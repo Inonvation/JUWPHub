@@ -489,12 +489,14 @@ class YktRepository(
         val tokenEnv = runCatching { parse(tokenRaw) }.getOrElse { e ->
             // HTTP 400 + 非 JSON 体 = 凭证错（服务端返回 Bad credentials 文本页）
             if (tokenRaw.httpCode == 400) {
-                credentialFailure("学号或密码错误")
+                credentialFailure(yktCredentialErrorText(tokenRaw.text))
             }
             throw e
         }
         if (tokenRaw.httpCode == 400) {
-            credentialFailure(tokenEnv.messageOrBlank.ifBlank { "学号或密码错误" })
+            // error_description 常是英文原文（"Bad credentials"），经 yktCredentialErrorText
+            // 映射成中文，不透出平台原文
+            credentialFailure(yktCredentialErrorText(tokenEnv.messageOrBlank))
         }
         // OAuth2 成功响应的 token 字段在顶层而非 data 里
         val accessToken = YktModels.accessTokenFromTopLevel(tokenRaw.text)

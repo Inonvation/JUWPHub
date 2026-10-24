@@ -3,6 +3,7 @@ package edu.jxslu.schedule
 import edu.jxslu.schedule.data.ykt.YktCard
 import edu.jxslu.schedule.data.ykt.YktModels
 import edu.jxslu.schedule.data.ykt.rechargeTargetCard
+import edu.jxslu.schedule.data.ykt.yktCredentialErrorText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -196,5 +197,32 @@ class YktModelsTest {
         assertNull(emptyList<YktCard>().rechargeTargetCard())
         // 单张未挂失卡：确认弹窗给用户看的就是它的卡号
         assertEquals("654321", listOf(card("654321", lost = "0")).rechargeTargetCard()?.account)
+    }
+
+    // ---- 登录 400 文案映射（2026-10-24：error_description 英文原文不再透出） ----
+
+    @Test
+    fun `bad credentials 映射成密码错误文案`() {
+        assertEquals(
+            "查询密码错误，请重新输入（默认为身份证后六位）",
+            yktCredentialErrorText("Bad credentials"),
+        )
+        // Spring Security OAuth 标准错误体与 JSON message 字段两种形状都要接住
+        assertEquals(
+            "查询密码错误，请重新输入（默认为身份证后六位）",
+            yktCredentialErrorText("invalid_grant"),
+        )
+        assertEquals(
+            "查询密码错误，请重新输入（默认为身份证后六位）",
+            yktCredentialErrorText("密码错误"),
+        )
+    }
+
+    @Test
+    fun `未知 400 文案给通用提示不透出平台原文`() {
+        assertEquals("登录失败，请检查学号与查询密码", yktCredentialErrorText(""))
+        assertEquals("登录失败，请检查学号与查询密码", yktCredentialErrorText("some server error"))
+        // 「密码错误」之外的中文业务消息也不透出（可能是别的校验失败，不猜原因）
+        assertEquals("登录失败，请检查学号与查询密码", yktCredentialErrorText("验证码无效"))
     }
 }

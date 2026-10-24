@@ -31,6 +31,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,6 +51,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -149,7 +152,6 @@ import me.rerere.hugeicons.stroke.Eye
 import me.rerere.hugeicons.stroke.EyeOff
 import me.rerere.hugeicons.stroke.InformationCircle
 import me.rerere.hugeicons.stroke.Shield01
-import me.rerere.hugeicons.stroke.ShowerHead
 import me.rerere.hugeicons.stroke.Tick02
 
 /** 引导步骤（DESIGN §3.16）。顺序即流程，[Done] 是终点。 */
@@ -211,6 +213,13 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
     // 服务端限流本来就还在，这里只求按钮口径与之一致。
     var qiekjCodeSentAt by remember { mutableStateOf(0L) }
     var qzxyCodeSentAt by remember { mutableStateOf(0L) }
+    // 教务 / 一卡通两步的表单值提升到引导级（2026-10-24 用户反馈）：步骤切换会重建组合，
+    // 局部 remember 会把输过的内容清空——「验证成功 → 下一屏 → 返回」要看到保留值 +
+    // 已验证横幅（各步自己的 done 参数），而不是一张空白表单。
+    var jwUsername by remember { mutableStateOf("") }
+    var jwPassword by remember { mutableStateOf("") }
+    var yktUsername by remember { mutableStateOf(vault.readCas()?.username.orEmpty()) }
+    var yktPassword by remember { mutableStateOf("") }
     // 成绩 / 学业后台补抓状态，完成页状态行读它（见 startBgSync）
     var bgSyncPhase by remember { mutableStateOf(BgSyncPhase.Idle) }
 
@@ -247,22 +256,6 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
     fun finish() {
         scope.launch {
             prefs.setOnboardingSeen()
-            onFinish()
-        }
-    }
-
-    /**
-     * 点完成页「其他可选账号」的行：与主按钮同效完成引导（写 seen 收窗），再直接落到
-     * 该服务页处理登录 / 使用方式。表单仍归各服务页（账号中心「本页不做表单」同一原则），
-     * 引导里只给入口。与 [finish] 同结构：**seen 落盘之后**才启动二级页并收引导窗——
-     * 收窗即销毁组合、取消本 scope，先收窗再写会把写入一起取消（新装 60 秒内进程
-     * 被杀重启的话引导会重弹）；先启动二级页后收窗，任务栈变成 [主界面, 二级页]，
-     * 二级页返回即主界面。
-     */
-    fun finishToService(screen: SubpageScreen) {
-        scope.launch {
-            prefs.setOnboardingSeen()
-            SubpageActivity.start(context, screen)
             onFinish()
         }
     }
@@ -369,6 +362,15 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
     // 直接进来改密码的（startAtJw）：返回 = 退出，用户本来就不在配置流程里。
     BackHandler(enabled = !startAtJw && step != Step.Welcome) { back() }
 
+    // 欢迎页的系统返回 = 整个应用退到后台（2026-10-24 用户反馈）：首启什么都没配置，
+    // 露出底下的空壳主界面只会让人困惑；退到后台再回来引导还在（seen 未写）。
+    // moveTaskToBack 不可用（返回 false）就整任务退场。重复进入（startAtJw）不适用
+    // ——那时候返回退出引导回主界面本来就是对的。
+    val activity = context as? Activity
+    BackHandler(enabled = !startAtJw && step == Step.Welcome) {
+        if (activity == null || !activity.moveTaskToBack(true)) activity?.finishAffinity()
+    }
+
     // 切步轻触感：欢迎页首帧不算，之后每前进一步 tick 一下
     var stepPrimed by remember { mutableStateOf(false) }
     LaunchedEffect(step) {
@@ -430,14 +432,30 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
                         cas = cas,
                         vault = vault,
                         scope = scope,
+                        username = jwUsername,
+                        onUsernameChange = { jwUsername = it },
+                        password = jwPassword,
+                        onPasswordChange = { jwPassword = it },
+                        done = jwOk,
                         onLaunchBgSync = { startBgSync() },
                         // 重复进入（只改密码）时这一步做完就收窗，不再拖着用户走后面几屏
-                        onDone = { jwOk = true; if (startAtJw) finish() else next(Step.Ykt) },
+                        onDone = {
+                            jwOk = true
+                            // 一卡通账号 = 同一个学号（2026-10-24 用户反馈）：教务验证成功后把
+                            // 学号带过去。表单状态提升后，yktUsername 的初值在欢迎页首帧就算好
+                            // （那时教务还没保存，读到空），必须在这里补带；用户已手输的不覆盖。
+                            if (yktUsername.isEmpty()) yktUsername = jwUsername
+                            if (startAtJw) finish() else next(Step.Ykt)
+                        },
                         onSkip = { if (startAtJw) finish() else next(Step.Ykt) },
                     )
                     Step.Ykt -> YktStep(
-                        vault = vault,
                         scope = scope,
+                        username = yktUsername,
+                        onUsernameChange = { yktUsername = it },
+                        password = yktPassword,
+                        onPasswordChange = { yktPassword = it },
+                        done = yktOk,
                         onDone = { yktOk = true; next(Step.Qiekj) },
                         onSkip = { next(Step.Qiekj) },
                     )
@@ -461,7 +479,7 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
                         qiekjOk = qiekjOk,
                         qzxyOk = qzxyOk,
                         bgSyncPhase = bgSyncPhase,
-                        onOpenService = { finishToService(it) },
+                        onOpenService = { SubpageActivity.start(context, it) },
                         onFinish = { finish() },
                     )
                 }
@@ -475,7 +493,6 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
     // 确认即落盘（版本号 + 时刻）：下次进来队列为空，不重复打扰。
     // 「不同意并退出」（2026-09-30 用户要求）：不写同意记录、不写 onboarding_seen，
     // 整个应用关掉——下次启动引导与声明都会再来，进主界面的唯一路径是同意。
-    val activity = context as? Activity
     noticeQueue.firstOrNull()?.let { notice ->
         NoticeDialog(
             title = FirstRunNotices.title(notice),
@@ -666,21 +683,7 @@ private fun ShakeBox(tick: Int, modifier: Modifier = Modifier, content: @Composa
     Box(modifier.offset(x = x.value)) { content() }
 }
 
-/** 矢量图标版 tile：primaryContainer 圆角底 + 着色图标（胖乖 / 趣智仍在用）。 */
-@Composable
-private fun TileIcon(icon: ImageVector, size: Dp, corner: Dp, iconSize: Dp) {
-    Box(
-        Modifier
-            .size(size)
-            .clip(RoundedCornerShape(corner))
-            .background(MaterialTheme.colorScheme.primaryContainer),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(iconSize))
-    }
-}
-
-/** 品牌图 tile（校徽 / 水宝宝 / 各服务官方图标）：自带底色，原尺寸渲染，不再叠容器底。 */
+/** 品牌图 tile（校徽 / 各服务官方图标）：自带底色，原尺寸渲染，不再叠容器底。 */
 @Composable
 private fun BrandTile(resId: Int, size: Dp) {
     Image(
@@ -1257,26 +1260,37 @@ private fun FeatureCell(icon: ImageVector, label: String) {
 
 // ---------------------------------------------------------------- 学校统一认证
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun JwStep(
     cas: CasSession,
     vault: CredentialVault,
     scope: CoroutineScope,
+    username: String,
+    onUsernameChange: (String) -> Unit,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    done: Boolean,
     onLaunchBgSync: () -> Unit,
     onDone: () -> Unit,
     onSkip: () -> Unit,
 ) {
     val context = LocalContext.current
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<NoticeFeedback?>(null) }
     var successMessage by remember { mutableStateOf<String?>(null) }
     var errorTick by remember { mutableIntStateOf(0) }
     val usernameFocus = remember { FocusRequester() }
     val passwordFocus = remember { FocusRequester() }
-    FocusOnEnter(usernameFocus)
+    // 已验证过（从下一步返回）就不自动弹键盘：用户多半只是路过看看，不是要重填
+    if (!done) FocusOnEnter(usernameFocus)
     val successHaptic = rememberSuccessHaptic()
+    val noticeInView = remember { BringIntoViewRequester() }
+    LaunchedEffect(notice) {
+        // 错误横幅出现在密码框下方，键盘还开着时多半在折叠线以下——把它滚进来，
+        // 否则用户只看到表单晃了一下却找不到错在哪
+        if (notice != null) runCatching { noticeInView.bringIntoView() }
+    }
 
     fun submit() {
         val user = username.trim()
@@ -1371,13 +1385,21 @@ private fun JwStep(
                     "**这是全应用唯一保存教务密码的地方**。")
             }
             Spacer(Modifier.height(16.dp))
-            StaggerIn(3) {
+            if (done && successMessage == null) {
+                // 从下一步返回时的「已验证」状态（2026-10-24 用户反馈）：不再显示空白表单，
+                // 表单保留输入值且可改，主按钮变「重新验证并保存」
+                StaggerIn(3) {
+                    SuccessRow("统一认证已验证并保存，可修改后重新验证")
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            StaggerIn(if (done && successMessage == null) 4 else 3) {
                 ShakeBox(tick = errorTick) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         OnboardingTextField(
                             label = "学号",
                             value = username,
-                            onValueChange = { username = it.trim() },
+                            onValueChange = { onUsernameChange(it.trim()) },
                             focusRequester = usernameFocus,
                             imeAction = ImeAction.Next,
                             onImeAction = { passwordFocus.requestFocus() },
@@ -1385,20 +1407,22 @@ private fun JwStep(
                         PasswordField(
                             label = "统一认证密码",
                             value = password,
-                            onValueChange = { password = it },
+                            onValueChange = { onPasswordChange(it) },
                             focusRequester = passwordFocus,
                             placeholder = "统一认证密码即为教务系统密码",
                             imeAction = ImeAction.Done,
                             onImeAction = { submit() },
                         )
-                        NoticeSlot(notice, successMessage)
+                        Box(Modifier.bringIntoViewRequester(noticeInView)) {
+                            NoticeSlot(notice, successMessage)
+                        }
                     }
                 }
             }
         }
-        StaggerIn(4) {
+        StaggerIn(if (done && successMessage == null) 5 else 4) {
             StepActions(
-                primaryText = "验证并保存",
+                primaryText = if (done && successMessage == null) "重新验证并保存" else "验证并保存",
                 busy = busy,
                 busyText = "正在验证…",
                 enabled = !busy && successMessage == null,
@@ -1412,24 +1436,31 @@ private fun JwStep(
 
 // ---------------------------------------------------------------- 一卡通 · 电费
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun YktStep(
-    vault: CredentialVault,
     scope: CoroutineScope,
+    username: String,
+    onUsernameChange: (String) -> Unit,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    done: Boolean,
     onDone: () -> Unit,
     onSkip: () -> Unit,
 ) {
     val context = LocalContext.current
-    var username by remember { mutableStateOf(vault.readCas()?.username.orEmpty()) }
-    var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<NoticeFeedback?>(null) }
     var successMessage by remember { mutableStateOf<String?>(null) }
     var errorTick by remember { mutableIntStateOf(0) }
     val usernameFocus = remember { FocusRequester() }
     val passwordFocus = remember { FocusRequester() }
-    FocusOnEnter(usernameFocus)
+    if (!done) FocusOnEnter(usernameFocus)
     val successHaptic = rememberSuccessHaptic()
+    val noticeInView = remember { BringIntoViewRequester() }
+    LaunchedEffect(notice) {
+        if (notice != null) runCatching { noticeInView.bringIntoView() }
+    }
 
     fun submit() {
         val user = username.trim()
@@ -1505,13 +1536,19 @@ private fun YktStep(
                 )
             }
             Spacer(Modifier.height(16.dp))
-            StaggerIn(2) {
+            if (done && successMessage == null) {
+                StaggerIn(2) {
+                    SuccessRow("一卡通已验证并开启，可修改后重新验证")
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            StaggerIn(if (done && successMessage == null) 3 else 2) {
                 ShakeBox(tick = errorTick) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         OnboardingTextField(
                             label = "学号",
                             value = username,
-                            onValueChange = { username = it.trim() },
+                            onValueChange = { onUsernameChange(it.trim()) },
                             focusRequester = usernameFocus,
                             imeAction = ImeAction.Next,
                             onImeAction = { passwordFocus.requestFocus() },
@@ -1519,7 +1556,7 @@ private fun YktStep(
                         PasswordField(
                             label = "查询密码",
                             value = password,
-                            onValueChange = { password = it.filter { c -> c.isDigit() } },
+                            onValueChange = { onPasswordChange(it.filter { c -> c.isDigit() }) },
                             numeric = true,
                             focusRequester = passwordFocus,
                             placeholder = "默认为身份证号后六位",
@@ -1531,14 +1568,16 @@ private fun YktStep(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         )
-                        NoticeSlot(notice, successMessage)
+                        Box(Modifier.bringIntoViewRequester(noticeInView)) {
+                            NoticeSlot(notice, successMessage)
+                        }
                     }
                 }
             }
         }
-        StaggerIn(3) {
+        StaggerIn(if (done && successMessage == null) 4 else 3) {
             StepActions(
-                primaryText = "验证并开启",
+                primaryText = if (done && successMessage == null) "重新验证并开启" else "验证并开启",
                 busy = busy,
                 busyText = "正在验证…",
                 enabled = !busy && successMessage == null,
@@ -1552,6 +1591,7 @@ private fun YktStep(
 
 // ---------------------------------------------------------------- 胖乖生活
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QiekjStep(
     scope: CoroutineScope,
@@ -1592,6 +1632,11 @@ private fun QiekjStep(
         runCatching { (if (tokenMode) tokenFocus else phoneFocus).requestFocus() }
     }
     val successHaptic = rememberSuccessHaptic()
+    val noticeInView = remember { BringIntoViewRequester() }
+    LaunchedEffect(notice) {
+        // 验证码冷却/发送/登录的提示都在表单下方，键盘开着时滚进来再说
+        if (notice != null) runCatching { noticeInView.bringIntoView() }
+    }
 
     fun sendCode() {
         val p = phone.trim()
@@ -1690,7 +1735,7 @@ private fun QiekjStep(
             Spacer(Modifier.height(6.dp))
             StaggerIn(0) {
                 StepHeader(
-                    tile = { TileIcon(HugeIcons.Droplet, 60.dp, 20.dp, 30.dp) },
+                    tile = { BrandTile(R.drawable.ic_brand_pangguai, 60.dp) },
                     title = Step.Qiekj.title,
                     desc = Step.Qiekj.desc,
                     done = successMessage != null,
@@ -1734,7 +1779,9 @@ private fun QiekjStep(
                                     imeAction = ImeAction.Done,
                                     onImeAction = { submitToken() },
                                 )
-                                NoticeSlot(notice, successMessage)
+                                Box(Modifier.bringIntoViewRequester(noticeInView)) {
+                                    NoticeSlot(notice, successMessage)
+                                }
                             }
                         } else {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1779,7 +1826,9 @@ private fun QiekjStep(
                                         )
                                     }
                                 }
-                                NoticeSlot(notice, successMessage)
+                                Box(Modifier.bringIntoViewRequester(noticeInView)) {
+                                    NoticeSlot(notice, successMessage)
+                                }
                             }
                         }
                     }
@@ -1805,6 +1854,7 @@ private fun QiekjStep(
 /** 趣智校园那一步的登录方式（DESIGN §3.16）。 */
 private enum class QzxyMode { Password, Sms, Session }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QzxyStep(
     scope: CoroutineScope,
@@ -1853,6 +1903,10 @@ private fun QzxyStep(
         }
     }
     val successHaptic = rememberSuccessHaptic()
+    val noticeInView = remember { BringIntoViewRequester() }
+    LaunchedEffect(notice) {
+        if (notice != null) runCatching { noticeInView.bringIntoView() }
+    }
 
     fun sendCode() {
         val p = phone.trim()
@@ -1972,7 +2026,7 @@ private fun QzxyStep(
             Spacer(Modifier.height(6.dp))
             StaggerIn(0) {
                 StepHeader(
-                    tile = { TileIcon(HugeIcons.ShowerHead, 60.dp, 20.dp, 30.dp) },
+                    tile = { BrandTile(R.drawable.ic_brand_qzxy, 60.dp) },
                     title = Step.Qzxy.title,
                     desc = Step.Qzxy.desc,
                     done = successMessage != null,
@@ -2092,7 +2146,9 @@ private fun QzxyStep(
                                 )
                             }
                         }
-                        NoticeSlot(notice, successMessage)
+                        Box(Modifier.bringIntoViewRequester(noticeInView)) {
+                            NoticeSlot(notice, successMessage)
+                        }
                     }
                 }
             }
@@ -2159,7 +2215,7 @@ private fun DoneStep(
             }
             StaggerIn(3) {
                 StatusRow(
-                    tile = { TileIcon(HugeIcons.Droplet, 34.dp, 11.dp, 18.dp) },
+                    tile = { BrandTile(R.drawable.ic_brand_pangguai, 34.dp) },
                     name = "胖乖生活",
                     desc = "开水房账号",
                     ok = qiekjOk,
@@ -2169,7 +2225,7 @@ private fun DoneStep(
             }
             StaggerIn(4) {
                 StatusRow(
-                    tile = { TileIcon(HugeIcons.ShowerHead, 34.dp, 11.dp, 18.dp) },
+                    tile = { BrandTile(R.drawable.ic_brand_qzxy, 34.dp) },
                     name = "趣智校园",
                     desc = "洗澡开热水",
                     ok = qzxyOk,
@@ -2213,8 +2269,9 @@ private val OptionalAccounts = listOf(
 /**
  * 完成页的「其他可选账号」（2026-10-24）：U净 / 快趣 / 问渠三个第三方账号不在前四步里，
  * 此前首启完全不出现，用户只能进首页后自己发现。这里只给入口不给表单——登录表单仍归
- * 各服务页（与账号中心「本页不做表单」同一原则）；点行 = 完成引导并落到该服务页
- * （外层 OnboardingScreen 的 finishToService）。
+ * 各服务页（与账号中心「本页不做表单」同一原则）。点行在**引导窗上叠开**对应服务页
+ * （不写 seen、不收引导），返回键回完成页还能继续点其他行；引导的收窗仍只有
+ * 主按钮「进入 JUWPHub」与顶栏「全部跳过」两条路。
  */
 @Composable
 private fun OptionalAccountsSection(onOpen: (SubpageScreen) -> Unit, modifier: Modifier = Modifier) {

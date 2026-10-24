@@ -199,6 +199,28 @@ sealed class YktException(message: String, cause: Throwable? = null) : Exception
     class NotInServiceTime(message: String) : YktException(message)
 }
 
+/**
+ * 登录接口 HTTP 400 的用户可读文案（2026-10-24）：400 应答的 `error_description` 是
+ * Spring Security OAuth 的英文原文（如 "Bad credentials"），直接透出就是用户看到的
+ * 英文报错。这里只把明确的凭证类消息映射成「密码错误」文案，其余一律给通用中文——
+ * 不把平台原文当文案透出，也不猜其他错误的具体原因。
+ */
+internal fun yktCredentialErrorText(raw: String): String {
+    val lower = raw.lowercase()
+    val credentialLike = "bad credentials" in lower ||
+        "invalid_grant" in lower ||
+        "invalid password" in lower ||
+        "密码错误" in raw ||
+        "密码不正确" in raw ||
+        "账号或密码错误" in raw ||
+        "用户名或密码错误" in raw
+    return if (credentialLike) {
+        "查询密码错误，请重新输入（默认为身份证后六位）"
+    } else {
+        "登录失败，请检查学号与查询密码"
+    }
+}
+
 /** 一卡通 JSON 解析（BOM 剥离 + 容错）。纯函数，JVM 可测。 */
 object YktModels {
 

@@ -27,9 +27,15 @@ sealed interface CasLoginResult {
 /**
  * 依据 HTTP 状态码与响应体判定 CAS 登录结果（DESIGN §4.27）。
  *
- * 验证码特征**尚无实测样本**，所以判定顺序刻意保守：先排除「明确成功」与「明确错」，
- * 剩下的 200 一律 [CasLoginResult.Unknown]（转 WebView）。等真机抓到验证码页样本，
- * 再把特征补进 [CAPTCHA_MARKERS] 即可，调用方的分支不用改。
+ * 2026-10-24 实测探针（假账号 + 错密码，`scripts/out/01_cas_login_page.html` 为登录页样本）：
+ * **错误凭证返回 HTTP 401**，应答是重渲染的登录页——页面里没有任何凭证错文案，
+ * 但带着 `getCaptcha()` 脚本字样。据此定两条硬规则：
+ * 1. **401 即凭证错**。它是唯一可靠的拒绝信号；若学校日后启用验证码流程，挑战页会以
+ *    200（或重定向）渲染，仍走下方 body 特征，不会撞上这条。
+ * 2. **凭证错特征先于验证码特征比对**。登录页本身就含 captcha 字样，先查验证码会把
+ *    任何重渲染的登录页（包括明确写了「密码错误」的）都判成 NeedCaptcha——上线以来
+ *    所有密码输错都被提示成「要求输入验证码」就是这条顺序造成的。
+ * 保守原则不变：宁可多跳一次网页，也不能把对的密码记成错的。
  */
 object CasLoginClassifier {
 
@@ -64,16 +70,17 @@ object CasLoginClassifier {
         httpCode >= 500 -> CasLoginResult.ServerError("统一认证返回 HTTP $httpCode")
         httpCode in 300..399 && !location.isNullOrBlank() ->
             CasLoginResult.Success(location)
+        httpCode == 401 -> CasLoginResult.CredentialWrong("统一认证登录失败（账号或密码错误）")
         else -> classifyBody(httpCode, body.orEmpty())
     }
 
     private fun classifyBody(httpCode: Int, body: String): CasLoginResult {
         val lower = body.lowercase()
-        if (CAPTCHA_MARKERS.any { it in lower }) {
-            return CasLoginResult.NeedCaptcha("统一认证要求输入验证码")
-        }
         if (CREDENTIAL_MARKERS.any { it in lower }) {
             return CasLoginResult.CredentialWrong("统一认证登录失败（账号或密码错误）")
+        }
+        if (CAPTCHA_MARKERS.any { it in lower }) {
+            return CasLoginResult.NeedCaptcha("统一认证要求输入验证码")
         }
         return CasLoginResult.Unknown("统一认证返回了认不出的页面（HTTP $httpCode）")
     }

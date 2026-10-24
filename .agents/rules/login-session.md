@@ -9,6 +9,10 @@
   `CredentialVault`（两份凭证加密存储的唯一读写口，文件仍是 `jw_credentials.xml` /
   `ykt_credentials.xml`，备份排除规则已在）、`CasSession`（CAS 会话唯一持有者，教务 / 学工 /
   签章共用，含 `ensureValid` / `tryLogin` / cookie 回灌）、`SessionStatus`（运行时停用状态）。
+  `CasLoginClassifier` 另有两条实测口径（2026-10-24，改动前先读探针依据）：**401 直判凭证错**
+  （本校 CAS 错误凭证返回 401 + 重渲染登录页，页面无凭证文案却必带 captcha 脚本字样）；
+  **凭证特征先于验证码特征比对**（登录页本身就含 captcha 字样，倒序会把密码错全判成
+  「要求输入验证码」）。见 `CasLoginResult.kt` 注释与 `CasLoginClassifierTest` 两条回归。
   四条别改坏：① **闸门只有「凭证错」计数**，验证码 / 网络 / 5xx 一律不计——旧实现把
   「CAS 无 Location」一律当凭证错，会把对的密码记成错的、累计还把账号停用，所以
   `CasLoginClassifier` 必须四分类（详情页 / 认不出的 200 走 `Manual`，转 WebView）；

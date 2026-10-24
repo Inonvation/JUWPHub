@@ -70,4 +70,24 @@ class CasLoginClassifierTest {
         assertTrue(CasLoginClassifier.classify(200, null, "Bad Credentials") is CasLoginResult.CredentialWrong)
         assertTrue(CasLoginClassifier.classify(200, null, "CAPTCHA required") is CasLoginResult.NeedCaptcha)
     }
+
+    /**
+     * 2026-10-24 实测（假账号探针）：本校 CAS 错误凭证返回 **401** + 重渲染的登录页，
+     * 页面没有任何凭证文案、却带 captcha 脚本字样——旧排序把它判成 NeedCaptcha，
+     * 所有密码输错都提示「要求输入验证码」。401 必须直接落凭证错。
+     */
+    @Test
+    fun unauthorized401_isCredentialWrong_evenWithCaptchaMarkup() {
+        val failurePage = "<html><script>function getCaptcha(){</script>" +
+            "<div>You have not logged in for more than 90 days.</div></html>"
+        val r = CasLoginClassifier.classify(401, null, failurePage)
+        assertTrue(r is CasLoginResult.CredentialWrong)
+    }
+
+    /** 凭证错特征先于验证码特征：两样都在的页面（失败重渲染的登录页）按凭证错算。 */
+    @Test
+    fun credentialMarkers_winOverCaptchaMarkers() {
+        val page = "<input id=\"captchaImg\"><div>用户名或密码错误</div>"
+        assertTrue(CasLoginClassifier.classify(200, null, page) is CasLoginResult.CredentialWrong)
+    }
 }
