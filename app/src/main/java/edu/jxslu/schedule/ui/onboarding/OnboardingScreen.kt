@@ -31,6 +31,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -90,9 +91,11 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -106,6 +109,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.R
+import edu.jxslu.schedule.SubpageActivity
+import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.prefs.OnboardingSyncOutcome
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
@@ -136,11 +142,11 @@ import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowLeft02
 import me.rerere.hugeicons.stroke.Calendar01
 import me.rerere.hugeicons.stroke.ChartAverage
+import me.rerere.hugeicons.stroke.ChevronRight
 import me.rerere.hugeicons.stroke.CreditCard
 import me.rerere.hugeicons.stroke.Droplet
 import me.rerere.hugeicons.stroke.Eye
 import me.rerere.hugeicons.stroke.EyeOff
-import me.rerere.hugeicons.stroke.GraduationCap
 import me.rerere.hugeicons.stroke.InformationCircle
 import me.rerere.hugeicons.stroke.Shield01
 import me.rerere.hugeicons.stroke.ShowerHead
@@ -241,6 +247,22 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
     fun finish() {
         scope.launch {
             prefs.setOnboardingSeen()
+            onFinish()
+        }
+    }
+
+    /**
+     * 点完成页「其他可选账号」的行：与主按钮同效完成引导（写 seen 收窗），再直接落到
+     * 该服务页处理登录 / 使用方式。表单仍归各服务页（账号中心「本页不做表单」同一原则），
+     * 引导里只给入口。与 [finish] 同结构：**seen 落盘之后**才启动二级页并收引导窗——
+     * 收窗即销毁组合、取消本 scope，先收窗再写会把写入一起取消（新装 60 秒内进程
+     * 被杀重启的话引导会重弹）；先启动二级页后收窗，任务栈变成 [主界面, 二级页]，
+     * 二级页返回即主界面。
+     */
+    fun finishToService(screen: SubpageScreen) {
+        scope.launch {
+            prefs.setOnboardingSeen()
+            SubpageActivity.start(context, screen)
             onFinish()
         }
     }
@@ -439,6 +461,7 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
                         qiekjOk = qiekjOk,
                         qzxyOk = qzxyOk,
                         bgSyncPhase = bgSyncPhase,
+                        onOpenService = { finishToService(it) },
                         onFinish = { finish() },
                     )
                 }
@@ -643,26 +666,37 @@ private fun ShakeBox(tick: Int, modifier: Modifier = Modifier, content: @Composa
     Box(modifier.offset(x = x.value)) { content() }
 }
 
-/** 步骤头：圆角图标块 + 标题 + 一句话说明；[done] 时右下角弹出「已验证」角标。 */
+/** 矢量图标版 tile：primaryContainer 圆角底 + 着色图标（胖乖 / 趣智仍在用）。 */
 @Composable
-private fun StepHeader(icon: ImageVector, title: String, desc: String, done: Boolean) {
+private fun TileIcon(icon: ImageVector, size: Dp, corner: Dp, iconSize: Dp) {
+    Box(
+        Modifier
+            .size(size)
+            .clip(RoundedCornerShape(corner))
+            .background(MaterialTheme.colorScheme.primaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(iconSize))
+    }
+}
+
+/** 品牌图 tile（校徽 / 水宝宝 / 各服务官方图标）：自带底色，原尺寸渲染，不再叠容器底。 */
+@Composable
+private fun BrandTile(resId: Int, size: Dp) {
+    Image(
+        painter = painterResource(resId),
+        contentDescription = null,
+        modifier = Modifier.size(size),
+        contentScale = ContentScale.Fit,
+    )
+}
+
+/** 步骤头：图标块（[tile]）+ 标题 + 一句话说明；[done] 时右下角弹出「已验证」角标。 */
+@Composable
+private fun StepHeader(tile: @Composable () -> Unit, title: String, desc: String, done: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(60.dp)) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(60.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(30.dp),
-                )
-            }
+            tile()
             // 角标不用 AnimatedVisibility：外层是 Row，Kotlin 会把调用解析到
             // RowScope 扩展上报错；这里用弹簧缩放的 Animatable，行为等价
             val badgeScale = remember { Animatable(0f) }
@@ -1316,7 +1350,7 @@ private fun JwStep(
             Spacer(Modifier.height(6.dp))
             StaggerIn(0) {
                 StepHeader(
-                    icon = HugeIcons.GraduationCap,
+                    tile = { BrandTile(R.drawable.ic_school_badge, 60.dp) },
                     title = Step.Jw.title,
                     desc = Step.Jw.desc,
                     done = successMessage != null,
@@ -1456,7 +1490,7 @@ private fun YktStep(
             Spacer(Modifier.height(6.dp))
             StaggerIn(0) {
                 StepHeader(
-                    icon = HugeIcons.CreditCard,
+                    tile = { BrandTile(R.drawable.ic_brand_wenqu, 60.dp) },
                     title = Step.Ykt.title,
                     desc = Step.Ykt.desc,
                     done = successMessage != null,
@@ -1656,7 +1690,7 @@ private fun QiekjStep(
             Spacer(Modifier.height(6.dp))
             StaggerIn(0) {
                 StepHeader(
-                    icon = HugeIcons.Droplet,
+                    tile = { TileIcon(HugeIcons.Droplet, 60.dp, 20.dp, 30.dp) },
                     title = Step.Qiekj.title,
                     desc = Step.Qiekj.desc,
                     done = successMessage != null,
@@ -1938,7 +1972,7 @@ private fun QzxyStep(
             Spacer(Modifier.height(6.dp))
             StaggerIn(0) {
                 StepHeader(
-                    icon = HugeIcons.ShowerHead,
+                    tile = { TileIcon(HugeIcons.ShowerHead, 60.dp, 20.dp, 30.dp) },
                     title = Step.Qzxy.title,
                     desc = Step.Qzxy.desc,
                     done = successMessage != null,
@@ -2091,6 +2125,7 @@ private fun DoneStep(
     qiekjOk: Boolean,
     qzxyOk: Boolean,
     bgSyncPhase: BgSyncPhase,
+    onOpenService: (SubpageScreen) -> Unit,
     onFinish: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
@@ -2105,7 +2140,7 @@ private fun DoneStep(
             Spacer(Modifier.height(24.dp))
             StaggerIn(1) {
                 StatusRow(
-                    icon = HugeIcons.GraduationCap,
+                    tile = { BrandTile(R.drawable.ic_school_badge, 34.dp) },
                     name = "学校统一认证",
                     desc = "教务 · 学工 · 成绩单",
                     ok = jwOk,
@@ -2114,7 +2149,7 @@ private fun DoneStep(
             }
             StaggerIn(2) {
                 StatusRow(
-                    icon = HugeIcons.CreditCard,
+                    tile = { BrandTile(R.drawable.ic_brand_wenqu, 34.dp) },
                     name = "一卡通 · 电费",
                     desc = "余额 · 付款码 · 流水",
                     ok = yktOk,
@@ -2124,7 +2159,7 @@ private fun DoneStep(
             }
             StaggerIn(3) {
                 StatusRow(
-                    icon = HugeIcons.Droplet,
+                    tile = { TileIcon(HugeIcons.Droplet, 34.dp, 11.dp, 18.dp) },
                     name = "胖乖生活",
                     desc = "开水房账号",
                     ok = qiekjOk,
@@ -2134,7 +2169,7 @@ private fun DoneStep(
             }
             StaggerIn(4) {
                 StatusRow(
-                    icon = HugeIcons.ShowerHead,
+                    tile = { TileIcon(HugeIcons.ShowerHead, 34.dp, 11.dp, 18.dp) },
                     name = "趣智校园",
                     desc = "洗澡开热水",
                     ok = qzxyOk,
@@ -2145,6 +2180,9 @@ private fun DoneStep(
             if (jwOk) {
                 StaggerIn(5) { BgSyncLine(bgSyncPhase) }
             }
+            StaggerIn(6) {
+                OptionalAccountsSection(onOpen = onOpenService, modifier = Modifier.padding(top = 18.dp))
+            }
         }
         StepActions(
             primaryText = "进入 JUWPHub",
@@ -2154,6 +2192,101 @@ private fun DoneStep(
             onPrimary = onFinish,
             skipText = null,
             onSkip = null,
+        )
+    }
+}
+
+/**
+ * 完成页可选账号的数据行。落点与账号中心三组口径对齐；AI 调课不列（可选服务，
+ * 不是平台账号）。快趣落**骑行页**而不是快趣账号页：新装用户默认「微信小程序」
+ * 使用方式，账号页此时把账号区收起并指向骑行页切方式（KvcxScreen 的进页提示），
+ * 落那里等于让「去设置」绕一圈。
+ */
+private data class OptionalAccount(val iconRes: Int, val name: String, val desc: String, val action: String, val screen: SubpageScreen)
+
+private val OptionalAccounts = listOf(
+    OptionalAccount(R.drawable.ic_brand_ujing, "U净 · 校园洗衣", "洗衣房空闲看板 · 扫码下单", "去登录", SubpageScreen.UJING),
+    OptionalAccount(R.drawable.ic_brand_kqcx, "快趣出行", "共享单车 · 免登录即可骑车", "去设置", SubpageScreen.RIDE),
+    OptionalAccount(R.drawable.ic_brand_wenqu, "问渠 · 志愿服务", "志愿工时 · 劳动教育时长", "去登录", SubpageScreen.WENQU),
+)
+
+/**
+ * 完成页的「其他可选账号」（2026-10-24）：U净 / 快趣 / 问渠三个第三方账号不在前四步里，
+ * 此前首启完全不出现，用户只能进首页后自己发现。这里只给入口不给表单——登录表单仍归
+ * 各服务页（与账号中心「本页不做表单」同一原则）；点行 = 完成引导并落到该服务页
+ * （外层 OnboardingScreen 的 finishToService）。
+ */
+@Composable
+private fun OptionalAccountsSection(onOpen: (SubpageScreen) -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "其他可选账号",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "可跳过 · 不配不影响其他功能",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            )
+        }
+        OptionalAccounts.forEach { account ->
+            OptionalAccountRow(
+                account = account,
+                onOpen = { onOpen(account.screen) },
+                modifier = Modifier.padding(top = 9.dp),
+            )
+        }
+        Text(
+            "以上账号与学校账号无关，点行可直接去处理；进首页后在「我的 → 账号与登录」也能随时补上。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            modifier = Modifier.padding(top = 10.dp),
+        )
+    }
+}
+
+/** 完成页可选账号行：品牌图 + 名称/一句话 + 行尾动作词，整行可点。 */
+@Composable
+private fun OptionalAccountRow(
+    account: OptionalAccount,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(15.dp))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f))
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 15.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BrandTile(account.iconRes, 34.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(account.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                account.desc,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            )
+        }
+        Text(
+            account.action,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.width(2.dp))
+        Icon(
+            HugeIcons.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(14.dp),
         )
     }
 }
@@ -2307,10 +2440,10 @@ private fun DoneCheckCanvas(modifier: Modifier, color: Color) {
     }
 }
 
-/** 完成页的状态行：图标 + 名称 + 状态词，配色即状态。 */
+/** 完成页的状态行：图标块（[tile]）+ 名称 + 状态词，配色即状态。 */
 @Composable
 private fun StatusRow(
-    icon: ImageVector,
+    tile: @Composable () -> Unit,
     name: String,
     desc: String,
     ok: Boolean,
@@ -2330,19 +2463,8 @@ private fun StatusRow(
             .padding(horizontal = 15.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier
-                .size(34.dp)
-                .clip(RoundedCornerShape(11.dp))
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp),
-            )
+        Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+            tile()
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
