@@ -67,6 +67,11 @@ internal val KEY_EBIKE_CARD_EXPIRY_NOTIFIED = stringSetPreferencesKey("ebike_car
         /** 开锁前「没有可用骑行卡」提醒的今日静音键（YYYY-MM-DD，见 [ebikeNoCardNoticeDate]）。 */
 internal val KEY_EBIKE_NO_CARD_NOTICE_DATE = stringPreferencesKey("ebike_no_card_notice_date")
 
+        // 远程用车提醒（2026-10-24，见 domain/EbikeRemoteRide）：累计次数 + 「有提醒待弹」
+        // 标记（小程序方式跳微信后没有当场弹的时机，回 App 时消费）。
+internal val KEY_EBIKE_REMOTE_RIDE_COUNT = intPreferencesKey("ebike_remote_ride_count")
+internal val KEY_EBIKE_REMOTE_RIDE_PENDING = booleanPreferencesKey("ebike_remote_ride_pending")
+
         // 「精确倒计时」已删（2026-09-30）：开关与校准标记两键
         // （ebike_precise_countdown_enabled / ebike_precise_calibrated_at）随之停用，
         // 同上面日历事件 id 的口径——旧设备上的残留值没人读，无害。

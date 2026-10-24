@@ -189,6 +189,10 @@ internal suspend fun performReturnBike(
         },
         owedCents = (payState as? KqcxAuth.UnpayState.Owed)?.amountCents,
         settling = settling,
+        // 结算期间地图还要标注这辆车（2026-10-24）：0,0 是服务端"没有坐标"的占位值，
+        // 与写动作的锚点判定同口径，不能当真
+        bikeLat = before?.lat?.takeIf { it != 0.0 },
+        bikeLng = before?.lng?.takeIf { it != 0.0 },
     )
 }
 

@@ -78,6 +78,7 @@ import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeQr
+import edu.jxslu.schedule.domain.EbikeRemoteRide
 import edu.jxslu.schedule.domain.EbikeRideCard
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.KqcxAuth
@@ -241,6 +242,14 @@ fun RideScreen(
      * 「扫车身码」不经过这个 effect（ActivityResult 回调不会因重建重放），无需这道闸。
      */
     var autoUnlockArmed by rememberSaveable { mutableStateOf(false) }
+    /**
+     * 远程用车提醒弹窗（2026-10-24，每 20 次一次、只提醒不阻断；口径见 [EbikeRemoteRide]）。
+     * 两个触发源汇到同一枚状态：账号方式 = 控制器的提醒事件流（开启成功当场弹）；
+     * 小程序方式 = ON_RESUME 消费 DataStore 的待提醒标记（跳微信时不打断，回 App 再弹）。
+     * 文案里的计数一并保存（跨重建弹窗还开着时数字不能变成 0）。
+     */
+    var showRemoteRideNotice by rememberSaveable { mutableStateOf(false) }
+    var remoteNoticeCount by rememberSaveable { mutableStateOf(0) }
 
     val phase = when {
         summary != null -> RidePhase.Settled
@@ -274,7 +283,10 @@ fun RideScreen(
      */
     var lastRideBikePos by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     LaunchedEffect(ride?.carNum) {
-        lastRideBikePos = null
+        // 换新车才作废上一辆的坐标；还车（carNum → null）保留——结算期间地图还要标注
+        // 这辆车（2026-10-24 用户要求），点「继续找车」回到找车态时不再画（marker 按
+        // phase 分流，见 rideMarkerPos），这份兜底就静默留着，下一辆开锁时作废
+        if (ride?.carNum != null) lastRideBikePos = null
     }
     val rideBike = rideBikePos ?: lastRideBikePos
     LaunchedEffect(rideBike) {
@@ -538,6 +550,13 @@ fun RideScreen(
         if (caps.directUnlock) viewModel.kvcx.warmRideCard()
     }
     LaunchedEffect(Unit) {
+        // 账号方式的远程用车提醒：控制器在两段式「开启」成功且计数达标时发一次（载荷 = 累计次数）
+        viewModel.kvcx.remoteRideSignal.collect { count ->
+            remoteNoticeCount = count
+            showRemoteRideNotice = true
+        }
+    }
+    LaunchedEffect(Unit) {
         ebikeViewModel.events.collect { event ->
             when (event) {
                 is EbikeEvent.Notice -> scope.postNotice(snackbar, event.text, event.tone)
@@ -569,6 +588,19 @@ fun RideScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 ebikeViewModel.burnPending()
                 viewModel.queryRideQuietly()
+                // 小程序方式的远程用车提醒（2026-10-24）：跳微信那一下不打断，标记落盘，
+                // 回 App 在这里消费弹出（读了就清，一次性）。账号方式不走这条（当场已弹），
+                // 标记常态为 false，多查一次无副作用。
+                scope.launch {
+                    val pending = runCatching { cardPrefs.ebikeRemoteRidePending.first() }
+                        .getOrDefault(false)
+                    if (pending) {
+                        runCatching { cardPrefs.setEbikeRemoteRidePending(false) }
+                        remoteNoticeCount = runCatching { cardPrefs.ebikeRemoteRideCount.first() }
+                            .getOrDefault(0)
+                        showRemoteRideNotice = true
+                    }
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -667,8 +699,22 @@ fun RideScreen(
     // 「我的车」坐标口径（2026-10-19 用户修订）：始终画车辆自己的坐标；不再并到蓝点。
     // 旧版在「开锁时人就在车边」后把车标画到用户坐标，用户看到的是开锁瞬间车标跳到
     // 自己位置、锁车后才回准确位置。镜头跟随是另一件事（见上面的 phase effect）。
-    val rideMarkerLat = rideBike?.first
-    val rideMarkerLng = rideBike?.second
+    /**
+     * 地图车标坐标（GCJ-02），按 phase 分流（2026-10-24 用户要求「还车后地图仍标注车辆位置，
+     * 点继续用车才回正常界面」）：骑行态 = 订单坐标（缺时兜底最后已知）；**还车结算态 =
+     * 结算卡带的坐标**（`KvcxReturnSummary.bikeLat/Lng`，控制器单例、跨页面重建存活；缺失时
+     * 兜底最后已知坐标）——点「继续找车」（summary 消失）或新一轮开启成功（ride 接管）才退场；
+     * 找车态不画。
+     */
+    val rideMarkerPos = when {
+        ride != null -> rideBike
+        summary != null ->
+            summary.bikeLat?.let { lat -> summary.bikeLng?.let { lng -> lat to lng } }
+                ?: lastRideBikePos
+        else -> null
+    }
+    val rideMarkerLat = rideMarkerPos?.first
+    val rideMarkerLng = rideMarkerPos?.second
     /**
      * 页面底部常驻块（动作区 + 免责）的**实时**实测高度（含导航栏内边距）。
      *
@@ -1170,6 +1216,26 @@ fun RideScreen(
         },
         onDismiss = { cardGate.value = null },
     )
+
+    // 远程用车提醒（2026-10-24，每 20 次一次；只提醒不阻断，点「知道了」即关）。
+    // 文案唯一出处 EbikeRemoteRide；触发源见 showRemoteRideNotice 的注释。
+    if (showRemoteRideNotice) {
+        AlertDialog(
+            onDismissRequest = { showRemoteRideNotice = false },
+            title = { Text(EbikeRemoteRide.DIALOG_TITLE) },
+            text = {
+                // 过渡落在弹窗窗口自己的组合里（内容槽第一行，见 ui-common.md）
+                DialogWindowFadeEffect()
+                Text(
+                    text = EbikeRemoteRide.dialogText(remoteNoticeCount),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showRemoteRideNotice = false }) { Text("知道了") }
+            },
+        )
+    }
 }
 /**
  * 用车确认弹窗的宿主：**「待确认动作」这个状态由它自己读**，页面函数体只负责写。

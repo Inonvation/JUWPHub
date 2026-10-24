@@ -837,6 +837,7 @@ object Graph {
                 val scope = appScope
                 val notices = MutableSharedFlow<KvcxNotice>(extraBufferCapacity = 8)
                 val unlocked = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+                val remoteReminder = MutableSharedFlow<Int>(extraBufferCapacity = 1)
                 KvcxRideController(
                     session = runCatching { kqcx(context) }.getOrNull(),
                     scope = scope,
@@ -845,6 +846,7 @@ object Graph {
                     onUnlocked = {},
                     rideNotices = notices,
                     rideUnlocked = unlocked,
+                    remoteRideReminder = remoteReminder,
                 )
             }.also { kvcxRide = it }
         }

@@ -51,6 +51,7 @@ import edu.jxslu.schedule.SubpageActivity
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.domain.EbikeCardExpiry
+import edu.jxslu.schedule.domain.EbikeCardSavings
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.RideRecord
 import edu.jxslu.schedule.domain.capabilities
@@ -107,6 +108,12 @@ fun KvcxScreen(
     )
     // 能力矩阵（DESIGN §3.9）：本页的账号 / 记录属于 App 内用车那一档
     val appRideEnabled = useMode.capabilities().inAppRide
+    // 骑行卡节省（2026-10-24）：以开卡额度与服务端剩余次数推算已用次数——**没有可参与
+    // 推算的卡**（无可用卡 / 只有无限次数卡 / 次数缺失）返回 null，区块不显示。
+    // 资产查询失败同样不显示，宁缺勿错。
+    val cardSavings = state.assets?.let { assets ->
+        EbikeCardSavings.computeFromCoupons(assets.coupons, System.currentTimeMillis())
+    }
 
     // 账号方式下上次判定登录过期：进页说一句为什么退回登录表单（小程序方式没有账号，不提示）
     if (appRideEnabled) {
@@ -151,6 +158,8 @@ fun KvcxScreen(
                     AccountSection(state, viewModel)
                     // 快趣资产（2026-09-30）：余额 / 卡券 / 会员卡，只读
                     AssetsSection(state = state, onRefresh = viewModel::refreshAssets)
+                    // 骑行卡节省（2026-10-24）：有可参与推算的卡才显示（判据见 cardSavings）
+                    cardSavings?.let { savings -> CardSavingsSection(result = savings) }
                 } else {
                     LoginSection(state, viewModel)
                 }
@@ -223,6 +232,27 @@ private fun CardExpiryDialog(coupons: List<KqcxAuth.AssetCoupon>, onDismiss: () 
 }
 
 // ── 本机骑行记录 ──
+
+/**
+ * 「骑行卡节省」（2026-10-24 用户要求，同日改服务端口径）：开卡一次给 260 次
+ * 前 15 分钟免费额度，额度与资产接口剩余次数之差 = 已用次数，每单按省 ¥0.8 计、
+ * 扣开卡 ¥18.8 为净省。口径全在 [EbikeCardSavings]（纯函数 + 单测），这里只排版；
+ * 不依赖本机骑行记录（开卡前的旧订单、微信里骑的都天然算对），**不新增任何请求**。
+ * **估算不是账单**，副标题写明。显示条件（有可参与推算的卡）由调用方把关（见 [KvcxScreen]）。
+ */
+@Composable
+private fun CardSavingsSection(result: EbikeCardSavings.Result) {
+    SettingsSection(
+        title = "骑行卡节省",
+        subtitle = "按开卡 ${EbikeCardSavings.CARD_QUOTA} 次额度 × 每单省 ¥0.8、开卡 ¥18.8 估算，以快趣为准。",
+    ) {
+        Text(
+            text = EbikeCardSavings.summaryText(result),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
+    }
+}
 
 /**
  * 「最近骑行」（DESIGN §3.9，2026-09-28）：只记**本机用车**这条链路（起点 / 终点 /

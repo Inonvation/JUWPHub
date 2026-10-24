@@ -15,6 +15,7 @@ import edu.jxslu.schedule.domain.EbikeAutoReturn
 import edu.jxslu.schedule.domain.EbikeCardExpiry
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeQr
+import edu.jxslu.schedule.domain.EbikeRemoteRide
 import edu.jxslu.schedule.domain.EbikeRideCard
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.FirstRunNotice
@@ -816,6 +817,23 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /**
+     * 远程用车累计次数（2026-10-24，见 [EbikeRemoteRide]）：账号方式「开启」成功与小程序方式
+     * 点「打开微信扫一扫」各 +1，跨进程持久。读入口只有 [incrementEbikeRemoteRideCount]
+     * （原子自增并返回新值），别各写一份读-改-写。
+     */
+    val ebikeRemoteRideCount: Flow<Int> = context.displayDataStore.data.map { p ->
+        p[KEY_EBIKE_REMOTE_RIDE_COUNT] ?: 0
+    }
+
+    /**
+     * 有远程用车提醒待弹（2026-10-24）：小程序方式达标时**不阻断跳转**，落此标记，
+     * 回 App（ON_RESUME）时消费弹出。账号方式当场弹、不经这个标记。
+     */
+    val ebikeRemoteRidePending: Flow<Boolean> = context.displayDataStore.data.map { p ->
+        p[KEY_EBIKE_REMOTE_RIDE_PENDING] ?: false
+    }
+
+    /**
      * 用车满 15 分钟自动还车开关（DESIGN §3.9，2026-10-10）。**默认关**：
      * 它会替用户执行有计费后果的写动作（自动还车），只能显式开启。
      */
@@ -1466,6 +1484,22 @@ class DisplayPrefsStore(internal val context: Context) {
         context.displayDataStore.edit {
             it[KEY_REMINDER_LEAD] = ReminderDefaults.coerceLead(value)
         }
+    }
+
+    /**
+     * 远程用车计数自增（2026-10-24）：读-改-写在一次 `edit` 事务里完成，自增后的值从
+     * 事务返回的快照里读出（调用方拿它判 [EbikeRemoteRide.shouldRemind]，别再读一遍 Flow）。
+     */
+    suspend fun incrementEbikeRemoteRideCount(): Int {
+        val prefs = context.displayDataStore.edit { p ->
+            p[KEY_EBIKE_REMOTE_RIDE_COUNT] = (p[KEY_EBIKE_REMOTE_RIDE_COUNT] ?: 0) + 1
+        }
+        return prefs[KEY_EBIKE_REMOTE_RIDE_COUNT] ?: 0
+    }
+
+    /** 「有远程用车提醒待弹」标记（见 [ebikeRemoteRidePending]）；弹出消费后写 false。 */
+    suspend fun setEbikeRemoteRidePending(value: Boolean) {
+        context.displayDataStore.edit { it[KEY_EBIKE_REMOTE_RIDE_PENDING] = value }
     }
 
     suspend fun setShortcutsEnabled(value: Boolean) {

@@ -16,6 +16,7 @@ import edu.jxslu.schedule.data.kqcx.LockOutcome
 import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.data.kqcx.UnlockOutcome
 import edu.jxslu.schedule.domain.EbikeRideCard
+import edu.jxslu.schedule.domain.EbikeRemoteRide
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KvcBusinessError
 import edu.jxslu.schedule.domain.KvcProtocolException
@@ -122,6 +123,7 @@ data class KvcxNotice(val text: String, val tone: NoticeTone)
 /** 无共享流的控制器实例（单测 / 兼容路径）兜底用的空事件流。 */
 private val emptyNotices = MutableSharedFlow<KvcxNotice>(extraBufferCapacity = 0)
 private val emptyUnlocked = MutableSharedFlow<Unit>(extraBufferCapacity = 0)
+private val emptyRemoteReminder = MutableSharedFlow<Int>(extraBufferCapacity = 0)
 
 /**
  * 快趣骑行状态 + 写动作的共享状态（DESIGN §4.32）。
@@ -192,6 +194,13 @@ data class KvcxReturnSummary(
     val owedCents: Long? = null,
     /** true = 还车已成功，扣款结果还在后台查；此时不显示「去微信结清」。 */
     val settling: Boolean = false,
+    /**
+     * 还车时车辆的最后已知坐标（GCJ-02，还车前订单快照里的；0,0 占位值已滤掉）。
+     * 结算期间地图继续标注这辆车（2026-10-24 用户要求），点「继续找车」随结算卡一起退场；
+     * 控制器是 Graph 单例，坐标跨页面重建存活。
+     */
+    val bikeLat: Double? = null,
+    val bikeLng: Double? = null,
 ) {
     /** 时长文案用人话（「13 分钟」），与历史列表同一口径（`RideRecord.durationText`）。 */
     val durationText: String? get() = durationSeconds?.let(RideRecord::durationText)
@@ -249,6 +258,12 @@ internal interface KvcxSideEffects {
 
     /** 记一条本机骑行记录（只有本机用车这条链路数据是齐的）。 */
     suspend fun recordRide(summary: KvcxReturnSummary)
+
+    /**
+     * 记一次远程开启（2026-10-24，见 [EbikeRemoteRide]）：返回**自增后**的累计次数，
+     * 调用方拿它判要不要弹提醒。读-改-写 DataStore 原子；失败返回 0（不弹，宁少不误）。
+     */
+    suspend fun recordRemoteRide(): Int
 }
 
 /** 生产用的副作用实现：全部落到 Graph + 提醒调度 + 本机记录。 */
@@ -291,6 +306,10 @@ internal object AppKvcxSideEffects : KvcxSideEffects {
             )
         }
     }
+
+    override suspend fun recordRemoteRide(): Int = runCatching {
+        Graph.displayPrefs(Graph.appContext).incrementEbikeRemoteRideCount()
+    }.getOrDefault(0)
 }
 
 /**
@@ -322,6 +341,12 @@ class KvcxRideController internal constructor(
      */
     private val rideNotices: MutableSharedFlow<KvcxNotice>? = null,
     private val rideUnlocked: MutableSharedFlow<Unit>? = null,
+    /**
+     * 远程用车提醒事件（2026-10-24）：两段式「开启」成功且计数达到 [EbikeRemoteRide.INTERVAL]
+     * 的整数倍时发一次（载荷 = 自增后的累计次数，弹窗文案用）。**只提醒不阻断**——
+     * 发出时机在成功落卡之后，骑行卡与提示都不等它。
+     */
+    private val remoteRideReminder: MutableSharedFlow<Int>? = null,
     /** 定位前置（写操作硬闸）。默认走真实定位；单测里换成假坐标。 */
     private val locate: suspend () -> LocateResult = {
         // 写动作不能像地图页那样等 8 秒；5 秒拿不到就走车辆锚点 / 明确提示。
@@ -343,6 +368,9 @@ class KvcxRideController internal constructor(
 
     /** 开锁成功信号共享流（同上）。 */
     val unlockedSignal: SharedFlow<Unit> get() = rideUnlocked ?: emptyUnlocked
+
+    /** 远程用车提醒共享流（同上）：载荷 = 自增后的累计次数。 */
+    val remoteRideSignal: SharedFlow<Int> get() = remoteRideReminder ?: emptyRemoteReminder
 
     /**
      * 事件出口（2026-10-21 单例化）：**有共享流就走流、没有才走回调**——两者同时发会
@@ -582,6 +610,7 @@ class KvcxRideController internal constructor(
                         if (reminderOpened) "（已打开免费时长提醒）" else "",
                     timerTone,
                 )
+                recordRemoteRideIfRemote(sendUnlock)
                 // 对账 + 补全放到后台：动作的 busy 在这一拍就结束，不让最多 5 次查询
                 // 继续占住按钮。**不走**共享的 refreshInternal（见 [syncAfterUnlock]）：
                 // 那份在服务端抽风回空时会把刚确认的订单整个抹掉。
@@ -616,6 +645,8 @@ class KvcxRideController internal constructor(
                     },
                     NoticeTone.Warning,
                 )
+                // 订单已创建 = 车已被这次远程开启占住：与成功分支同一口径计数
+                recordRemoteRideIfRemote(sendUnlock)
                 val syncSeq = snapshotSeq
                 scope.launch { syncAfterUnlock(outcome.carNum, syncSeq, sentUnlock = sendUnlock) }
             }
@@ -954,6 +985,19 @@ class KvcxRideController internal constructor(
         lat.isFinite() && lng.isFinite() &&
             lat in -90.0..90.0 && lng in -180.0..180.0 &&
             !(lat == 0.0 && lng == 0.0)
+
+    /**
+     * 远程用车计数（2026-10-24，见 [EbikeRemoteRide]）：只有**两段式「开启」**算远程扫车
+     * （建单把车占住）；扫车身码（[sendUnlock] = true，人车同在）不计。达标时经共享流发一次
+     * 提醒事件——发出在成功落卡之后，**只提醒不阻断**。
+     */
+    private suspend fun recordRemoteRideIfRemote(sendUnlock: Boolean) {
+        if (sendUnlock) return
+        val count = effects.recordRemoteRide()
+        if (EbikeRemoteRide.shouldRemind(count)) {
+            remoteRideReminder?.tryEmit(count)
+        }
+    }
 
     /**
      * 骑行状态快照落库 + 悬置态裁决（[query] / [refreshInternal] / [queryLockState] 共用，

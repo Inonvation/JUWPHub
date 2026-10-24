@@ -253,6 +253,12 @@
   （快趣没有最终账单接口），卡上写明「金额与结算以快趣小程序为准」——别把快照当账单，
   也别为它去加一个「查最终账单」的轮询。数据口径仍在 `KvcxRideController` 的
   `KvcxReturnSummary`（`settleText` 有单测），文案不要在页面里另写一份。
+  **结算期间地图继续标注刚还的这辆车**（2026-10-24 用户要求）：车标坐标随结算卡走
+  （`KvcxReturnSummary.bikeLat/Lng`，`performReturnBike` 从还车前订单快照取、0,0 占位值滤掉；
+  缺失时页面退回 `lastRideBikePos`——它的清除时机是「carNum 变为**非空**才清」，还车不清）。
+  分流判据在 `RideScreen.rideMarkerPos`：骑行态订单坐标 / 结算态结算卡坐标 / 找车态不画；
+  点「继续找车」（summary 消失）或新一轮开启成功（ride 接管）车标才退场。
+  **自动还车不保留**（后台发生、无结算卡，进页即正常界面，用户同日确认）。
   **「重新使用该车」**（2026-10-10 用户要求）：下区**第二行**一枚描边全宽按钮，点击走
   开锁的**同一套闸**（`requestKvcxAction(UNLOCK, 车号)`——二次确认 / 定位前置 / 零重试），
   对刚还的车重新创建订单并开锁。**别把它并进「继续找车」那一行**——三枚并排会把六字
@@ -471,6 +477,41 @@
   那三接口，也别在骑行页另建一份查询（预热与判定都走控制器）。
 - 同日的界面口径不写在这里：今日页「快趣骑行」行的高亮与点击反馈见
   `.agents/rules/today-ui.md`；快趣账号页「快趣资产」的主次见 DESIGN §4.32 末段。
+
+## 远程用车提醒（2026-10-24 用户要求）
+
+- **每 20 次远程开启弹一次提醒，只提醒不阻断**（点「知道了」即关，用车流程不加一步）。
+  口径在 `domain/EbikeRemoteRide.kt`（`shouldRemind` 与弹窗文案的唯一出处，
+  `EbikeRemoteRideTest` 钉住）。"远程扫车"（非扫车身码）只有两条计数链，共用同一个计数器：
+  - **账号方式**：两段式「开启」成功才计（`KvcxAction.UNLOCK`；`Unlocked` 与 `Unconfirmed`
+    都算——订单都已创建、车被占住）。**`DIRECT_UNLOCK`（扫车身码，人车同在）不计**，
+    重试开锁 / 解锁继续骑不计（非新车）。计数在控制器成功分支经
+    `KvcxSideEffects.recordRemoteRide()`（DataStore 键 `ebike_remote_ride_count`，
+    `incrementEbikeRemoteRideCount` 原子自增并返回新值）；达标经共享流 `remoteRideSignal`
+    发载荷（自增后次数），骑行页收流**当场弹**（`KvcxRideControllerTest` 钉住
+    "两段式计、完整开锁不计、达标才发"）。
+  - **小程序方式**：点「打开微信扫一扫」（`EbikeViewModel.onWechatScanClicked`，
+    两个入口单点收口在这）。达标**不阻断跳转**——落 `ebike_remote_ride_pending`，
+    回 App（ON_RESUME）时骑行页消费弹出并清标记（提醒滞后到回 App，用车零打扰）。
+  - 弹窗是普通 AlertDialog + `DialogWindowFadeEffect`，**不走确认闸**；页面状态
+    `rememberSaveable`（跨重建弹窗还开着时计数不能归零）。计数失败静默（读存储不该挡用车）。
+
+## 骑行卡节省（2026-10-24 用户要求，同日改**服务端口径**）
+
+- **快趣账号页新区块**（`CardSavingsSection`，资产区之下）：开卡一次给 260 次前 15 分钟
+  免费额度，**已用次数 = 额度 − 资产接口剩余次数**（`KqcxAuth.AssetCoupon.remainFrequency`），
+  每单按省 0.8 元计、扣开卡 18.8 元为净省；未回本显示还差几次（向上取整）。口径全在
+  `domain/EbikeCardSavings.kt`（纯 JVM，`EbikeCardSavingsTest` 钉住），**不依赖本机骑行记录、
+  不新增任何请求**。
+- **为什么不用本机记录**：`ride_records` 只记 App 内开的车（微信里骑的永远缺），且开卡前
+  的旧订单无法排除（费用字段与持卡免费单同为 0）——服务端次数推算对这两件事天然免疫：
+  卡没扣次数就不算用掉（短时还车不扣费的单自动排除），开卡那一刻额度才 260，之前的订单
+  根本不在这笔账里。
+- **只显示有可参与推算的卡**（`computeFromCoupons` 返回非 null）：可用卡（`EbikeRideCard.
+  isUsable`）里**有限次数**的那部分；无限次数卡（官方 >1e5）没有"260 次"基准、次数缺失
+  的卡不下断言，都排除；全部不可参与 → 区块不显示（资产查询失败同样不显示，宁缺勿错）。
+  多张有限卡合并推算（额度 × 张数 − 总剩余）。剩余多于额度的脏数据钳 0，不显示负的"已用"。
+- 这是**估算不是账单**：区块副标题写明口径与「以快趣为准」，正文（`summaryText`）不再抄数字。
 
 ## 快趣出行设置弹层（说明口径与沿革）
 

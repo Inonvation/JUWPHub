@@ -10,6 +10,7 @@ import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.domain.EbikeAutoReturn
 import edu.jxslu.schedule.domain.EbikeQr
 import edu.jxslu.schedule.domain.EbikeFreeRide
+import edu.jxslu.schedule.domain.EbikeRemoteRide
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.ThemeMode
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -226,6 +227,15 @@ class EbikeViewModel(
      */
     fun onWechatScanClicked() {
         viewModelScope.launch {
+            // 远程用车计数（2026-10-24，见 EbikeRemoteRide）：跳转微信扫一扫扫的是 App 生成的
+            // 车号码，算一次远程开启。达标**不阻断跳转**——落待提醒标记，回 App（ON_RESUME）
+            // 时弹出；计数失败静默（提醒不该挡住用车）。
+            runCatching {
+                val count = prefs.incrementEbikeRemoteRideCount()
+                if (EbikeRemoteRide.shouldRemind(count)) {
+                    prefs.setEbikeRemoteRidePending(true)
+                }
+            }
             var saveText: String? = null
             var saveOk = true
             if (!_uiState.value.generatedSaved) {

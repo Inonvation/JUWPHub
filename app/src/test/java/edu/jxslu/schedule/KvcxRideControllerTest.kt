@@ -19,7 +19,10 @@ import edu.jxslu.schedule.ui.ebike.unlockCooldownSecondsLeft
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.junit.Assert.assertEquals
@@ -185,6 +188,10 @@ class KvcxRideControllerTest {
         /** 计时善后被调起时的钩子：测「界面先行」顺序（此刻骑行卡应已落 UI）。 */
         var onStartTimer: (() -> Unit)? = null
 
+        /** 远程用车计数：`nextRemoteCount` 是下一次自增后的返回值；调用次数供断言。 */
+        var remoteRideCalls = 0
+        var nextRemoteCount = 0
+
         override suspend fun startRideTimer(): Pair<String, NoticeTone> {
             startedTimer++
             onStartTimer?.invoke()
@@ -204,6 +211,11 @@ class KvcxRideControllerTest {
         override suspend fun recordRide(summary: KvcxReturnSummary) {
             recorded += summary
         }
+
+        override suspend fun recordRemoteRide(): Int {
+            remoteRideCalls++
+            return nextRemoteCount
+        }
     }
 
     private val notices = mutableListOf<Pair<String, NoticeTone>>()
@@ -213,6 +225,7 @@ class KvcxRideControllerTest {
         session: KvcxRideSession?,
         effects: KvcxSideEffects = FakeEffects(),
         located: LocateResult = LocateResult.Ok(28.68, 115.85),
+        remoteRideReminder: MutableSharedFlow<Int>? = null,
     ): KvcxRideController = KvcxRideController(
         session = session,
         scope = CoroutineScope(Dispatchers.Unconfined),
@@ -220,6 +233,7 @@ class KvcxRideControllerTest {
         onUnlocked = { unlockedSignals++ },
         locate = { located },
         effects = effects,
+        remoteRideReminder = remoteRideReminder,
         // 补全重拉的间隔在单测里取 0：Unconfined 下 delay(0) 不挂起，断言不需要等真时间
         unlockSyncIntervalMs = 0L,
     )
@@ -1036,6 +1050,79 @@ class KvcxRideControllerTest {
         assertEquals(listOf(summary), effects.recorded)
         assertEquals(false, session.returnWasLocked)
         assertNull(kvcx.state.value.ride)
+    }
+
+    @Test
+    fun `还车结果卡带车辆坐标_占位坐标不算`() {
+        // 结算期间地图还要标注这辆车（2026-10-24）：坐标来自还车前订单快照
+        val session = FakeSession()
+        val kvcx = controller(session)
+        kvcx.query(quiet = true)
+        session.underway = null
+
+        kvcx.returnBike()
+
+        val summary = kvcx.state.value.returnSummary
+        assertNotNull(summary)
+        assertEquals(28.68, summary!!.bikeLat!!, 1e-9)
+        assertEquals(115.85, summary.bikeLng!!, 1e-9)
+
+        // 0,0 是服务端"没有坐标"的占位值：结果卡不装它，页面据此退回最后已知坐标
+        val session2 = FakeSession()
+        session2.underway = ride(lat = 0.0, lng = 0.0)
+        val kvcx2 = controller(session2)
+        kvcx2.query(quiet = true)
+        session2.underway = null
+        kvcx2.returnBike()
+        assertNull(kvcx2.state.value.returnSummary?.bikeLat)
+        assertNull(kvcx2.state.value.returnSummary?.bikeLng)
+    }
+
+    @Test
+    fun `两段式开启计远程用车_完整开锁不计`() {
+        // 远程扫车口径（2026-10-24）：两段式「开启」（含未确认——订单同样已创建、车被占住）
+        // 各算一次；扫车身码（DIRECT_UNLOCK，人车同在）不算
+        val session = FakeSession()
+        val effects = FakeEffects()
+        val kvcx = controller(session, effects)
+
+        kvcx.unlock("100000669", sendUnlock = false)
+        assertEquals(1, effects.remoteRideCalls)
+
+        kvcx.unlock("100000670", sendUnlock = true)
+        assertEquals(1, effects.remoteRideCalls)
+
+        session.unlockResult = { UnlockOutcome.Unconfirmed("100000669") }
+        kvcx.unlock("100000669", sendUnlock = false)
+        assertEquals(2, effects.remoteRideCalls)
+    }
+
+    @Test
+    fun `远程计数达标发提醒事件_不达标不发`() {
+        val session = FakeSession()
+        val effects = FakeEffects()
+        val reminderFlow = MutableSharedFlow<Int>(extraBufferCapacity = 8)
+        val received = mutableListOf<Int>()
+        val collector = CoroutineScope(Dispatchers.Unconfined + Job()).launch {
+            reminderFlow.collect { received += it }
+        }
+        val kvcx = controller(session, effects, remoteRideReminder = reminderFlow)
+
+        effects.nextRemoteCount = 20
+        kvcx.unlock("100000669")
+        assertEquals(listOf(20), received)
+
+        received.clear()
+        effects.nextRemoteCount = 21
+        session.unlockResult = { UnlockOutcome.Unconfirmed("100000669") }
+        kvcx.unlock("100000669")
+        assertEquals(emptyList<Int>(), received)
+
+        received.clear()
+        effects.nextRemoteCount = 40
+        kvcx.unlock("100000669")
+        assertEquals(listOf(40), received)
+        collector.cancel()
     }
 
     @Test
