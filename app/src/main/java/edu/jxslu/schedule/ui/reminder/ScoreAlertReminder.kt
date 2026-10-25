@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -17,7 +18,6 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import androidx.work.workDataOf
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.SubpageScreen
@@ -72,6 +72,9 @@ object ScoreAlertReminder {
 
     /** [enqueueCheck] 的入参键：非空 = 只跑那一路（目前只有问渠用，见 [enqueueWenquCheck]）。 */
     internal const val KEY_ONLY_CHAIN = "only_chain"
+
+    /** [enqueueCheck] 的入参键：true = 冷启动补查（闸门阈值减半，见 [check]）。 */
+    internal const val KEY_EAGER = "eager"
 
     /** 「只跑问渠那一路」的取值。 */
     private const val CHAIN_WENQU = "wenqu"
@@ -157,13 +160,22 @@ object ScoreAlertReminder {
         }.onFailure { Log.w(TAG, "ensurePeriodicWork failed", it) }
     }
 
-    /** 即时评估（REPLACE：连着改两次只跑最后一次）。冷启动与设置变更都走这里。 */
-    fun enqueueCheck(context: Context, onlyChain: String? = null) {
+    /**
+     * 即时评估（REPLACE：连着改两次只跑最后一次）。冷启动与设置变更都走这里。
+     *
+     * [eager] = 冷启动补查（[edu.jxslu.schedule.JuwApplication] 传 true）：闸门阈值减半，
+     * 兜住「距上次成功检查还没满整档」时打开 App 也不查的空窗；设置变更入口不传——
+     * 它已清检查时刻，闸门必开。
+     */
+    fun enqueueCheck(context: Context, onlyChain: String? = null, eager: Boolean = false) {
         runCatching {
             val request = OneTimeWorkRequestBuilder<ScoreAlertCheckWorker>()
                 .setConstraints(connectedConstraint())
                 .setInputData(
-                    if (onlyChain == null) workDataOf() else workDataOf(KEY_ONLY_CHAIN to onlyChain),
+                    Data.Builder().apply {
+                        onlyChain?.let { putString(KEY_ONLY_CHAIN, it) }
+                        if (eager) putBoolean(KEY_EAGER, true)
+                    }.build(),
                 )
                 .build()
             WorkManager.getInstance(context)
@@ -208,13 +220,15 @@ object ScoreAlertReminder {
      * 整体兜异常：后台任务里任何失败都不该让 Worker 报错重试（重试会再打一次教务）。
      *
      * [onlyChain] 非空 = **只跑那一路**（设置页改问渠提醒时用，见 [enqueueWenquCheck]）。
+     * [eager] = 冷启动补查：只有成绩/考试两路吃它（闸门阈值减半），选课/调课/问渠
+     * 三路各自口径不动。
      *
      * 通知总开关只拦「发通知」，不拦核对本身（2026-10-06 收件箱 §4.38）：成绩/考试的
      * 入箱不依赖通知——通知全关的用户恰好是最依赖收件箱的人。选课/调课两路不在此列：
      * 前者的入箱点在「通知发成功」内（发不出就不落已发键也不入箱，下一轮还有机会），
      * 后者的调度开关在 [ScheduleAlertReminder.check] 内部自判。
      */
-    suspend fun check(context: Context, onlyChain: String? = null) {
+    suspend fun check(context: Context, onlyChain: String? = null, eager: Boolean = false) {
         runCatching {
             val prefs = Graph.displayPrefs(context)
             // 盯了指定活动（问渠蹲点）也要叫醒问渠那一路——见 WenquActivityAlertReminder.checkPinnedSlot
@@ -232,8 +246,8 @@ object ScoreAlertReminder {
             val wenquOn = prefs.wenquActivityAlertEnabled.first()
             if (!scoreOn && !examOn && !selectionOn && !scheduleOn && !wenquOn && !wenquPinned) return
             val notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
-            if (scoreOn) checkScores(context, notificationsEnabled)
-            if (examOn) checkExams(context, notificationsEnabled)
+            if (scoreOn) checkScores(context, notificationsEnabled, eager)
+            if (examOn) checkExams(context, notificationsEnabled, eager)
             // 选课提醒自带落盘去重与闹钟重排（DESIGN §4.35），这里只负责按周期叫醒它
             if (selectionOn) SelectionAlertReminder.check(context)
             // 调课检测（DESIGN §4.17 重立）：第四路搭同一趟车，闸门与静默纪律在 ScheduleSync.check
@@ -248,8 +262,8 @@ object ScoreAlertReminder {
     // 成绩
     // ------------------------------------------------------------------
 
-    private suspend fun checkScores(context: Context, notificationsEnabled: Boolean) {
-        when (val result = Graph.scoreSync(context).sync()) {
+    private suspend fun checkScores(context: Context, notificationsEnabled: Boolean, eager: Boolean) {
+        when (val result = Graph.scoreSync(context).sync(eager = eager)) {
             is ScoreSync.Result.Updated -> {
                 if (result.firstImport) return // 首次导入是基线，不是变动
                 if (result.changes.isEmpty()) return
@@ -284,8 +298,8 @@ object ScoreAlertReminder {
     // 考试
     // ------------------------------------------------------------------
 
-    private suspend fun checkExams(context: Context, notificationsEnabled: Boolean) {
-        when (val result = Graph.examSync(context).sync()) {
+    private suspend fun checkExams(context: Context, notificationsEnabled: Boolean, eager: Boolean) {
+        when (val result = Graph.examSync(context).sync(eager = eager)) {
             is ExamSync.Result.Updated -> {
                 if (result.changes.isEmpty()) return
                 // 免扰时段（DESIGN §3.7）：考试变动是事实型通知，拦下待补发
@@ -431,8 +445,13 @@ class ScoreAlertCheckWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        // 入参非空 = 只跑那一路（问渠设置页改开关时用，见 ScoreAlertReminder.enqueueWenquCheck）
-        ScoreAlertReminder.check(applicationContext, inputData.getString(ScoreAlertReminder.KEY_ONLY_CHAIN))
+        // 入参非空 = 只跑那一路（问渠设置页改开关时用，见 ScoreAlertReminder.enqueueWenquCheck）；
+        // eager = 冷启动补查（JuwApplication 传入），成绩/考试两路闸门阈值减半
+        ScoreAlertReminder.check(
+            applicationContext,
+            inputData.getString(ScoreAlertReminder.KEY_ONLY_CHAIN),
+            inputData.getBoolean(ScoreAlertReminder.KEY_EAGER, false),
+        )
         return Result.success()
     }
 }

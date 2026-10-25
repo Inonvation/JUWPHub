@@ -104,10 +104,12 @@ class JuwApplication : Application() {
             BalanceAlertReminder.ensurePeriodicWork(this@JuwApplication)
             BalanceAlertReminder.enqueueCheck(this@JuwApplication)
             // 成绩/考试变动提醒（DESIGN §4.33）：排周期核对（间隔 = 设置档位），两个开关
-            // 都关时内部会撤销任务；冷启动再补查一次，兜住「周期任务还没跑」的间隔。
+            // 都关时内部会撤销任务；冷启动再补查一次（eager = 闸门阈值减半），兜住
+            // 「周期任务被系统省电推迟 / 距上次成功检查还没满整档」的空窗——教务发布后
+            // 最早半个间隔就随打开 App 带出，而不是等下一个周期。
             // 间隔闸门在 ScoreSync / ExamSync 内部（成功才落时刻），不会重复打教务。
             ScoreAlertReminder.ensurePeriodicWork(this@JuwApplication)
-            ScoreAlertReminder.enqueueCheck(this@JuwApplication)
+            ScoreAlertReminder.enqueueCheck(this@JuwApplication, eager = true)
             // 选课轮次提醒（DESIGN §4.35）：周期核对搭成绩/考试那一趟车（间隔共用），
             // 冷启动只补一次本地重排——闹钟丢了/换代就补上，开关关着时是撤销闹钟的空跑。
             SelectionAlertReminder.scheduleNext(this@JuwApplication)

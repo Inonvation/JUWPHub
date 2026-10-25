@@ -67,12 +67,19 @@
   兜非法值；2026-10-04 起成绩/考试/选课/调课四链各自一个键，见 §4.17）；提醒开着时 `ScoreSync` 走**小时级**毫秒闸门（`score_check_millis`），
   关着维持原 7 天日期闸门（`scoreSyncDate`）——关提醒后自动导入节奏不变（§4.29 不受影响）；
   `ExamSync` 只服务提醒（开关关 = Skipped，零请求），闸门 `exam_check_millis`；
-- **冷启动自动查一次**（用户要求的口径）：`JuwApplication` 既有的成绩自动导入链之后
-  追加 `examSync.sync()`；各链内部被开关与间隔闸门挡住，不满足就是零网络空跑；
+- **冷启动自动查一次**（用户要求的口径；2026-10-25 起 eager 放宽）：`JuwApplication`
+  既有的成绩自动导入链之后追加 `ScoreAlertReminder.enqueueCheck(eager = true)`
+  （经 Worker 只走成绩/考试两路 sync）；各链内部被开关与间隔闸门挡住，不满足就是零网络空跑。
+  **冷启动补查阈值减半**（`AutoSyncRules.shouldAttemptAt(eager)`：半个间隔、不小于 1 小时）：
+  原口径下「昨天的检查刚建基线、教务今天发布新考试、今天打开 App」会被整档闸门吞掉，
+  要手动刷新才看得到；减半后最早半个间隔就随打开 App 带出，半个间隔内重复打开仍是零网络。
+  周期任务与手动「更新」口径不变；选课/调课/问渠三路不吃 eager（选课本有 30 分钟自制
+  闸门 + 精确闹钟兜底，调课/问渠未被报障不动）；
 - 周期核对 WorkManager `score_alert_periodic`：间隔 = 档位；**两开关全关撤销任务**；
   幂等 = 「已排周期记 DataStore `alert_periodic_interval`，档位没变 KEEP、变了 REPLACE」
   （WorkManager 2.7 没有 UPDATE 策略）；设置变更 `onSettingsChanged` = 重排周期 +
-  one-shot 立即评估（**不清检查时刻**——首跑本来就要建基线，不需要额外清）；
+  one-shot 立即评估（**清各链检查时刻**——用户刚改的开关/间隔要按新规则当场评估一次，
+  沿用旧时刻会当天不生效；首跑基线语义不受影响）；
 - Worker 类名 `ScoreAlertCheckWorker` 与工作名一经发布不可改（KEEP/REPLACE 按类名
   实例化，同 `BalanceAlertCheckWorker` 的坑位说明）。
 

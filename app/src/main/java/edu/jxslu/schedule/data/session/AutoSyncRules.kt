@@ -52,9 +52,20 @@ object AutoSyncRules {
      * - 从没成功过（last 无效/≤0）→ 抓；
      * - 时钟被回拨（last 在未来）→ 不抓，等它自然走到区间内（与 [shouldAttempt] 同口径）；
      * - [intervalHours] 是脏值（≤0）按 1 小时兜底，不能让坏配置退化成「每次都抓」。
+     *
+     * [eager] 只给**冷启动补查**用（周期任务不传）：阈值减为半个间隔（不小于 1 小时），
+     * 兜住「周期任务被系统省电推迟 / 距上次成功检查还没满整档」时打开 App 也不查的空窗
+     * ——教务发布的新数据最早在半个间隔后由打开 App 的动作带出，而不必等下一个周期。
+     * 打开 App 的频率用户自己控制，半个间隔保证它不会变成「每次打开都打教务」。
      */
-    fun shouldAttemptAt(lastSuccessMillis: Long?, intervalHours: Int, nowMillis: Long): Boolean {
-        val hours = intervalHours.coerceAtLeast(1)
+    fun shouldAttemptAt(
+        lastSuccessMillis: Long?,
+        intervalHours: Int,
+        nowMillis: Long,
+        eager: Boolean = false,
+    ): Boolean {
+        val base = intervalHours.coerceAtLeast(1)
+        val hours = if (eager) (base / 2).coerceAtLeast(1) else base
         val last = lastSuccessMillis?.takeIf { it > 0 } ?: return true
         if (last > nowMillis) return false
         return nowMillis - last >= hours * MILLIS_PER_HOUR

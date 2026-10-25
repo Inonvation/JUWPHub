@@ -30,7 +30,8 @@ import kotlinx.coroutines.sync.Mutex
  *
  * 闸门与基线纪律：
  * - 只服务提醒：开关关着直接 Skipped，一行网络请求都不发；
- * - 间隔 + `exam_check_millis`（失败不写时刻，下个周期自动补查）；
+ * - 间隔 + `exam_check_millis`（失败不写时刻，下个周期自动补查）；`eager` 只由
+ *   冷启动补查传入（阈值减半，见 [AutoSyncRules.shouldAttemptAt]），周期任务不传；
  * - 壳页学期缓存（[AutoSyncRules.shellTermCacheUsable]）：TTL 内复用上次抓到的学期，
  *   省一个壳页 GET；force（手动更新按钮）永远真抓；
  * - 基线为空（首跑）或学期切换 = 只存基线**不通知**，防首跑/换学期整表刷屏；
@@ -64,22 +65,22 @@ class ExamSync(
         data class Failed(val reason: String) : Result
     }
 
-    suspend fun sync(force: Boolean = false): Result {
+    suspend fun sync(force: Boolean = false, eager: Boolean = false): Result {
         if (!mutex.tryLock()) return Result.InProgress
         try {
-            return syncLocked(force)
+            return syncLocked(force, eager)
         } finally {
             mutex.unlock()
         }
     }
 
-    private suspend fun syncLocked(force: Boolean): Result {
+    private suspend fun syncLocked(force: Boolean, eager: Boolean): Result {
         val alertOn = prefs.examAlertEnabled.first()
         val intervalHours = prefs.examAlertIntervalHours.first()
         val now = nowMillis()
         if (!force) {
             if (!alertOn) return Result.Skipped
-            if (!AutoSyncRules.shouldAttemptAt(prefs.examAlertCheckMillis(), intervalHours, now)) {
+            if (!AutoSyncRules.shouldAttemptAt(prefs.examAlertCheckMillis(), intervalHours, now, eager)) {
                 return Result.Skipped
             }
         }

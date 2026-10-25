@@ -149,6 +149,11 @@
   返回空变更。删掉这道闸，用户开开关的那一刻会被整表考试刷屏。
 - **检查时刻只在成功后落**（`score_check_millis` / `exam_check_millis`），失败不写——
   下个周期自动补查。**失败也不重试**（不加重试 = 防撞风控，与自动导入同口径）。
+- **冷启动补查阈值减半**（2026-10-25）：`JuwApplication` 的 `enqueueCheck(eager = true)`
+  经 Worker 只给成绩/考试两路把 `shouldAttemptAt` 阈值降到半个间隔（不小于 1 小时）——
+  兜住「距上次成功检查没满整档、打开 App 也不查」的空窗（用户报障：教务当天发新考试，
+  打开 App 无提醒，手动刷新才看到）。周期任务不传 eager；`onSettingsChanged` 不传
+  （它已清时刻，闸门必开）；选课/调课/问渠三路不吃 eager。
 - **闸门有两套**（都在 `ScoreSync.syncLocked` 的分支里）：成绩提醒开着 →
   `AutoSyncRules.shouldAttemptAt` 毫秒间隔（小时级）；关着 → 原 7 天日期闸门
   （`scoreSyncDate` 照旧写，§4.29 的自动导入节奏不变）。别把两套合并——关提醒的

@@ -136,6 +136,71 @@ class AutoSyncRulesTest {
         )
     }
 
+    @Test
+    fun `毫秒闸门_冷启动补查阈值减半`() {
+        val last = now - 13 * 60 * 60 * 1000L
+        // 周期任务口径：24h 档 13h 不到闸，跳过
+        assertFalse(AutoSyncRules.shouldAttemptAt(last, intervalHours = 24, nowMillis = now))
+        // 冷启动补查（eager）：阈值减半为 12h，13h 已过闸，真抓
+        assertTrue(
+            AutoSyncRules.shouldAttemptAt(last, intervalHours = 24, nowMillis = now, eager = true),
+        )
+    }
+
+    @Test
+    fun `毫秒闸门_冷启动补查半个间隔内仍不抓`() {
+        assertFalse(
+            AutoSyncRules.shouldAttemptAt(
+                now - 11 * 60 * 60 * 1000L,
+                intervalHours = 24,
+                nowMillis = now,
+                eager = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `毫秒闸门_冷启动补查1小时档不再降`() {
+        // 最勤档的半档（0.5h）按 1 小时兜底，冷启动补查不比周期任务更勤
+        assertFalse(
+            AutoSyncRules.shouldAttemptAt(
+                now - 30 * 60 * 1000L,
+                intervalHours = 1,
+                nowMillis = now,
+                eager = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `毫秒闸门_冷启动补查奇数档整除向下`() {
+        // 3h 档半档 = 1h（Int 整除向下），1.5h 已过 eager 闸
+        assertTrue(
+            AutoSyncRules.shouldAttemptAt(
+                now - 90 * 60 * 1000L,
+                intervalHours = 3,
+                nowMillis = now,
+                eager = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `毫秒闸门_冷启动补查没成功过立即抓`() {
+        assertTrue(
+            AutoSyncRules.shouldAttemptAt(null, intervalHours = 24, nowMillis = now, eager = true),
+        )
+        // 回拨口径与普通闸门一致：不因 eager 放开
+        assertFalse(
+            AutoSyncRules.shouldAttemptAt(
+                now + 60 * 60 * 1000L,
+                intervalHours = 24,
+                nowMillis = now,
+                eager = true,
+            ),
+        )
+    }
+
     // ---- 壳页学期缓存（考试/选课共用，2026-10-04 风控优化）----
 
     @Test

@@ -69,23 +69,27 @@ class ScoreSync(
         data class Failed(val reason: String) : Result
     }
 
-    suspend fun sync(force: Boolean = false): Result {
+    suspend fun sync(force: Boolean = false, eager: Boolean = false): Result {
         if (!mutex.tryLock()) return Result.InProgress
         try {
-            return syncLocked(force)
+            return syncLocked(force, eager)
         } finally {
             mutex.unlock()
         }
     }
 
-    private suspend fun syncLocked(force: Boolean): Result {
+    private suspend fun syncLocked(force: Boolean, eager: Boolean): Result {
         val alertOn = prefs.scoreAlertEnabled.first()
         val intervalHours = prefs.scoreAlertIntervalHours.first()
         val now = nowMillis()
         if (!force) {
             if (alertOn) {
                 val last = prefs.scoreAlertCheckMillis()
-                if (!AutoSyncRules.shouldAttemptAt(last, intervalHours, now)) return Result.Skipped
+                // eager 只作用于这条小时级提醒闸门；关提醒的 7 天日期闸门是自动导入
+                // 节奏（§4.29），冷启动补查不掺和
+                if (!AutoSyncRules.shouldAttemptAt(last, intervalHours, now, eager)) {
+                    return Result.Skipped
+                }
             } else {
                 val hasData = repo.hasData()
                 val last = prefs.scoreSyncDate.first()
