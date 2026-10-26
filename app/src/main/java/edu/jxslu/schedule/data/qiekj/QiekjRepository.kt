@@ -163,7 +163,12 @@ class QiekjRepository(
      *
      * - `signin/todaySignIn` 先判今天是否已签；
      * - 未签才走 `signin/signInAcList` 取活动 id，再 `signin/doUserSignIn`；
-     *   `code=33001` 是服务端幂等结果（今天已签），按成功处理。
+     *   `code=33001` 是服务端幂等结果（今天已签），按成功处理；
+     * - 未签时顺手 best-effort 问一次 `signin/todaySignIntegral`（今日可得积分），
+     *   失败不阻断签到——它只服务「+X 积分」的提醒展示。
+     *
+     * 结果带 [QiekjDailySignInResult.freshSignIn]（本次真签到）与两个积分字段；
+     * 「今天已签」的两条路 freshSignIn=false，自动签到的成功提醒只看它。
      *
      * 由用户手动触发，或由「打开软件自动签到」在当天首次前台时触发；
      * 不循环、不批量，验证码/风控不绕过。
@@ -174,9 +179,20 @@ class QiekjRepository(
         val today = pointsApi.todaySignIn(token)
         today.throwIfFailed()
         val todayData = today.data.decodeObjectOrNull(TodaySignInData.serializer())
+
+        var gained: String? = null
+        var total: String? = null
+        val freshSignIn: Boolean
         val signInText = if (todayData?.isSignIn == true) {
+            freshSignIn = false
             "签到：今天已签过"
         } else {
+            // 只服务展示，失败不挡签到
+            gained = runCatching {
+                val integral = pointsApi.todaySignIntegral(token)
+                integral.throwIfFailed()
+                integral.data.decodePrimitiveTextOrNull()
+            }.getOrNull()
             val activity = pointsApi.signInActivities(token)
             activity.throwIfFailed()
             val activityData = activity.data.decodeObjectOrNull(SignInActivityData.serializer())
@@ -184,12 +200,18 @@ class QiekjRepository(
             val result = pointsApi.doUserSignIn(token = token, activityId = activityId)
             when (result.code) {
                 0, 200 -> {
+                    freshSignIn = true
                     val resultData = result.data.decodeObjectOrNull(SignInResultData.serializer())
-                    "签到成功：activityId=$activityId，累计积分 ${resultData?.totalIntegral ?: "-"}"
+                    total = resultData?.totalIntegral?.takeIf { it.isNotBlank() }
+                    "签到成功：activityId=$activityId，累计积分 ${total ?: "-"}"
                 }
-                33001 -> "签到：服务端确认今天已签"
+                33001 -> {
+                    freshSignIn = false
+                    "签到：服务端确认今天已签"
+                }
                 else -> {
                     result.throwIfFailed()
+                    freshSignIn = false
                     "签到：未知状态"
                 }
             }
@@ -204,7 +226,13 @@ class QiekjRepository(
         } catch (_: Throwable) {
             null
         }
-        return QiekjDailySignInResult(signInText = signInText, balance = balance)
+        return QiekjDailySignInResult(
+            signInText = signInText,
+            freshSignIn = freshSignIn,
+            gainedIntegral = gained,
+            totalIntegral = total,
+            balance = balance,
+        )
     }
 
     suspend fun latestDevices(): List<DeviceItem> {

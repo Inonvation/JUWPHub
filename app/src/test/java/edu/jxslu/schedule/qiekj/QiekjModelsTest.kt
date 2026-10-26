@@ -18,6 +18,7 @@ import edu.jxslu.schedule.data.qiekj.SyncData
 import edu.jxslu.schedule.data.qiekj.TodaySignInData
 import edu.jxslu.schedule.data.qiekj.TokenExpiredException
 import edu.jxslu.schedule.data.qiekj.decodeObjectOrNull
+import edu.jxslu.schedule.data.qiekj.decodePrimitiveTextOrNull
 import edu.jxslu.schedule.data.qiekj.isSessionFinished
 import edu.jxslu.schedule.data.qiekj.noDataPollAction
 import edu.jxslu.schedule.data.qiekj.shouldRequestRemoteEnd
@@ -155,6 +156,22 @@ class QiekjModelsTest {
             """{"code":0,"data":""}""",
         )
         assertNull(activity.data.decodeObjectOrNull(SignInActivityData.serializer()))
+    }
+
+    @Test
+    fun decodePrimitiveText_裸字符串数字按文本读脏形态回null() {
+        // todaySignIntegral 的 data 是裸字符串（ApiResponse<String>），数字/字符串两形态都按文本读
+        fun dataOf(raw: String) =
+            QiekjJson.json.decodeFromString<ApiEnvelope<JsonElement>>(raw).data
+        assertEquals("2", dataOf("""{"code":0,"data":"2"}""").decodePrimitiveTextOrNull())
+        assertEquals("2", dataOf("""{"code":0,"data":2}""").decodePrimitiveTextOrNull())
+        // JsonNull / 对象 / 数组 / 空白串 / 缺失一律当没有
+        assertNull(dataOf("""{"code":0,"data":null}""").decodePrimitiveTextOrNull())
+        assertNull(dataOf("""{"code":0,"data":{}}""").decodePrimitiveTextOrNull())
+        assertNull(dataOf("""{"code":0,"data":[]}""").decodePrimitiveTextOrNull())
+        assertNull(dataOf("""{"code":0,"data":""}""").decodePrimitiveTextOrNull())
+        assertNull(dataOf("""{"code":0,"data":"  "}""").decodePrimitiveTextOrNull())
+        assertNull((null as JsonElement?).decodePrimitiveTextOrNull())
     }
 
     @Test

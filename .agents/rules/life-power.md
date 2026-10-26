@@ -16,6 +16,19 @@
   → `signin/doUserSignIn`；`doUserSignIn` 的 `code=33001` 是今天已签。自动签到每天首次
   回到前台触发一次，成功才写日期，失败下次打开还能重试（`QiekjAutoSignInRunner` /
   `QiekjAutoSignInRules`）。验证码、风控、付费都不绕过。
+- **自动签到成功提示（2026-10-24）**：自动签到静默完成，用户感知不到——本次真签到成功
+  （非「今天已签」幂等）在主窗口发一条**底部提示卡**（App 统一 Snackbar 通道，非系统通知
+  ——用户当即改的口径），正文自带前缀：「胖乖签到成功：今日 +X 积分，当前 Y 积分」。
+  「今天已签」与失败都不发（失败还会重试，不制造噪音）。文案唯一口径
+  `domain/QiekjSignInNotice.text`（积分缺位降级，不猜数）。桥接：`onResume` 协程经
+  `QiekjSignInNoticeBus`（进程内单例流，同 `PayCodeResultBus` 口径）→ 壳层
+  `QiekjSignInNoticeHost` 取值即消费再 `postNotice` 到 `shellSnackbar`——组合内才有
+  `shellSnackbar`，发布方只管发；触发时应用必在前台，免扰闸不适用。
+  **+X 来自 `signin/todaySignIntegral`**：官方注解是 GET，但 2026-10-11 只读探针实测
+  POST + 表单 token（1.60.3 / 无分隔）同样通过——挂 `api` 客户端（与 `user/balance` 同款），
+  **不挂 pointsApi**；它是签到前问「可得多少」，只在未签时 best-effort 调一次，失败不挡签到。
+  **Y 来自 `doUserSignIn` 的 `totalIntegral`**（官方 d8 dump 里无人读这个字段，字段名出处是
+  探针脚本读原始 JSON，别拿官方 dump 当反证）。手动「签到一次」不发提示（结果就在卡里）。
 - **「出水中」跨窗口口径**（2026-10-21）：`Graph.qiekjWatering`（`QiekjWateringStore`，落盘
   SharedPreferences + StateFlow）。`WaterViewModel.unlock()` 流程首次进入 `Working` 时 `begin`
   （设备名 / 起水时刻），结算 `Success`、流程失败、165 秒超时收尾时 `clear`；5 分钟未清视为

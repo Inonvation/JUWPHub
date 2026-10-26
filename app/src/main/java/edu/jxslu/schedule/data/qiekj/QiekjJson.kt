@@ -14,6 +14,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * 胖乖接口的 JSON 配置与脏数据容错（DESIGN §4.10 决策 1）。
@@ -40,6 +41,13 @@ object QiekjJson {
  */
 fun <T> JsonElement?.decodeObjectOrNull(serializer: KSerializer<T>): T? =
     (this as? JsonObject)?.let { QiekjJson.json.decodeFromJsonElement(serializer, it) }
+
+/**
+ * data 是裸字符串/裸数字（`todaySignIntegral` 回 `"2"` 这类）时按文本读；
+ * 对象 / 数组 / JsonNull / 空白串一律当没有（`contentOrNull` 对 JsonNull 回 null）。
+ */
+fun JsonElement?.decodePrimitiveTextOrNull(): String? =
+    (this as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
 
 /** 任何 JsonPrimitive 都按其文本内容当作字符串读；数组/对象返回 null（等价 LenientStringJsonAdapter）。 */
 object LenientStringSerializer : KSerializer<String?> {

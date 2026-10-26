@@ -82,6 +82,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import edu.jxslu.schedule.data.prefs.DisplayPrefs
 import edu.jxslu.schedule.data.qiekj.QiekjAutoSignInRunner
+import edu.jxslu.schedule.ui.reminder.QiekjSignInNoticeBus
+import edu.jxslu.schedule.ui.reminder.QiekjSignInNoticeHost
 import edu.jxslu.schedule.data.xg.XgUrls
 import edu.jxslu.schedule.data.prefs.OnboardingSyncOutcome
 import edu.jxslu.schedule.domain.FloatingBall
@@ -235,10 +237,13 @@ class MainActivity : ComponentActivity() {
         }
         // 胖乖每日签到（默认关）：开关开着时每天首次回到前台检查一次；
         // 已签到 / 未登录 / 开关关都内部跳过，失败不写日期，下次打开还能重试。
+        // 本次真签到成功经 QiekjSignInNoticeBus 落到壳层底部提示卡（组合内才有
+        // shellSnackbar，这里只管发）；已签与失败不发。
         Graph.appScope.launch {
             QiekjAutoSignInRunner.runIfDue(
                 prefs = Graph.displayPrefs(applicationContext),
                 repo = Graph.qiekj(applicationContext),
+                onFreshSignIn = QiekjSignInNoticeBus::publish,
             )
         }
     }
@@ -1614,6 +1619,9 @@ internal fun JuwApp(
                 .align(Alignment.BottomCenter)
                 .padding(bottom = bottomReserveDp),
         )
+        // 胖乖自动签到成功（2026-10-24）：onResume 协程经 QiekjSignInNoticeBus 落到这里，
+        // 走同一条 shellSnackbar 底部提示卡通道
+        QiekjSignInNoticeHost(snackbar = shellSnackbar, scope = shellScope)
     }
 }
 

@@ -83,9 +83,20 @@ data class SignInResultData(
     @kotlinx.serialization.Serializable(LenientStringSerializer::class) val totalIntegral: String? = null,
 )
 
-/** 一次「每日签到」运行的结果；失败由仓库抛异常，这里只留展示文本与最新余额。 */
+/**
+ * 一次「每日签到」运行的结果；失败由仓库抛异常，这里只留展示文本与最新余额。
+ *
+ * [freshSignIn] 区分「本次真的签到成功」与「服务端幂等结果（今天已签）」——
+ * 自动签到的成功提醒只在前者为 true 时发。积分缺位（解析失败/接口没给）回 null，
+ * 展示层降级，不猜数。
+ */
 data class QiekjDailySignInResult(
     val signInText: String,
+    val freshSignIn: Boolean = false,
+    /** 今日签到可得积分（`signin/todaySignIntegral`，签到前取）。 */
+    val gainedIntegral: String? = null,
+    /** 签到后累计积分（`doUserSignIn` 的 `totalIntegral`）。 */
+    val totalIntegral: String? = null,
     val balance: BalanceData? = null,
 )
 

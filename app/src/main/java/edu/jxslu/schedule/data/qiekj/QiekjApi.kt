@@ -33,6 +33,15 @@ interface QiekjApi {
     // ── 每日签到（2026-10-23）──
     // 这些端点走 pointsApi（Version=1.123.0 + 官方 & 拼接），不开水链路共用。
 
+    /**
+     * 今日签到可得积分（官方注解是 GET，但 2026-10-11 只读探针用 POST + 表单 token
+     * 实测通过——与 `user/balance` 同挂 1.60.3 的 [api] 客户端，不走去签到链路的 pointsApi）。
+     * 响应 data 是裸字符串（如 "2"），调用方从 JsonElement 自行取值。
+     */
+    @FormUrlEncoded
+    @POST("signin/todaySignIntegral")
+    suspend fun todaySignIntegral(@Field("token") token: String): ApiEnvelope<JsonElement>
+
     @FormUrlEncoded
     @POST("signin/todaySignIn")
     suspend fun todaySignIn(@Field("token") token: String): ApiEnvelope<JsonElement>
