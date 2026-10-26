@@ -31,8 +31,8 @@ android {
         applicationId = "edu.jxslu.schedule"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        versionName = "2.15.0"
+        versionCode = 30
+        versionName = "3.0.0"
     }
 
     signingConfigs {
