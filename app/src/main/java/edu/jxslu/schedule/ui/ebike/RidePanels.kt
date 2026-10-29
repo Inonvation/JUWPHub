@@ -1370,7 +1370,6 @@ internal fun RideBikePanel(
                         text = subtitleText(
                             state.queried,
                             state.loading,
-                            state.completing,
                             state.updatedAtMillis,
                         ),
                         style = MaterialTheme.typography.labelSmall,
@@ -2830,23 +2829,21 @@ private fun clusterStatusText(cluster: BikeCluster): String {
 }
 
 /**
- * 摘要行下方那句状态：刷新中 / 更新于几点（补全中） / 还没拿到数据。
+ * 摘要行下方那句状态：刷新中 / 更新于几点 / 还没拿到数据。
  *
- * 中心结果落地就不再是"刷新中"——撒点还在飞时只挂一句「正在补全周围…」，
- * 它只影响列表的完整度，不影响已看到的车。超过 [STALE_AFTER_MS] 补一句提示。
+ * **一次落地**（2026-10-29）：中心 + 撒点 + 大桩补全合并完才落列表，所以加载期间就是
+ * 「刷新中…」，没有「中心已到、还在补全」那种中间态。超过 [STALE_AFTER_MS] 补一句提示。
  */
 @Composable
 private fun subtitleText(
     queried: Boolean,
     loading: Boolean,
-    completing: Boolean,
     updatedAtMillis: Long,
 ): String {
     // 每 15 秒重算一次"现在"，把更新时间从新鲜翻成可能过期（RESUMED 才走，后台停）
     val now by rememberResumedNow(CLOCK_TICK_MS)
     val base = when {
         loading && queried -> "刷新中…"
-        completing && updatedAtMillis > 0 -> "更新于 ${clockText(updatedAtMillis)} · 正在补全周围…"
         updatedAtMillis > 0 -> "更新于 ${clockText(updatedAtMillis)}"
         queried -> "尚未获取到数据"
         else -> "正在获取…"

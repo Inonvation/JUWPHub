@@ -162,12 +162,6 @@ data class BikeMapUiState(
      */
     val panelHeightDp: Float = DEFAULT_PANEL_HEIGHT_DP,
     /**
-     * 中心结果已落地、周围的撒点还在飞（2026-09-28 拆分）：**不再算"刷新中"**——
-     * 头部进度圈在中心结果回来时就该收（拖动换地方时等待感主要来自它），
-     * 撒点补全只在副标题挂一句「正在补全周围…」。
-     */
-    val completing: Boolean = false,
-    /**
      * 还车点 / 禁停区图层（DESIGN §3.9，2026-09-28）：与车辆列表同一次用户动作驱动
      * （进页 / 拖动停稳 / 刷新 / 定位成功后各拉一次），**不额外轮询**。
      * 失败保留上一层：图层是装饰，空白比旧值更糟。
@@ -387,7 +381,7 @@ class BikeMapViewModel(
         debounceJob?.cancel()
         queryJob?.cancel()
         zoneJob?.cancel()
-        _uiState.update { it.copy(loading = false, completing = false) }
+        _uiState.update { it.copy(loading = false) }
     }
 
     /** 还没有车当上下文时的待发图层请求（只有本次会话第一次会用到）。 */
@@ -403,6 +397,14 @@ class BikeMapViewModel(
     private var lastAttemptLat: Double? = null
     private var lastAttemptLng: Double? = null
     private var cameraNonce = 0L
+
+    /**
+     * 最近一次量到的视口半对角线（米；0 = 还没量到）。采样环半径按它缩放
+     * （[BikeNearby.sampleRadiusMeters]）：放大到只看一条路时不再查视界之外的车。
+     * View 层在「停手」时用可见包围盒现算并带过来（[onMapSettled]）；其它查询路径
+     * （定位 / 回到校区 / 刷新）沿用最近一次的值。
+     */
+    private var viewportHalfDiagonalMeters = 0.0
 
     /**
      * 上一次跟随镜头落到的用户坐标（2026-10-19）。
@@ -499,9 +501,17 @@ class BikeMapViewModel(
      * 程序性移动（定位、回到校区、点分组联动）的事件被镜头静默区吃掉，走不到这里，
      * 那些路径各自安排查询（[onLocated] / [onResetToCampus] / [onClusterTap]）。
      */
-    fun onMapSettled(lat: Double, lng: Double, zoom: Double) {
+    fun onMapSettled(
+        lat: Double,
+        lng: Double,
+        zoom: Double,
+        viewportHalfDiagonalMeters: Double = 0.0,
+    ) {
         if (!lat.isFinite() || !lng.isFinite()) return
         if (zoom.isFinite() && zoom > 0) pendingZoom = zoom
+        if (viewportHalfDiagonalMeters.isFinite() && viewportHalfDiagonalMeters > 0.0) {
+            this.viewportHalfDiagonalMeters = viewportHalfDiagonalMeters
+        }
         pendingLat = lat
         pendingLng = lng
         scheduleQuery(immediate = false)
@@ -512,6 +522,8 @@ class BikeMapViewModel(
      * 「刷新」就是用户要看最新的意思）。
      */
     fun refresh() {
+        // 大桩补全的缓存一并作废：手动刷新要看最新的，不能吃 60 秒内的旧快照
+        spotFills.clear()
         scheduleQuery(immediate = true, forceZones = true)
     }
 
@@ -812,7 +824,7 @@ class BikeMapViewModel(
     }
 
     /**
-     * 导航带入的待定位车号（今日页「+ → 扫一扫」/ 悬浮球扫到车身码经 focusItemId 传进来）：
+     * 导航带入的待定位车号（侧栏「扫一扫」扫到车身码经 focusItemId 传进来）：
      * 第一笔查询结果里找到就自动定位（[focusCar]）；查过一轮还是没有（车被骑走 / 不在这一带
      * / **正被别人骑着**）就退到按车号点名查一次（[fetchCarDetail]），服务端说不可用就把原因
      * 摆到车辆卡上——与「扫车身码」那条路同一条兜底（2026-10-11）。
@@ -833,10 +845,9 @@ class BikeMapViewModel(
             focusCar(num)
             return
         }
-        // 这一轮查询已经落定（中心 + 撒点都回来了）还是没有它：按车号点名查一次。
-        // 用 `queried && !completing` 判"落定"，别在撒点还在飞时就下结论（那会白查一次）。
-        val state = _uiState.value
-        if (state.queried && !state.completing) {
+        // 这一轮查询已经落定（中心 + 撒点 + 补全一起回来的那一拍）还是没有它：按车号点名查一次。
+        // 现在是一次落地（见 [query]），`queried` 为 true 就代表结果完整，不用再判中间态。
+        if (_uiState.value.queried) {
             pendingFocusCar = null
             fetchCarDetail(num)
         }
@@ -1149,14 +1160,8 @@ class BikeMapViewModel(
             return
         }
 
-        // 中心点先落列表，别等撒点跑完：九次请求里最慢的那个不该压在用户眼前。
-        // 撒点还在飞时不摘 loading——头部那枚进度圈就是「还在补全周围」的提示
+        // 中心点没返回满，说明这一带能查到的就这么多，不用再撒点浪费请求
         val sampling = centerBikes.size >= SAMPLE_PAGE_SIZE
-        // 中心结果落地即结束"刷新中"：拖动换地方时，用户等的就是这一批（撒点只是补全）
-        applyResult(lat, lng, centerBikes, stillLoading = false)
-        if (BuildConfig.DEBUG) {
-            Log.d(TAG, "首屏落地 +${SystemClock.elapsedRealtime() - startedAt}ms（${centerBikes.size} 条）")
-        }
         // 记视野。写完这一次就够了，不需要在退出时再写一遍。
         // 不占关键路径：DataStore 写入是磁盘事务，压在两批请求之间只是白等它
         val zoomForViewport = pendingZoom
@@ -1166,21 +1171,40 @@ class BikeMapViewModel(
         // 换校区了（比如从本校拖到隔壁师大）：图层要用这一带的车号重拉，官方同口径
         reloadZonesForSite(lat, lng, centerBikes)
 
-        // 中心点没返回满，说明这一带能查到的就这么多，不用再撒点浪费请求
-        if (!sampling) return
-        _uiState.update { it.copy(completing = true) }
-        // 采样结果合并后再刷一遍：多出来的远车按距离插进列表，簇与展开态照旧重算
+        if (!sampling) {
+            applyResult(lat, lng, centerBikes, stillLoading = false)
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "落地 +${SystemClock.elapsedRealtime() - startedAt}ms（${centerBikes.size} 条）")
+            }
+            return
+        }
+
+        // 中心已回满：**环 + 大桩补全并行跑，合并后只落一次**（2026-10-29 用户口径
+        // 「车辆数量一段一段递增刷新，不够稳定」）。旧版中心先落、环再落、补全再落，
+        // 同一处停车点的数字会 20 → 33 → 45 跳三下；宁可多等一个环的往返（头部就是
+        // 「刷新中…」），一次落定。撒点期间不摘 loading，正是这个意思。
+        //
+        // 环半径按视口缩放（[BikeNearby.sampleRadiusMeters]）：放大到只看一条路时不再查
+        // 视界之外的几百米（2026-10-29 用户口径「范围跟着视图比例缩小」）。
         val ring = ringSampleCount(pendingZoom)
-        val merged = mergeSamples(lat, lng, centerBikes, ring)
+        val radius = BikeNearby.sampleRadiusMeters(viewportHalfDiagonalMeters)
+        val (ringBikes, fillBikes) = coroutineScope {
+            val ringJob = async { mergeSamples(lat, lng, centerBikes, ring, radius) }
+            // 补全的桩从**中心结果**里挑：用户正看着的那处大桩一定在最近的 20 辆里，
+            // 不必等环回来（等了就又是两拍落地）
+            val fillJob = async { fillBigSpot(lat, lng, centerBikes) }
+            ringJob.await() to fillJob.await()
+        }
+        val merged = BikeNearby.mergeBikes(ringBikes, fillBikes)
         applyResult(lat, lng, merged, stillLoading = false)
         if (BuildConfig.DEBUG) {
             Log.d(
                 TAG,
-                "合并落地 +${SystemClock.elapsedRealtime() - startedAt}ms" +
-                    "（${merged.size} 条 · 环 $ring 点 · z${"%.1f".format(pendingZoom)}）",
+                "落地 +${SystemClock.elapsedRealtime() - startedAt}ms" +
+                    "（中心 ${centerBikes.size} → 合并 ${ringBikes.size} → 补全 ${merged.size} 条" +
+                    " · 环 $ring 点 · 半径 ${radius.toInt()} 米 · z${"%.1f".format(pendingZoom)}）",
             )
         }
-        _uiState.update { it.copy(completing = false) }
     }
 
     /**
@@ -1189,7 +1213,7 @@ class BikeMapViewModel(
      * 默认的校区尺度（z ≥ [RING_SAMPLE_ZOOM]）撒 **4** 个对角点，请求数从 9 砍到 5；
      * 缩得更小、一屏看得更远时才用 8 个方位。
      *
-     * **别改成 0**：z17 在纬度 28.7° 下的视野约 1.1×1.7 公里，比 450 米的采样环还大，
+     * **别改成 0**：z17 在纬度 28.7° 下的视野约 1.1×1.7 公里，比采样环（≤400 米）还大，
      * 只查中心会让地图上只剩中心一小片有车。
      */
     private fun ringSampleCount(zoom: Double): Int = if (zoom >= RING_SAMPLE_ZOOM) 4 else 8
@@ -1393,13 +1417,13 @@ class BikeMapViewModel(
         // 随之作废（别留一个悬空目标被后面某次成功刷新意外触发；见 `autoUnlockCar`）。
         // `pendingFocusCar` 本身保留：下次查询成功仍照旧定位 / 高亮（那是只读动作）
         if (pendingFocusCar != null) autoUnlockCar = null
-        // 中心结果都没拿到：撒点也不会发，把"补全中"一并收掉（否则副标题会挂着）
-        _uiState.update { it.copy(loading = false, queried = true, failure = failure, completing = false) }
+        _uiState.update { it.copy(loading = false, queried = true, failure = failure) }
     }
 
     /**
      * 撒点补齐：中心的结果不够（返回满 20 辆，说明还有更远的没给），
-     * 就在周围各查一次，按车号合并。[ringCount] 由 [ringSampleCount] 按缩放给（4 或 8）。
+     * 就在周围各查一次，按车号合并。[ringCount] 由 [ringSampleCount] 按缩放给（4 或 8）；
+     * [radiusMeters] 由 [BikeNearby.sampleRadiusMeters] 按视口给（放大时环跟着缩）。
      *
      * 采样请求并行发，单个点失败只丢这个点——少看到一辆车，总比整页报错强。
      */
@@ -1408,16 +1432,74 @@ class BikeMapViewModel(
         lng: Double,
         center: List<NearbyBike>,
         ringCount: Int,
+        radiusMeters: Double,
     ): List<NearbyBike> {
         val merged = LinkedHashMap<String, NearbyBike>()
         center.forEach { bike -> merged[bike.carNum] = bike }
-        val rings = BikeNearby.samplePoints(lat, lng, ringCount).drop(1)
+        val rings = BikeNearby.samplePoints(lat, lng, ringCount, radiusMeters).drop(1)
         val extra = coroutineScope {
             rings.map { point -> async { sampleAt(point.lat, point.lng) } }.awaitAll()
         }
         extra.forEach { list -> list.forEach { bike -> merged.putIfAbsent(bike.carNum, bike) } }
         return merged.values.toList()
     }
+
+    /**
+     * 大桩补全（2026-10-29 用户口径 A）：服务端一次只回最近 20 辆，成员数 ≥ 20 的停车点
+     * 一定被截断过——它的数字是撒点并集的产物，地图中心挪一点就从 28 变 33 / 35。
+     *
+     * 做法：挑离查询中心最近的一处大桩（[BikeNearby.nearestTruncatedSpot]），以它的落点
+     * 为中心补 4 个偏移查询（±[SPOT_FILL_OFFSET_METERS] 米），并集就能覆盖整桩
+     * （2026-09-27 实测的 38 辆大桩：只查桩心 20/38，加 4 个偏移点 38/38）。查询几何锚在
+     * 桩上、不随地图中心动，数字因此稳定。**返回的只是补到的车**，由调用方与环结果合并
+     * （两批并行跑、一次落地，见 [query]）。
+     *
+     * **缓存 [SPOT_FILL_TTL_MS]**：平移时同一处桩不重发；过期重拉（车会流动）。
+     * **只补最近的一处**、且只在它离查询中心 ≤ [SPOT_FILL_MAX_DISTANCE_METERS] 时补——
+     * 视野里两处大桩都补是 8 个请求，代价超过收益。刷新按钮会清缓存（[refresh]）。
+     */
+    private suspend fun fillBigSpot(
+        lat: Double,
+        lng: Double,
+        bikes: List<NearbyBike>,
+    ): List<NearbyBike> {
+        val spot = withContext(Dispatchers.Default) {
+            BikeNearby.nearestTruncatedSpot(
+                clusters = BikeNearby.cluster(bikes),
+                lat = lat,
+                lng = lng,
+                minBikes = SPOT_FILL_MIN_BIKES,
+                maxDistanceMeters = SPOT_FILL_MAX_DISTANCE_METERS,
+            )
+        } ?: return emptyList()
+        val now = System.currentTimeMillis()
+        val cached = spotFills[spot.key]?.takeIf { now - it.at in 0..SPOT_FILL_TTL_MS }
+        if (cached != null) return cached.bikes
+        val fetched = fetchSpotFill(spot.lat, spot.lng)
+        // 空结果不缓存：4 个点全失败时下一次刷新还要重试（与图层「空不覆盖」同一口径）
+        if (fetched.isNotEmpty()) {
+            spotFills[spot.key] = SpotFill(now, fetched)
+            spotFills.entries.removeAll { (_, value) -> now - value.at > SPOT_FILL_TTL_MS }
+        }
+        return fetched
+    }
+
+    /** 按桩补点：桩心 + 四个对角偏移点各查一次，失败的点只丢它自己（与撒点同口径）。 */
+    private suspend fun fetchSpotFill(lat: Double, lng: Double): List<NearbyBike> {
+        val points = BikeNearby.samplePoints(
+            lat,
+            lng,
+            ringCount = SPOT_FILL_SAMPLES,
+            radiusMeters = SPOT_FILL_OFFSET_METERS,
+        ).drop(1)
+        return coroutineScope {
+            points.map { point -> async { sampleAt(point.lat, point.lng) } }.awaitAll().flatten()
+        }
+    }
+
+    /** 大桩补全的会话缓存（按簇键；超过 [SPOT_FILL_TTL_MS] 过期）。 */
+    private data class SpotFill(val at: Long, val bikes: List<NearbyBike>)
+    private val spotFills = HashMap<String, SpotFill>()
 
     /**
      * 单个采样点。服务端报错、结构不符、网络异常一律算空——采样点失败不该拖垮整页。
@@ -1463,6 +1545,23 @@ class BikeMapViewModel(
 
         /** 低于这个缩放才撒 8 个方位点；否则 4 个（见 [ringSampleCount]）。 */
         private const val RING_SAMPLE_ZOOM = 16.5
+
+        /**
+         * 大桩补全（2026-10-29，见 [fillBigSpot]）的**挑桩**门槛：中心那一页只有 20 条，
+         * 最近那处大桩常常占不满 20（末尾混进旁边桩的车），按 20 挑会漏；取 10 = 这一页
+         * 里**占了一半以上**，足以认定"用户正看着一处大桩、它一定被截断过"。
+         */
+        private const val SPOT_FILL_MIN_BIKES = 10
+
+        /** 大桩补全：桩心之外补几个偏移查询、偏移多少米（覆盖一跨几十米的大车桩）。 */
+        private const val SPOT_FILL_SAMPLES = 4
+        private const val SPOT_FILL_OFFSET_METERS = 25.0
+
+        /** 大桩补全只补离查询中心这么近的那一处（用户正在看的那处桩）。 */
+        private const val SPOT_FILL_MAX_DISTANCE_METERS = 500.0
+
+        /** 大桩补全结果的缓存时长：平移时同一处桩不重发，过期重拉。 */
+        private const val SPOT_FILL_TTL_MS = 60_000L
 
         /**
          * 跟随态下每次重定心的最小位移（米，2026-10-19）。

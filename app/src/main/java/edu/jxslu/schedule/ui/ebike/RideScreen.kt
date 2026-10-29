@@ -143,7 +143,7 @@ internal enum class RidePhase { Finding, Riding, Settled }
 fun RideScreen(
     onBack: () -> Unit = {},
     /**
-     * 带车号进页（今日页「+ → 扫一扫」/ 悬浮球扫到车身码）：第一笔查询结果里找到就高亮并定位，
+     * 带车号进页（侧栏「扫一扫」扫到车身码）：第一笔查询结果里找到就高亮并定位，
      * 并**在确认这辆车可用后自动走开锁的同一套闸**（见 `autoUnlockRequest`）。
      * 不轮询——找不到就等用户下一次动作。
      */
@@ -573,7 +573,7 @@ fun RideScreen(
         if (carNum.isBlank()) return@LaunchedEffect
         // 与内置扫车身码同一口径：确认可用后才露车辆卡。
         pickedCar = null
-        // 今日页「+ → 扫一扫」/ 悬浮球扫到车身码进来：与骑行页「扫车身码」同一条路——
+        // 侧栏「扫一扫」扫到车身码进来：与骑行页「扫车身码」同一条路——
         // 确认这辆车可用后自动走开锁的同一套闸（见 autoUnlockRequest）。
         // 定位 / 高亮每次重建都照跑（一次性动作，重来无害）；**自动开锁只发一次**
         // （见 autoUnlockArmed——重建重跑时不再发，免得对同一次扫码重发一次开锁）
@@ -859,14 +859,26 @@ fun RideScreen(
                             },
                     )
 
-                    // 车号输入搬进「车号 / 出码」面板，地图上不再有第二个入口抢注意力
+                    // 车号输入搬进「车号 / 出码」面板，地图上不再有第二个入口抢注意力。
+                    // 定位 / 回到校区两枚浮动按钮在**地图右下角、面板上沿之上**（2026-10-29 用户口径：
+                    // 定位到我的位置移到右下角、面板右上方；定位我的在下、定位到校区在上）。
+                    // 底距 = 面板高度 + 底部常驻块实测高度：面板拖动、卡片进出（块高变化）时
+                    // 按钮跟着面板上沿走，既不会被面板盖住，也不占右上角的地图内容。
                     Column(
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 12.dp)
+                            .align(Alignment.BottomEnd)
+                            .padding(bottom = panelHeight + liveBlockDp.dp + 12.dp)
                             .padding(end = 10.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        MapCircleButton(
+                            icon = HugeIcons.MapsLocation02,
+                            label = "回到校区",
+                            onClick = {
+                                haptics.tap()
+                                viewModel.onResetToCampus()
+                            },
+                        )
                         MapCircleButton(
                             icon = HugeIcons.Crosshair,
                             label = if (state.followUser && state.userLat != null) {
@@ -884,14 +896,6 @@ fun RideScreen(
                                 } else {
                                     locatePermissionLauncher.launch(AppPermissions.location.toTypedArray())
                                 }
-                            },
-                        )
-                        MapCircleButton(
-                            icon = HugeIcons.MapsLocation02,
-                            label = "回到校区",
-                            onClick = {
-                                haptics.tap()
-                                viewModel.onResetToCampus()
                             },
                         )
                     }

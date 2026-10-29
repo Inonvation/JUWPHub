@@ -1,5 +1,6 @@
 package edu.jxslu.schedule
 
+import edu.jxslu.schedule.domain.BikeCluster
 import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.BikeStatus
 import edu.jxslu.schedule.domain.CarDetailResult
@@ -8,6 +9,7 @@ import edu.jxslu.schedule.domain.NearbyParseResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -45,6 +47,33 @@ class BikeNearbyTest {
         val parsed = BikeNearby.parse(raw, centerLat, centerLng)
         assertTrue("期望解析成功，实际 $parsed", parsed is NearbyParseResult.Ok)
         return (parsed as NearbyParseResult.Ok).bikes
+    }
+
+    /** 在基准纬度上往北挪 [meters] 米（1e-5° ≈ 1.11 米），聚簇阈值的用例用它摆距离。 */
+    private fun north(meters: Double): String = (centerLat + meters / 111_320.0).toString()
+
+    /** 造一簇 [count] 辆同点位的车（「大桩补全挑哪一处」的用例用）。 */
+    private fun clusterOf(key: String, lat: String, count: Int): BikeCluster {
+        val bikes = (0 until count).map { index ->
+            NearbyBike(
+                carNum = "10000%04d".format(index),
+                lat = lat.toDouble(),
+                lng = centerLng,
+                batteryPercent = 90.0,
+                status = BikeStatus.Available,
+                model = "雅迪A8",
+                siteName = "",
+                campusName = "南昌工程学院",
+                distanceMeters = 0,
+            )
+        }
+        return BikeCluster(
+            key = key,
+            siteName = key,
+            lat = lat.toDouble(),
+            lng = centerLng,
+            bikes = bikes,
+        )
     }
 
     // ---- 解析：正常与容错 ----
@@ -216,8 +245,8 @@ class BikeNearbyTest {
         assertEquals(1, clusters.size)
         assertEquals("教学北大楼左侧", clusters.first().title)
         assertEquals(3, clusters.first().bikes.size)
-        // 展示坐标取成员均值
-        assertEquals(bikes.map { it.lat }.average(), clusters.first().lat, 1e-9)
+        // 展示坐标取成员中位数（不是均值）：离群车不拉偏落点
+        assertEquals(bikes.map { it.lat }.sorted()[1], clusters.first().lat, 1e-9)
     }
 
     @Test
@@ -236,13 +265,13 @@ class BikeNearbyTest {
     }
 
     @Test
-    fun `没有停车点名时回落坐标网格`() {
+    fun `没有停车点名时按距离聚成一簇`() {
         val bikes = ok(
             response(
-                car(carNum = "100000652", lat = "28.6883209", lng = "116.0284657", site = ""),
-                // 同一采样格（4 位小数）→ 归一组
-                car(carNum = "100000023", lat = "28.6883249", lng = "116.0284699", site = ""),
-                // 差得远 → 另一组
+                car(carNum = "100000652", lat = north(0.0), lng = "116.0284657", site = ""),
+                // 相距约 5 米 → 同一处停车点
+                car(carNum = "100000023", lat = north(5.0), lng = "116.0284699", site = ""),
+                // 几百米外 → 另一处
                 car(carNum = "100000345", lat = "28.6863000", lng = "116.0264000", site = ""),
             ),
         )
@@ -250,6 +279,129 @@ class BikeNearbyTest {
         assertEquals(2, clusters.size)
         assertEquals(2, clusters[0].bikes.size)
         assertEquals("未标注停车点", clusters[0].title)
+    }
+
+    @Test
+    fun `同一个停车点跨网格也不分裂`() {
+        // 旧版按 4 位小数网格分组：一辆车的位置抖过格子边界就换一组，一个停车点能画出
+        // 3~7 个数字（2026-10-29 用户报的「同一个停车点两个数字」）。现在按 15 米近邻聚，
+        // 下面三辆彼此不到 4 米、但落在两个网格里的车必须是一簇
+        val bikes = ok(
+            response(
+                car(carNum = "100000652", lat = "28.6883410", lng = "116.0284650", site = ""),
+                car(carNum = "100000023", lat = "28.6883590", lng = "116.0284650", site = ""),
+                car(carNum = "100000345", lat = "28.6883750", lng = "116.0284650", site = ""),
+            ),
+        )
+        assertEquals(1, BikeNearby.cluster(bikes).size)
+    }
+
+    @Test
+    fun `名字不同但挨在一起的两堆车并成一簇`() {
+        // 同一排车桩在运营方台账里常有「有名字 / 没名字」两拨、或两种写法：
+        // 旧版各画一枚标记，现在 15 米内并成一簇，标题取成员里最多的那个名字
+        val bikes = ok(
+            response(
+                car(carNum = "100000652", lat = "28.6883200", lng = "116.0284650", site = "教学北大楼左侧"),
+                car(carNum = "100000023", lat = "28.6883230", lng = "116.0284660", site = "教学北大楼左侧"),
+                car(carNum = "100000345", lat = "28.6883260", lng = "116.0284640", site = "北大楼"),
+                car(carNum = "100000456", lat = "28.6883290", lng = "116.0284670", site = ""),
+            ),
+        )
+        val clusters = BikeNearby.cluster(bikes)
+        assertEquals(1, clusters.size)
+        assertEquals("教学北大楼左侧", clusters.first().title)
+        assertEquals(4, clusters.first().bikes.size)
+    }
+
+    @Test
+    fun `隔着一条路的两个停车点不会合并`() {
+        // 15 米阈值的依据：2026-09-27 实测两处停车点的最近间隔是 20.7 米
+        val bikes = ok(
+            response(
+                car(carNum = "100000652", lat = "28.6883200", lng = "116.0284650", site = "教学北大楼左侧"),
+                car(carNum = "100000023", lat = north(25.0), lng = "116.0284650", site = "北大楼"),
+            ),
+        )
+        val clusters = BikeNearby.cluster(bikes)
+        assertEquals(2, clusters.size)
+        assertEquals("教学北大楼左侧", clusters[0].title)
+        assertEquals("北大楼", clusters[1].title)
+    }
+
+    @Test
+    fun `名字相同但位置飘出去的车不拉偏簇的落点`() {
+        // 离线车的上报位置可能停在几十米外，但它仍属于同一个停车点（名字相同）：
+        // 落点用中位数，不能被这一辆拉走（均值会偏出 20 米，标记就跑到马路上了）
+        val bikes = ok(
+            response(
+                car(carNum = "100000652", lat = "28.6883190", lng = "116.0284640"),
+                car(carNum = "100000023", lat = "28.6883200", lng = "116.0284650"),
+                car(carNum = "100000345", lat = "28.6883210", lng = "116.0284660"),
+                car(carNum = "100000456", lat = north(80.0), lng = "116.0284650"),
+            ),
+        )
+        val clusters = BikeNearby.cluster(bikes)
+        assertEquals(1, clusters.size)
+        // 4 辆取中间两个的均值 = 紧挨着的那三辆的中位，离群那辆不参与
+        assertEquals((28.6883200 + 28.6883210) / 2.0, clusters.first().lat, 1e-9)
+        assertNotEquals(bikes.map { it.lat }.average(), clusters.first().lat)
+    }
+
+    @Test
+    fun `未标注簇的键不会撞`() {
+        // 环形停车点 + 圆心单独一辆：环上 8 辆彼此 9.2 米相连（< 10 米阈值）、离圆心 12 米，
+        // 两组各自成簇；环的中位数恰好落回圆心 → 两个未标注簇的网格键相同。列表 key 重复
+        // 会直接崩，撞键时必须补一个稳定后缀（成员里最小的车号）
+        val ring = (0 until 8).map { index ->
+            val bearing = Math.toRadians(index * 45.0)
+            val dLat = 12.0 * Math.cos(bearing) / 111_320.0
+            val dLng = 12.0 * Math.sin(bearing) /
+                (111_320.0 * Math.cos(Math.toRadians(centerLat)))
+            car(
+                carNum = "10000065$index",
+                lat = (centerLat + dLat).toString(),
+                lng = (centerLng + dLng).toString(),
+                site = "",
+            )
+        }
+        val bikes = ok(response(car(carNum = "100000000", site = ""), *ring.toTypedArray()))
+        val clusters = BikeNearby.cluster(bikes)
+        assertEquals(2, clusters.size)
+        assertEquals(clusters.size, clusters.map { it.key }.toSet().size)
+    }
+
+    @Test
+    fun `相隔十二米的两处无名车桩各自成簇`() {
+        // 阈值 10 米（2026-10-29 由 15 收到 10，用户口径「有些挨得近的停车点也会被合并」）：
+        // 12 米外的两处停车点不该再并成一枚
+        val bikes = ok(
+            response(
+                car(carNum = "100000652", lat = north(0.0), lng = "116.0284650", site = ""),
+                car(carNum = "100000023", lat = north(12.0), lng = "116.0284650", site = ""),
+            ),
+        )
+        assertEquals(2, BikeNearby.cluster(bikes).size)
+    }
+
+    @Test
+    fun `合并两批车时同车号用主批次`() {
+        // 环采样结果（主）与大桩补全结果（补）合并：同一辆车以主批次为准，补到的多出来
+        val ring = ok(
+            response(car(carNum = "100000652", battery = "50.0")),
+        )
+        val fill = ok(
+            response(
+                car(carNum = "100000652", battery = "92.8"),
+                car(carNum = "100000023", lat = "28.6863209", lng = "116.0264657"),
+            ),
+        )
+        val merged = BikeNearby.mergeBikes(ring, fill)
+        assertEquals(2, merged.size)
+        // 同一辆车以主批次为准（电量 50，不是补全那批的 92.8）
+        assertEquals(50.0, merged.first { it.carNum == "100000652" }.batteryPercent!!, 1e-9)
+        // 主批次没有的车由补全那批补上
+        assertTrue(merged.any { it.carNum == "100000023" })
     }
 
     @Test
@@ -289,6 +441,84 @@ class BikeNearbyTest {
     }
 
     // ---- 距离与文案 ----
+
+    @Test
+    fun `采样半径按视口缩放并夹在上下限`() {
+        // 视口还没量到（0 / 非有限）：按上限算，别在首帧只查中心
+        assertEquals(
+            BikeNearby.SAMPLE_RADIUS_METERS,
+            BikeNearby.sampleRadiusMeters(0.0),
+            1e-9,
+        )
+        assertEquals(
+            BikeNearby.SAMPLE_RADIUS_METERS,
+            BikeNearby.sampleRadiusMeters(Double.NaN),
+            1e-9,
+        )
+        // 视口很大（缩得很小）：夹到上限，不再放大
+        assertEquals(400.0, BikeNearby.sampleRadiusMeters(2000.0), 1e-9)
+        // 放大到视口半对角线 500 米：0.45 倍 = 225
+        assertEquals(225.0, BikeNearby.sampleRadiusMeters(500.0), 1e-9)
+        // 放到最大档：夹到下限 150
+        assertEquals(
+            BikeNearby.SAMPLE_RADIUS_MIN_METERS,
+            BikeNearby.sampleRadiusMeters(100.0),
+            1e-9,
+        )
+        // z17 默认视野（半对角线约 1 公里）算出来贴着上限
+        assertEquals(BikeNearby.SAMPLE_RADIUS_METERS, BikeNearby.sampleRadiusMeters(1010.0), 1e-9)
+    }
+
+    @Test
+    fun `采样点半径可以按视口给`() {
+        val points = BikeNearby.samplePoints(centerLat, centerLng, ringCount = 4, radiusMeters = 200.0)
+        assertEquals(5, points.size)
+        points.drop(1).forEach { point ->
+            assertEquals(
+                200.0,
+                BikeNearby.distanceMeters(centerLat, centerLng, point.lat, point.lng),
+                2.0,
+            )
+        }
+    }
+
+    @Test
+    fun `大桩补全只挑最近的一处被截断的停车点`() {
+        val near = clusterOf("s:近", north(100.0), 25)
+        val far = clusterOf("s:远", north(300.0), 22)
+        val small = clusterOf("s:小", north(50.0), 6)
+        // 两处都够大：取更近的那处（只补一处，两处都补是 8 个请求）
+        assertEquals(
+            "s:近",
+            BikeNearby.nearestTruncatedSpot(
+                clusters = listOf(far, small, near),
+                lat = centerLat,
+                lng = centerLng,
+                minBikes = 20,
+                maxDistanceMeters = 500.0,
+            )?.key,
+        )
+        // 太远不补（用户看的不是那一处）
+        assertNull(
+            BikeNearby.nearestTruncatedSpot(
+                clusters = listOf(far),
+                lat = centerLat,
+                lng = centerLng,
+                minBikes = 20,
+                maxDistanceMeters = 100.0,
+            ),
+        )
+        // 没有达到封顶数的桩：不用补
+        assertNull(
+            BikeNearby.nearestTruncatedSpot(
+                clusters = listOf(near, far, small),
+                lat = centerLat,
+                lng = centerLng,
+                minBikes = 30,
+                maxDistanceMeters = 500.0,
+            ),
+        )
+    }
 
     @Test
     fun `采样点覆盖中心与一圈八方位`() {

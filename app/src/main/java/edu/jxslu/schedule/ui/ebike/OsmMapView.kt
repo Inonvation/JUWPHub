@@ -214,14 +214,18 @@ internal fun OsmMapView(
     colors: BikeMarkerColors,
     camera: CameraRequest?,
     /**
-     * 地图**停手**后回调一次（中心 + 缩放）：用户拖完/滑停才通知，滑行途中一次都不发。
+     * 地图**停手**后回调一次（中心 + 缩放 + 视口半对角线米数）：用户拖完/滑停才通知，
+     * 滑行途中一次都不发。
      *
      * 判据在 [SettleWatcher]（手指松开 + 地图中心连续 120ms 没动；**不是**事件间隔，也不是
      * `scroller.isFinished`——那两条都真机否掉过，理由写在那个类的注释里），不在调用方：
      * View 层才知道地图是不是还在滑。程序性移动（定位 / 回到校区 / 点分组联动）的事件被
      * [CameraSuppressor] 吃掉，走不到这里，那些路径各自安排查询。
+     *
+     * 视口半对角线（米）用于按视口缩放采样半径（`BikeNearby.sampleRadiusMeters`）：
+     * 放大到只看一条路时不必再查视界之外的几百米。拿不到包围盒时给 0，调用方按上限算。
      */
-    onCenterSettled: (Double, Double, Double) -> Unit,
+    onCenterSettled: (Double, Double, Double, Double) -> Unit,
     zones: KvcxZones,
     onClusterTap: (String) -> Unit,
     onRideTap: () -> Unit,
@@ -293,7 +297,7 @@ internal fun OsmMapView(
                         }
                         // 每次事件只喂给停手判定；查询由它确认"真的停了"之后再发
                         settleWatcher.onEvent(this@apply) { lat, lng, zoom ->
-                            settleCallback(lat, lng, zoom)
+                            settleCallback(lat, lng, zoom, viewportHalfDiagonalMeters(this@apply))
                         }
                         return false
                     }
@@ -304,7 +308,7 @@ internal fun OsmMapView(
                             return false
                         }
                         settleWatcher.onEvent(this@apply) { lat, lng, zoom ->
-                            settleCallback(lat, lng, zoom)
+                            settleCallback(lat, lng, zoom, viewportHalfDiagonalMeters(this@apply))
                         }
                         return false
                     }
@@ -458,6 +462,20 @@ private class CameraSuppressor {
     private companion object {
         const val SUPPRESS_RADIUS_METERS = BikeNearby.MIN_REQUERY_SHIFT_METERS
     }
+}
+
+/**
+ * 当前视口的半对角线（米）：用 osmdroid 的可见包围盒现算，喂给采样半径的缩放
+ * （`BikeNearby.sampleRadiusMeters`，2026-10-29）——放大到只看一条路时，环跟着缩，
+ * 视界之外的几百米不再发请求。
+ *
+ * 包围盒拿不到（尺寸还没定 / 投影未就绪）时回 0，调用方按采样半径上限算。
+ */
+private fun viewportHalfDiagonalMeters(mapView: MapView): Double {
+    val box = runCatching { mapView.boundingBox }.getOrNull() ?: return 0.0
+    val centerLat = (box.latNorth + box.latSouth) / 2
+    val centerLng = (box.lonEast + box.lonWest) / 2
+    return BikeNearby.distanceMeters(centerLat, centerLng, box.latNorth, box.lonEast)
 }
 
 /**

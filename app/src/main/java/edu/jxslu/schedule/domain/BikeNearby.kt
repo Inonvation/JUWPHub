@@ -81,11 +81,14 @@ data class NearbyBike(
  * 逐个画标记会叠成一坨，点也点不中（§4.23）。
  */
 data class BikeCluster(
-    /** 聚簇键（停车点名或坐标网格），既作列表 key 也作选中态标识。 */
+    /**
+     * 聚簇键（停车点名或坐标网格；未标注簇撞键时带 `#车号` 后缀），既作列表 key
+     * 也作选中态标识。**必须唯一**：列表 key 重复会直接崩。
+     */
     val key: String,
     /** 展示用停车点名；空串表示接口没给，此时回落到坐标网格。 */
     val siteName: String,
-    /** 簇的展示坐标 = 成员坐标均值。 */
+    /** 簇的展示坐标 = 成员坐标的**中位数**（不是均值，见 [BikeNearby.cluster]）。 */
     val lat: Double,
     val lng: Double,
     /** 簇内车辆，按距离升序（与传入顺序一致）。 */
@@ -152,8 +155,23 @@ object BikeNearby {
     /** 默认缩放级别：校区尺度，一屏能看见教学楼与宿舍。 */
     const val DEFAULT_ZOOM = 17.0
 
-    /** 无停车点名时的聚簇网格精度（4 位小数约 11 米）。 */
+    /** 未标注停车点的**簇键**网格精度（4 位小数约 11 米；只用于生成稳定的 key，不再用于分组）。 */
     private const val CLUSTER_GRID_DECIMALS = 4
+
+    /**
+     * 同一处停车点的判定半径（米，2026-10-29）。
+     *
+     * 两条合并规则之一：两点距离 ≤ 它就连成一簇（另一条是停车点名相同）。**取 10 米**
+     * （同日由 15 收到 10，用户口径「有些挨得近的停车点也会被合并到一起了」）：
+     * 2026-09-27 实测的 131 个点位在 10 米下仍得到 38 / 30 / 22 / 16 辆那几个大桩
+     * （与 15 米逐组相同，只是不再把 10~15 米外的两处桩并掉）；再往下收到 8 米就会把
+     * 30 辆和 22 辆的大桩切出零头（29+1 / 20+2），那正是「同一个停车点两个数字」。
+     *
+     * 旧版对没名字的车用 4 位小数网格（约 11 米）分组：一个 30 辆的停车点会横跨 **7 个
+     * 格子**，地图上就是同一个停车点画出好几个数字，车的位置在格子边界上抖一下还会
+     * 少一个 / 多一个（用户 2026-10-29 报的「同一个停车点两个数字 / 刷新后一隐一现」）。
+     */
+    const val CLUSTER_RADIUS_METERS = 10.0
 
     /** 查询中心点位移小于该值不重复发请求（DESIGN §4.23 数据纪律）。 */
     const val MIN_REQUERY_SHIFT_METERS = 30.0
@@ -171,23 +189,45 @@ object BikeNearby {
     const val LOW_BATTERY_BADGE_PERCENT = 20.0
 
     /**
-     * 采样环半径（米），见 [samplePoints]。
+     * 采样环半径**上限**（米），见 [sampleRadiusMeters] / [samplePoints]。
      *
-     * 2026-09-29 从 700 收到 **450**（用户口径：「稍微减小视图刷新的范围，现在太多了有点卡」）：
-     * 环半径决定"一次刷新能捞回多大一片车"，700 米那圈把 1.4 公里外的车也捞进列表与地图，
-     * 聚合圈多、每帧要画的标记就多（拖动时掉帧），列表也长。
-     * 450 米（配 [MAX_NEARBY_DISTANCE_METERS] 1.2 公里）刚好覆盖校园尺度。
+     * 2026-09-29 从 700 收到 **450**（用户口径：「稍微减小视图刷新的范围，现在太多了有点卡」）。
+     * 2026-10-29 再收到 **400** 并改为**按视口缩放**（用户口径：「范围适当减小一点；地图放大了
+     * 范围跟着视图比例同步缩小，避免视界之外的位置也被刷新」）：实际半径 =
+     * `min(400, 视口半对角线 × 0.45)`、下限 [SAMPLE_RADIUS_MIN_METERS]。z17 默认视野约
+     * 1.1×1.7 公里（半对角线 ~1 公里）算出来贴着上限；放大到只看一条路时半径跟着缩到 150，
+     * 不再去查视界之外的几百米。**别放大回去**。
      */
-    const val SAMPLE_RADIUS_METERS = 450.0
+    const val SAMPLE_RADIUS_METERS = 400.0
+
+    /** 采样环半径下限（米）：放大到最大档也不小于它，否则中心那一个点查不到什么。 */
+    const val SAMPLE_RADIUS_MIN_METERS = 150.0
+
+    /** 采样环半径 / 视口半对角线的比例（0.45 ≈ 旧版 450 米环在 z17 视口下的比例）。 */
+    const val SAMPLE_VIEWPORT_RATIO = 0.45
 
     /**
      * 展示距离上限（米）。多点采样会把更远的车也捞回来，那些不算"附近"，不进列表。
      *
-     * 2026-09-29 从 2000 收到 **1200**（与 [SAMPLE_RADIUS_METERS] 一起收，理由同上）：
-     * 校园对角线约 1.4 公里，站在校园中心 1.2 公里内已覆盖全校；再远的车既走不到、
-     * 又白占列表与地图标记。
+     * 2026-09-29 从 2000 收到 **1200**（与采样环一起收，理由同上）。2026-10-29 再收到
+     * **1000**（用户口径「范围过大可能卡顿」）：校园围栏对角线约 1.4 公里，站在校园中心
+     * 到四个角约 980 米——1000 仍然覆盖全校，只是不再收拢一百多米外的邻校/校外车。
      */
-    const val MAX_NEARBY_DISTANCE_METERS = 1200
+    const val MAX_NEARBY_DISTANCE_METERS = 1000
+
+    /**
+     * 采样环半径（纯函数，单测锁定）：按视口半对角线缩放，夹在
+     * [SAMPLE_RADIUS_MIN_METERS] ~ [SAMPLE_RADIUS_METERS] 之间。
+     *
+     * 视口还没量到（0 / 负数 / 非有限）时按上限算：宁可多查一圈，也别在首帧只查中心。
+     */
+    fun sampleRadiusMeters(viewportHalfDiagonalMeters: Double): Double {
+        if (!viewportHalfDiagonalMeters.isFinite() || viewportHalfDiagonalMeters <= 0.0) {
+            return SAMPLE_RADIUS_METERS
+        }
+        return (viewportHalfDiagonalMeters * SAMPLE_VIEWPORT_RATIO)
+            .coerceIn(SAMPLE_RADIUS_MIN_METERS, SAMPLE_RADIUS_METERS)
+    }
 
     /**
      * 运营方停车点名里的错别字 → 校内实际楼名。
@@ -379,8 +419,9 @@ object BikeNearby {
      * 于是以地图中心查一次，返回的全是那一个桩，别处的车根本不会出现（2026-09-23 用户实测：
      * 把窗口移过去才看得到）。多撒几个点、各查一次再按车号合并，覆盖范围就上来了。
      *
-     * 半径取 [SAMPLE_RADIUS_METERS]：比校区尺度略小，相邻采样点的"最近 20"有重叠，
-     * 中间不至于漏出空档。
+     * [radiusMeters] 默认取 [SAMPLE_RADIUS_METERS]（上限）；**生产调用方按视口给**
+     * （[sampleRadiusMeters]，2026-10-29）——放大到只看一条路时，环跟着缩，视界之外不再查。
+     * 「大桩补全」也用这条（半径 = 桩的半跨度，见 `BikeMapViewModel.fillBigSpot`）。
      *
      * [ringCount] 由调用方按缩放给（2026-10-01，见 `BikeMapViewModel.ringSampleCount`）：
      * 默认校区尺度只撒 4 个对角点（请求数 9 → 5），缩得更小才用 8 个。
@@ -391,17 +432,47 @@ object BikeNearby {
         lat: Double,
         lng: Double,
         ringCount: Int = RING_SAMPLE_COUNT,
+        radiusMeters: Double = SAMPLE_RADIUS_METERS,
     ): List<GcjPoint> {
         val count = ringCount.coerceIn(RING_MIN_SAMPLE_COUNT, RING_SAMPLE_COUNT)
+        val radius = if (radiusMeters.isFinite() && radiusMeters > 0.0) {
+            radiusMeters
+        } else {
+            SAMPLE_RADIUS_METERS
+        }
         val points = mutableListOf(GcjPoint(lat, lng))
         repeat(count) { index ->
             // 4 点时从 45° 起（四个对角）：正东西南北那四个方向的车会全落在轴线上，
             // 对角围出来的覆盖更均匀
             val bearing = index * (360.0 / count) + if (count == RING_MIN_SAMPLE_COUNT) 45.0 else 0.0
-            points += offsetBy(lat, lng, SAMPLE_RADIUS_METERS, bearing)
+            points += offsetBy(lat, lng, radius, bearing)
         }
         return points
     }
+
+    /**
+     * 「大桩补全」要补哪一处（纯函数，单测锁定，2026-10-29）。
+     *
+     * 服务端一次只回最近 20 辆，成员数够多的簇大概率被截断过——它的数字靠撒点并集凑出来，
+     * 会随地图中心漂。挑**离 (lat,lng) 最近**、成员数 ≥ [minBikes]、距离不超过
+     * [maxDistanceMeters] 的那一处去补（锚在桩上查，数字才稳定）；视野里同时补两处是
+     * 8 个请求，不值。没有符合条件的就返回 null（这一带没有大桩，不用补）。
+     *
+     * [minBikes] 由调用方按"数据从哪来"给：从中心那一页（20 条）挑时取一半（10）就够——
+     * 那一页里占了一半以上的簇一定被截断过；门槛仍是 20 会漏（末尾常混进旁边桩的车）。
+     */
+    fun nearestTruncatedSpot(
+        clusters: List<BikeCluster>,
+        lat: Double,
+        lng: Double,
+        minBikes: Int,
+        maxDistanceMeters: Double,
+    ): BikeCluster? = clusters.asSequence()
+        .filter { it.bikes.size >= minBikes }
+        .map { cluster -> cluster to distanceMeters(lat, lng, cluster.lat, cluster.lng) }
+        .filter { (_, distance) -> distance <= maxDistanceMeters }
+        .minByOrNull { (_, distance) -> distance }
+        ?.first
 
     /**
      * 从 [lat]/[lng] 沿 [bearingDegrees] 走 [meters] 米。
@@ -431,30 +502,95 @@ object BikeNearby {
     private const val METERS_PER_DEGREE_LAT = 111_320.0
 
     /**
-     * 按停车点聚簇：`givecarName` 非空就用它分组，为空的车回落 4 位小数网格
-     * （约 11 米，同一排车桩归一组）。
+     * 按**物理位置**聚簇（2026-10-29 重做；旧版是「有名字按名字、没名字按 4 位小数网格」）。
      *
-     * 用运营方自己的停车点字段而不是纯几何距离：它不受定位抖动影响，
-     * 20 辆车挤在一个点上时也不会因为几米误差被切成两簇。代价是相距很近但名字不同的
-     * 两堆车会分成两枚标记，那是无害的。
+     * 两条合并规则，任一成立就并成一簇：
+     * - **停车点名相同**：运营方台账里最可靠的身份。名字相同的车就算隔得远（上报位置飘了
+     *   几十米）也还是同一个停车点，稀疏车桩不至于被切成一车一枚标记；
+     * - **两点距离 ≤ [CLUSTER_RADIUS_METERS]**：名字缺失的车按几何近邻成簇；名字不同但
+     *   物理上挨在一起的两组（同一排车桩「有名字 / 没名字」两拨、台账里两种写法）并成一枚。
+     *
+     * 旧版的两个毛病都在这里：4 位小数网格把一个 30 辆的停车点切成 3~7 个格子（同一个
+     * 停车点画出好几个数字，刷新时车的位置在格子边界上抖一下就少一个多一个）；名字不同的
+     * 两拨车挨在一起时也各画一枚。合并之后**每个非空停车点名只会出现在一个簇里**，
+     * 簇键因此仍然唯一。
+     *
+     * 展示坐标取成员坐标的**中位数**（不是均值）：同一名字的离线车可能停在上报位置几十米外，
+     * 均值会被它拉偏；中位数对单个离群点不敏感，成员小幅变化时落点也更稳。
      *
      * 输出顺序跟随入参首次出现的顺序（入参已按距离排序），所以簇也是按距离排的。
      */
     fun cluster(bikes: List<NearbyBike>): List<BikeCluster> {
-        val groups = LinkedHashMap<String, MutableList<NearbyBike>>()
-        bikes.forEach { bike ->
-            groups.getOrPut(clusterKey(bike)) { mutableListOf() }.add(bike)
+        if (bikes.isEmpty()) return emptyList()
+        val parent = IntArray(bikes.size) { it }
+
+        fun find(index: Int): Int {
+            var root = index
+            while (parent[root] != root) {
+                parent[root] = parent[parent[root]]
+                root = parent[root]
+            }
+            return root
         }
-        return groups.map { (key, members) ->
+
+        fun union(a: Int, b: Int) {
+            val rootA = find(a)
+            val rootB = find(b)
+            if (rootA != rootB) parent[rootB] = rootA
+        }
+
+        // 阈值比较用等距圆柱近似就够（校园尺度内误差厘米级），省掉 n² 次 haversine 的三角函数
+        val cosLat = cos(Math.toRadians(bikes.first().lat))
+        val radiusSquared = CLUSTER_RADIUS_METERS * CLUSTER_RADIUS_METERS
+        for (i in bikes.indices) {
+            for (j in i + 1 until bikes.size) {
+                val a = bikes[i]
+                val b = bikes[j]
+                if (a.siteName.isNotEmpty() && a.siteName == b.siteName) {
+                    union(i, j)
+                    continue
+                }
+                val dLat = (a.lat - b.lat) * METERS_PER_DEGREE_LAT
+                val dLng = (a.lng - b.lng) * METERS_PER_DEGREE_LAT * cosLat
+                if (dLat * dLat + dLng * dLng <= radiusSquared) union(i, j)
+            }
+        }
+
+        val groups = LinkedHashMap<Int, MutableList<NearbyBike>>()
+        bikes.forEachIndexed { index, bike ->
+            groups.getOrPut(find(index)) { mutableListOf() }.add(bike)
+        }
+        val usedKeys = HashSet<String>()
+        return groups.values.map { members ->
+            val lat = median(members.map { it.lat })
+            val lng = median(members.map { it.lng })
+            val name = dominantSiteName(members)
+            val base = if (name.isNotEmpty()) "s:$name" else "g:" + gridKey(lat, lng)
+            // 有名字的键天然唯一（同名必并）；只有未标注簇可能撞键（两个簇的落点四舍五入
+            // 到同一格）。撞了就补成员里最小的车号——列表 key 重复会直接崩，不能赌概率。
+            val key = if (usedKeys.add(base)) base else "$base#${members.minOf { it.carNum }}"
             BikeCluster(
                 key = key,
-                // 成员已按距离升序，第一个就是最近的那辆，用它当簇名
-                siteName = members.first().siteName,
-                lat = members.sumOf { it.lat } / members.size,
-                lng = members.sumOf { it.lng } / members.size,
+                siteName = name,
+                lat = lat,
+                lng = lng,
                 bikes = members.toList(),
             )
         }
+    }
+
+    /**
+     * 合并两批车：按车号去重、[primary] 优先；顺序 = primary 在前，primary 没给的接在后面。
+     *
+     * 用途是环采样结果与「大桩补全」结果的合并（两批并行查、合并后**只落一次**，
+     * 见 `BikeMapViewModel.query`）：同一辆车在两边都出现时以 primary 的字段为准。
+     */
+    fun mergeBikes(primary: List<NearbyBike>, extra: List<NearbyBike>): List<NearbyBike> {
+        if (extra.isEmpty()) return primary
+        val merged = LinkedHashMap<String, NearbyBike>(primary.size + extra.size)
+        primary.forEach { merged[it.carNum] = it }
+        extra.forEach { merged.putIfAbsent(it.carNum, it) }
+        return merged.values.toList()
     }
 
     /**
@@ -591,13 +727,38 @@ object BikeNearby {
         else -> BikeStatus.Available
     }
 
-    private fun clusterKey(bike: NearbyBike): String {
-        val site = bike.siteName.trim()
-        if (site.isNotEmpty()) return "s:$site"
+    /**
+     * 成员里出现最多的非空停车点名。票数相同取**最先出现**的——成员按距离升序，
+     * 也就是离用户最近的那辆；合并两处挨着的停车点时标题不会随刷新来回换。
+     */
+    private fun dominantSiteName(members: List<NearbyBike>): String {
+        val counts = LinkedHashMap<String, Int>()
+        members.forEach { bike ->
+            if (bike.siteName.isNotEmpty()) {
+                counts[bike.siteName] = (counts[bike.siteName] ?: 0) + 1
+            }
+        }
+        return counts.maxByOrNull { it.value }?.key.orEmpty()
+    }
+
+    /** 中位数（偶数个取中间两个的均值）。簇的落点用它，见 [cluster]。 */
+    private fun median(values: List<Double>): Double {
+        val sorted = values.sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 0) (sorted[mid - 1] + sorted[mid]) / 2.0 else sorted[mid]
+    }
+
+    /**
+     * 未标注停车点的簇键：按落点取 4 位小数网格（约 11 米）。
+     *
+     * 只用来给簇一个稳定、唯一的 key（列表 key / 展开态标识），**不再用它分组**。
+     * 两个未标注簇至少隔着 [CLUSTER_RADIUS_METERS]，四舍五入不会落进同一格，键不会撞。
+     */
+    private fun gridKey(lat: Double, lng: Double): String {
         val factor = Math.pow(10.0, CLUSTER_GRID_DECIMALS.toDouble())
-        val lat = Math.round(bike.lat * factor) / factor
-        val lng = Math.round(bike.lng * factor) / factor
-        return "g:$lat,$lng"
+        val gridLat = Math.round(lat * factor) / factor
+        val gridLng = Math.round(lng * factor) / factor
+        return "$gridLat,$gridLng"
     }
 
     private fun isUsableCoordinate(lat: Double, lng: Double): Boolean =
