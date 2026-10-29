@@ -90,6 +90,33 @@ class UjingApiParseTest {
     }
 
     @Test
+    fun dryerAdditionDryTimeParsesServerOptions() {
+        // 差价计价烘干机：四个温度档位 + 服务端下发的时长选项（不写死档位）
+        val env = envelope(
+            """{"code":0,"data":{"type":2,"deviceTypeName":"烘干机","deviceWashModel":[
+                {"workModelId":21,"workModelName":"高温烘","basePrice":200,"time":10,"isDefault":1,
+                 "additionDryTime":{"title":"烘干时间","options":[10,20,30,40,50,60]}},
+                {"workModelId":22,"workModelName":"中温烘","basePrice":200,"time":10,
+                 "additionDryTime":{"title":"烘干时间","options":["10","20","30"]}}
+            ]}}""",
+        )
+        val program = env.decodeData<UjingProgramData>()!!
+        val first = program.deviceWashModel[0]
+        assertTrue(first.isDefault)
+        assertEquals("烘干时间", first.additionDryTime?.title)
+        assertEquals(listOf(10, 20, 30, 40, 50, 60), first.additionDryTime?.options)
+        // 字符串形态的 options 也宽容读
+        assertEquals(listOf(10, 20, 30), program.deviceWashModel[1].additionDryTime?.options)
+        // 一档一价机型没有 additionDryTime
+        val differential = envelope(
+            """{"code":0,"data":{"type":2,"deviceWashModel":[
+                {"workModelId":23,"workModelName":"低温烘","basePrice":600,"time":30}
+            ]}}""",
+        ).decodeData<UjingProgramData>()!!
+        assertNull(differential.deviceWashModel[0].additionDryTime)
+    }
+
+    @Test
     fun programFlagsGateOrderExtras() {
         // 2026-10-01 下单可选参数的三个服务端开关：布尔可能以数字形态出现
         val env = envelope(

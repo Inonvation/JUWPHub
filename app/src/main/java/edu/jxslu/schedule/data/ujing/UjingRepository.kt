@@ -259,7 +259,8 @@ class UjingRepository(
      * 可选参数的发送条件在 [UjingApi.createOrder]：[washTemperatureId] 只在
      * 机型开放水温（`isWashTemperatureEnable`）且非烘干时由调用方传入；
      * 投放加购按用户勾选带标准档（[addDetergent] / [addDisinfectant]，默认值
-     * 由机型强制投放声明给出）；烘干 `dryTime` 仍由本类按模式时长自动补。
+     * 由机型强制投放声明给出）；烘干 `dryTime` 由本类按 [dryTimeMinutes]（差价计价）
+     * 或模式自带时长（一档一价）换算成「分钟 / 10」。
      */
     suspend fun createOrder(
         scan: UjingScanResult,
@@ -268,9 +269,31 @@ class UjingRepository(
         washTemperatureId: Int? = null,
         addDetergent: Boolean = false,
         addDisinfectant: Boolean = false,
+        /**
+         * 差价计价烘干机所选时长（分钟）；一档一价 / 洗衣机为 null。
+         * 非空时下单 body 的 `dryTime` 用它，不再用 `model.time`。
+         */
+        dryTimeMinutes: Int? = null,
     ): UjingOrderSnapshot = withContext(Dispatchers.IO) {
         val storeId = program.storeId?.takeIf { it.isNotBlank() }
             ?: throw UjingApiException("设备未绑定门店，无法下单")
+        val dryer = UjingState.isDryer(program.type, program.deviceTypeId, program.deviceTypeName)
+        val selectedDryMinutes = dryTimeMinutes?.takeIf { it > 0 }
+        val effectiveDryMinutes = selectedDryMinutes ?: model.time
+        val estimatedPriceFen = if (dryer && selectedDryMinutes != null) {
+            UjingState.dryerPriceFen(model.basePrice, model.time, selectedDryMinutes)
+        } else {
+            model.basePrice
+        }
+        // 订单卡/历史账单要能看出「选了哪个温度档 + 多少分钟」，不能只留模式名
+        val snapshotModelName = if (dryer && selectedDryMinutes != null) {
+            listOfNotNull(
+                model.workModelName.takeIf { it.isNotBlank() },
+                "$selectedDryMinutes 分钟",
+            ).joinToString(" · ")
+        } else {
+            model.workModelName
+        }
         val envelope = api.createOrder(
             token = requireSession().token,
             deviceId = scan.deviceId.orEmpty(),
@@ -282,8 +305,12 @@ class UjingRepository(
             // 投放加购：用户勾选才带标准档（枚举单一来源在 UjingState，UI 不选档位）
             detergentGearId = if (addDetergent) UjingState.DETERGENT_STANDARD_GEAR else null,
             disinfectantGearId = if (addDisinfectant) UjingState.DISINFECTANT_STANDARD_GEAR else null,
-            // 烘干机协议事实：dryTime = 模式时长 / 10
-            dryTime = if (program.type == 2) model.time / 10 else null,
+            // 烘干机协议事实：dryTime = 分钟 / 10；差价计价用用户选的时长
+            dryTime = if (dryer && effectiveDryMinutes > 0) {
+                UjingState.dryTimeFor(effectiveDryMinutes)
+            } else {
+                null
+            },
         )
         envelope.requireSuccess()
         val data = envelope.decodeData<UjingOrderCreateData>()
@@ -299,12 +326,12 @@ class UjingRepository(
                 .joinToString(" · ")
                 .ifBlank { program.deviceTypeName },
             modelId = model.workModelId,
-            modelName = model.workModelName,
-            priceFen = model.basePrice,
+            modelName = snapshotModelName,
+            priceFen = estimatedPriceFen,
             status = "0",
             snapshotAt = now,
             createdAt = now,
-            durationSeconds = model.time * 60,
+            durationSeconds = effectiveDryMinutes * 60,
         )
         orderStore.save(snapshot)
         // 账单留痕：下单即入账（状态随刷新更新，取消标注见 cancelOrder）
@@ -338,6 +365,11 @@ class UjingRepository(
         val data = envelope.decodeData<UjingOrderDetailData>()
             ?: throw UjingApiException("订单详情为空")
         val current = orderStore.current()
+        // 服务端实付优先（差价计价的本地金额只是预估）；未支付时 payPrice 常为 0/缺省，保留预估
+        val serverPriceFen = data.payPrice?.toDoubleOrNull()
+            // round 而非截断：4.35 元是 435 分，截断会显示成 434
+            ?.let { Math.round(it * 100).toInt() }
+            ?.takeIf { it > 0 }
         val snapshot = UjingOrderSnapshot(
             orderId = orderId,
             orderNo = data.orderNo.orEmpty().ifBlank { current?.orderNo.orEmpty() },
@@ -345,9 +377,8 @@ class UjingRepository(
             deviceName = current?.deviceName.orEmpty(),
             modelId = current?.modelId ?: 0,
             modelName = current?.modelName.orEmpty(),
-            priceFen = current?.priceFen
-                // round 而非截断：4.35 元是 435 分，截断会显示成 434
-                ?: data.payPrice?.toDoubleOrNull()?.let { Math.round(it * 100).toInt() }
+            priceFen = serverPriceFen
+                ?: current?.priceFen
                 ?: 0,
             status = data.status.orEmpty(),
             // 服务端文案优先（非空才覆盖，本次没给就沿用旧值，别把已有文案清掉）

@@ -99,6 +99,16 @@
 8. 扫描窗口的**原文模式**（`EbikeScanActivity.MODE_RAW`）是给本功能复用骑行扫码窗口的唯一入口，
    改动时保持骑行模式（不传 extra）行为不变。
 
+## 支付通道（2026-10-29 核对官方 2.4.18）
+
+- 官方客户端支持支付宝 + 微信（`channel=wechatPay`），微信走 `WXPayEntryActivity` +
+  OpenSDK，appId `wx32b6b6e1d84c8dac` 绑定官方包名 `com.midea.vm.washer` + 官方签名。
+- **本 App 不接微信支付**：第三方包名 / 签名与官方 appId 不匹配，微信客户端会拒绝；
+  U净服务端也不会给我们的 appId 签发参数。不要复用 / 伪造官方 appId（红线）。
+- 只保留支付宝。若后续要评估 H5 / 小程序兜底，先用**已完成订单**探测
+  `payment/arguments?channel=wechatPay` 是否返回 `mweb_url` / 跳转串；
+  未确认前不写代码，也不对未支付订单调用（可能锁支付参数）。
+
 ## 下单可选参数（2026-10-01 体验补，改前重读）
 
 - **口径：「服务端声明需要才发」**。实测五基础字段（type / deviceTypeId / deviceId /
@@ -113,7 +123,8 @@
   `DISINFECTANT_STANDARD_GEAR` = 4）。**档位本身不可选**——其余档位的价格语义没有实样，
   造出来就是瞎报价；未声明投放的机型发档位可能被拒（下单报错，关掉再试）或被忽略，
   金额一律以支付宝实付为准（确认弹层已注明）。
-- `dryTime`：仅烘干机（type == 2），协议口径 = 模式时长 / 10（`UjingState.dryTimeFor`）。
+- `dryTime`：仅烘干机，协议口径 = 分钟 / 10（`UjingState.dryTimeFor`）。差价计价取
+  `additionDryTime.options` 所选分钟，一档一价取 `model.time`。
 - `orders/{id}/detail` 固定带 `additional=price`（照抄官方抓包形态，取 `payPrice`）。
 - 订单快照（`UjingOrderSnapshot`）的 `createdAt`（支付窗口基准）与 `durationSeconds`
   （进度条分母）**只在下单时写、刷新原样保留**；旧版本快照两列为 0，UI 各自退回静态提示。
@@ -157,14 +168,26 @@
 - **进页对表走静默**：`loggedIn` 收集器里那次 `refreshOrder` 用 `silent = true`（进页补数据不该
   把订单卡按钮闪成加载圈）。
 
-## 烘干机（2026-10-16，改前重读）
+## 烘干机（2026-10-16 首版；2026-10-29 补差价计价，改前重读）
 
 - **判定 `UjingState.isDryer(type, deviceTypeId, deviceTypeName)`**：`program.type == 2` 为准
   （协议事实），`deviceTypeId == 3` 与机型名含「烘干 / 干衣」兜底（与看板同一判据）。
-  **请求体仍按服务端 `type` 字段发**（无样本不臆测协议），这里只管 UI 展示判定。
-- 下单页：烘干机档位区标题「烘干时长」、`ModelCard` 标题以时长为主（`烘干 N 分钟`，副行只留价格）；
-  **水温 / 投放选项整块不出**（都是洗衣概念），`addonDefaults(isDryer, …)` 恒不勾。
-- 烘干时长沿用服务端下发的 `deviceWashModel`（每档即一个时长，`dryTime = 时长 / 10`），不另造档位。
+  请求体的 `type` 字段照原样发；`dryTime` 是否带由 `isDryer` 决定（见下）。
+- **两种计价形态**（官方 2.4.18 `assets/washer/program.js`）：
+  - **差价计价**：`deviceWashModel[].additionDryTime` 存在，形如 `{title, options:[10,20,...]}`。
+    四个初始档位是温度模式（`workModelName`，如高温烘 / 中温烘 / 低温烘 / 常温烘），
+    时长在 `additionDryTime.options` 里另选——**服务端给几档渲染几档，禁止写死 10/20/30/40**。
+    下单 `dryTime = 所选分钟 / 10`；价格 = 基础价 + 按每 10 分钟单价线性加价。
+  - **一档一价**：没有 `additionDryTime`，每个档位自带 `time`；卡片标题 `名称-N分钟`，
+    `dryTime = model.time / 10`。
+- 下单页：有 `additionDryTime` 时档位区标题「烘干模式」+ 下方「烘干时长」chips；
+  没有时标题「烘干时长」、档位卡标题带时长。**水温 / 投放整块不出**（都是洗衣概念），
+  `addonDefaults(isDryer, …)` 恒不勾。
+- 差价计价默认**不预选时长**（官方也要求显式选择），未选禁用下单；换档位后原时长不在新
+  options 里就清空。`isDefault` 用于默认选中档（服务端数字 0/1，宽容解析），缺省回退第一条。
+- 预估价只用于确认弹层 / 订单卡，**实付以服务端 `payPrice` / 支付宝为准**。
+- `dryTime` 发送条件由调用方 `isDryer` 决定（官方 `submitOrder` 按 deviceTypeId 判），
+  `UjingApi` 只按非空发；不再用 `type == 2` 卡死。
 
 ## 命名与文案
 

@@ -5,6 +5,7 @@ import edu.jxslu.schedule.data.qiekj.QiekjJson
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -92,6 +93,20 @@ object LenientIntSerializer : KSerializer<Int> {
     override fun serialize(encoder: Encoder, value: Int) = encoder.encodeInt(value)
 }
 
+/**
+ * 整数列表宽容：元素可能是数字或字符串（服务端脏数据），逐个走 [LenientIntSerializer]。
+ * 读不出的元素给 0，由 domain 侧过滤（不在解析层决定业务合法性）。
+ */
+object LenientIntListSerializer : KSerializer<List<Int>> {
+    private val delegate = ListSerializer(LenientIntSerializer)
+
+    override val descriptor: SerialDescriptor = delegate.descriptor
+
+    override fun deserialize(decoder: Decoder): List<Int> = delegate.deserialize(decoder)
+
+    override fun serialize(encoder: Encoder, value: List<Int>) = delegate.serialize(encoder, value)
+}
+
 /** 布尔宽容：`true` / `1` / `"true"` / `"1"` 为真，其余为假。 */
 object LenientBoolSerializer : KSerializer<Boolean> {
     override val descriptor: SerialDescriptor =
@@ -162,6 +177,24 @@ data class UjingWashModel(
     @Serializable(LenientIntSerializer::class) val basePrice: Int = 0,
     @Serializable(LenientIntSerializer::class) val time: Int = 0,
     @Serializable(LenientBoolSerializer::class) val hide: Boolean = false,
+    /** 服务端标记的默认档（官方 `isDefault`；数字 0/1）。 */
+    @Serializable(LenientBoolSerializer::class) val isDefault: Boolean = false,
+    /**
+     * 差价计价烘干机的「附加烘干时长」：存在时四个初始档位是温度模式
+     * （高温烘 / 中温烘…），时长另选；一档一价机型为 null。
+     * 官方 `program.js` 的判据即 `isDryer && !workModel.additionDryTime`。
+     */
+    val additionDryTime: UjingDryTime? = null,
+)
+
+/**
+ * 烘干时长选项（官方 `workModel.additionDryTime`）：`title` 是分区标题，
+ * `options` 是服务端下发的分钟数组——**不写死档位**，返回几档渲染几档。
+ */
+@Serializable
+data class UjingDryTime(
+    val title: String = "",
+    @Serializable(with = LenientIntListSerializer::class) val options: List<Int> = emptyList(),
 )
 
 // ── 订单（P2） ──

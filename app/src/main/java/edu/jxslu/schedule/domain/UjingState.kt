@@ -210,6 +210,56 @@ object UjingState {
      */
     fun dryTimeFor(modelTimeMinutes: Int): Int = modelTimeMinutes / 10
 
+    /**
+     * 差价计价烘干机的时长选项（服务端 `additionDryTime.options`）：只保留正数且
+     * 10 的整数倍——协议口径 `dryTime = 分钟 / 10`，非 10 倍数用整数表达会截断；
+     * 保留服务端顺序，不去重排序（档位顺序由服务端定）。
+     */
+    fun dryTimeOptions(options: List<Int>): List<Int> =
+        options.filter { it > 0 && it % 10 == 0 }.distinct()
+
+    /** 是否需要另选烘干时长：烘干机且服务端给了有效的 `additionDryTime.options`。 */
+    fun needsDryTimeSelection(isDryer: Boolean, options: List<Int>): Boolean =
+        isDryer && dryTimeOptions(options).isNotEmpty()
+
+    /**
+     * 烘干档位标题：
+     * - 差价计价（有 `additionDryTime`）：只显示服务端模式名（高温烘 / 中温烘…），时长在下方另选；
+     * - 一档一价：把时长并进标题（官方 `displayName` 同口径，`高温烘-30 分钟`）。
+     * 名称缺失时回退「烘干」，不把空串拼进标题。
+     */
+    fun dryerModelTitle(
+        modelName: String,
+        modelTimeMinutes: Int,
+        isDryer: Boolean,
+        hasAdditionDryTime: Boolean,
+    ): String {
+        val name = modelName.ifBlank { if (isDryer) "烘干" else "模式" }
+        if (!isDryer || hasAdditionDryTime) return name
+        return if (modelTimeMinutes > 0) "$name-$modelTimeMinutes 分钟" else name
+    }
+
+    /**
+     * 差价计价烘干机的每 10 分钟单价（分）：分区副标题用。
+     * 基础价覆盖 [baseMinutes]，`baseMinutes == 10` 时就是基础价本身。
+     */
+    fun dryerPricePer10Fen(basePriceFen: Int, baseMinutes: Int): Int {
+        val base = baseMinutes.takeIf { it > 0 } ?: 10
+        return basePriceFen * 10 / base
+    }
+
+    /**
+     * 差价计价烘干机的预估价（分）：基础价覆盖 [baseMinutes]，之后按同一单价线性增加。
+     * `baseMinutes == 10` 时等价官方 `(selected-10)*base/10 + base`；
+     * 金额只用于确认弹层/订单卡展示，**实付以服务端 `payPrice` 为准**。
+     */
+    fun dryerPriceFen(basePriceFen: Int, baseMinutes: Int, selectedMinutes: Int): Int {
+        if (basePriceFen <= 0) return 0
+        val base = baseMinutes.takeIf { it > 0 } ?: 10
+        val extra = (selectedMinutes - base).coerceAtLeast(0) * basePriceFen / base
+        return basePriceFen + extra
+    }
+
     // ── 空闲看板 ──
 
     /** 某洗衣房按设备类型的聚合数据（来自 `devices/reserve` 的 `devices[].device`）。 */

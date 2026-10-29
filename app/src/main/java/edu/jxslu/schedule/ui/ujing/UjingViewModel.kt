@@ -460,6 +460,7 @@ class UjingViewModel(
         if (current == null || current.isTerminal) {
             createAndPay(
                 model = selection.model,
+                dryTimeMinutes = selection.dryTimeMinutes,
                 washTemperatureId = selection.temperatureId,
                 addDetergent = selection.addDetergent,
                 addDisinfectant = selection.addDisinfectant,
@@ -474,6 +475,7 @@ class UjingViewModel(
                     if (snapshot.isTerminal) {
                         createAndPay(
                             model = selection.model,
+                            dryTimeMinutes = selection.dryTimeMinutes,
                             washTemperatureId = selection.temperatureId,
                             addDetergent = selection.addDetergent,
                             addDisinfectant = selection.addDisinfectant,
@@ -496,6 +498,7 @@ class UjingViewModel(
     /** orders/create → 立即请求支付参数并拉起支付宝。 */
     private fun createAndPay(
         model: UjingWashModel,
+        dryTimeMinutes: Int?,
         washTemperatureId: Int?,
         addDetergent: Boolean,
         addDisinfectant: Boolean,
@@ -508,12 +511,13 @@ class UjingViewModel(
             // 报「下单失败」诱导重发——把订单交给订单卡，让用户从「重试支付」续上。
             val created = runCatching {
                 repo.createOrder(
-                    draft.scan,
-                    draft.program,
-                    model,
-                    washTemperatureId,
-                    addDetergent,
-                    addDisinfectant,
+                    scan = draft.scan,
+                    program = draft.program,
+                    model = model,
+                    washTemperatureId = washTemperatureId,
+                    addDetergent = addDetergent,
+                    addDisinfectant = addDisinfectant,
+                    dryTimeMinutes = dryTimeMinutes,
                 )
             }
             val snapshot = created.getOrElse { error ->

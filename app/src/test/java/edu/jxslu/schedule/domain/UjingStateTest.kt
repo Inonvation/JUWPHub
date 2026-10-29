@@ -95,6 +95,59 @@ class UjingStateTest {
         assertEquals(9, UjingState.dryTimeFor(90))
     }
 
+    @Test
+    fun dryerTimeOptionsComeFromServerAndFilterInvalid() {
+        // 不写死档位：服务端给几档渲染几档，顺序保持
+        assertEquals(
+            listOf(10, 20, 30, 40, 50, 60, 90, 120),
+            UjingState.dryTimeOptions(listOf(10, 20, 30, 40, 50, 60, 90, 120)),
+        )
+        // 非正 / 非 10 倍数过滤，重复项去重
+        assertEquals(listOf(10, 20, 30), UjingState.dryTimeOptions(listOf(0, -10, 10, 15, 20, 30, 20)))
+        assertTrue(UjingState.needsDryTimeSelection(true, listOf(10, 20)))
+        assertFalse(UjingState.needsDryTimeSelection(false, listOf(10, 20)))
+        assertFalse(UjingState.needsDryTimeSelection(true, emptyList()))
+        assertFalse(UjingState.needsDryTimeSelection(true, listOf(15, 25)))
+    }
+
+    @Test
+    fun dryerTitlesSeparateTemperatureModesFromTime() {
+        // 差价计价：四个初始档位只显示温度模式名，时长另选
+        assertEquals(
+            "高温烘",
+            UjingState.dryerModelTitle("高温烘", 10, isDryer = true, hasAdditionDryTime = true),
+        )
+        // 一档一价：时长并进标题
+        assertEquals(
+            "高温烘-30 分钟",
+            UjingState.dryerModelTitle("高温烘", 30, isDryer = true, hasAdditionDryTime = false),
+        )
+        // 洗衣机不拼时长（时长在副行）
+        assertEquals(
+            "滚筒洗衣机",
+            UjingState.dryerModelTitle("滚筒洗衣机", 35, isDryer = false, hasAdditionDryTime = false),
+        )
+        // 名称缺失回退，不把空串拼进标题
+        assertEquals(
+            "烘干-30 分钟",
+            UjingState.dryerModelTitle("", 30, isDryer = true, hasAdditionDryTime = false),
+        )
+    }
+
+    @Test
+    fun dryerPriceScalesWithSelectedMinutes() {
+        // 基础档 10 分钟：10/20/30/60 分钟分别 1/2/3/6 份基础价
+        assertEquals(200, UjingState.dryerPriceFen(200, 10, 10))
+        assertEquals(400, UjingState.dryerPriceFen(200, 10, 20))
+        assertEquals(600, UjingState.dryerPriceFen(200, 10, 30))
+        assertEquals(1200, UjingState.dryerPriceFen(200, 10, 60))
+        // 基础档不是 10 分钟时按基础档比例算
+        assertEquals(300, UjingState.dryerPriceFen(200, 20, 30))
+        // 每 10 分钟单价（分区副标题）
+        assertEquals(200, UjingState.dryerPricePer10Fen(200, 10))
+        assertEquals(100, UjingState.dryerPricePer10Fen(200, 20))
+    }
+
     // ---- 烘干机判定 ----
 
     @Test

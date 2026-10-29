@@ -391,7 +391,8 @@ ui/reminder/UjingDoneReminder    洗衣完成提醒：setAlarmClock 单点 + Wor
 且非烘干，枚举 1 常温 / 2=30℃ / 3=40℃ / 4=60℃）、`wp_detergentGearId` / `wp_disinfectantGearId`
 （**投放加购**：非烘干机，用户在扫码结果卡勾选「洗衣液 / 消毒液」，默认按机型强制投放声明
 勾好，勾了才发标准档 1 / 4——档位固定不可选，其余档位的价格语义没实样；加购费用以支付宝
-实付为准）、`dryTime`（仅烘干机，协议口径 = 模式时长 / 10））→
+实付为准）、`dryTime`（仅烘干机，协议口径 = 分钟 / 10；差价计价取 `additionDryTime.options`
+所选分钟，一档一价取 `model.time`））→
 `payment/arguments?channel=alipay`（→ `payInfo.orderInfo` 给 SDK）→
 `orders/{id}/detail?additional=price`（status 为**字符串**；remainTime 秒；`additional=price`
 照抄官方抓包形态）→ `app/payment/{id}/lastPayStatus` → `orders/{id}/cancel` →
@@ -432,6 +433,14 @@ P2——找一台空闲机器走 下单 → 支付宝付款 → 订单卡倒计�
 行失败时把 `error.message` 显示出来。
 单测：`UjingStateTest` 20 例 + `UjingOrderStateTest` 8 例，在 HEAD（2.9.0）干净副本上
 `testDebugUnitTest` + `assembleDebug` 通过（全量 1918 例 0 失败）。
+
+**2026-10-29 烘干机差价计价**：官方 2.4.18 `assets/washer/program.js` 核对出两种形态——
+`workModel.additionDryTime` 存在时是**差价计价**（四个温度档位 `workModelName` + 时长
+`options` 另选，`dryTime = 分钟 / 10`，价格按每 10 分钟单价线性加）；不存在时是**一档一价**
+（`workModelName-N分钟`，`dryTime = model.time / 10`）。DTO 增 `additionDryTime` / `isDefault`，
+UI 按服务端 `options` 全量渲染（**不写死 10/20/30/40**），差价计价默认不预选时长、未选禁下单；
+`UjingApi` 的 `dryTime` 改为按调用方 `isDryer` 判定后非空即发。微信支付**不接**：官方 appId
+`wx32b6b6e1d84c8dac` 绑定官方包名 / 签名，第三方无法复用；只保留支付宝。
 
 ---
 
@@ -1110,8 +1119,8 @@ UI 规格见 §3.28。
 `WenquPreregDashboard.kt`（**前台仪表板**，2026-10-21：`WenquAppForeground` started 计数判前台
 （不引 lifecycle-process）；`WenquPreregDashboardHost` 挂 `JuwRoot` 与 `SettingsActivity`，
 执行期间任何界面自动弹，用户关掉后不再自动弹；**顶部折叠胶囊**（面板关掉后常驻「抢报中 · 第 N 发」，
-单击重开，全窗口可见——不依赖只在主窗口的悬浮球，问渠页等独立窗口内也能重开）；重开 =
-通知点击 / 悬浮球单击（预报名期间，平时仍付款码）/ 顶部胶囊 / 蹲点页已预报名行；
+单击重开，全窗口可见——问渠页等独立窗口内也能重开）；重开 =
+通知点击 / 顶部胶囊 / 蹲点页已预报名行；
 操作 = 取消（二次确认）· 手动报名 · 重试）+
 `data/wenqu/WenquServerClock.kt`（`Date` 头时钟偏移，试发窗口按服务器钟折算）。
 入口在详情弹层（`applyBlockReason == APPLY_NOT_STARTED` 才给按钮 + `WenquPreregConfirmDialog`
@@ -1390,3 +1399,45 @@ RGBA_F16 / RGBA_1010102 这类非常规配置，不该漏给出图侧。
 - **已知边界**：自动检查优先用 WebView 会话；若进程重启后 WebView 会话已不在、
   且 12 小时 CAS 窗口未到，则本轮跳过，卡片继续显示上次快照——用户可在详情页手动
   刷新或打开报修页后恢复。打卡片只进原生详情，不跳 Web。
+
+### 4.50 快捷设置磁贴（TileService，2026-10-29；UI 见 §3.32）
+
+**组件**：三个独立 `TileService`（`ui/tile/PayCodeTileService` / `QiekjWaterTileService` /
+`QzxyWaterTileService`），共用抽象基类 `JuwTileService`。系统按组件识别磁贴，不能合并成一个。
+Manifest 每条都要 `exported="true"` + `android.permission.BIND_QUICK_SETTINGS_TILE`
++ `android.service.quicksettings.action.QS_TILE`；`BIND_QUICK_SETTINGS_TILE` 是 SystemUI
+持有的平台权限，只写在 service 上，不写 `uses-permission`。图标必须是单色 vector。
+
+**点击链路**：`TileService.onClick` →（开水磁贴）`WaterAutoStart.arm(screen)` →
+`startActivityAndCollapse` → `subpageLaunchIntent` → MainActivity 跳板 → `SubpageActivity`。
+
+- **不直接起 `SubpageActivity`**：那会让二级页成为新 task 的根（返回退桌面、再点桌面
+  图标另开一个 task、窗口链恢复错乱）。与通知跳板同一条纪律，见 `SubpageStack.kt`。
+- **API 34+ 用 `startActivityAndCollapse(PendingIntent)`**：`Intent` 重载已废弃，
+  targetSdk 34+ 在后台调用会抛异常。API 26–33 仍用 `Intent` 重载。
+- **每个磁贴的 PendingIntent requestCode 必须不同**：匹配不看 extras，三个磁贴都指向
+  `MainActivity`，共用 requestCode 会互相顶掉（点哪个都开同一页）。
+
+**就绪判定**（`TileTargets.action` 纯函数 + `readTileSignals`）：
+
+- 付款码 = `Graph.yktCredentialStore(ctx).read() != null`；
+- 胖乖 = `Graph.qiekj(ctx).loggedIn.value`；
+- 趣智 = `Graph.qzxy(ctx).localSession() != null`。
+
+`onStartListening` 在 IO 协程里读（不碰网络、不在主线程读 EncryptedSharedPreferences），
+读完按 `TileAction.lit` 设 `STATE_ACTIVE/INACTIVE`：付款码磁贴 `lit` 恒 false（纯动作
+入口，不表示凭证状态）；开水磁贴 `lit` = 登录态。`onClick` 只用缓存，缓存缺失时同步补读
+一次（毫秒级）。**不用 `requestListeningState`**：下拉通知栏必先触发 `onStartListening`，
+点击时状态已是新的。
+
+`ready` 与 `lit` 分工：`ready` 只决定落点 / 是否自动开水（付款码有凭证进码页、没凭证进
+设置页），`lit` 只决定磁贴底色。别把两者合并——付款码就是「有凭证但恒灰」的组合。
+
+**自动开水**：只在磁贴点击时 `WaterAutoStart.arm`；令牌是进程内单槽、页面首帧消费、
+不进 `SubpageRequest`，所以窗口链恢复不会重开阀。未登录 / 用水中 / 流程中由页面 VM
+静默跳过（与小组件胶囊同一条实现）。
+
+**零网络**：磁贴不取余额、不出码、不写任何业务数据；付款码的 `FLAG_SECURE` / 亮度 /
+扫码监听仍只在 `PayCodeScreen` 一处。
+
+**测试**：`TileTargetsTest` 钉住三种磁贴 × 就绪 / 未就绪的落点与 `autoStart`。

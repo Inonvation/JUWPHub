@@ -113,7 +113,8 @@ class UjingApi private constructor(private val http: OkHttpClient) {
      * - `washTemperatureId`：仅洗衣机业务（type != 2）且机型开放水温时带；
      * - `wp_detergentGearId` / `wp_disinfectantGearId`：强制投放机型带标准档
      *   （档位枚举 1 = 洗涤剂标准、4 = 消毒液标准，社区实测口径）；
-     * - `dryTime`：仅烘干机（type == 2），协议事实 = 模式时长 / 10。
+     * - `dryTime`：仅烘干机，协议事实 = 分钟 / 10。**由调用方判定烘干机后传入**
+     *   （官方 `submitOrder` 按 `isDryer` 决定是否带，不按 `type` 卡）；非烘干机不传。
      */
     suspend fun createOrder(
         token: String,
@@ -147,7 +148,7 @@ class UjingApi private constructor(private val http: OkHttpClient) {
             if (type != 2 && disinfectantGearId != null) {
                 put("wp_disinfectantGearId", disinfectantGearId)
             }
-            if (type == 2 && dryTime != null) {
+            if (dryTime != null) {
                 put("dryTime", dryTime)
             }
         },

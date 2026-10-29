@@ -28,9 +28,11 @@ class UjingDraftStore {
         val program: UjingProgramData,
     )
 
-    /** 下单页交出的选择：模式（档位）+ 水温 + 投放加购。 */
+    /** 下单页交出的选择：模式（档位）+ 烘干时长 + 水温 + 投放加购。 */
     data class OrderSelection(
         val model: UjingWashModel,
+        /** 差价计价烘干机所选时长（分钟）；一档一价 / 洗衣机为 null。 */
+        val dryTimeMinutes: Int?,
         /** 水温档 id（null = 机型未开放水温 / 烘干机，下单 body 不带）。 */
         val temperatureId: Int?,
         val addDetergent: Boolean,

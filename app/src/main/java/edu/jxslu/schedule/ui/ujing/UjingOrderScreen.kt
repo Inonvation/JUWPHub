@@ -11,6 +11,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -125,6 +128,7 @@ fun UjingOrderScreen(onBack: () -> Unit = {}) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun OrderReadyContent(
     draft: UjingDraftStore.Draft,
@@ -142,7 +146,12 @@ private fun OrderReadyContent(
         UjingState.ScanBadge.Free && scan.createOrderEnabled
 
     // ── 选择状态（窗口级，进程回收即丢——与草稿同一生命周期口径） ──
-    var selectedModelId by rememberSaveable { mutableIntStateOf(models.firstOrNull()?.workModelId ?: 0) }
+    // 默认档：服务端 isDefault 优先，其次第一条（官方 program.js 同口径）
+    var selectedModelId by rememberSaveable {
+        mutableIntStateOf(
+            (models.firstOrNull { it.isDefault } ?: models.firstOrNull())?.workModelId ?: 0,
+        )
+    }
     // 水温默认常温（机型开放水温且非烘干机才给选项）；-1 = 本机无水温选项
     var temperatureId by rememberSaveable {
         mutableIntStateOf(
@@ -158,6 +167,20 @@ private fun OrderReadyContent(
     var confirmOpen by rememberSaveable { mutableStateOf(false) }
 
     val selected = models.firstOrNull { it.workModelId == selectedModelId }
+    // 差价计价烘干机：时长选项全由服务端下发，不写死 10/20/30/40；一档一价机型为空
+    val dryTimeOptions = remember(selected?.workModelId, selected?.additionDryTime) {
+        UjingState.dryTimeOptions(selected?.additionDryTime?.options.orEmpty())
+    }
+    val needsDryTime = UjingState.needsDryTimeSelection(
+        dryer,
+        selected?.additionDryTime?.options.orEmpty(),
+    )
+    // 0 = 未选：官方也要求显式选时长，不默认 10 分钟
+    var dryTimeMinutes by rememberSaveable { mutableIntStateOf(0) }
+    // 换档位后原时长不在新选项里就清空，避免把上一档的时长带到下一档
+    LaunchedEffect(selectedModelId, dryTimeOptions) {
+        if (dryTimeMinutes !in dryTimeOptions) dryTimeMinutes = 0
+    }
 
     // 单层结构：滚动内容占满剩余高度，动作条贴底（navigationBarsPadding 自理）
     Column(modifier = modifier.fillMaxSize()) {
@@ -168,11 +191,16 @@ private fun OrderReadyContent(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            DeviceCard(scan, program)
+            DeviceCard(scan, program, dryer)
             SettingsSection(
-                title = if (dryer) "烘干时长" else "洗衣档位",
+                title = when {
+                    dryer && needsDryTime -> "烘干模式"
+                    dryer -> "烘干时长"
+                    else -> "洗衣档位"
+                },
                 subtitle = when {
                     !orderable -> "设备使用中 · 仅可查看模式与价格"
+                    dryer && needsDryTime -> "先选温度档位，再选烘干时长"
                     dryer -> "选择烘干时长，选好再下单"
                     else -> "点一下选中，选好再下单"
                 },
@@ -192,8 +220,43 @@ private fun OrderReadyContent(
                                 onSelect = { selectedModelId = model.workModelId },
                                 enabled = orderable,
                                 dryer = dryer,
+                                hasAdditionDryTime = UjingState.needsDryTimeSelection(
+                                    dryer,
+                                    model.additionDryTime?.options.orEmpty(),
+                                ),
                             )
                         }
+                    }
+                }
+            }
+            if (needsDryTime && selected != null) {
+                val dryTimeTitle = selected.additionDryTime?.title
+                    ?.takeIf { it.isNotBlank() } ?: "烘干时长"
+                val per10 = UjingState.dryerPricePer10Fen(selected.basePrice, selected.time)
+                SettingsSection(
+                    title = dryTimeTitle,
+                    subtitle = "每 10 分钟 ¥${UjingState.fen2yuan(per10)}",
+                ) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        dryTimeOptions.forEach { minutes ->
+                            FilterChip(
+                                selected = dryTimeMinutes == minutes,
+                                onClick = { dryTimeMinutes = minutes },
+                                enabled = orderable,
+                                label = { Text("$minutes 分钟") },
+                            )
+                        }
+                    }
+                    if (orderable && dryTimeMinutes <= 0) {
+                        Text(
+                            "请选择烘干时长",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
                     }
                 }
             }
@@ -216,6 +279,8 @@ private fun OrderReadyContent(
         OrderActionBar(
             selected = selected,
             dryer = dryer,
+            dryTimeMinutes = dryTimeMinutes.takeIf { it > 0 },
+            needsDryTime = needsDryTime,
             temperatureId = temperatureId,
             addDetergent = addDetergent,
             addDisinfectant = addDisinfectant,
@@ -228,6 +293,7 @@ private fun OrderReadyContent(
         OrderConfirmDialog(
             program = program,
             model = selected,
+            dryTimeMinutes = dryTimeMinutes.takeIf { it > 0 },
             temperatureId = temperatureId.takeIf { it > 0 },
             addDetergent = addDetergent,
             addDisinfectant = addDisinfectant,
@@ -236,6 +302,7 @@ private fun OrderReadyContent(
                 draftStore.submit(
                     UjingDraftStore.OrderSelection(
                         model = selected,
+                        dryTimeMinutes = dryTimeMinutes.takeIf { it > 0 },
                         temperatureId = temperatureId.takeIf { it > 0 },
                         addDetergent = addDetergent,
                         addDisinfectant = addDisinfectant,
@@ -254,7 +321,7 @@ private const val TEMPERATURE_DEFAULT_ID = 1
 
 /** 设备信息卡：机型 + 状态徽标 + 机号 + 通信模块（点验时看「通信模块」行）。 */
 @Composable
-private fun DeviceCard(scan: UjingScanResult, program: UjingProgramData) {
+private fun DeviceCard(scan: UjingScanResult, program: UjingProgramData, dryer: Boolean) {
     SettingsSection(title = "设备", subtitle = program.storeName.ifBlank { null }) {
         AppCard {
             Row(
@@ -262,7 +329,7 @@ private fun DeviceCard(scan: UjingScanResult, program: UjingProgramData) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    program.deviceTypeName.ifBlank { "洗衣机" },
+                    program.deviceTypeName.ifBlank { if (dryer) "烘干机" else "洗衣机" },
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f),
                 )
@@ -281,10 +348,25 @@ private fun DeviceCard(scan: UjingScanResult, program: UjingProgramData) {
     }
 }
 
-/** 档位展示名：烘干机以时长为主（对齐官方「选烘干时间」），其余用服务端模式名。 */
-private fun modelLabel(model: UjingWashModel, dryer: Boolean): String =
-    if (dryer && model.time > 0) "烘干 ${model.time} 分钟"
-    else model.workModelName.ifBlank { "模式 ${model.workModelId}" }
+/**
+ * 档位展示名：烘干机按服务端形态区分——差价计价只显示温度模式名（高温烘 / 中温烘…），
+ * 时长在下方另选；一档一价把时长并进标题。洗衣机沿用服务端模式名。
+ */
+private fun modelLabel(
+    model: UjingWashModel,
+    dryer: Boolean,
+    hasAdditionDryTime: Boolean,
+): String =
+    if (dryer) {
+        UjingState.dryerModelTitle(
+            modelName = model.workModelName,
+            modelTimeMinutes = model.time,
+            isDryer = true,
+            hasAdditionDryTime = hasAdditionDryTime,
+        )
+    } else {
+        model.workModelName.ifBlank { "模式 ${model.workModelId}" }
+    }
 
 /**
  * 一档洗衣模式 / 烘干时长：`AppCard` 高亮态 = 选中态（描边、底色、触感都由 AppCard 统一给，
@@ -300,8 +382,10 @@ private fun ModelCard(
     onSelect: () -> Unit,
     /** 设备不可下单（使用中 / 故障）时整档置灰不可点——别让人选了却下不了单。 */
     enabled: Boolean = true,
-    /** 烘干机：标题以时长为主（对齐官方「选烘干时间」的呈现），副行只留价格。 */
+    /** 烘干机：标题按服务端形态显示（温度模式名 / 模式名-时长）。 */
     dryer: Boolean = false,
+    /** 差价计价烘干机：标题只留温度模式名，价格列补「/基础时长」。 */
+    hasAdditionDryTime: Boolean = false,
 ) {
     AppCard(
         onClick = onSelect,
@@ -316,7 +400,7 @@ private fun ModelCard(
             RadioDot(selected = selected, enabled = enabled)
             Column(Modifier.weight(1f)) {
                 Text(
-                    modelLabel(model, dryer),
+                    modelLabel(model, dryer, hasAdditionDryTime),
                     style = MaterialTheme.typography.bodyLarge,
                     color = when {
                         !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
@@ -333,15 +417,24 @@ private fun ModelCard(
                     )
                 }
             }
-            Text(
-                "¥${UjingState.fen2yuan(model.basePrice)}",
-                style = MaterialTheme.typography.titleSmall,
-                color = when {
-                    !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                    selected -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurface
-                },
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    "¥${UjingState.fen2yuan(model.basePrice)}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = when {
+                        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        selected -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                )
+                if (dryer && hasAdditionDryTime && model.time > 0) {
+                    Text(
+                        "/${model.time}分钟",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    )
+                }
+            }
         }
     }
 }
@@ -458,27 +551,57 @@ private fun ChipRow(label: String, content: @Composable RowScope.() -> Unit) {
 private fun OrderActionBar(
     selected: UjingWashModel?,
     dryer: Boolean,
+    dryTimeMinutes: Int?,
+    needsDryTime: Boolean,
     temperatureId: Int,
     addDetergent: Boolean,
     addDisinfectant: Boolean,
     orderable: Boolean,
     onOrder: () -> Unit,
 ) {
+    val estimatedPriceFen = if (selected != null && dryer && dryTimeMinutes != null) {
+        UjingState.dryerPriceFen(selected.basePrice, selected.time, dryTimeMinutes)
+    } else {
+        selected?.basePrice ?: 0
+    }
     val summary = OrderSummary(
-        title = selected?.let { modelLabel(it, dryer) }
-            ?: if (dryer) "未选择烘干时长" else "未选择洗衣档位",
+        title = when {
+            selected == null -> if (dryer) "未选择烘干模式" else "未选择洗衣档位"
+            dryer -> buildString {
+                append(
+                    UjingState.dryerModelTitle(
+                        modelName = selected.workModelName,
+                        modelTimeMinutes = selected.time,
+                        isDryer = true,
+                        hasAdditionDryTime = needsDryTime,
+                    ),
+                )
+                if (needsDryTime) {
+                    append(" · ")
+                    append(dryTimeMinutes?.let { "$it 分钟" } ?: "未选时长")
+                }
+            }
+            else -> modelLabel(selected, dryer = false, hasAdditionDryTime = false)
+        },
         detail = selected?.let {
-            buildString {
-                append("¥").append(UjingState.fen2yuan(it.basePrice))
-                // 烘干机的时长已在标题里，副行不再重复
-                if (it.time > 0 && !dryer) {
-                    append(" · ").append(it.time).append(" 分钟")
+            if (needsDryTime && dryTimeMinutes == null) {
+                "请选择烘干时长"
+            } else {
+                buildString {
+                    append("¥").append(UjingState.fen2yuan(estimatedPriceFen))
+                    if (dryer && needsDryTime) {
+                        append(" · 预估，以实付为准")
+                    }
+                    // 烘干机的时长已在标题里，副行不再重复
+                    if (it.time > 0 && !dryer) {
+                        append(" · ").append(it.time).append(" 分钟")
+                    }
+                    if (temperatureId > 0) {
+                        append(" · ").append(UjingState.temperatureLabel(temperatureId))
+                    }
+                    if (addDetergent) append(" · 洗衣液")
+                    if (addDisinfectant) append(" · 消毒液")
                 }
-                if (temperatureId > 0) {
-                    append(" · ").append(UjingState.temperatureLabel(temperatureId))
-                }
-                if (addDetergent) append(" · 洗衣液")
-                if (addDisinfectant) append(" · 消毒液")
             }
         },
     )
@@ -516,13 +639,24 @@ private fun OrderActionBar(
                         }
                     }
                 }
-                Button(onClick = onOrder, enabled = orderable && selected != null) {
+                Button(
+                    onClick = onOrder,
+                    enabled = orderable && selected != null &&
+                        (!needsDryTime || dryTimeMinutes != null),
+                ) {
                     Text("下单")
                 }
             }
             if (!orderable) {
                 Text(
                     "该设备正在使用或暂不可下单，暂时下不了单。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
+                )
+            } else if (selected != null && needsDryTime && dryTimeMinutes == null) {
+                Text(
+                    "请选择烘干时长后再下单。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
@@ -558,12 +692,24 @@ internal fun ScanBadgePill(badge: UjingState.ScanBadge) {
 private fun OrderConfirmDialog(
     program: UjingProgramData,
     model: UjingWashModel,
+    dryTimeMinutes: Int?,
     temperatureId: Int?,
     addDetergent: Boolean,
     addDisinfectant: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val dryer = UjingState.isDryer(program.type, program.deviceTypeId, program.deviceTypeName)
+    val hasAdditionDryTime = UjingState.needsDryTimeSelection(
+        dryer,
+        model.additionDryTime?.options.orEmpty(),
+    )
+    val effectiveDryMinutes = dryTimeMinutes ?: model.time
+    val estimatedPriceFen = if (dryer && dryTimeMinutes != null) {
+        UjingState.dryerPriceFen(model.basePrice, model.time, dryTimeMinutes)
+    } else {
+        model.basePrice
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("确认下单") },
@@ -573,19 +719,40 @@ private fun OrderConfirmDialog(
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     buildString {
-                        append(program.deviceTypeName.ifBlank { "洗衣机" })
+                        append(
+                            program.deviceTypeName.ifBlank {
+                                if (dryer) "烘干机" else "洗衣机"
+                            },
+                        )
                         program.deviceNo?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
                     },
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 Text(
                     buildString {
-                        append(model.workModelName.ifBlank { "洗衣模式" })
-                        append(" · ¥").append(UjingState.fen2yuan(model.basePrice))
-                        if (model.time > 0) append(" · ").append(model.time).append(" 分钟")
-                        // 烘干机下单会自动带 dryTime（协议口径 = 时长/10），给用户交代一句
-                        if (program.type == 2 && model.time > 0) {
-                            append(" · 烘干档 ${UjingState.dryTimeFor(model.time)}")
+                        if (dryer) {
+                            append(
+                                UjingState.dryerModelTitle(
+                                    modelName = model.workModelName,
+                                    modelTimeMinutes = model.time,
+                                    isDryer = true,
+                                    hasAdditionDryTime = hasAdditionDryTime,
+                                ),
+                            )
+                            // 差价计价：标题只有温度模式名，时长单独交代
+                            if (hasAdditionDryTime && effectiveDryMinutes > 0) {
+                                append(" · ").append(effectiveDryMinutes).append(" 分钟")
+                            }
+                        } else {
+                            append(model.workModelName.ifBlank { "洗衣模式" })
+                            if (model.time > 0) {
+                                append(" · ").append(model.time).append(" 分钟")
+                            }
+                        }
+                        append(" · ¥").append(UjingState.fen2yuan(estimatedPriceFen))
+                        // 差价计价的金额按单价预估，最终以服务端/支付宝实付为准
+                        if (dryer && dryTimeMinutes != null) {
+                            append("（预估，以实付为准）")
                         }
                     },
                     style = MaterialTheme.typography.bodyMedium,
