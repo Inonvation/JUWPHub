@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.domain
 
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 import kotlin.math.abs
@@ -36,6 +37,33 @@ data class ReminderPlan(
 ) {
     /** 去重键：同一节课同一天只提醒一次（闹钟与周期核对共用，DESIGN §3.7）。 */
     val dedupKey: String get() = "$date|${course.id}|$startMinutes"
+}
+
+/**
+ * 距上课还有几分钟（**向上取整**，最小 1）——灵动岛芯片「剩 N 分」的唯一口径。
+ *
+ * 向上取整而不是向下：还剩 8 分 59 秒时说「剩 9 分」，用户按它出门不会迟到；
+ * 向下取整会在整分刚过时少报一分钟。已上课（闹钟迟到跨过上课时刻）给 1，
+ * 芯片上永远不会出现「剩 0 分 / 剩 -1 分」。
+ */
+fun ReminderPlan.minutesLeft(now: LocalDateTime): Long {
+    val seconds = Duration.between(now, startAt).seconds
+    if (seconds <= 0L) return 1L
+    return (seconds + 59L) / 60L
+}
+
+/**
+ * 灵动岛卡片的进度条（0–100）= 提前量窗口走完的比例。
+ *
+ * 窗口 = `[triggerAt, startAt)`。闹钟被 ROM 推迟时从中间起步（例如提前量 10 分钟、
+ * 只剩 3 分钟才发出 → 70%），这是**如实反映**而不是假装从 0 起——进度条与芯片分钟数
+ * 必须说同一件事。提前量为 0（理论上不出现）按走完处理，避免除零。
+ */
+fun ReminderPlan.progressPercent(now: LocalDateTime): Int {
+    val total = Duration.between(triggerAt, startAt).seconds
+    if (total <= 0L) return 100
+    val elapsed = Duration.between(triggerAt, now).seconds
+    return ((elapsed * 100L) / total).coerceIn(0L, 100L).toInt()
 }
 
 /**

@@ -62,6 +62,30 @@ fun placeTeacherLine(course: Course): String {
     ).joinToString(" · ")
 }
 
+/**
+ * 灵动岛倒计时卡片的正文：`@南B208 · 10:15 上课`（无地点只留后半句）。
+ *
+ * **地点在前**：倒计时卡是「马上要出门」的场景，地点是唯一不能猜的信息；
+ * 上课时刻放后面，与芯片的剩余分钟数互为印证。不走 [metaLine] 是因为那里
+ * 以时间段开头、地点被挤到中段，而卡片正文只有一行。
+ */
+fun liveClassLine(slots: List<TimeSlot>, course: Course): String {
+    val location = compactPosition(course.position)
+    return listOfNotNull(
+        location.takeIf { it.isNotBlank() }?.let { "@$it" },
+        "${clockOf(slots, course)} 上课",
+    ).joinToString(" · ")
+}
+
+/**
+ * 灵动岛芯片上的短文案：`剩8分`。
+ *
+ * 芯片宽 96dp，超过 7 个字符可能只留图标（与 `EbikeFreeRide.countdownChipText`
+ * 同一约束）；提前量上限 30 分钟，最长 `剩30分` 四个字符，安全。
+ * 分钟数由 `ReminderPlan.minutesLeft` 给，这里只管拼。
+ */
+fun liveChipText(minutesLeft: Long): String = "剩${minutesLeft}分"
+
 /** `3-4 节` / `5 节`：今日页统一卡左列的节次短标签（与 [sectionRange] 的「第3-4节」区分）。 */
 fun sectionShortLabel(course: Course): String =
     if (course.endSection > course.startSection) {

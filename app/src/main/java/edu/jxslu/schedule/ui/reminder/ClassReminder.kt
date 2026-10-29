@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.reminder
 
 import android.app.AlarmManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -8,6 +9,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.provider.AlarmClock
+import android.service.notification.StatusBarNotification
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -29,7 +31,7 @@ import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.prefs.ReminderKeyKind
 import edu.jxslu.schedule.data.repo.PendingLaunch
 import edu.jxslu.schedule.data.repo.PendingNotification
-import edu.jxslu.schedule.domain.ReminderDefaults
+import edu.jxslu.schedule.domain.ReminderPlan
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.dueReminderPlan
@@ -43,6 +45,10 @@ import edu.jxslu.schedule.domain.homeworkDisplayTitle
 import edu.jxslu.schedule.domain.nextClassStartPlan
 import edu.jxslu.schedule.domain.nextReminderPlan
 import edu.jxslu.schedule.domain.remarkPreview
+import edu.jxslu.schedule.domain.liveChipText
+import edu.jxslu.schedule.domain.liveClassLine
+import edu.jxslu.schedule.domain.minutesLeft
+import edu.jxslu.schedule.domain.progressPercent
 import edu.jxslu.schedule.ui.wenqu.WenquPreregReminder
 import kotlinx.coroutines.flow.first
 import java.time.LocalDateTime
@@ -69,9 +75,10 @@ object ClassReminder {
     private const val ALARM_REQUEST_CODE = 4002
 
     /**
-     * 重排下一个提醒：上课与作业两个来源取**更早**的触发时刻，排同一个闹钟。
-     * 某一类开关关掉就忽略那一类；两者都没有（提醒关、课表空、不在学期内、没有待提醒作业）
-     * 时撤销已排闹钟——「关掉开关后通知还在响」比不响严重得多。
+     * 重排下一个提醒：上课（提前量 / 上课时刻 / 倒计时卡片的分钟刻度）与作业两个来源
+     * 取**更早**的触发时刻，排同一个闹钟。某一类开关关掉就忽略那一类；两者都没有
+     * （提醒关、课表空、不在学期内、没有待提醒作业）时撤销已排闹钟——「关掉开关后
+     * 通知还在响」比不响严重得多。顺带：不在倒计时窗口里就撤掉岛上那张卡。
      */
     suspend fun scheduleNext(context: Context) {
         runCatching {
@@ -83,22 +90,33 @@ object ClassReminder {
                 ?: return
             val pending = alarmPendingIntent(context)
             val now = LocalDateTime.now()
-            val classTriggerAt = if (repo.reminderEnabled.first()) {
+            val reminderOn = repo.reminderEnabled.first()
+            var livePlan: ReminderPlan? = null
+            val classTriggerAt = if (reminderOn) {
                 val semester = repo.semester.first()
                 val slots = repo.timeSlots.first()
                 val courses = repo.courses.first()
+                val lead = repo.reminderLeadMinutes.first()
                 // 日期覆盖（调休 / 停课，§4.40）：放假那天不排上课提醒，
                 // 补课那天按借来的课排——与今日页同一口径
                 val overrides = repo.overridesFor()
-                // 上课提醒现在有两个触发点（DESIGN §3.7）：提前量与上课时刻，
-                // 都开着时取更早的排闹钟；核对 Worker 会先补发窗口内的、再重排
+                // 灵动岛倒计时卡片（2026-10-29）：提前量窗口内每分钟边界醒一次，
+                // 刷新芯片上的剩余分钟数与进度条。借**同一枚闹钟**（核对 Worker 每轮
+                // 都会重排），不新增闹钟通道、不常驻前台服务——岛上分钟级足够，
+                // 秒级交给卡片头部的系统 chronometer。
+                livePlan = dueReminderPlan(semester, slots, courses, now, lead, overrides)
+                val liveTickAt = livePlan
+                    ?.takeIf { ReminderNotifications.liveTickNeeded(context, repo, it) }
+                    ?.let { nextMinuteBoundary(now) }
+                // 上课提醒现在有三个候选触发点（DESIGN §3.7）：提前量、上课时刻、
+                // 倒计时的分钟刻度，取最早的排闹钟；核对 Worker 会先补发窗口内的、再重排
                 listOfNotNull(
                     nextReminderPlan(
                         semester = semester,
                         slots = slots,
                         courses = courses,
                         now = now,
-                        leadMinutes = repo.reminderLeadMinutes.first(),
+                        leadMinutes = lead,
                         overrides = overrides,
                     )?.triggerAt,
                     nextClassStartPlan(
@@ -108,8 +126,12 @@ object ClassReminder {
                         now = now,
                         overrides = overrides,
                     )?.startAt,
+                    liveTickAt,
                 ).minOrNull()
             } else null
+            // 不在倒计时窗口里（提醒关 / 已上课 / 调休停课 / 换了课表）就别让岛上那张卡留着：
+            // 设置页与数据变化只调这里、不调核对 Worker，撤卡不能只指望 Worker
+            if (livePlan == null) ReminderNotifications.cancelLiveUpdate(context)
             // 作业开关关 → 连库都不读（未完成列表要查 Room）；开着才求下一个作业提醒点
             val homeworkTriggerAt = if (repo.homeworkReminderEnabled.first()) {
                 nextHomeworkReminder(
@@ -160,6 +182,16 @@ object ClassReminder {
         Intent(context, ReminderAlarmReceiver::class.java),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
+
+    /**
+     * 下一个整分边界（严格晚于 [now]）。倒计时卡片的分钟刻度：芯片「剩 N 分」与
+     * 进度条按整分翻转，闹钟落在 :00 秒上，芯片就不会「剩 8 分」停满 59 秒才变。
+     *
+     * 先截断到分再加一分钟，保证结果**严格大于** now（截断最多抹掉 59.999 秒，
+     * 再加 60 秒），不会排出一个已经过去的时刻导致闹钟立即回环。
+     */
+    private fun nextMinuteBoundary(now: LocalDateTime): LocalDateTime =
+        now.withSecond(0).withNano(0).plusMinutes(1)
 }
 
 /**
@@ -184,6 +216,13 @@ internal object ReminderNotifications {
     /** 「上课」通知（上课时刻触发，2026-09-22 新增）：固定 id 1004，与提前量（1001）、
      *  作业（1002/1003）互不覆盖。 */
     private const val CLASS_START_NOTIFICATION_ID = 1004
+
+    /**
+     * 倒计时卡片的上课时刻余量（2026-10-29）：上课后多久由系统兜底撤掉。
+     * 正常路径是核对 Worker 在上课时刻那轮 [cancelLiveUpdate]；这个 timeout 只在
+     * 「闹钟全丢 + App 被冻结」时兜底，别把它当主路径。
+     */
+    private const val LIVE_GRACE_MILLIS = 2 * 60 * 1000L
 
     /** 作业截止提醒通道（DESIGN §3.11）。与上课提醒同档 importance，用户可在系统设置降级。 */
     private const val HOMEWORK_CHANNEL_ID = "homework_deadline_v2"
@@ -267,7 +306,11 @@ internal object ReminderNotifications {
     }
 
     private suspend fun postClassReminderIfAny(context: Context, repo: ScheduleRepository) {
-        if (!repo.reminderEnabled.first()) return
+        if (!repo.reminderEnabled.first()) {
+            // 关开关后残留的倒计时卡片必须撤：关掉后通知还在，比不响严重得多
+            cancelLiveUpdate(context)
+            return
+        }
         // 通知被系统/用户整体关闭时静默跳过：写不出去也不该在核对里报错
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         val slots = repo.timeSlots.first()
@@ -310,49 +353,201 @@ internal object ReminderNotifications {
             )
             if (held) {
                 repo.setReminderLastKey(ReminderKeyKind.Start, startKey)
-                return
+                // 不 return：上课提醒被拦不等于倒计时卡片不用撤——上课时刻到了，
+                // 岛上那张卡（若有）必须在同一轮里撤掉，否则要等 timeoutAfter 兜底
+            } else {
+                val posted = postClassNotification(
+                    context,
+                    id = CLASS_START_NOTIFICATION_ID,
+                    title = "上课 · ${startDue.course.name}",
+                    text = notificationLine(slots, startDue.course),
+                    strongVibration = strongVibration,
+                )
+                if (posted) repo.setReminderLastKey(ReminderKeyKind.Start, startKey)
             }
-            val posted = postClassNotification(
-                context,
-                id = CLASS_START_NOTIFICATION_ID,
-                title = "上课 · ${startDue.course.name}",
-                text = notificationLine(slots, startDue.course),
-                strongVibration = strongVibration,
-            )
-            if (posted) repo.setReminderLastKey(ReminderKeyKind.Start, startKey)
         }
 
-        val due = dueReminderPlan(semester, slots, courses, now, leadMinutes = lead, overrides = overrides)
-        val key = due?.dedupKey
-        if (key != null && repo.reminderLastKey(ReminderKeyKind.Before) != key) {
-            val held = QuietHoursGate.intercept(
-                context,
-                PendingNotification(
-                    tag = NOTIFICATION_TAG,
-                    notificationId = NOTIFICATION_ID,
-                    channelId = CHANNEL_ID,
-                    category = NotificationCompat.CATEGORY_EVENT,
-                    title = "${ReminderDefaults.leadLabel(lead)}后上课 · ${due.course.name}",
-                    text = notificationLine(slots, due.course),
-                    eventAt = due.startAt.atZone(zone).toInstant().toEpochMilli(),
-                    enqueuedAt = System.currentTimeMillis(),
-                    vibrate = strongVibration,
-                    launch = PendingLaunch(kind = PendingLaunch.Kind.MAIN_PLAIN, requestCode = 0),
-                ),
-            )
-            if (held) {
-                repo.setReminderLastKey(ReminderKeyKind.Before, key)
-                return
-            }
-            val posted = postClassNotification(
-                context,
-                id = NOTIFICATION_ID,
-                title = "${ReminderDefaults.leadLabel(lead)}后上课 · ${due.course.name}",
-                text = notificationLine(slots, due.course),
-                strongVibration = strongVibration,
-            )
-            if (posted) repo.setReminderLastKey(ReminderKeyKind.Before, key)
+        syncLiveUpdate(
+            context = context,
+            repo = repo,
+            plan = dueReminderPlan(semester, slots, courses, now, leadMinutes = lead, overrides = overrides),
+            slots = slots,
+            strongVibration = strongVibration,
+        )
+    }
+
+    /**
+     * 灵动岛倒计时卡片（DESIGN §3.7，2026-10-29）：提前量提醒不再是「发一条就走」的
+     * 一次性通知，而是**常驻到上课时刻**的 Live Update——状态栏一枚芯片（`剩8分`）、
+     * 下拉一张卡（课名 + 地点/上课时刻 + 系统倒计时 + 进度条）。
+     *
+     * 与提前量提醒共用同一条去重键（`Before`）：键已落 = 这节课的提醒处理过
+     * （发过，或被免扰拦下）。**只有第一次发要响**（HIGH 渠道 + 直接震动），
+     * 之后每分钟的刷新静默（`setOnlyAlertOnce` + 同一 id）。
+     *
+     * 三种「不上岛 / 撤岛」：
+     * - 免扰时段拦下第一次发送 → 不补发（拦截 = 已处理，与旧提醒同口径）；
+     * - 用户把岛划掉 → [isLivePosted] 为 false，**不再顶回去**（Live Updates 的硬要求：
+     *   别把用户划掉的再弹回来）；
+     * - [plan] 为 null（还没进提前量窗口 / 已上课 / 提醒关了 / 调休停课）→ 撤掉残留。
+     *
+     * [plan] 由 [dueReminderPlan] 给：它只看「还没开始、且在上课时刻 − 提前量之内」的课，
+     * 上课那一刻自然变 null——这正是「倒计时归零即撤岛」的语义，不另写判定。
+     */
+    private suspend fun syncLiveUpdate(
+        context: Context,
+        repo: ScheduleRepository,
+        plan: ReminderPlan?,
+        slots: List<TimeSlot>,
+        strongVibration: Boolean,
+    ) {
+        if (plan == null) {
+            cancelLiveUpdate(context)
+            return
         }
+        val key = plan.dedupKey
+        val now = LocalDateTime.now()
+        if (repo.reminderLastKey(ReminderKeyKind.Before) == key) {
+            // 已处理过：只有还挂在通知栏上才刷新。划掉的、被免扰拦下的都不再发
+            if (isLivePosted(context)) postLiveUpdate(context, plan, slots, now)
+            return
+        }
+        val held = QuietHoursGate.intercept(
+            context,
+            PendingNotification(
+                tag = NOTIFICATION_TAG,
+                notificationId = NOTIFICATION_ID,
+                channelId = CHANNEL_ID,
+                category = NotificationCompat.CATEGORY_EVENT,
+                // 标题/正文与岛上那张卡同一口径：补发出来的是普通通知，
+                // 不带相对时间（「20 分钟后上课」在补发时刻可能是假信息）
+                title = plan.course.name,
+                text = liveClassLine(slots, plan.course),
+                eventAt = plan.startAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                enqueuedAt = System.currentTimeMillis(),
+                vibrate = strongVibration,
+                launch = PendingLaunch(kind = PendingLaunch.Kind.MAIN_PLAIN, requestCode = 0),
+            ),
+        )
+        if (held) {
+            repo.setReminderLastKey(ReminderKeyKind.Before, key)
+            return
+        }
+        val posted = postLiveUpdate(context, plan, slots, now)
+        if (posted) {
+            repo.setReminderLastKey(ReminderKeyKind.Before, key)
+            // 开了「通知强提醒」才直接震（口径同上课时刻通知，见 postClassNotification）
+            if (strongVibration) ReminderVibration.vibrate(context)
+        }
+    }
+
+    /**
+     * 撤掉倒计时卡片（与提前量提醒同一个 tag/id）。没有这条通知时是空跑。
+     * internal：`ClassReminder.scheduleNext` 在提醒被关掉时也要撤（它不走核对 Worker）。
+     *
+     * **只撤 `ongoing` 的那条**：免扰时段补发出来的提前量提醒复用同一个 tag/id，
+     * 但它是普通通知（非 ongoing）——顺手撤掉会把刚补发的提醒吃掉。
+     */
+    internal fun cancelLiveUpdate(context: Context) {
+        if (!isLivePosted(context)) return
+        runCatching {
+            NotificationManagerCompat.from(context).cancel(NOTIFICATION_TAG, NOTIFICATION_ID)
+        }.onFailure { Log.w("ClassReminder", "cancel live update failed", it) }
+    }
+
+    /** 本应用挂在通知栏上的那条上课类通知（固定 tag/id），没有则 null。 */
+    private fun activeClassNotification(context: Context): StatusBarNotification? = runCatching {
+        context.getSystemService(NotificationManager::class.java)
+            ?.activeNotifications
+            ?.firstOrNull { it.tag == NOTIFICATION_TAG && it.id == NOTIFICATION_ID }
+    }.getOrNull()
+
+    /**
+     * 倒计时卡片现在是否挂在通知栏上（`ongoing` 才是它）。用来实现「用户划掉的
+     * 不再顶回去」：每轮核对先问系统，没有就不发——不需要额外的已划掉标记，
+     * 也不会因为进程重启而丢失（通知本身由系统持有）。
+     */
+    private fun isLivePosted(context: Context): Boolean =
+        activeClassNotification(context)?.isOngoing == true
+
+    /**
+     * 分钟刻度要不要排（DESIGN §3.7）：只有「卡片看得见」或「这节课的提醒还没处理过」
+     * 才值得每分钟唤醒一次核对。
+     *
+     * - 卡片在栏上 → 要刷新分钟数 / 进度条；
+     * - 提醒还没处理（用户刚在提前量窗口里打开开关、闹钟漏了但 App 刚被打开）→
+     *   先让下一轮核对把卡发出来；
+     * - 用户划掉了 / 免扰时段拦下了 / 渠道被系统关掉 → **不再每分钟醒**：
+     *   刻度只为看得见的卡片服务，否则提前量 30 分钟就是 30 次白唤醒。
+     */
+    internal suspend fun liveTickNeeded(
+        context: Context,
+        repo: ScheduleRepository,
+        plan: ReminderPlan,
+    ): Boolean = isLivePosted(context) || repo.reminderLastKey(ReminderKeyKind.Before) != plan.dedupKey
+
+    private fun postLiveUpdate(
+        context: Context,
+        plan: ReminderPlan,
+        slots: List<TimeSlot>,
+        now: LocalDateTime,
+    ): Boolean {
+        ensureChannel(context)
+        val notification = liveClassNotification(context, plan, slots, now)
+        // 无 POST_NOTIFICATIONS 权限时系统静默丢弃；SecurityException 等异常也不外漏
+        return runCatching {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_TAG, NOTIFICATION_ID, notification)
+        }.isSuccess
+    }
+
+    /**
+     * 倒计时卡片的构建（Android 16 上由系统提升为 Live Update / 灵动岛）。
+     *
+     * 上岛只要两件东西：`setRequestPromotedOngoing(true)` + manifest 里的
+     * `POST_PROMOTED_NOTIFICATIONS`（普通权限，已在）。低版本设备这两项被系统忽略，
+     * 同一份通知退化成「常驻 + 倒计时」的普通通知，不是分档实现。
+     * 官方资格清单全部满足：`ongoing` ✓、有 contentTitle ✓、无自定义 RemoteViews ✓、
+     * 非 group summary ✓、不 colorized ✓、渠道不是 IMPORTANCE_MIN ✓、样式是
+     * `ProgressStyle`（清单里允许）✓。**别加 `setCustomContentView`、别把渠道降成
+     * IMPORTANCE_MIN**，那会当场取消资格。
+     *
+     * 三层时间表达各有分工，别互相替代：
+     * - 卡片头部：系统 chronometer 倒数到上课时刻（秒级，不靠我们重发）；
+     * - 芯片：`剩8分`（HyperOS 3 的芯片不显示 chronometer，只能给短文案，
+     *   见 `EbikeFreeRideNotifier.countdownNotification` 的实测记录）；
+     * - 进度条：提前量窗口走完的比例，与芯片分钟数同一口径。
+     */
+    private fun liveClassNotification(
+        context: Context,
+        plan: ReminderPlan,
+        slots: List<TimeSlot>,
+        now: LocalDateTime,
+    ): Notification {
+        val zone = ZoneId.systemDefault()
+        val startAtMillis = plan.startAt.atZone(zone).toInstant().toEpochMilli()
+        val nowMillis = now.atZone(zone).toInstant().toEpochMilli()
+        val text = liveClassLine(slots, plan.course)
+        return NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_bell)
+            .setContentTitle(plan.course.name)
+            .setContentText(text)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            // 常驻到上课时刻：不自动消失、不随点击消失（上课时刻那条是另一条通知）
+            .setOngoing(true)
+            .setAutoCancel(false)
+            // 第一次发要响（渠道 HIGH + 振动），之后每分钟的刷新必须静默
+            .setOnlyAlertOnce(true)
+            .setWhen(startAtMillis)
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .setChronometerCountDown(true)
+            .setStyle(NotificationCompat.ProgressStyle().setProgress(plan.progressPercent(now)))
+            // 兜底：核对链路全挂（闹钟丢失 + App 被冻结）时也别让岛永远挂着
+            .setTimeoutAfter((startAtMillis - nowMillis).coerceAtLeast(0L) + LIVE_GRACE_MILLIS)
+            .setContentIntent(mainContentIntent(context))
+            .setRequestPromotedOngoing(true)
+            .setShortCriticalText(liveChipText(plan.minutesLeft(now)))
+            .build()
     }
 
     /**
@@ -368,7 +563,18 @@ internal object ReminderNotifications {
         return "$meta\n$remark"
     }
 
-    /** 上课类通知的共用构建（提前量与上课开始两处共用，标题与 id 不同）。 */
+    /**
+     * 上课类通知的点击落点：主界面（今日页）。两条通知共用同一个 PendingIntent
+     * ——requestCode + filterEquals 完全相同，系统本来就只认一份。
+     */
+    private fun mainContentIntent(context: Context): PendingIntent = PendingIntent.getActivity(
+        context,
+        0,
+        Intent(context, MainActivity::class.java),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    /** 上课类通知的共用构建（上课时刻通知用；提前量那条已改成倒计时卡片）。 */
     private fun postClassNotification(
         context: Context,
         id: Int,
@@ -384,14 +590,7 @@ internal object ReminderNotifications {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setAutoCancel(true)
-            .setContentIntent(
-                PendingIntent.getActivity(
-                    context,
-                    0,
-                    Intent(context, MainActivity::class.java),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                ),
-            )
+            .setContentIntent(mainContentIntent(context))
             .build()
         // 无 POST_NOTIFICATIONS 权限时系统静默丢弃；SecurityException 等异常也不外漏
         val posted = runCatching {
