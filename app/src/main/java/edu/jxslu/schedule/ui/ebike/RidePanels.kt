@@ -278,7 +278,8 @@ internal fun RideActionArea(
     lockPending: Boolean,
     /**
      * 开锁成功后的动作冷却截止时刻（epoch ms；0 = 无）。
-     * 冷却期「锁车 / 还车」置灰（2026-10-09 用户口径「开车后冷却三秒」），见 [KvcxRideState.unlockCooldownUntil]。
+     * 冷却期骑行卡**三枚动作（开锁 / 解锁 / 锁车 / 还车）一起置灰**并逐秒显剩余秒
+     * （2026-10-29 用户口径「都置灰」），见 [KvcxRideState.unlockCooldownUntil]。
      */
     unlockCooldownUntil: Long,
     timerActive: Boolean,
@@ -675,25 +676,38 @@ private fun RideActionButtons(
                     )
 
                     ride.locked == true -> RideActionButton(
-                        text = if (busy == KvcxAction.RESUME) "解锁中…" + waitedText else "解锁",
+                        // 冷却期内三枚动作一起置灰（2026-10-29 用户口径「都置灰」）：这一枚
+                        // 发的是真·解锁指令（物理写），和锁车 / 还车同一道闸——「重新使用该车」
+                        // 建单后服务端还在落账，早点点下去没有结果（用户报「点了没反应」）
+                        text = when {
+                            busy == KvcxAction.RESUME -> "解锁中…" + waitedText
+                            coolingSeconds > 0 -> "解锁 ${coolingSeconds}s"
+                            else -> "解锁"
+                        },
                         onClick = onResume,
-                        enabled = busy == null,
+                        enabled = busy == null && coolingSeconds == 0,
                         modifier = Modifier.weight(1f),
                     )
 
                     else -> RideActionButton(
                         // 已解锁也保留开锁入口：对在案订单重发解锁指令（不重建订单、免确认）——
-                        // 「App 显示未锁、车实际还锁着」时要有出口
-                        text = if (busy == KvcxAction.RESUME) "开锁中…" + waitedText else "开锁",
+                        // 「App 显示未锁、车实际还锁着」时要有出口。
+                        // 冷却期同样置灰（2026-10-29 用户口径「都置灰」）：这枚也是物理写指令，
+                        // 三枚一起挡，视觉上不要留一枚"看起来还能点"的
+                        text = when {
+                            busy == KvcxAction.RESUME -> "开锁中…" + waitedText
+                            coolingSeconds > 0 -> "开锁 ${coolingSeconds}s"
+                            else -> "开锁"
+                        },
                         onClick = onResume,
-                        enabled = busy == null,
+                        enabled = busy == null && coolingSeconds == 0,
                         modifier = Modifier.weight(1f),
                     )
                 }
                 // 锁车 / 还车是物理写动作：开锁后的冷却期内（[KvcxRideState.unlockCooldownUntil]）
                 // 置灰——车侧「已解锁」上报还没走完，紧接着发指令容易两头落空（2026-10-09）。
                 // 冷却期按钮文案带剩余秒数（「锁车 3s」，2026-10-10）——只置灰不说话，
-                // 用户不知道要等多久。左位开锁不冷却（重发解锁是安全的，见冷却口径的说明）
+                // 用户不知道要等多久。左位开锁 / 解锁同样吃这道闸（2026-10-29 用户口径「都置灰」）
                 RideActionButton(
                     text = when {
                         busy == KvcxAction.LOCK -> "锁车中…" + waitedText
@@ -754,11 +768,18 @@ private fun RideActionButtons(
             }
             // 「重新使用该车」（2026-10-10）：还车后原地重开这辆车（与其它开锁同一套闸）。
             // 单独一行、全宽——塞进上面那行会把文字挤成省略号；车号缺失（快照没拿到）
-            // 时没有"该车"可重开，不摆。
+            // 时没有"该车"可重开，不摆。请求期间写「开启中…（已等 Ns）」并禁用：定位 + 建单
+            // 最长十几秒，按钮纹丝不动时用户会以为没点上，再点一次被 busy 闸静默丢掉
+            // （2026-10-29 用户报「点了没反应」）
             summary?.carNum?.let { car ->
                 RideActionButton(
-                    text = "重新使用该车",
+                    text = when (busy) {
+                        KvcxAction.UNLOCK -> "开启中…" + waitedText
+                        KvcxAction.DIRECT_UNLOCK -> "开锁中…" + waitedText
+                        else -> "重新使用该车"
+                    },
                     onClick = { onReuseCar(car) },
+                    enabled = busy == null,
                     filled = false,
                 )
             }

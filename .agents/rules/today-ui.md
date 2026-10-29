@@ -48,7 +48,8 @@
     行内「开锁⇄锁车」：`locked==true` 显「开锁」→ `resumeRide()`；未锁显「锁车」→ `tempLock()`
     （免确认，与骑行页同闸）；悬置（`unlockPending` / `lockPending`）显「确认中…」置灰；
     有动作在跑（`busy`）时整条动作区收成一枚「还车中… 12s」+ 转圈（见下面「结束动作的两段反馈」）；
-    开锁 3 秒冷却内锁车 / 还车置灰显剩余秒；
+    开锁 3 秒冷却内「开锁 / 锁车 / 还车」一起置灰并显剩余秒（2026-10-29 用户口径「都置灰」，
+    与骑行页同口径）；
     已锁车的副行追加「已锁车（计费继续）」（临时锁车 ≠ 订单结束）。
     「还车」走今日页本地的 `KvcxConfirmAlertDialog`（文案唯一出处仍是 `kvcxConfirmDialog`）。
   - 胖乖：**`Graph.qiekjWatering` 落盘会话**（`QiekjWateringStore`，2026-10-21）——`unlock()` 流程

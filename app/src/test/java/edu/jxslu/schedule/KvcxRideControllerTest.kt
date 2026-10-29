@@ -1298,9 +1298,11 @@ class KvcxRideControllerTest {
     }
 
     @Test
-    fun `重新开启成功清掉还车结算卡`() {
+    fun `重新开启成功清掉还车结算卡并进三秒冷却`() {
         // 结算卡上的「重新使用该车」：开启成功 = 离开结算态，否则「已还车」的卡片会和
-        // 在案订单并存。两段式下开启落「已锁」快照、不进冷却
+        // 在案订单并存。两段式下开启落「已锁」快照；但这条路径**要挂冷却**——刚还完就
+        // 建新单，服务端两条账都还在落，早点点解锁 / 锁车 / 还车都没有结果
+        // （2026-10-29 用户报「点了没反应」）
         val session = FakeSession()
         val kvcx = controller(session)
         kvcx.query(quiet = true)
@@ -1311,17 +1313,19 @@ class KvcxRideControllerTest {
         session.unlockResult = {
             UnlockOutcome.Unlocked("100000669", helmetFlow = false, ride = ride(locked = true))
         }
+        val before = System.currentTimeMillis()
         kvcx.unlock("100000669")
 
         assertNull(kvcx.state.value.returnSummary)
         assertNotNull(kvcx.state.value.ride)
         assertEquals(true, kvcx.state.value.ride?.locked)
-        assertEquals(0L, kvcx.state.value.unlockCooldownUntil)
+        assertTrue(kvcx.state.value.unlockCooldownUntil >= before + UNLOCK_COOLDOWN_MS)
     }
 
     @Test
-    fun `重新开启未确认也清掉还车结算卡`() {
-        // 订单已创建（只是没确认到）：同样离开结算态——「已还车」的卡片不能与在案订单并存
+    fun `重新开启未确认也清掉还车结算卡且不进冷却`() {
+        // 订单已创建（只是没确认到）：同样离开结算态——「已还车」的卡片不能与在案订单并存。
+        // 未确认不算"开上了"：不挂冷却，用户仍可锁车 / 还车兜底（与普通开锁同一口径）
         val session = FakeSession()
         val kvcx = controller(session)
         kvcx.query(quiet = true)
@@ -1336,6 +1340,7 @@ class KvcxRideControllerTest {
 
         assertNull(kvcx.state.value.returnSummary)
         assertTrue(kvcx.state.value.unlockPending)
+        assertEquals(0L, kvcx.state.value.unlockCooldownUntil)
     }
 
     @Test

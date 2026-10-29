@@ -50,8 +50,14 @@ import java.util.Locale
  *
  * 车把「已解锁」上报服务端是**异步**的（开锁指令发出 ≠ 车侧已上报完成，常见 3~15 秒，
  * 放宽锁车确认窗就是为同一段延迟），紧接着发锁车 / 还车指令既容易撞上还在走的
- * 上报链、也容易把状态搅成谁都对不上的局面。冷却只挡锁车与还车这两个**物理写动作**
- * （UI 置灰），开锁位（重发解锁 / 解锁继续骑）不挡——那是把车打开的动作，没有新增计费后果。
+ * 上报链、也容易把状态搅成谁都对不上的局面。
+ *
+ * **冷却期内三枚动作一起置灰**（2026-10-29 用户口径「都置灰」）：左位开锁 / 解锁虽然
+ * 不新增计费后果，但同样是物理写指令，留着"看起来还能点"的那一枚只会让用户在落账空档里
+ * 白点。代价是「车没真开、想立刻重发」这个兜底要等 3 秒——3 秒比一次无声失败便宜。
+ *
+ * **「重新使用该车」也挂它**：那条两段式开启之后服务端还在落两条账（判据见
+ * [KvcxRideController.unlock]）。
  */
 internal const val UNLOCK_COOLDOWN_MS = 3_000L
 
@@ -161,10 +167,14 @@ data class KvcxRideState(
     /**
      * 开锁成功后的「锁车 / 还车」冷却截止时刻（epoch 毫秒；0 = 无冷却）。
      *
-     * 开锁指令发出后车侧上报是异步的（见 [UNLOCK_COOLDOWN_MS]），冷却期内这两个物理
-     * 写动作在 UI 上置灰。开锁类动作成功（[unlock] / [retryUnlock] / [resumeRide]）都会
-     * 刷新它；**不是失败态**，只是一道节流闸：页面按 [unlockCooldownSecondsLeft] 逐秒
-     * 显示倒计时，过期即失效（不写回 0 也没关系）。
+     * 开锁指令发出后车侧上报是异步的（见 [UNLOCK_COOLDOWN_MS]），冷却期内骑行卡上
+     * **三枚动作（开锁 / 解锁 / 锁车 / 还车）一起置灰**（2026-10-29 用户口径「都置灰」）。
+     * 开锁类动作成功（[unlock] / [retryUnlock] / [resumeRide]）都会刷新它；**不是失败态**，
+     * 只是一道节流闸：页面按 [unlockCooldownSecondsLeft] 逐秒显示倒计时，过期即失效
+     * （不写回 0 也没关系）。
+     *
+     * **「重新使用该车」那条两段式开启也挂它**（[unlock] 的 `reusingReturnedBike`）：
+     * 刚还完就建新单，服务端两条账都还在落，早点点下去没有结果。
      */
     val unlockCooldownUntil: Long = 0L,
     /**
@@ -540,6 +550,10 @@ class KvcxRideController internal constructor(
     fun unlock(carNum: String, sendUnlock: Boolean = false) = run(
         if (sendUnlock) KvcxAction.DIRECT_UNLOCK else KvcxAction.UNLOCK,
     ) { session ->
+        // 结算卡上的「重新使用该车」也走这条两段式开启，但它多一层时序：刚还掉的订单与
+        // 刚建的新单都在服务端异步落账，建单成功后的几秒里点解锁 / 锁车 / 还车容易撞在
+        // 这段上（用户报「点了没反应」）。所以这一条即使没发解锁指令也照挂 3 秒冷却。
+        val reusingReturnedBike = _state.value.returnSummary?.carNum == carNum
         val point = locateOrNotice() ?: return@run
         val outcome = try {
             session.unlockBike(carNum, point.lat, point.lng, point.source, sendUnlock = sendUnlock)
@@ -573,14 +587,16 @@ class KvcxRideController internal constructor(
                         unlockPending = false,
                         lockPending = false,
                         scoreAuthRequired = false,
-                        // 冷却防的是「刚发过解锁指令，车侧上报还在走」——只有真发过指令
-                        // （完整流程 / 两段式撞上头盔车退回完整流程）才需要；两段式车没动，
-                        // 锁车（重发无妨）/ 还车（wasLocked 跳过静默锁）都不用挡
-                        unlockCooldownUntil = if (sendUnlock || outcome.helmetFlow) {
-                            confirmedAt + UNLOCK_COOLDOWN_MS
-                        } else {
-                            0L
-                        },
+                        // 冷却防的是「刚发过解锁指令，车侧上报还在走」——完整流程 / 两段式
+                        // 撞上头盔车退回完整流程都要挡；普通两段式车没动，锁车（重发无妨）/
+                        // 还车（wasLocked 跳过静默锁）都不用挡。**「重新使用该车」是例外**：
+                        // 刚还完就建新单，服务端两条账都还在落，三枚动作按钮一起冷却
+                        unlockCooldownUntil =
+                            if (sendUnlock || outcome.helmetFlow || reusingReturnedBike) {
+                                confirmedAt + UNLOCK_COOLDOWN_MS
+                            } else {
+                                0L
+                            },
                         // 重新开锁成功即离开结算态（结算卡上的「重新使用该车」）：「已还车」的
                         // 卡片只在"还完车待决定"这段时间成立。失败路径不经过这里，卡片保留，
                         // 用户可以原地再点一次。

@@ -634,7 +634,8 @@ private fun ActiveRow(
  *
  * 锁态口径（与骑行页同源）：`locked == false` 显「锁车」（免确认）；`locked == true`
  * 显「开锁」；悬置态（开锁未确认 / 锁车确认中）显「确认中…」置灰。开锁后 3 秒冷却内
- * 锁车 / 还车置灰并显示剩余秒。还车与骑行页共用同一确认闸（调用方接 `kvcxConfirmDialog`）。
+ * **「开锁 / 锁车 / 还车」一起置灰并显示剩余秒**（2026-10-29 用户口径「都置灰」，
+ * 与骑行页同口径）。还车与骑行页共用同一确认闸（调用方接 `kvcxConfirmDialog`）。
  */
 @Composable
 private fun KvcxActiveRow(
@@ -723,9 +724,16 @@ private fun KvcxActiveRow(
                     pending -> ActionChip(label = "确认中…", enabled = false, onClick = {})
                     else -> {
                         // 开锁 ⇄ 锁车（免确认的是锁车；开锁走重发解锁那条现成路）
+                        // 冷却期两枚都置灰（2026-10-29）：已锁态这枚也是物理写，
+                        // 「重新使用该车」建单后服务端还在落账，早点点下去没有结果
                         ActionChip(
-                            label = if (locked) "开锁" else "锁车",
-                            enabled = if (locked) true else cooldownLeft <= 0,
+                            label = when {
+                                locked && cooldownLeft > 0 -> "开锁 ${cooldownLeft}s"
+                                locked -> "开锁"
+                                cooldownLeft > 0 -> "锁车 ${cooldownLeft}s"
+                                else -> "锁车"
+                            },
+                            enabled = cooldownLeft <= 0,
                             onClick = {
                                 haptics.tap()
                                 if (locked) onUnlock() else onLock()
