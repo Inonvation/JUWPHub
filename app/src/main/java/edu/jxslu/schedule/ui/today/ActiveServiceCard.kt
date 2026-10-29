@@ -27,7 +27,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -59,12 +61,16 @@ import edu.jxslu.schedule.ui.common.AppCardDefaults
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.BreathingDot
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.ebike.KvcxAction
+import edu.jxslu.schedule.ui.ebike.KvcxReturnSummary
 import edu.jxslu.schedule.ui.ebike.KvcxRideState
 import edu.jxslu.schedule.ui.ebike.unlockCooldownSecondsLeft
 import edu.jxslu.schedule.ui.qzxy.isQzxyWateringExpired
 import edu.jxslu.schedule.ui.qzxy.rememberQzxyWateringClock
+import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.delay
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.CheckmarkCircle02
 import me.rerere.hugeicons.stroke.ChevronRight
 
 /**
@@ -81,6 +87,13 @@ import me.rerere.hugeicons.stroke.ChevronRight
  * 动效：行的出现/消失走 `AnimatedVisibility`（进 220ms / 退 160ms，ui-common 口径），
  * 卡体 `animateContentSize` 收平高度；计时文案 `tnum` 等宽 + 每秒走（不做 crossfade，
  * 高频数值口径）；进行中行首一枚 900ms 呼吸圆点（同 `WateringBadge` 手法）。
+ *
+ * 结束动作的两段反馈（2026-10-29，用户报「点了还车/结束用水没有任何反馈，成功后卡片直接消失」）：
+ * 1. **动作中**：行尾动作钮换成置灰的「还车中… 12s」/「结束中…」+ 一枚 12dp 转圈，快趣带已等秒数，
+ *    趣智副行直接展示流程当前步骤（`QzxyFlowState.Working.step`）——等待有解释，不是卡住；
+ * 2. **成功后**：行数据一没就没，旧版那一帧直接退场；现在先亮 1.4 秒「已还车 / 已结束用水」完成态
+ *    （静态点 + 成功色勾 + 结果摘要），再走常规退场。完成态与进行中行共用同一个
+ *    `AnimatedVisibility`（内容就地切换）——分成两条会同时占两行高，卡体当场弹一下。
  *
  * 快趣骑行中（明确未锁车）把**整张卡片的边缘**点亮（`AppCard.highlighted` +
  * `highlightedFill = false`：主色 1.5dp 描边、不抬底色，180ms 过渡）：卡内行保持平铺，
@@ -115,6 +128,19 @@ internal fun ActiveServiceCard(
     qzxyWatering: QzxyWatering?,
     /** 趣智对账已确认设备那边结束（转「待核对」，不点亮）。 */
     qzxyDeviceEnded: Boolean,
+    /**
+     * 趣智「结束用水」流程正在跑（本窗口 ViewModel 的 `flow` 是 `Working`，2026-10-29）：
+     * 行切「正在结束…」、动作钮换成禁用的「结束中…」，副行展示当前步骤。
+     */
+    qzxyStopping: Boolean = false,
+    /** 趣智结束中的当前步骤文案（`QzxyFlowState.Working.step`）；null = 还没进到第一步。 */
+    qzxyStopStep: String? = null,
+    /**
+     * 快趣还车的完成态是否在亮（2026-10-29）。由列表层算好传进来而不是卡内自算：
+     * 有在案骑行时这张卡被提到课程区之前，还车成功那一刻 `ride` 就没了——卡内自算的话
+     * 卡片会带着「已还车」当场挪回列表中间（`animateItem` 滑走），完成态根本看不到。
+     */
+    kvcxDone: Boolean = false,
     ujingOrder: UjingOrderSnapshot?,
     /** 快趣动作回调（null = 行不渲染）。 */
     kvcxOnUnlock: (() -> Unit)?,
@@ -152,7 +178,19 @@ internal fun ActiveServiceCard(
     // 5 分钟线时由 WaterSlot 的时钟回调把它收掉）
     val waterVisible = waterSession != null && !waterExpired.value &&
         !waterSession.isStale(System.currentTimeMillis())
-    val anyActive = kvcxVisible || freeRideVisible || waterVisible || qzxyVisible || ujingLive != null
+    // 完成态要交代「刚结束的是哪台设备、用了多久」：数据消失后原对象就没了，留住最后一份
+    val lastQzxyWatering = rememberLastValue(qzxyWatering)
+    val lastWaterSession = rememberLastValue(waterSession)
+    // 结束成功的「已完成」停留（2026-10-29）：动作一成功行数据就没了，旧版那一帧直接退场，
+    // 用户既看不到「结束中」也看不到结果。现在先亮 1.4 秒完成态，再走常规退场。
+    // 快趣那份在列表层算（见 [kvcxDone]：它还决定卡片要不要留在原位）。
+    val qzxyDone = rememberDoneLinger(qzxyVisible, qzxyStopping)
+    val waterDone = rememberDoneLinger(waterVisible, waterStopping)
+    // 完成态与进行中行共用一条可见性：内容就地切换，卡体不会同时装两行
+    val kvcxRow = kvcxVisible || kvcxDone
+    val qzxyRow = qzxyVisible || qzxyDone
+    val waterRow = waterVisible || waterDone
+    val anyActive = kvcxRow || freeRideVisible || waterRow || qzxyRow || ujingLive != null
 
     // 整卡壳的显隐也走 AnimatedVisibility：**不能 early return**——组合一卸载，
     // 收拢动画就没有载体了（用户报的「状态卡片消失是瞬间消失的」正是它）。
@@ -170,25 +208,29 @@ internal fun ActiveServiceCard(
             highlightedFill = false,
         ) {
             AnimatedVisibility(
-                visible = kvcxVisible,
+                visible = kvcxRow,
                 enter = EnterRow,
                 exit = ExitRow,
             ) {
-                if (ride != null && kvcxOnUnlock != null && kvcxOnLock != null && kvcxOnReturn != null) {
-                    KvcxActiveRow(
-                        ride = ride,
-                        state = kvcxState ?: KvcxRideState(),
-                        freeStartAt = kvcxFreeStartAt,
-                        onUnlock = kvcxOnUnlock,
-                        onLock = kvcxOnLock,
-                        onReturn = kvcxOnReturn,
-                        onOpen = onOpenEbike,
-                    )
+                if (kvcxVisible) {
+                    if (ride != null && kvcxOnUnlock != null && kvcxOnLock != null && kvcxOnReturn != null) {
+                        KvcxActiveRow(
+                            ride = ride,
+                            state = kvcxState ?: KvcxRideState(),
+                            freeStartAt = kvcxFreeStartAt,
+                            onUnlock = kvcxOnUnlock,
+                            onLock = kvcxOnLock,
+                            onReturn = kvcxOnReturn,
+                            onOpen = onOpenEbike,
+                        )
+                    }
+                } else {
+                    KvcxDoneRow(summary = kvcxState?.returnSummary)
                 }
             }
             // 免费时长行（小程序方式）：骑行行不出现时才轮到它（账号方式的骑行信息更全，
             // 两者不会同时成立——能力闸互斥；防御性写法不叠分隔线即可）
-            val afterKvcx = kvcxVisible || freeRideVisible
+            val afterKvcx = kvcxRow || freeRideVisible
             if (freeRideStartAt != null) {
                 FreeRideSlot(
                     startAtMillis = freeRideStartAt,
@@ -197,33 +239,41 @@ internal fun ActiveServiceCard(
                     onExpired = { freeRideExpired.value = true },
                 )
             }
-            AnimatedDivider(visible = afterKvcx && (waterVisible || qzxyVisible || ujingLive != null))
-            waterSession?.let { session ->
-                WaterSlot(
-                    session = session,
-                    stopping = waterStopping,
-                    canStop = waterCanStop,
-                    onEnd = waterOnEnd,
-                    onOpen = onOpenWater,
-                    onExpired = { waterExpired.value = true },
-                )
-            }
-            AnimatedDivider(visible = waterVisible && (qzxyVisible || ujingLive != null))
+            AnimatedDivider(visible = afterKvcx && (waterRow || qzxyRow || ujingLive != null))
+            // Slot 常驻（不是 `waterSession?.let`）：会话消失后还要承载完成态，退场动画也
+            // 得有载体——跟着会话一起卸载，那一帧就是硬消失（2026-10-29）
+            WaterSlot(
+                session = waterSession,
+                done = waterDone,
+                lastSession = lastWaterSession,
+                stopping = waterStopping,
+                canStop = waterCanStop,
+                onEnd = waterOnEnd,
+                onOpen = onOpenWater,
+                onExpired = { waterExpired.value = true },
+            )
+            AnimatedDivider(visible = waterRow && (qzxyRow || ujingLive != null))
             AnimatedVisibility(
-                visible = qzxyVisible,
+                visible = qzxyRow,
                 enter = EnterRow,
                 exit = ExitRow,
             ) {
-                qzxyWatering?.let { watering ->
-                    QzxyActiveRow(
-                        watering = watering,
-                        deviceEnded = qzxyDeviceEnded,
-                        onStop = qzxyOnStop,
-                        onOpen = onOpenQzxy,
-                    )
+                if (qzxyVisible) {
+                    qzxyWatering?.let { watering ->
+                        QzxyActiveRow(
+                            watering = watering,
+                            deviceEnded = qzxyDeviceEnded,
+                            stopping = qzxyStopping,
+                            step = qzxyStopStep,
+                            onStop = qzxyOnStop,
+                            onOpen = onOpenQzxy,
+                        )
+                    }
+                } else {
+                    QzxyDoneRow(watering = lastQzxyWatering)
                 }
             }
-            AnimatedDivider(visible = qzxyVisible && ujingLive != null)
+            AnimatedDivider(visible = qzxyRow && ujingLive != null)
             AnimatedVisibility(
                 visible = ujingLive != null,
                 enter = EnterRow,
@@ -259,28 +309,41 @@ private fun FreeRideSlot(
     }
 }
 
-/** 开水行：同上，秒级走时留在本行；超过 5 分钟（过期）回调 [onExpired] 撤行。 */
+/**
+ * 开水行：同上，秒级走时留在本行；超过 5 分钟（过期）回调 [onExpired] 撤行。
+ *
+ * [session] 可为 null：会话成功后落盘 store 已清空，但完成态（[done]）还要在这条 Slot 里
+ * 再亮 1.4 秒——Slot 若跟着会话一起卸载，退场就没有载体了（2026-10-29）。
+ */
 @Composable
 private fun WaterSlot(
-    session: QiekjWateringSession,
+    session: QiekjWateringSession?,
+    done: Boolean,
+    lastSession: QiekjWateringSession?,
     stopping: Boolean,
     canStop: Boolean,
     onEnd: () -> Unit,
     onOpen: () -> Unit,
     onExpired: () -> Unit,
 ) {
-    val now by rememberLiveSecond(session.startedAtMillis) { !session.isStale(it) }
-    val active = !session.isStale(now)
+    val now by rememberLiveSecond(session?.startedAtMillis) { at ->
+        session != null && !session.isStale(at)
+    }
+    val active = session != null && !session.isStale(now)
     LaunchedEffect(active) { if (!active) onExpired() }
-    AnimatedVisibility(visible = active, enter = EnterRow, exit = ExitRow) {
-        WaterActiveRow(
-            session = session,
-            now = now,
-            stopping = stopping,
-            canStop = canStop,
-            onEnd = onEnd,
-            onOpen = onOpen,
-        )
+    AnimatedVisibility(visible = active || done, enter = EnterRow, exit = ExitRow) {
+        if (active && session != null) {
+            WaterActiveRow(
+                session = session,
+                now = now,
+                stopping = stopping,
+                canStop = canStop,
+                onEnd = onEnd,
+                onOpen = onOpen,
+            )
+        } else {
+            WaterDoneRow(session = lastSession)
+        }
     }
 }
 
@@ -297,6 +360,73 @@ private fun rememberLiveSecond(key: Any?, stillActive: (Long) -> Boolean): State
             value = System.currentTimeMillis()
         }
     }
+
+/** 完成态停留时长：够看清「已还车 / 已结束用水」+ 一行结果，又不至于挡着往下看。 */
+private const val DoneLingerMillis = 1_400L
+
+/**
+ * 动作收尾后多久内数据消失还算「这次动作的结果」。
+ *
+ * 成功时数据与动作**同帧**收尾（`ride = null` / `wateringStore.clear()` 就在动作块里），
+ * 但失败时动作先结束、数据还在——过一阵的到期 / 别处清理不能算成「刚结束」，
+ * 否则会把 165 秒自动关阀、后台自动还车也报成用户刚点的完成态。
+ */
+private const val EndActionGraceMillis = 6_000L
+
+/**
+ * 「结束成功 → 完成态停留」闸（2026-10-29）。
+ *
+ * [visible] = 行数据是否还在；[ending] = 结束动作是否正在跑。两者同帧翻假时，
+ * 光看当帧判不出来（动作停下与数据消失是同一帧），所以 [ending] 一旦为真就记一笔，
+ * 由 [visible] 翻假那一帧消费；没等到数据消失（失败 / 被挡）就在 [EndActionGraceMillis]
+ * 后作废。
+ *
+ * `internal` 而不是私有：快趣那份要在列表层（`TodayContent`）算——它还决定卡片要不要
+ * 留在课程区之前（见 `ActiveServiceCard` 的 `kvcxDone`）。
+ */
+@Composable
+internal fun rememberDoneLinger(visible: Boolean, ending: Boolean): Boolean {
+    val done = remember { mutableStateOf(false) }
+    val sawEnding = remember { mutableStateOf(false) }
+    LaunchedEffect(ending) {
+        if (ending) {
+            sawEnding.value = true
+        } else if (sawEnding.value) {
+            delay(EndActionGraceMillis)
+            sawEnding.value = false
+        }
+    }
+    LaunchedEffect(visible) {
+        if (visible) {
+            done.value = false
+        } else if (sawEnding.value) {
+            sawEnding.value = false
+            done.value = true
+            delay(DoneLingerMillis)
+            done.value = false
+        }
+    }
+    return done.value
+}
+
+/** 记住最后一个非空值：行数据消失后，完成态还要用它交代「刚结束的是哪台设备」。 */
+@Composable
+private fun <T : Any> rememberLastValue(value: T?): T? {
+    val last = remember { mutableStateOf(value) }
+    LaunchedEffect(value) { if (value != null) last.value = value }
+    return last.value
+}
+
+/** 完成态行尾的成功色勾（静态；呼吸点已停，勾负责把「结束了」说清）。 */
+@Composable
+private fun DoneCheck() {
+    androidx.compose.material3.Icon(
+        HugeIcons.CheckmarkCircle02,
+        contentDescription = null,
+        tint = MaterialTheme.semanticColors.success,
+        modifier = Modifier.size(18.dp),
+    )
+}
 
 /** 卡内分隔线的显隐也走收拢/淡出：行在退场时分隔线同步收掉，不闪一截硬边。 */
 @Composable
@@ -489,7 +619,14 @@ private fun KvcxActiveRow(
     val elapsed = rideElapsedSecondsShared(ride, state.fetchedAt, now)
     val locked = ride.locked == true
     val pending = state.unlockPending || state.lockPending
-    val busy = state.busy != null
+    val busy = state.busy
+    // 动作跑起来之后按钮要说话（2026-10-29）：旧版还车只把两枚钮一起置灰，用户看不出
+    // 点上了没有。还车链路最坏可挂一两分钟（定位 + 多次查询各自超时），带上已等秒数。
+    val busySeconds = if (busy != null && state.busyAt > 0L) {
+        ((now - state.busyAt) / 1_000L).toInt().coerceAtLeast(0)
+    } else {
+        0
+    }
     val cooldownLeft = unlockCooldownSecondsLeft(state.unlockCooldownUntil, now)
 
     // 免费窗口进度（2026-10-22）：15 分钟内倒计时条（与骑行页同一条口径），
@@ -536,31 +673,80 @@ private fun KvcxActiveRow(
         },
         trailing = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // 开锁 ⇄ 锁车（免确认的是锁车；开锁走重发解锁那条现成路）
-                if (pending || busy) {
-                    ActionChip(label = "确认中…", enabled = false, onClick = {})
-                } else {
-                    ActionChip(
-                        label = if (locked) "开锁" else "锁车",
-                        enabled = if (locked) true else cooldownLeft <= 0,
-                        onClick = {
-                            haptics.tap()
-                            if (locked) onUnlock() else onLock()
+                when {
+                    // 动作在跑：只留一枚置灰的「还车中… 12s」+ 转圈。旧版是「确认中…」
+                    // 旁边挂一枚禁用的「还车」，看不出是哪一个动作在跑（2026-10-29）
+                    busy != null -> ActionChip(
+                        label = buildString {
+                            append(busy.label())
+                            if (busySeconds > 0) append(" ").append(busySeconds).append("s")
                         },
+                        enabled = false,
+                        busy = true,
+                        onClick = {},
                     )
+                    // 悬置（指令已发、车侧还没回报）：只置灰，不加转圈——这一段可能挂到
+                    // 下次刷新才消解，转圈转久了反而像卡死
+                    pending -> ActionChip(label = "确认中…", enabled = false, onClick = {})
+                    else -> {
+                        // 开锁 ⇄ 锁车（免确认的是锁车；开锁走重发解锁那条现成路）
+                        ActionChip(
+                            label = if (locked) "开锁" else "锁车",
+                            enabled = if (locked) true else cooldownLeft <= 0,
+                            onClick = {
+                                haptics.tap()
+                                if (locked) onUnlock() else onLock()
+                            },
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        ActionChip(
+                            label = if (cooldownLeft > 0) "还车 ${cooldownLeft}s" else "还车",
+                            enabled = cooldownLeft <= 0,
+                            filled = false,
+                            onClick = {
+                                haptics.tap()
+                                onReturn()
+                            },
+                        )
+                    }
                 }
-                Spacer(Modifier.width(6.dp))
-                ActionChip(
-                    label = if (cooldownLeft > 0) "还车 ${cooldownLeft}s" else "还车",
-                    enabled = !busy && !pending && cooldownLeft <= 0,
-                    filled = false,
-                    onClick = {
-                        haptics.tap()
-                        onReturn()
-                    },
-                )
             }
         },
+    )
+}
+
+/** 忙碌动作的按钮文案（与骑行页底栏同族：开锁中… / 锁车中… / 还车中…）。 */
+private fun KvcxAction.label(): String = when (this) {
+    KvcxAction.UNLOCK, KvcxAction.DIRECT_UNLOCK, KvcxAction.RETRY_UNLOCK, KvcxAction.RESUME -> "开锁中…"
+    KvcxAction.LOCK -> "锁车中…"
+    KvcxAction.RETURN -> "还车中…"
+    KvcxAction.RING -> "响铃中…"
+    KvcxAction.QUERY_LOCK -> "查询中…"
+}
+
+/**
+ * 快趣「已还车」完成态（2026-10-29）：订单结束、行数据消失后停留 1.4 秒。
+ * 副行 = 车号 · 本次时长 · 费用（`returnSummary` 就是还车那一刻算出来的那一份）。
+ */
+@Composable
+private fun KvcxDoneRow(summary: KvcxReturnSummary?) {
+    ActiveRow(
+        brandRes = edu.jxslu.schedule.R.drawable.ic_brand_kqcx,
+        title = "快趣骑行",
+        status = "已还车",
+        pulsing = false,
+        subtitle = buildString {
+            summary?.carNum?.let { append("车 ").append(it) }
+            summary?.durationSeconds?.let { seconds ->
+                if (isNotEmpty()) append(" · ")
+                append("已骑 ").append(KqcxAuth.formatRideDuration(seconds))
+            }
+            summary?.feeCents?.let { cents ->
+                if (isNotEmpty()) append(" · ")
+                append("¥%.2f".format(cents / 100.0))
+            }
+        }.ifBlank { "订单已结束" },
+        trailing = { DoneCheck() },
     )
 }
 
@@ -641,10 +827,15 @@ private fun WaterActiveRow(
         progress = session.progressFraction(now),
         trailing = {
             if (canStop) {
-                ActionChip(label = "结束开水", enabled = !stopping, onClick = {
-                    haptics.tap()
-                    onEnd()
-                })
+                ActionChip(
+                    label = if (stopping) "结束中…" else "结束开水",
+                    enabled = !stopping,
+                    busy = stopping,
+                    onClick = {
+                        haptics.tap()
+                        onEnd()
+                    },
+                )
             } else {
                 androidx.compose.material3.Icon(
                     HugeIcons.ChevronRight,
@@ -658,13 +849,46 @@ private fun WaterActiveRow(
 }
 
 /**
- * 趣智用水行：用水中（计时 + 结束用水）/ 待核对（超 1h 或对账确认设备结束）两形态，
- * 与 `WateringStatusBlock` 同一条判据；「待核对」仍给「结算核对」按钮（要去设备旁）。
+ * 胖乖「已结束开水」完成态（2026-10-29）：流程成功、落盘会话清掉后停留 1.4 秒。
+ * 副行 = 设备 · 本次出水时长（会话起点在 [session] 里，取的是消失前最后一份）。
+ */
+@Composable
+private fun WaterDoneRow(session: QiekjWateringSession?) {
+    ActiveRow(
+        brandRes = edu.jxslu.schedule.R.drawable.ic_brand_pangguai,
+        title = "胖乖生活",
+        status = "已结束开水",
+        pulsing = false,
+        subtitle = session?.let { s ->
+            buildString {
+                append(s.deviceName.ifBlank { "开水设备" })
+                append(" · 用时 ")
+                append(
+                    QzxyWateringFormat.duration(
+                        (System.currentTimeMillis() - s.startedAtMillis).coerceAtLeast(0L),
+                    ),
+                )
+            }
+        } ?: "本次出水已结束",
+        trailing = { DoneCheck() },
+    )
+}
+
+/**
+ * 趣智用水行：用水中（计时 + 结束用水）/ 结束中（步骤文案 + 禁用的结束钮）/ 待核对
+ * （超 1h 或对账确认设备结束）三形态，判据与 `WateringStatusBlock` 同源。
+ *
+ * 结束中的反馈（2026-10-29）：结束走蓝牙（停阀 → 轮询设备结算 → 上报），十几秒起步，
+ * 旧版点了之后这一行纹丝不动、按钮还能连点。现在标题切「正在结束…」，副行直接展示
+ * 流程步骤（[step]，来自 `QzxyFlowState.Working.step`），动作钮换成禁用的「结束中…」。
+ * 「待核对」仍给「结算核对」按钮（要去设备旁）。
  */
 @Composable
 private fun QzxyActiveRow(
     watering: QzxyWatering,
     deviceEnded: Boolean,
+    stopping: Boolean,
+    step: String?,
     onStop: () -> Unit,
     onOpen: () -> Unit,
 ) {
@@ -685,16 +909,21 @@ private fun QzxyActiveRow(
     }
     ActiveRow(
         brandRes = edu.jxslu.schedule.R.drawable.ic_brand_qzxy,
-        title = if (pending) "趣智校园 · 待核对" else "趣智校园 · 用水中",
-        // 待核对 = 用水已结束：圆点不呼吸（呼吸只属于「正在进行中」）
+        title = when {
+            stopping -> "趣智校园 · 正在结束…"
+            pending -> "趣智校园 · 待核对"
+            else -> "趣智校园 · 用水中"
+        },
+        // 待核对 = 用水已结束：圆点不呼吸（呼吸只属于「正在进行中」）；结束中照旧呼吸
         pulsing = !pending,
         onClick = onOpen,
         onClickLabel = "查看用水详情",
-        subtitle = if (pending) {
-            "开阀于 ${QzxyWateringFormat.clockText(watering.startedAtMillis)} · 预扣 " +
+        subtitle = when {
+            stopping -> step?.takeIf { it.isNotBlank() } ?: "正在结束用水…"
+            pending -> "开阀于 ${QzxyWateringFormat.clockText(watering.startedAtMillis)} · 预扣 " +
                 QzxyWateringFormat.money(watering.preDeductMilli)
-        } else {
-            "${watering.deviceName.ifBlank { "热水器" }} · " + rememberQzxyWateringClock(watering.startedAtMillis)
+            else -> "${watering.deviceName.ifBlank { "热水器" }} · " +
+                rememberQzxyWateringClock(watering.startedAtMillis)
         },
         // 用水时长按 1 小时记账窗口推（超过即转「待核对」，不再画进行中的条）
         progress = if (pending) {
@@ -704,11 +933,41 @@ private fun QzxyActiveRow(
                 .coerceIn(0f, 1f)
         },
         trailing = {
-            ActionChip(label = if (pending) "结算核对" else "结束用水", onClick = {
-                haptics.tap()
-                onStop()
-            })
+            if (stopping) {
+                ActionChip(label = "结束中…", enabled = false, busy = true, onClick = {})
+            } else {
+                ActionChip(label = if (pending) "结算核对" else "结束用水", onClick = {
+                    haptics.tap()
+                    onStop()
+                })
+            }
         },
+    )
+}
+
+/**
+ * 趣智「已结束用水」完成态（2026-10-29）：结算成功、本地记账清掉后停留 1.4 秒。
+ * 副行 = 设备 · 本次用时；金额与账单在结算提示（Snackbar）和趣智页消费记录里。
+ */
+@Composable
+private fun QzxyDoneRow(watering: QzxyWatering?) {
+    ActiveRow(
+        brandRes = edu.jxslu.schedule.R.drawable.ic_brand_qzxy,
+        title = "趣智校园",
+        status = "已结束用水",
+        pulsing = false,
+        subtitle = watering?.let { w ->
+            buildString {
+                append(w.deviceName.ifBlank { "热水器" })
+                append(" · 用时 ")
+                append(
+                    QzxyWateringFormat.duration(
+                        (System.currentTimeMillis() - w.startedAtMillis).coerceAtLeast(0L),
+                    ),
+                )
+            }
+        } ?: "本次用水已结束",
+        trailing = { DoneCheck() },
     )
 }
 
@@ -759,17 +1018,34 @@ private fun UjingActiveRow(order: UjingOrderSnapshot, onOpen: () -> Unit) {
     )
 }
 
-/** 行尾的紧凑动作钮（32dp 高，与 `PowerRoomPickerSheet` 的行内小钮同规格）。 */
+/**
+ * 行尾的紧凑动作钮（32dp 高，与 `PowerRoomPickerSheet` 的行内小钮同规格）。
+ *
+ * [busy] = 动作正在跑：文字前加一枚 12dp 转圈（2026-10-29）。按钮同时置灰，
+ * 「点上了、在等结果」和「按钮点不动」才分得开；转圈取 `LocalContentColor`，
+ * 跟着禁用态一起变淡，不另调一套颜色。
+ */
 @Composable
 private fun ActionChip(
     label: String,
     onClick: () -> Unit,
     enabled: Boolean = true,
     filled: Boolean = true,
+    busy: Boolean = false,
 ) {
     val shape = CircleShape
     val content: @Composable () -> Unit = {
-        Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (busy) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(12.dp),
+                    strokeWidth = 1.5.dp,
+                    color = LocalContentColor.current,
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        }
     }
     if (filled) {
         Button(

@@ -46,7 +46,9 @@
     （无账号 token），但计时是本机动作；行尾「结束计时」给提前还车的出口（确认弹窗后调
     `EbikeFreeRideReminder.endRide`，连带撤提醒与通知）。两行能力闸互斥，不同时出现。
     行内「开锁⇄锁车」：`locked==true` 显「开锁」→ `resumeRide()`；未锁显「锁车」→ `tempLock()`
-    （免确认，与骑行页同闸）；悬置 / busy 显「确认中…」；开锁 3 秒冷却内锁车 / 还车置灰显剩余秒；
+    （免确认，与骑行页同闸）；悬置（`unlockPending` / `lockPending`）显「确认中…」置灰；
+    有动作在跑（`busy`）时整条动作区收成一枚「还车中… 12s」+ 转圈（见下面「结束动作的两段反馈」）；
+    开锁 3 秒冷却内锁车 / 还车置灰显剩余秒；
     已锁车的副行追加「已锁车（计费继续）」（临时锁车 ≠ 订单结束）。
     「还车」走今日页本地的 `KvcxConfirmAlertDialog`（文案唯一出处仍是 `kvcxConfirmDialog`）。
   - 胖乖：**`Graph.qiekjWatering` 落盘会话**（`QiekjWateringStore`，2026-10-21）——`unlock()` 流程
@@ -81,6 +83,21 @@
   点击不再用默认灰色涟漪（用户报「矩形的丑陋灰色背景边框」）：圆角 12dp 裁切 +
   `indication = null`，按下浅主色底 + 0.985 回缩（与侧栏行同族）。**别把默认 indication 加回来**。
   行内不需要为高亮让位的额外留白，快趣行与其它行左对齐。
+- **结束动作的两段反馈（2026-10-29 用户报「点还车 / 结束用水没有任何反馈，成功后卡片直接消失」）**：
+  - **动作中**：行尾动作钮换置灰的「还车中… 12s」/「结束中…」+ 12dp 转圈（`ActionChip(busy = true)`）；
+    快趣的秒数取 `busyAt`（还车链路最坏挂一两分钟），趣智标题切「正在结束…」、副行直接展示
+    `QzxyFlowState.Working.step`（停阀 → 等设备结算 → 上报）。**悬置态（`unlockPending` /
+    `lockPending`）仍只写「确认中…」不加转圈**——它可能挂到下次刷新才消解，转圈转久了像卡死。
+  - **成功后**：先亮 1.4 秒完成态（`KvcxDoneRow` / `QzxyDoneRow` / `WaterDoneRow`：静态点 +
+    `semanticColors.success` 勾 + 结果摘要），再走常规 160ms 退场。判据是 `rememberDoneLinger`：
+    结束动作跑过（`busy == RETURN` / 趣智 `flow is Working` / 胖乖 `stopping`）且
+    `EndActionGraceMillis`（6 秒）内行数据消失；**到期自然收尾不亮完成态**（165 秒自动关阀、
+    后台自动还车 / 订单在别处结束）。
+  - **完成态与进行中行必须共用一个 `AnimatedVisibility`**（内容 `if (visible) 进行中 else 完成`）：
+    拆成两条会同时占两行高、卡体当场弹一下。开水那行原来用 `waterSession?.let { WaterSlot }`，
+    会话一清 Slot 就卸载、退场没有载体——现在 Slot 常驻、`session` 可为 null（2026-10-29 改）。
+  - 今日页要收趣智的 `QzxyEvent.Notice`（`qzxyViewModel.events`）：结算成功 / 被挡的原因只在
+    这条流里，今日页是「结束用水」的动作点，不收就静默丢掉（与开水 `WaterEvent` 同一条写法）。
 - **行底时长进度条（2026-10-22 用户要求）**：`ActiveRow(progress = …)` 在行内容之下画一条
   3dp 全宽 `LinearProgressIndicator`，`status` 旁的 `statusColor` / `progressError` 走 error 色。
   各行的窗口与文案：

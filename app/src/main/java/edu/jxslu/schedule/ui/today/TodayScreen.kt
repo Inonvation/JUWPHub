@@ -114,6 +114,8 @@ import edu.jxslu.schedule.ui.ebike.KvcxAction
 import edu.jxslu.schedule.ui.ebike.KvcxRideState
 import edu.jxslu.schedule.ui.ebike.kvcxConfirmDialog
 import edu.jxslu.schedule.ui.qzxy.QzxyViewModel
+import edu.jxslu.schedule.ui.qzxy.QzxyEvent
+import edu.jxslu.schedule.ui.qzxy.QzxyFlowState
 import edu.jxslu.schedule.ui.ujing.UjingEntrySheet
 import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
 import edu.jxslu.schedule.domain.QzxyWatering
@@ -479,6 +481,16 @@ fun TodayScreen(
             }
         }
     }
+    // 趣智同理（2026-10-29）：服务卡上的「结束用水」是今日页的动作点，而结算成功 /
+    // 被挡的原因只在这条事件流里（趣智页是另一个 Activity 的 ViewModel，收不到这里的）。
+    // 没人收的话点了结束只有卡片自己变，失败原因连一句提示都没有。
+    LaunchedEffect(qzxyViewModel) {
+        qzxyViewModel?.events?.collect { event ->
+            when (event) {
+                is QzxyEvent.Notice -> scope.postNotice(snackbar, event.text, event.tone)
+            }
+        }
+    }
 
     // 单条结果提示（钉桌面失败等）：与快捷方式拉起失败共用同一条 Snackbar 队列，
     // 后到的消息自动排队，不会互相顶掉
@@ -750,6 +762,9 @@ fun TodayScreen(
                     waterCanStop = waterEntryState.flow is UnlockFlowState.Working,
                     qzxyWatering = qzxyEntryState.watering,
                     qzxyDeviceEnded = qzxyEntryState.wateringDeviceEnded,
+                    // 结束用水的两段反馈（2026-10-29）：行切「正在结束…」+ 副行展示当前步骤
+                    qzxyStopping = qzxyEntryState.flow is QzxyFlowState.Working,
+                    qzxyStopStep = (qzxyEntryState.flow as? QzxyFlowState.Working)?.step,
                     ujingOrder = ujingOrder,
                     onKvcxAction = dispatchKvcxAction,
                     onWaterEnd = { waterViewModel?.endSession() },
@@ -993,6 +1008,10 @@ private fun TodayContent(
     waterCanStop: Boolean = false,
     qzxyWatering: QzxyWatering?,
     qzxyDeviceEnded: Boolean,
+    /** 趣智「结束用水」流程正在跑（行切「正在结束…」，2026-10-29）。 */
+    qzxyStopping: Boolean = false,
+    /** 结束中的当前步骤文案（`QzxyFlowState.Working.step`）。 */
+    qzxyStopStep: String? = null,
     ujingOrder: UjingOrderSnapshot?,
     onKvcxAction: (KvcxAction) -> Unit = {},
     onWaterEnd: () -> Unit = {},
@@ -1010,7 +1029,14 @@ private fun TodayContent(
     val clearance = LocalBottomBarClearance.current
     // 有在案骑行时把「进行中服务」卡提到课程区之前（2026-10-22 用户口径）：骑行是最需要
     // 一眼看到的状态，课程 / 作业多的时候原位置会落到首屏之外；没有在案订单时留在原位。
-    val rideInProgress = kvcxRideState?.ride != null
+    //
+    // 还车成功后的 1.4 秒完成态（2026-10-29）也要留在这个位置：`ride` 在成功那一刻就没了，
+    // 只看 ride 的话卡片会带着「已还车」当场挪回列表中间（animateItem 滑走），完成态白做。
+    val kvcxDone = rememberDoneLinger(
+        visible = kvcxRideState?.ride != null,
+        ending = kvcxRideState?.busy == KvcxAction.RETURN,
+    )
+    val rideInProgress = kvcxRideState?.ride != null || kvcxDone
     val activeServicesCard: @Composable (Modifier) -> Unit = { cardModifier ->
         ActiveServiceCard(
             kvcxState = kvcxRideState,
@@ -1021,6 +1047,9 @@ private fun TodayContent(
             waterCanStop = waterCanStop,
             qzxyWatering = qzxyWatering,
             qzxyDeviceEnded = qzxyDeviceEnded,
+            qzxyStopping = qzxyStopping,
+            qzxyStopStep = qzxyStopStep,
+            kvcxDone = kvcxDone,
             ujingOrder = ujingOrder,
             kvcxOnUnlock = { onKvcxAction(KvcxAction.RESUME) },
             kvcxOnLock = { onKvcxAction(KvcxAction.LOCK) },
