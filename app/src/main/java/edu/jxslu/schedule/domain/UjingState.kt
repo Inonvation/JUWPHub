@@ -129,6 +129,18 @@ object UjingState {
     fun transitToWashDone(beforeStatus: String?, afterStatus: String): Boolean =
         afterStatus == "50" && beforeStatus != "50"
 
+    /**
+     * 订单已完成（50）：今日页的取衣提醒只认完成——取消 / 超时 / 启动失败（51/52/53/60）
+     * 没有「衣服还在机器里」这回事，不留提醒。
+     */
+    fun isWashDone(status: String): Boolean = status == "50"
+
+    /** 今日页取衣提醒的标题：烘干机不叫「洗完」。 */
+    fun washDoneTitle(dryer: Boolean): String = if (dryer) "衣物已烘干" else "衣物已洗完"
+
+    /** 设备名缺失时的兜底：烘干机不能说成洗衣机。 */
+    fun deviceFallback(dryer: Boolean): String = if (dryer) "烘干机" else "洗衣机"
+
     /** 剩余秒数 → 「X 分 Y 秒」（负数夹到 0）。 */
     fun remainText(remainSeconds: Int): String {
         val total = remainSeconds.coerceAtLeast(0)

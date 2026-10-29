@@ -52,6 +52,7 @@ class UjingOrderStore(context: Context) {
         put("deviceName", s.deviceName)
         put("modelId", s.modelId)
         put("modelName", s.modelName)
+        put("dryer", s.dryer)
         put("priceFen", s.priceFen)
         put("status", s.status)
         put("statusRemark", s.statusRemark)
@@ -71,6 +72,7 @@ class UjingOrderStore(context: Context) {
             deviceName = obj.optString("deviceName"),
             modelId = obj.optInt("modelId"),
             modelName = obj.optString("modelName"),
+            dryer = obj.optBoolean("dryer"),
             priceFen = obj.optInt("priceFen"),
             status = obj.optString("status"),
             statusRemark = obj.optString("statusRemark"),
@@ -100,6 +102,11 @@ data class UjingOrderSnapshot(
     /** 用户选的模式（下单请求原样保存，重启后卡片还能说明"点的是什么"）。 */
     val modelId: Int = 0,
     val modelName: String = "",
+    /**
+     * 是否烘干机订单（下单时 `UjingState.isDryer` 判定）。今日页取衣提醒据此选文案
+     * （「衣物已烘干」而不是「已洗完」）；旧版本快照没有该字段 → false。
+     */
+    val dryer: Boolean = false,
     /** 应付金额（分）。 */
     val priceFen: Int = 0,
     val status: String = "",

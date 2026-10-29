@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
@@ -156,6 +157,11 @@ internal fun ActiveServiceCard(
     onOpenQzxy: () -> Unit = {},
     /** U净 行整行落点（U净 页：订单英雄卡 / 扫码）。 */
     onOpenUjing: () -> Unit,
+    /**
+     * U净 取衣提醒行尾「已取走」：清掉已完成订单快照（并撤完成闹钟，调用侧做）。
+     * 只有这个动作（或 U净 页的「知道了」）能收掉提醒，不设时间上限。
+     */
+    onUjingDismiss: () -> Unit,
     /** 小程序免费计时行的「结束计时」意图（确认弹窗在调用侧）。 */
     onEndFreeRide: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -167,6 +173,10 @@ internal fun ActiveServiceCard(
     val kvcxRiding = kvcxVisible && kvcxOnLock != null && kvcxOnReturn != null && ride?.locked == false
     val qzxyVisible = qzxyWatering != null
     val ujingLive = ujingOrder?.takeIf { !it.isTerminal }
+    // 已完成（50）的订单不随行退场（2026-10-29 用户要求：洗完忘了拿）：快照落盘，
+    // 一直留到用户点行尾「已取走」（或 U净 页「知道了」）。取消 / 超时 / 启动失败不留。
+    val ujingDone = ujingOrder?.takeIf { UjingState.isWashDone(it.status) }
+    val ujingRow = ujingLive != null || ujingDone != null
     // 秒级走时按行隔离（2026-10-22）：此前 `now` 读在卡顶层，免费计时 / 开水期间整卡
     // （含快趣行与按钮）每秒重组。现在时钟收进各自的 Slot，只有那一行每秒重组；
     // 到点由 Slot 回调父级收行（freeRideExpired / waterExpired），父级不再自己走秒。
@@ -190,7 +200,7 @@ internal fun ActiveServiceCard(
     val kvcxRow = kvcxVisible || kvcxDone
     val qzxyRow = qzxyVisible || qzxyDone
     val waterRow = waterVisible || waterDone
-    val anyActive = kvcxRow || freeRideVisible || waterRow || qzxyRow || ujingLive != null
+    val anyActive = kvcxRow || freeRideVisible || waterRow || qzxyRow || ujingRow
 
     // 整卡壳的显隐也走 AnimatedVisibility：**不能 early return**——组合一卸载，
     // 收拢动画就没有载体了（用户报的「状态卡片消失是瞬间消失的」正是它）。
@@ -239,7 +249,7 @@ internal fun ActiveServiceCard(
                     onExpired = { freeRideExpired.value = true },
                 )
             }
-            AnimatedDivider(visible = afterKvcx && (waterRow || qzxyRow || ujingLive != null))
+            AnimatedDivider(visible = afterKvcx && (waterRow || qzxyRow || ujingRow))
             // Slot 常驻（不是 `waterSession?.let`）：会话消失后还要承载完成态，退场动画也
             // 得有载体——跟着会话一起卸载，那一帧就是硬消失（2026-10-29）
             WaterSlot(
@@ -252,7 +262,7 @@ internal fun ActiveServiceCard(
                 onOpen = onOpenWater,
                 onExpired = { waterExpired.value = true },
             )
-            AnimatedDivider(visible = waterRow && (qzxyRow || ujingLive != null))
+            AnimatedDivider(visible = waterRow && (qzxyRow || ujingRow))
             AnimatedVisibility(
                 visible = qzxyRow,
                 enter = EnterRow,
@@ -273,13 +283,19 @@ internal fun ActiveServiceCard(
                     QzxyDoneRow(watering = lastQzxyWatering)
                 }
             }
-            AnimatedDivider(visible = qzxyRow && ujingLive != null)
+            AnimatedDivider(visible = qzxyRow && ujingRow)
             AnimatedVisibility(
-                visible = ujingLive != null,
+                visible = ujingRow,
                 enter = EnterRow,
                 exit = ExitRow,
             ) {
-                ujingLive?.let { UjingActiveRow(order = it, onOpen = onOpenUjing) }
+                if (ujingLive != null) {
+                    UjingActiveRow(order = ujingLive, onOpen = onOpenUjing)
+                } else {
+                    ujingDone?.let {
+                        UjingDoneRow(order = it, onOpen = onOpenUjing, onDismiss = onUjingDismiss)
+                    }
+                }
             }
         }
     }
@@ -443,13 +459,16 @@ private val ExitRow = fadeOut(tween(160)) +
     shrinkVertically(tween(160), shrinkTowards = Alignment.Top)
 
 /** 品牌图标：与侧栏同款位图，24dp。**必须用 `Image`**——`Icon(painter)` 会把位图整体
- *  染成 LocalContentColor（真机上呈黑色块），侧栏同款位图就是用 `Image` 渲染的。 */
+ *  染成 LocalContentColor（真机上呈黑色块），侧栏同款位图就是用 `Image` 渲染的。
+ *  [alpha] < 1 用于完成态去强调（用户口径「置灰」）：保留品牌色形，只淡出。 */
 @Composable
-private fun BrandIcon(resId: Int) {
+private fun BrandIcon(resId: Int, alpha: Float = 1f) {
     androidx.compose.foundation.Image(
         painter = androidx.compose.ui.res.painterResource(resId),
         contentDescription = null,
-        modifier = Modifier.size(24.dp),
+        modifier = Modifier
+            .size(24.dp)
+            .graphicsLayer { this.alpha = alpha },
     )
 }
 
@@ -470,6 +489,10 @@ private fun BrandIcon(resId: Int) {
  *
  * [progress] = 行底的时长进度条（0..1，可为 null = 不画）：快趣免费窗口倒计时 / 超时增长，
  * 开水、趣智、U净 的进行中时长。`progressError` 时走 error 色（超时）。
+ *
+ * [muted] = 完成态整行去强调（2026-10-29 用户口径「都置灰」）：品牌图标淡出、标题 / 副行 /
+ * 状态词统一走 onSurface 低透明度。只给**已完成但还需用户处理**的行用（U净 取衣提醒）——
+ * 进行中的行别用，那会让状态看起来是失效的。
  */
 @Composable
 private fun ActiveRow(
@@ -484,6 +507,7 @@ private fun ActiveRow(
     statusColor: Color? = null,
     progress: Float? = null,
     progressError: Boolean = false,
+    muted: Boolean = false,
 ) {
     val haptics = rememberAppHaptics()
     val scheme = MaterialTheme.colorScheme
@@ -543,7 +567,7 @@ private fun ActiveRow(
                 )
                 Spacer(Modifier.width(8.dp))
             }
-            BrandIcon(brandRes)
+            BrandIcon(brandRes, alpha = if (muted) 0.5f else 1f)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -551,6 +575,11 @@ private fun ActiveRow(
                         text = title,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
+                        color = if (muted) {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         // 标题先让位：状态词是固定宽度的短标签，不能被长标题挤成省略号
@@ -561,7 +590,11 @@ private fun ActiveRow(
                         Text(
                             text = status,
                             style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                            color = statusColor ?: MaterialTheme.colorScheme.primary,
+                            color = statusColor ?: if (muted) {
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
                             maxLines = 1,
                         )
                     }
@@ -569,7 +602,7 @@ private fun ActiveRow(
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (muted) 0.45f else 0.55f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -994,7 +1027,7 @@ private fun UjingActiveRow(order: UjingOrderSnapshot, onOpen: () -> Unit) {
         brandRes = edu.jxslu.schedule.R.drawable.ic_brand_ujing,
         title = "U净 · " + UjingState.statusLabel(order.status, order.statusRemark),
         subtitle = buildString {
-            append(order.deviceName.ifBlank { "洗衣机" })
+            append(order.deviceName.ifBlank { UjingState.deviceFallback(order.dryer) })
             if (running && order.remainSeconds > 0) {
                 append(" · 剩 ").append(UjingState.remainText(liveRemain))
             }
@@ -1019,11 +1052,52 @@ private fun UjingActiveRow(order: UjingOrderSnapshot, onOpen: () -> Unit) {
 }
 
 /**
+ * U净 取衣提醒行（2026-10-29 用户要求）：订单已完成（50）后不再随行退场，一直留到
+ * 用户点行尾「已取走」（或去 U净 页点「知道了」），避免洗完忘了拿。
+ *
+ * **整行置灰**（同日用户口径「都置灰吧」）：完成态不该和进行中的服务抢视觉权重——
+ * 图标淡出、标题 / 副行走低透明度、「已取走」用灰底灰字（仍可点）。圆点不呼吸，
+ * 与趣智「待核对」同一语气；文案区分烘干机。行本体仍进 U净 页，收提醒只走行尾动作。
+ */
+@Composable
+private fun UjingDoneRow(
+    order: UjingOrderSnapshot,
+    onOpen: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val haptics = rememberAppHaptics()
+    ActiveRow(
+        brandRes = edu.jxslu.schedule.R.drawable.ic_brand_ujing,
+        title = "U净 · " + UjingState.washDoneTitle(order.dryer),
+        pulsing = false,
+        muted = true,
+        // 提醒语放最前：设备名较长时单行省略会先吃掉尾巴，别把「记得去拿」截掉
+        subtitle = "记得去拿衣物 · 「" +
+            order.deviceName.ifBlank { UjingState.deviceFallback(order.dryer) } + "」",
+        onClick = onOpen,
+        onClickLabel = "查看洗衣订单",
+        trailing = {
+            ActionChip(
+                label = "已取走",
+                muted = true,
+                onClick = {
+                    haptics.tap()
+                    onDismiss()
+                },
+            )
+        },
+    )
+}
+
+/**
  * 行尾的紧凑动作钮（32dp 高，与 `PowerRoomPickerSheet` 的行内小钮同规格）。
  *
  * [busy] = 动作正在跑：文字前加一枚 12dp 转圈（2026-10-29）。按钮同时置灰，
  * 「点上了、在等结果」和「按钮点不动」才分得开；转圈取 `LocalContentColor`，
  * 跟着禁用态一起变淡，不另调一套颜色。
+ *
+ * [muted] = 完成态去强调的灰底灰字（2026-10-29 用户口径「都置灰」）：**仍可点**，
+ * 只把视觉权重降下来；别和 [enabled] = false 混用——那是真的不可点。
  */
 @Composable
 private fun ActionChip(
@@ -1032,6 +1106,7 @@ private fun ActionChip(
     enabled: Boolean = true,
     filled: Boolean = true,
     busy: Boolean = false,
+    muted: Boolean = false,
 ) {
     val shape = CircleShape
     val content: @Composable () -> Unit = {
@@ -1053,6 +1128,15 @@ private fun ActionChip(
             enabled = enabled,
             modifier = Modifier.height(32.dp),
             shape = shape,
+            colors = if (muted) {
+                ButtonDefaults.buttonColors(
+                    // 灰底灰字但 content 比禁用态（38%）更实：看得出还能点
+                    containerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                    contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+            } else {
+                ButtonDefaults.buttonColors()
+            },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
             content = { content() },
         )
@@ -1062,6 +1146,13 @@ private fun ActionChip(
             enabled = enabled,
             modifier = Modifier.height(32.dp),
             shape = shape,
+            colors = if (muted) {
+                ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+            } else {
+                ButtonDefaults.outlinedButtonColors()
+            },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
             content = { content() },
         )

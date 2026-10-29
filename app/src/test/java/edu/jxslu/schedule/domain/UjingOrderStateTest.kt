@@ -129,4 +129,27 @@ class UjingOrderStateTest {
         assertFalse(UjingState.transitToWashDone("40", "40"))
         assertFalse(UjingState.transitToWashDone(null, "40"))
     }
+
+    // ---- 今日页取衣提醒（2026-10-29） ----
+
+    @Test
+    fun pickupReminderOnlyForCompletedStatus() {
+        // 只有完成（50）留提醒；取消 / 超时 / 启动失败没有「衣服还在机器里」
+        assertTrue(UjingState.isWashDone("50"))
+        assertFalse(UjingState.isWashDone("40"))
+        assertFalse(UjingState.isWashDone("51"))
+        assertFalse(UjingState.isWashDone("52"))
+        assertFalse(UjingState.isWashDone("53"))
+        assertFalse(UjingState.isWashDone("60"))
+        assertFalse(UjingState.isWashDone(""))
+    }
+
+    @Test
+    fun pickupReminderWordingDistinguishesDryer() {
+        assertEquals("衣物已洗完", UjingState.washDoneTitle(dryer = false))
+        assertEquals("衣物已烘干", UjingState.washDoneTitle(dryer = true))
+        // 设备名缺失时的兜底同样区分机型
+        assertEquals("洗衣机", UjingState.deviceFallback(dryer = false))
+        assertEquals("烘干机", UjingState.deviceFallback(dryer = true))
+    }
 }

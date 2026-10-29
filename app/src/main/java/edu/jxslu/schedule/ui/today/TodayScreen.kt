@@ -117,6 +117,7 @@ import edu.jxslu.schedule.ui.qzxy.QzxyViewModel
 import edu.jxslu.schedule.ui.qzxy.QzxyEvent
 import edu.jxslu.schedule.ui.qzxy.QzxyFlowState
 import edu.jxslu.schedule.ui.ujing.UjingEntrySheet
+import edu.jxslu.schedule.ui.reminder.UjingDoneReminder
 import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
 import edu.jxslu.schedule.domain.QzxyWatering
 import edu.jxslu.schedule.ui.qzxy.QzxyEntrySheet
@@ -770,6 +771,11 @@ fun TodayScreen(
                     onWaterEnd = { waterViewModel?.endSession() },
                     onQzxyStop = { qzxyViewModel?.stopWater() },
                     onOpenUjing = onOpenUjing,
+                    // 取衣提醒行尾「已取走」：与 U净 页「知道了」同一语义——清快照 + 撤完成闹钟
+                    onUjingDismiss = {
+                        ujingRepo.dismissOrder()
+                        UjingDoneReminder.cancel(context)
+                    },
                     // 小程序方式的免费计时（DataStore 落盘）：账号方式不传（骑行信息更全的那行优先）
                     freeRideStartAt = ebikeRideStartAt.takeIf { !kvcxInAppRide },
                     onOpenEbike = onOpenEbike,
@@ -1021,6 +1027,8 @@ private fun TodayContent(
     onOpenWater: () -> Unit = {},
     onOpenQzxy: () -> Unit = {},
     onOpenUjing: () -> Unit = {},
+    /** U净 取衣提醒行尾「已取走」：清掉已完成订单快照（调用侧同时撤完成闹钟）。 */
+    onUjingDismiss: () -> Unit = {},
     /** 小程序免费计时行的「结束计时」意图（确认弹窗在 TodayScreen 层）。 */
     onEndFreeRide: () -> Unit = {},
 ) {
@@ -1060,6 +1068,7 @@ private fun TodayContent(
             onOpenWater = onOpenWater,
             onOpenQzxy = onOpenQzxy,
             onOpenUjing = onOpenUjing,
+            onUjingDismiss = onUjingDismiss,
             onEndFreeRide = onEndFreeRide,
             modifier = cardModifier,
         )

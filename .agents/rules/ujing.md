@@ -165,6 +165,12 @@
   （`UjingOrderSnapshot.statusRemark`，旧快照读成空串），展示统一走
   `UjingState.statusLabel(status, remark)`——服务端文案非空优先、本地表兜底。**别再直接
   `statusText(status)`**（订单卡与今日页弹窗两处都改了）。
+- **今日页取衣提醒（2026-10-29 用户要求）**：订单完成（`status == "50"`）后，今日页
+  「进行中服务」卡的 U净 行**不随行退场**——切「U净 · 衣物已洗完 / 衣物已烘干」+
+  「记得去拿衣物」，行尾「已取走」调 `UjingRepository.dismissOrder()` 并撤完成闹钟
+  （`UjingDoneReminder.cancel`）。**只有这个动作（或 U净 页「知道了」）能收掉，不设时间
+  上限**；取消 / 超时 / 启动失败（51/52/53/60）不留。快照新增 `dryer`（下单时
+  `UjingState.isDryer` 判定、刷新原样保留），标题与设备名兜底按机型分（烘干机不说「洗完」）。
 - **进页对表走静默**：`loggedIn` 收集器里那次 `refreshOrder` 用 `silent = true`（进页补数据不该
   把订单卡按钮闪成加载圈）。
 

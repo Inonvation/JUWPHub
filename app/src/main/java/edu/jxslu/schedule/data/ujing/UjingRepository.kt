@@ -327,6 +327,7 @@ class UjingRepository(
                 .ifBlank { program.deviceTypeName },
             modelId = model.workModelId,
             modelName = snapshotModelName,
+            dryer = dryer,
             priceFen = estimatedPriceFen,
             status = "0",
             snapshotAt = now,
@@ -377,6 +378,7 @@ class UjingRepository(
             deviceName = current?.deviceName.orEmpty(),
             modelId = current?.modelId ?: 0,
             modelName = current?.modelName.orEmpty(),
+            dryer = current?.dryer ?: false,
             priceFen = serverPriceFen
                 ?: current?.priceFen
                 ?: 0,
@@ -390,7 +392,11 @@ class UjingRepository(
             createdAt = current?.createdAt ?: 0L,
             durationSeconds = current?.durationSeconds ?: 0,
         )
-        orderStore.save(snapshot)
+        // 请求期间用户可能已点「知道了 / 已取走」清掉快照，或已下了新单：旧请求的结果
+        // 不能把已收掉的订单写回来（会复活取衣提醒 / 顶掉新单）。历史账单照常更新。
+        if (orderStore.current()?.orderId == orderId) {
+            orderStore.save(snapshot)
+        }
         // 同一笔订单状态变化更新原条目（同 orderId 去重），历史页看到的就是最新状态
         historyStore.upsert(UjingHistoryEntry.fromSnapshot(snapshot))
         if (UjingState.transitToWashDone(current?.status, snapshot.status)) {
