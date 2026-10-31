@@ -14,7 +14,8 @@ import java.time.LocalTime
  * 地点被省略成 `@()`），后台链路上完全不可见，所以在 JVM 里钉死：
  * - [minutesLeft]：向上取整，已上课不出现 0 / 负数；
  * - [progressPercent]：提前量窗口走完的比例，闹钟迟到时从中间起步；
- * - [liveClassLine] / [liveChipText]：正文与芯片的文案口径。
+ * - [liveClassLine] / [liveChipText] / [chipPlace]：正文与芯片的文案口径
+ *   （芯片只有一个文字槽，地点与分钟数压缩拼接）。
  */
 class LiveClassUpdateTest {
 
@@ -123,9 +124,33 @@ class LiveClassUpdateTest {
     }
 
     @Test
-    fun liveChipText_shortEnoughForTheChip() {
-        // 芯片宽 96dp，超过 7 个字符可能只留图标；提前量上限 30 分钟
-        assertEquals("剩8分", liveChipText(8))
-        assertEquals("剩30分", liveChipText(30))
+    fun liveChipText_placeBeforeMinutes() {
+        // 折叠芯片只有**一个**文字槽（没有放图标的第二格），地点只能压缩拼进这一行；
+        // 地点放前位——被系统截断时先丢分钟数，而不是先丢教室号
+        assertEquals("南B208·8分", liveChipText("教学南大楼(南B208)", 8))
+        assertEquals("南B208·30分", liveChipText("教学南大楼(南B208)", 30))
+    }
+
+    @Test
+    fun liveChipText_longPlaceKeepsRoomNumber() {
+        // 楼名超过 5 字：留「首字 + 房间号」，房间号是唯一不能猜的部分
+        assertEquals("工210·8分", liveChipText("工程训练中心210", 8))
+    }
+
+    @Test
+    fun liveChipText_withoutPlace_fallsBackToCountdownOnly() {
+        // 无地点 / 教务返回的 `()` 脏数据：退回旧的「剩 N 分」，不留 `·8分` 这种断头文案
+        assertEquals("剩8分", liveChipText("", 8))
+        assertEquals("剩8分", liveChipText("()", 8))
+        assertEquals("剩30分", liveChipText("  ", 30))
+    }
+
+    @Test
+    fun chipPlace_budgetIsFiveChars() {
+        // 括号楼名先由 compactPosition 剥成房号，本来就在预算内
+        assertEquals("南B302", chipPlace("教学南大楼(南B302)"))
+        assertEquals("工210", chipPlace("工程训练中心210"))
+        // 没有房间号的纯楼名：截前 5 字，宁可给楼名也不给半个房号
+        assertEquals("工程训练中", chipPlace("工程训练中心"))
     }
 }

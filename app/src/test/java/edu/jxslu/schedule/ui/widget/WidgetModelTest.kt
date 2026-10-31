@@ -14,6 +14,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * 小组件展示模型的口径（DESIGN §3.6）。
@@ -55,6 +56,10 @@ class WidgetModelTest {
     private fun stateAt(time: LocalTimeLike, courses: List<Course>, day: LocalDate = thursday) =
         buildTodayState(semester, slots, courses, day, time)
 
+    /** [day] 当天 [minutes] 的绝对时刻，与 WidgetModel 的 epoch 口径一致。 */
+    private fun epochAt(day: LocalDate, minutes: Int): Long =
+        day.atStartOfDay(ZoneId.systemDefault()).plusMinutes(minutes.toLong()).toInstant().toEpochMilli()
+
     // ---------- 焦点：下一节（60 分钟窗口内） ----------
 
     @Test
@@ -66,6 +71,10 @@ class WidgetModelTest {
         assertEquals("下一节 · 第3-4节", focus.label)
         assertEquals("课1", focus.name)
         assertEquals("还有 45 分钟上课", focus.countdown)
+        // 桌面 Chronometer 的目标：10:15 上课那一刻（绝对时刻，不是「45 分钟」）
+        assertEquals("还有 ", focus.countdownPrefix)
+        assertEquals("上课", focus.countdownSuffix)
+        assertEquals(epochAt(thursday, 10 * 60 + 15), focus.countdownTargetEpochMillis)
         assertNull(focus.fallbackNote)
         assertNull(focus.progress)
     }
@@ -106,6 +115,10 @@ class WidgetModelTest {
         assertEquals("正在上课 · 第3-4节", focus.label)
         // 细粒度口径优先：10:30 在第 3 节（10:15–10:55）内，说「第3节 · 还有 25 分钟」
         assertEquals("第3节 · 还有 25 分钟下课", focus.countdown)
+        // Chronometer 目标 = 本节 10:55 结束（课间那一刻再切成「课间 · 还有 5 分钟上课」）
+        assertEquals("第3节 · 还有 ", focus.countdownPrefix)
+        assertEquals("下课", focus.countdownSuffix)
+        assertEquals(epochAt(thursday, 10 * 60 + 55), focus.countdownTargetEpochMillis)
         assertTrue(focus.progress!! in 0f..1f)
     }
 
@@ -149,6 +162,10 @@ class WidgetModelTest {
         assertFalse(widgetMetricsFor(110, 250).metaInline)
         assertFalse(widgetMetricsFor(110, 110).showProgress)
         assertTrue(widgetMetricsFor(250, 200).showProgress)
+        // 窄卡（2×2 / 2×4）倒计时只放 mm:ss，完整文案会把左侧标签挤没
+        assertTrue(widgetMetricsFor(110, 110).shortCountdown)
+        assertTrue(widgetMetricsFor(110, 250).shortCountdown)
+        assertFalse(widgetMetricsFor(250, 110).shortCountdown)
     }
 
     // ---------- 列表行数按高度算 ----------

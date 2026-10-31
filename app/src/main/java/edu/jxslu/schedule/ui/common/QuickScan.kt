@@ -14,14 +14,14 @@ import edu.jxslu.schedule.domain.quickScanTargetOf
 import edu.jxslu.schedule.ui.ebike.EbikeScanActivity
 
 /**
- * 扫一扫入口的组合封装（DESIGN §3.1 悬浮球）。
+ * 扫一扫入口的组合封装（DESIGN §3.1 侧栏「扫一扫」）。
  *
  * 注册取景页 launcher、构造 intent，把识别结果按 [quickScanTargetOf] 三档分流回三个回调：
  * 车码 → [onEbike]、机身码 → [onWasher]、别家码 → [onForeign]（就地提示，不跳页）。
  * 取景窗口走**原文模式**（`MODE_RAW`）——车号解析归本地判据、机身码原文归 U净 服务端，
  * 本地只负责「去哪一页」这一件事。
  *
- * 悬浮球用这一份；今日页 / 生活页各自的同款实现本轮不动（后续可收敛到这里）。
+ * 侧栏「扫一扫」用这一份；骑行页自己的取景入口另有实现，不要并成一条。
  *
  * @return 触发扫一扫的动作（调用即拉起取景页）。
  */

@@ -231,6 +231,25 @@ class TodayStateTest {
     }
 
     @Test
+    fun ongoingCountdownTarget_matchesLabelAndPointsAtSectionBoundary() {
+        val c = thursdayCourses.first() // 3-4 节：10:15-10:55 / 11:00-11:40
+        val inSection = ongoingCountdownTarget(slots, c, LocalTimeLike(10, 30))!!
+        assertEquals("第3节 · 还有 ", inSection.prefix)
+        assertEquals("下课", inSection.suffix)
+        assertEquals(10 * 60 + 55, inSection.targetMinutes)
+        // 文案由同一个目标派生：桌面 Chronometer 与今日页不会出现两套口径
+        assertEquals(
+            ongoingCountdownLabel(slots, c, LocalTimeLike(10, 30)),
+            inSection.label(10 * 60 + 30),
+        )
+
+        val duringBreak = ongoingCountdownTarget(slots, c, LocalTimeLike(10, 55))!!
+        assertEquals("课间 · 还有 ", duringBreak.prefix)
+        assertEquals("上课", duringBreak.suffix)
+        assertEquals(11 * 60, duringBreak.targetMinutes)
+    }
+
+    @Test
     fun ongoingProgress_coversWholeCourseAndIsClamped() {
         val c = thursdayCourses.first() // 10:15–11:40，共 85 分钟
         assertEquals(0f, ongoingProgress(slots, c, LocalTimeLike(10, 15))!!, 0.001f)

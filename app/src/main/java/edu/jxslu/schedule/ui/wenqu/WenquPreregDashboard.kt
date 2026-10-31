@@ -161,7 +161,7 @@ data class WenquPreregDashState(
  *   订阅 [WenquPreregRunner.dash]，执行期间在**任何界面**上弹 [WenquPreregDashboardDialog]。
  *   自动弹的时机：起跑时 App 在前台、或后台起跑后用户回到 App（前台沿 false→true）。
  *   用户手动关掉后**不再自动弹**（执行照常，进度走通知），重开入口 = 进度 / 结果通知点击、
- *   悬浮球单击（预报名期间）、蹲点页「已预报名」行。
+ *   顶部「抢报中」胶囊、蹲点页「已预报名」行。
  * - [WenquPreregDashboardActivityJump]：通知落点。Intent 带 [EXTRA_DASH_REOPEN] 把主窗口
  *   拉起来，MainActivity 读到 extra 调 [WenquPreregDashboardHost.reopen]——通知点进来的
  *   重开不受「关过不再自动弹」限制。
@@ -171,7 +171,7 @@ data class WenquPreregDashState(
  */
 object WenquPreregDashboardHost {
 
-    /** 「把面板弹出来」请求计数（通知 extra / 悬浮球单击都会 +1，Host 订阅到即弹）。 */
+    /** 「把面板弹出来」请求计数（通知 extra / 顶部胶囊点击都会 +1，Host 订阅到即弹）。 */
     internal val reopenRequest = MutableStateFlow(0)
 
     /**
@@ -197,7 +197,7 @@ object WenquPreregDashboardHost {
     }
 
     /**
-     * 进程内重开（2026-10-21）：App 已在前台时悬浮球单击走这里；通知点进来由
+     * 进程内重开（2026-10-21）：App 已在前台时顶部「抢报中」胶囊走这里；通知点进来由
      * MainActivity 消费 [EXTRA_DASH_REOPEN] 后也走这里——都能突破「关过不再自动弹」。
      */
     fun reopen() {
@@ -233,7 +233,7 @@ fun WenquPreregDashboardHost() {
     val state by WenquPreregRunner.dash.collectAsState()
     val reopen by WenquPreregDashboardHost.reopenRequest.collectAsState()
     val foreground by WenquAppForeground.foreground.collectAsState()
-    // 用户关过面板后本轮不再自动弹（结果通知与悬浮球仍可重开）。
+    // 用户关过面板后本轮不再自动弹（结果通知与顶部胶囊仍可重开）。
     // 标记在 Host 单例里跨窗口共享（主窗口关掉的，设置窗口也不会再弹）。
     val dismissedThisRun by WenquPreregDashboardHost.dismissed.collectAsState()
     var show by remember { mutableStateOf(false) }
@@ -277,9 +277,8 @@ fun WenquPreregDashboardHost() {
         )
     } else if (!show && state.isRunning) {
         // 折叠胶囊（2026-10-21 补）：面板被关掉 / 还没弹出时，屏幕顶部中央显示一枚
-        // 「抢报中」胶囊，单击重开面板。**不依赖悬浮球**——问渠页等二级页是独立窗口，
-        // 悬浮球按既有口径只在主窗口，但 Host 挂在两边的根组合上，胶囊全窗口可见；
-        // 主窗口里它也是悬浮球之外的第二入口（球在三个 Tab 才显示）。
+        // 「抢报中」胶囊，单击重开面板。Host 挂在主窗口与设置窗口两边的根组合上，
+        // 胶囊全窗口可见——问渠页等二级页里也能点它重开，不用返回主界面。
         DashCollapsedPill(
             state = state,
             onClick = { WenquPreregDashboardHost.reopen() },

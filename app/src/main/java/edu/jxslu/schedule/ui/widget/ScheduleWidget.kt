@@ -2,8 +2,11 @@ package edu.jxslu.schedule.ui.widget
 
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
+import android.widget.RemoteViews
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -13,6 +16,7 @@ import androidx.glance.GlanceTheme
 import androidx.glance.LocalContext
 import androidx.glance.LocalSize
 import androidx.glance.action.clickable
+import androidx.glance.appwidget.AndroidRemoteViews
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.SizeMode
@@ -41,6 +45,7 @@ import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.MainActivity
+import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.LocalTimeLike
 import edu.jxslu.schedule.domain.buildTodayState
 import edu.jxslu.schedule.domain.dayLabel
@@ -552,27 +557,52 @@ private fun FocusBlock(model: WidgetModel, metrics: WidgetMetrics) {
                     .background(accent.copy(alpha = 0.16f))
                     .padding(horizontal = 10.dp, vertical = 8.dp),
             ) {
-                Row(
-                    modifier = GlanceModifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Vertical.CenterVertically,
-                ) {
-                    Text(
-                        text = focus.label,
-                        style = TextStyle(
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = ColorProvider(accent),
-                        ),
-                        maxLines = 1,
-                        modifier = GlanceModifier.defaultWeight(),
+                val target = focus.countdownTargetEpochMillis
+                val prefix = focus.countdownPrefix
+                val suffix = focus.countdownSuffix
+                if (target != null && prefix != null && suffix != null && metrics.shortCountdown) {
+                    // 窄卡（2×2 / 2×4，实测 < 200dp）：标签 + 完整文案必然被裁，
+                    // 只留「下课 24:37」——suffix 交代方向，课名在下一行
+                    TickingCountdown(
+                        targetEpochMillis = target,
+                        prefix = prefix,
+                        suffix = suffix,
+                        color = accent,
+                        short = true,
                     )
-                    val note = focus.countdown ?: focus.fallbackNote
-                    if (note != null) {
+                } else {
+                    Row(
+                        modifier = GlanceModifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Vertical.CenterVertically,
+                    ) {
                         Text(
-                            text = note,
-                            style = TextStyle(fontSize = 11.sp, color = ColorProvider(accent)),
+                            text = focus.label,
+                            style = TextStyle(
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = ColorProvider(accent),
+                            ),
                             maxLines = 1,
+                            modifier = GlanceModifier.defaultWeight(),
                         )
+                        if (target != null && prefix != null && suffix != null) {
+                            TickingCountdown(
+                                targetEpochMillis = target,
+                                prefix = prefix,
+                                suffix = suffix,
+                                color = accent,
+                                short = false,
+                            )
+                        } else {
+                            val note = focus.countdown ?: focus.fallbackNote
+                            if (note != null) {
+                                Text(
+                                    text = note,
+                                    style = TextStyle(fontSize = 11.sp, color = ColorProvider(accent)),
+                                    maxLines = 1,
+                                )
+                            }
+                        }
                     }
                 }
                 Spacer(GlanceModifier.height(3.dp))
@@ -666,6 +696,39 @@ private fun FocusBlock(model: WidgetModel, metrics: WidgetMetrics) {
             }
         }
     }
+}
+
+/**
+ * 焦点卡右侧的倒计时（DESIGN §3.6「倒计时」，2026-10-29）。
+ *
+ * 把系统 `Chronometer` 包成 RemoteViews 经 [AndroidRemoteViews] 嵌进组合：走字由
+ * **桌面宿主进程**完成，每秒自己按 base 重算，App 进程被杀 / 锁屏 / 重启都不影响，
+ * 也不产生任何后台唤醒。Glance 的 Text 做不到——它只能显示刷新时刻算好的静态字符串
+ * （此前「还有 25 分钟」一节课都不动，点进 App 再退出也不会重算）。
+ *
+ * @param short 窄卡（宽度 < 200dp）只放 `下课 24:37`：完整文案会把整行挤爆，
+ *   方向交给 suffix（下课 / 上课），课名在下一行
+ */
+@Composable
+private fun TickingCountdown(
+    targetEpochMillis: Long,
+    prefix: String,
+    suffix: String,
+    color: Color,
+    short: Boolean,
+) {
+    val context = LocalContext.current
+    // 快照可能是几十秒前算的：base 按「此刻到目标」重算，晚应用也不会差
+    val remaining = (targetEpochMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+    val base = SystemClock.elapsedRealtime() + remaining
+    val format = if (short) "$suffix %s" else "$prefix%s $suffix"
+    val remoteViews = RemoteViews(context.packageName, R.layout.widget_countdown).apply {
+        setTextColor(R.id.widget_countdown, color.toArgb())
+        // 先定倒计时方向再 start：反过来的话第一帧可能按正计时闪一下
+        setChronometerCountDown(R.id.widget_countdown, true)
+        setChronometer(R.id.widget_countdown, base, format, true)
+    }
+    AndroidRemoteViews(remoteViews, GlanceModifier)
 }
 
 /** 进度条分段数：Glance 没有 `fillMaxWidth(fraction)`，用 N 段拼接表达比例。 */

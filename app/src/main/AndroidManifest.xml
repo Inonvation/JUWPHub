@@ -271,6 +271,42 @@
                 android:resource="@xml/widget_water_qzxy" />
         </receiver>
 
+        <!-- 快捷设置磁贴（DESIGN §3.32 / §4.50）：付款码 / 胖乖开水 / 趣智开水。
+             三个独立 TileService，各自一个组件（系统按组件识别磁贴，不能合并）。
+             exported=true 是系统绑定所必需；BIND_QUICK_SETTINGS_TILE 由 SystemUI 持有，
+             只声明在 service 上，不要写成 uses-permission。
+             label 是磁贴下方的短标签（3–4 字），icon 必须是单色 vector。 -->
+        <service
+            android:name=".ui.tile.PayCodeTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_pay_code"
+            android:label="@string/tile_pay_code_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".ui.tile.QiekjWaterTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_qiekj_water"
+            android:label="@string/tile_qiekj_water_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".ui.tile.QzxyWaterTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_qzxy_water"
+            android:label="@string/tile_qzxy_water_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- 小组件边界闹钟落点（上下课时刻刷新），仅内部广播 -->
         <receiver
             android:name=".ui.widget.WidgetBoundaryReceiver"

@@ -26,6 +26,7 @@ import edu.jxslu.schedule.domain.BikeCluster
 import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.GcjPoint
 import edu.jxslu.schedule.domain.KvcxZones
+import edu.jxslu.schedule.domain.NearbyBike
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -154,6 +155,10 @@ private data class MapOverlayInputs(
     val colors: BikeMarkerColors,
     val clusters: List<BikeCluster>,
     val selectedKey: String?,
+    /** 「按车辆」模式的车列表与选中车号（2026-10-29）：新绘制输入必须进这份比对（红线）。 */
+    val bikes: List<NearbyBike> = emptyList(),
+    val byBike: Boolean = false,
+    val selectedBikeCarNum: String? = null,
     val userPoint: GcjPoint?,
     /** 用户位置的定位精度（米，半径）；0 = 不画精度圈。新绘制输入必须进这份比对（红线）。 */
     val userAccuracyMeters: Float,
@@ -198,6 +203,14 @@ private class DrawnOverlayInputs(var value: MapOverlayInputs? = null)
 internal fun OsmMapView(
     clusters: List<BikeCluster>,
     selectedKey: String?,
+    /** 「按车辆」模式要逐辆画的车；[byBike] = false 时不消费（2026-10-29）。 */
+    bikes: List<NearbyBike> = emptyList(),
+    /** 地图显示方式：true = 每辆车一枚图标，false = 停车点聚合圈。 */
+    byBike: Boolean = false,
+    /** 选中的车号（点图标 / 点列表行）：图标画加粗描边；null = 没选中。 */
+    selectedBikeCarNum: String? = null,
+    /** 点中某辆车图标（仅「按车辆」模式）。 */
+    onBikeTap: (String) -> Unit = {},
     userLat: Double?,
     userLng: Double?,
     /** 用户位置的定位精度（米，半径）；0 = 不画精度圈。 */
@@ -246,6 +259,7 @@ internal fun OsmMapView(
     // 回调每次重组刷新：地图监听器只建一次，闭包捕获旧 lambda 会读到过期状态
     val settleCallback by rememberUpdatedState(onCenterSettled)
     val tapCallback by rememberUpdatedState(onClusterTap)
+    val bikeTapCallback by rememberUpdatedState(onBikeTap)
     val rideTapCallback by rememberUpdatedState(onRideTap)
     val appliedCallback by rememberUpdatedState(onCameraApplied)
     val panCallback by rememberUpdatedState(onUserPan)
@@ -350,11 +364,17 @@ internal fun OsmMapView(
                 },
                 highlightLabel = highlightLabel,
                 zones = zones,
+                bikes = bikes,
+                byBike = byBike,
+                selectedBikeCarNum = selectedBikeCarNum,
             )
             if (drawn.value != inputs) {
                 overlay.colors = inputs.colors
                 overlay.clusters = inputs.clusters
                 overlay.selectedKey = inputs.selectedKey
+                overlay.bikes = inputs.bikes
+                overlay.byBike = inputs.byBike
+                overlay.selectedBikeCarNum = inputs.selectedBikeCarNum
                 overlay.userPoint = inputs.userPoint
                 overlay.userAccuracyMeters = inputs.userAccuracyMeters
                 overlay.userHeading = inputs.userHeading
@@ -367,6 +387,7 @@ internal fun OsmMapView(
             }
             // 回调不进上面那份比对：它们只是闭包，每轮重组换新实例很正常，换了不需要重画地图
             overlay.onClusterTap = tapCallback
+            overlay.onBikeTap = bikeTapCallback
             overlay.onRideTap = rideTapCallback
         },
     )

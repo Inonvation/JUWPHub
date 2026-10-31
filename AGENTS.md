@@ -1,6 +1,12 @@
-# JUWPHub · Agent 工作规范
+﻿# JUWPHub · Agent 工作规范
 
 本文件给 AI Agent / 结对工具读。人看 `README.md` 与 `DESIGN.md`。
+
+## Agent 技能规则
+
+- 仅在本仓库内：每个 Codex 会话第一次准备编码、修改、审查或重构前，必须先直接读取并遵循
+  `C:\Users\cy\.codex\plugins\cache\andrej-karpathy-local\andrej-karpathy-skills\2.0.0\.agents\skills\karpathy-guidelines\SKILL.md`。
+- 同一会话后续代码任务沿用已读取内容，不重复调用；普通问答和只读查询不触发。
 
 ## 项目身份
 
@@ -24,7 +30,7 @@
 | 今日页 / 课表网格 / 作息表 / 课程时间 | `.agents/rules/today-ui.md` |
 | 收件箱（入箱挂点 · 去重 · 保留策略） | `.agents/rules/inbox.md` |
 | AI 调课（prompt · 工具调用 · API Key · 落库语义） | `.agents/rules/ai-schedule.md` |
-| 桌面小组件 | `.agents/rules/widget.md` |
+| 桌面小组件 / 快捷设置磁贴 | `.agents/rules/widget.md` |
 | 教务课表导入 / 考试 / 成绩 / 教材 / 选课 / 教学日历 / 评教 / 实习基地 | `.agents/rules/import-jw.md` |
 | 登录 / 凭证 / 会话 / 自动填表 / 首启引导 | `.agents/rules/login-session.md` |
 | 笔记 / 作业 / Markdown / 公式 / 课程备注 | `.agents/rules/notes-homework.md` |

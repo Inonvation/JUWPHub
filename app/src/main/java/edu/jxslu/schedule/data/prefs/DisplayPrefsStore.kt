@@ -19,7 +19,6 @@ import edu.jxslu.schedule.domain.EbikeRemoteRide
 import edu.jxslu.schedule.domain.EbikeRideCard
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.FirstRunNotice
-import edu.jxslu.schedule.domain.FloatingBall
 import edu.jxslu.schedule.domain.QuietWindow
 import edu.jxslu.schedule.domain.QuietWindows
 import edu.jxslu.schedule.domain.ScoreAlertDefaults
@@ -135,24 +134,6 @@ class DisplayPrefsStore(internal val context: Context) {
     val toolboxEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
         p[KEY_TOOLBOX_ENABLED] ?: true
     }
-
-    /** 应用内悬浮球开关（DESIGN §3.1）。全局项，**默认开**：主窗口三个 Tab 常驻的快捷入口。 */
-    val floatingBallEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
-        p[KEY_FLOATING_BALL_ENABLED] ?: true
-    }.distinctUntilChanged()
-
-    /**
-     * 悬浮球归一化位置（DESIGN §3.1）：x/y ∈ [0,1]，缺省 = 右下角。
-     * 读路径夹取防线脏数据（含非有限值）；位置不吸附边缘，落在哪存哪。
-     */
-    val floatingBallPosition: Flow<FloatingBall.Position> = context.displayDataStore.data.map { p ->
-        FloatingBall.clamp(
-            FloatingBall.Position(
-                x = p[KEY_FLOATING_BALL_X] ?: FloatingBall.DefaultPosition.x,
-                y = p[KEY_FLOATING_BALL_Y] ?: FloatingBall.DefaultPosition.y,
-            ),
-        )
-    }.distinctUntilChanged()
 
     /**
      * 启动页（DESIGN §3.3）。默认今日页；认不出的存储值一律退回今日页（[StartPage.fromName]）。
@@ -994,6 +975,18 @@ class DisplayPrefsStore(internal val context: Context) {
     }.distinctUntilChanged()
 
     /**
+     * 附近单车地图的**显示方式**（DESIGN §3.9，2026-10-29）：true = 按车辆逐个画图标，
+     * false（默认）= 按停车点聚成数字圈。
+     *
+     * 默认按停车点：一屏几十上百辆车时逐个画又密又慢，聚合圈才是默认读图方式；
+     * 「按车辆」给"就想看某一辆在哪"的场景，切过去后点图标直接出详情。
+     * 用户改过后落 DataStore，下次进页保持。
+     */
+    val ebikeMapByBike: Flow<Boolean> = context.displayDataStore.data.map { p ->
+        p[KEY_EBIKE_MAP_BY_BIKE] ?: false
+    }.distinctUntilChanged()
+
+    /**
      * 骑行页底部面板高度（dp，DESIGN §3.9）；null = 没拖过，用默认值。
      *
      * 只做范围校验，窗口缩放导致的"放不下"由渲染时再夹一道，不覆写用户拖出来的值。
@@ -1271,20 +1264,6 @@ class DisplayPrefsStore(internal val context: Context) {
 
     suspend fun setToolboxEnabled(value: Boolean) {
         context.displayDataStore.edit { it[KEY_TOOLBOX_ENABLED] = value }
-    }
-
-    /** 应用内悬浮球开关（DESIGN §3.1）。 */
-    suspend fun setFloatingBallEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_FLOATING_BALL_ENABLED] = value }
-    }
-
-    /** 悬浮球位置（DESIGN §3.1）。写入前夹取到 [0,1]。 */
-    suspend fun setFloatingBallPosition(position: FloatingBall.Position) {
-        val clamped = FloatingBall.clamp(position)
-        context.displayDataStore.edit {
-            it[KEY_FLOATING_BALL_X] = clamped.x
-            it[KEY_FLOATING_BALL_Y] = clamped.y
-        }
     }
 
     /** 启动页（DESIGN §3.3）。写的是用户的选择本身，不因为生活页此刻关着就改写它。 */
@@ -1665,6 +1644,11 @@ class DisplayPrefsStore(internal val context: Context) {
     /** 记住附近单车地图「只看本校」筛选（DESIGN §3.9），见 [ebikeMapOnlyOurCampus]。 */
     suspend fun setEbikeMapOnlyOurCampus(value: Boolean) {
         context.displayDataStore.edit { it[KEY_EBIKE_MAP_ONLY_OUR_CAMPUS] = value }
+    }
+
+    /** 记住附近单车地图的显示方式（按停车点 / 按车辆），见 [ebikeMapByBike]。 */
+    suspend fun setEbikeMapByBike(value: Boolean) {
+        context.displayDataStore.edit { it[KEY_EBIKE_MAP_BY_BIKE] = value }
     }
 
     /** 记住附近单车地图的最后视野（DESIGN §3.9），见 [ebikeMapViewport]。 */

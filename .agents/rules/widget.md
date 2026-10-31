@@ -46,6 +46,14 @@
 - 边界闹钟 2026-09-24 起用 **`setAlarmClock` 精确闹钟**（此前 `setAndAllowWhileIdle` 被
   Redmi K70 推迟几分钟，用户报「上下课了小组件还不换」）——**别改回**非精确闹钟；
   无特殊权限，代价仅是触发时状态栏短暂显示闹钟图标（上课提醒同一手法）。
+- **倒计时是系统 `Chronometer`，不是静态文本**（2026-10-29）：`WidgetFocus.Course` 带
+  `countdownTargetEpochMillis` + 前后缀，`ScheduleWidget.TickingCountdown` 用
+  `AndroidRemoteViews` 嵌原生 `Chronometer`（布局 `res/layout/widget_countdown.xml`）。
+  走字在桌面宿主进程，App 被杀也照走、零唤醒；**别改回「按刷新时刻算 N 分钟」**——
+  那样一节课都不动。`Chronometer` 到 0 自停，边界闹钟负责换下一段文案。
+  边界集合含**每个小节的起止**（`nextTodayBoundaryMinutes`），否则 10:55 的课间
+  要等到 11:40 才切。窄卡（`WidgetMetrics.shortCountdown`，宽度 < 200dp）只放
+  `下课 24:37`。回前台刷新在 `MainActivity.onResume`（`TodayWidgetRefresh.refreshNow`）。
 
 ## 周网格列与高亮列
 
@@ -93,3 +101,29 @@
 
 - 澎湃OS / MIUI 的负一屏只收录「小米小部件」（需开放平台审核），**原生小组件进不去**；
   设置页已给出替代路径（负一屏搜索 / 日历同步），不要把它当 bug 修（DESIGN §3.6「负一屏」）。
+
+## 快捷设置磁贴（2026-10-29）
+
+作用域：改磁贴、磁贴状态、磁贴点击落点时读。规格见 DESIGN §3.32 / §4.50。
+
+- 三个独立 `TileService`（`ui/tile/`）：付款码 / 胖乖开水 / 趣智开水；系统按组件识别，
+  不能合并成一个。Manifest 必须 `exported="true"` + `BIND_QUICK_SETTINGS_TILE` +
+  `QS_TILE` intent-filter，图标单色 vector。
+- **点击走 `subpageLaunchIntent`（MainActivity 跳板），不直接起 `SubpageActivity`**：
+  否则二级页成为新 task 的根，返回退桌面、再点图标另开一个 task。与通知跳板同一条纪律。
+- **API 34+ 用 `startActivityAndCollapse(PendingIntent)`**；API 26–33 用 Intent 重载。
+  每个磁贴的 PendingIntent requestCode 必须不同（匹配不看 extras，共用会互相顶掉）。
+- **就绪判定**：付款码 = 一卡通凭证存在；胖乖 = `loggedIn`；趣智 = `localSession() != null`。
+  `onStartListening` 里 IO 协程读，`onClick` 用缓存；**不要在 onStartListening 主线程读
+  EncryptedSharedPreferences**。未就绪用 `STATE_INACTIVE`（灰但可点），**不要用
+  `STATE_UNAVAILABLE`**（点不动，用户到不了配置页）。
+- **三个磁贴都恒灰**：它们只做动作入口，不表示凭证 / 登录状态。`ready` 只决定落点 /
+  是否自动开水（付款码有凭证进码页、没凭证进设置页；开水磁贴已登录才自动开），**不参与
+  底色**。别把两者合并——三个磁贴都是「有状态也不点亮」。
+- **开水磁贴 = 一键直接开**：点击时 `WaterAutoStart.arm(screen)`，页面首帧消费一次；
+  令牌不进 `SubpageRequest`，窗口链恢复不会重开阀。未登录 / 用水中 / 流程中由页面 VM
+  静默跳过。**磁贴内不取数、不出码**，付款码的 `FLAG_SECURE` / 亮度仍只在 `PayCodeScreen`。
+- 应用内添加入口在「我的 → 桌面小组件 → 快捷设置磁贴」：API 33+ 走
+  `StatusBarManager.requestAddTileService`，低版本只给手动路径文案。
+- 测试：`TileTargetsTest`（落点 + `autoStart`）；release 包要冒烟，确认 R8 没把
+  Manifest 引用的 TileService 裁掉。

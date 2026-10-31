@@ -49,9 +49,16 @@ class TodayBoundaryTest {
     }
 
     @Test
-    fun duringClass_nextBoundaryIsThisClassEnd() {
-        // 5-6 节进行中：下一个边界是 15:25 下课（而非 15:45 的下一节）
-        assertEquals(15 * 60 + 25, nextTodayBoundaryMinutes(semester, slots, courses, thursday, LocalTimeLike(14, 30)))
+    fun duringClass_nextBoundaryIsThisSectionEnd() {
+        // 5-6 节进行中（5 节 14:00–14:40、6 节 14:45–15:25）：下一个边界是本节结束，
+        // 不是整门课结束——课间那 5 分钟也要让桌面从「第5节」切到「课间」
+        assertEquals(14 * 60 + 40, nextTodayBoundaryMinutes(semester, slots, courses, thursday, LocalTimeLike(14, 30)))
+    }
+
+    @Test
+    fun duringBreak_nextBoundaryIsNextSectionStart() {
+        // 14:42 在 5、6 节之间的 5 分钟课间：下一个边界是 14:45 上第 6 节
+        assertEquals(14 * 60 + 45, nextTodayBoundaryMinutes(semester, slots, courses, thursday, LocalTimeLike(14, 42)))
     }
 
     @Test
@@ -72,7 +79,7 @@ class TodayBoundaryTest {
 
     @Test
     fun boundaryIsStrictlyAfterNow() {
-        // 10:30（3-4 节进行中）：10:15 已过，取 11:40 下课
-        assertEquals(11 * 60 + 40, nextTodayBoundaryMinutes(semester, slots, courses, thursday, LocalTimeLike(10, 30)))
+        // 10:30（3-4 节进行中）：10:15 已过，取本节 10:55 结束
+        assertEquals(10 * 60 + 55, nextTodayBoundaryMinutes(semester, slots, courses, thursday, LocalTimeLike(10, 30)))
     }
 }

@@ -467,6 +467,24 @@ class BikeNearbyTest {
         )
         // z17 默认视野（半对角线约 1 公里）算出来贴着上限
         assertEquals(BikeNearby.SAMPLE_RADIUS_METERS, BikeNearby.sampleRadiusMeters(1010.0), 1e-9)
+        // 「按车辆」模式上限更小（250，2026-10-30 用户口径「范围少一点避免卡顿」）
+        assertEquals(
+            BikeNearby.BIKE_MODE_SAMPLE_RADIUS_METERS,
+            BikeNearby.sampleRadiusMeters(1010.0, byBike = true),
+            1e-9,
+        )
+        // 视口还没量到时，按车辆模式也回它自己的上限
+        assertEquals(
+            BikeNearby.BIKE_MODE_SAMPLE_RADIUS_METERS,
+            BikeNearby.sampleRadiusMeters(0.0, byBike = true),
+            1e-9,
+        )
+        // 放大到很小：两种模式共用下限 150
+        assertEquals(
+            BikeNearby.SAMPLE_RADIUS_MIN_METERS,
+            BikeNearby.sampleRadiusMeters(100.0, byBike = true),
+            1e-9,
+        )
     }
 
     @Test

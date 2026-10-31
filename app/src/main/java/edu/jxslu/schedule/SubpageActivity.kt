@@ -148,7 +148,7 @@ enum class SubpageScreen {
     CAMPUS_CARD_SETTINGS,
     /** 我的 → 教务账户（原生信息页，DESIGN §3.3；不再一点就开导入 WebView） */
     JW_ACCOUNT,
-    /** 设置 → 应用 → 外观与交互（主题 · 字体 · 导航 · 悬浮球，DESIGN §3.3） */
+    /** 设置 → 应用 → 外观与交互（主题 · 字体 · 导航，DESIGN §3.3） */
     APPEARANCE_SETTINGS,
     /** 设置 → 应用 → 功能（AI 调课 · 天气 · 快捷方式 · 百宝箱，DESIGN §3.3） */
     FEATURE_SETTINGS,

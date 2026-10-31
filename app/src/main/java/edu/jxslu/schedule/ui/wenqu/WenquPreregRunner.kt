@@ -56,7 +56,7 @@ object WenquPreregRunner {
 
     private val _dash = MutableStateFlow(WenquPreregDashState())
 
-    /** 仪表板状态（前台弹层 / 悬浮球 / 结果页唯一数据源）。 */
+    /** 仪表板状态（前台弹层 / 顶部胶囊 / 结果页唯一数据源）。 */
     val dash: StateFlow<WenquPreregDashState> = _dash.asStateFlow()
 
     /** 进程内写口（同模块：服务中断上报、面板手动报名回填「最近返回」）。 */

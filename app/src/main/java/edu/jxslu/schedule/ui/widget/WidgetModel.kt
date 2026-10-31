@@ -2,6 +2,7 @@ package edu.jxslu.schedule.ui.widget
 
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseFilter
+import edu.jxslu.schedule.domain.CountdownTarget
 import edu.jxslu.schedule.domain.LocalTimeLike
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.ScheduleOverride
@@ -16,6 +17,8 @@ import edu.jxslu.schedule.domain.sectionRange
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * 桌面小组件的**展示模型**（DESIGN §3.6）。
@@ -65,6 +68,16 @@ sealed interface WidgetFocus {
         val meta: String,
         /** `还有 25 分钟下课` / `课间 · 还有 4 分钟上课`；没有则 null */
         val countdown: String? = null,
+        /**
+         * 倒计时交给系统 `Chronometer` 自走用的三段数据（DESIGN §3.6「倒计时」）。
+         *
+         * 目标写成**绝对时刻**而不是「还剩 N 分钟」：快照可能在几十秒前算好，
+         * Chronometer 按「现在到目标时刻」自己算，晚应用也不会差。
+         * 三者任一为 null 时渲染层退回 [countdown] 的静态文案（旧快照也走这条）。
+         */
+        val countdownPrefix: String? = null,
+        val countdownSuffix: String? = null,
+        val countdownTargetEpochMillis: Long? = null,
         /** 没有倒计时时的兜底文案（`10:15 上课`） */
         val fallbackNote: String? = null,
         val colorIndex: Int,
@@ -295,6 +308,11 @@ data class WidgetMetrics(
     val metaInline: Boolean,
     /** 是否画正在上课的进度条（紧凑档 110dp 高放不下）。 */
     val showProgress: Boolean,
+    /**
+     * 倒计时是否只放 `mm:ss`：宽度 < 200dp（2×2 / 2×4 这类竖条）时，
+     * 完整文案（`第3节 · 还有 24:37 下课`）会把左侧「正在上课 · 第3-4节」挤没。
+     */
+    val shortCountdown: Boolean,
 ) {
     /** 列表行数预算（[WidgetLayout.List] 才有意义；已为「还有 N 节」留位）。 */
     fun rowsBudget(totalRows: Int): Int =
@@ -335,6 +353,7 @@ fun widgetMetricsFor(widthDp: Int, heightDp: Int): WidgetMetrics {
         focusNameLines = if (compact) 1 else 2,
         metaInline = compact && widthDp >= WideMetaDp,
         showProgress = layout == WidgetLayout.List,
+        shortCountdown = widthDp < WideMetaDp,
     )
 }
 
@@ -541,15 +560,21 @@ private fun buildFocus(state: TodayState): WidgetFocus {
     val ongoing = state.ongoing != null
     val countdown: String?
     val fallback: String?
+    // 桌面 Chronometer 的绝对目标（DESIGN §3.6「倒计时」）；拿不到时渲染层退回静态文案
+    val target: CountdownTarget?
     if (ongoing) {
         // 与今日页同一取舍：优先细粒度倒计时，退整门口径
         countdown = state.ongoingCountdown
             ?: state.minutesToOngoingEnd?.let { "还有 $it 分钟下课" }
         fallback = null
+        target = state.ongoingCountdownTarget
     } else {
         // 「下一节」进焦点卡的前提就是 ≤60 分钟（TodayState 准入窗口），直接说分钟数
         countdown = state.minutesToNext?.let { "还有 $it 分钟上课" }
         fallback = if (countdown == null) "${clockOf(state.slots, course)} 上课" else null
+        // 目标取课程有效开始时刻（整分），不用 now + 分钟数——后者把秒数抹掉了
+        target = ScheduleCalculator.courseStartMinutes(state.slots, course)
+            ?.let { CountdownTarget("还有 ", "上课", it) }
     }
 
     return WidgetFocus.Course(
@@ -557,11 +582,18 @@ private fun buildFocus(state: TodayState): WidgetFocus {
         name = course.name,
         meta = metaOf(course),
         countdown = countdown,
+        countdownPrefix = target?.prefix,
+        countdownSuffix = target?.suffix,
+        countdownTargetEpochMillis = target?.let { epochMillisAt(state.date, it.targetMinutes) },
         fallbackNote = fallback,
         colorIndex = course.colorIndex,
         progress = if (ongoing) state.ongoingProgress else null,
     )
 }
+
+/** 当天 [minutesOfDay] 的绝对时刻（epoch 毫秒）：桌面 Chronometer 的目标时刻。 */
+private fun epochMillisAt(date: LocalDate, minutesOfDay: Int): Long =
+    date.atStartOfDay(ZoneId.systemDefault()).plusMinutes(minutesOfDay.toLong()).toInstant().toEpochMilli()
 
 /**
  * 4×4 摘要行：正在上 / 下一节一行，或明日接棒时明天第一节。

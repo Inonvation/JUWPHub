@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  桌面倒计时（DESIGN §3.6「倒计时」）。
+
+  为什么是一个原生 Chronometer：它由桌面宿主进程 inflate，每秒自己按 base 重算，
+  App 进程被杀、锁屏、重启都不影响走字，也不产生任何唤醒。Glance 没有等价组件，
+  只能经 AndroidRemoteViews 嵌进组合。
+
+  字号与焦点卡右侧文案一致（11sp）；颜色由 ScheduleWidget 按课程色 setTextColor。
+-->
+<Chronometer xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_countdown"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:countDown="true"
+    android:maxLines="1"
+    android:textSize="11sp" />

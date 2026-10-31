@@ -86,10 +86,8 @@ import edu.jxslu.schedule.ui.reminder.QiekjSignInNoticeBus
 import edu.jxslu.schedule.ui.reminder.QiekjSignInNoticeHost
 import edu.jxslu.schedule.data.xg.XgUrls
 import edu.jxslu.schedule.data.prefs.OnboardingSyncOutcome
-import edu.jxslu.schedule.domain.FloatingBall
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
-import edu.jxslu.schedule.ui.common.FloatingBallOverlay
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberQuickScan
@@ -130,6 +128,7 @@ import edu.jxslu.schedule.ui.theme.JuwTheme
 import edu.jxslu.schedule.ui.theme.semanticColors
 import edu.jxslu.schedule.ui.today.TodayScreen
 import edu.jxslu.schedule.ui.water.WaterViewModel
+import edu.jxslu.schedule.ui.widget.TodayWidgetRefresh
 import edu.jxslu.schedule.data.qzxy.QzxyBluetoothScanner
 import edu.jxslu.schedule.ui.qzxy.QzxyViewModel
 import edu.jxslu.schedule.ui.week.WeekScreen
@@ -230,6 +229,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 桌面小组件（DESIGN §3.6）：回前台补一次刷新。此前只有冷启动（Application.onCreate）
+        // 和写库才刷，进程活着时从桌面点进来再退出去，卡片上的倒计时/状态停在上次快照上。
+        // refreshNow 内部先查有没有实例，没实例是廉价空跑；无网络、无新增唤醒。
+        Graph.appScope.launch {
+            TodayWidgetRefresh.refreshNow(applicationContext)
+        }
         // 宿舍报修（DESIGN §4.49）：只在回到前台时核对（不做后台轮询）。
         // 30 分钟内不重复打接口，闸门在 DormRepairSync 里；用 applicationContext 不持有 Activity。
         Graph.appScope.launch {
@@ -611,7 +616,7 @@ private val FloatingPillHeight = 64.dp
 
 /**
  * 普通（非悬浮）底栏的解析高度：M3 `NavigationBar` 的默认容器高 80dp。
- * 只用于算悬浮球的可拖动区域（让开底栏），不参与布局测量。
+ * 只用于算壳层提示卡让开底栏的高度，不参与布局测量。
  */
 private val PlainBottomBarHeight = 80.dp
 
@@ -1140,19 +1145,12 @@ internal fun JuwApp(
     val bottomBarVisibleRequest = remember { mutableStateOf(true) }
     val bottomBarVisible by bottomBarVisibleRequest
 
-    // 应用内悬浮球（DESIGN §3.1）：开关 + 位置，独立单流各收一次（combine 已满员）。
-    // 首帧按「开 + 右下角」渲染，真值到达后归位——与底栏同纪律：宁可先显示再收。
-    val repo = remember(context) { Graph.repository(context) }
-    val floatingBallEnabled by remember { repo.floatingBallEnabled }
-        .collectAsStateWithLifecycle(initialValue = true)
-    val floatingBallPosition by remember { repo.floatingBallPosition }
-        .collectAsStateWithLifecycle(initialValue = FloatingBall.DefaultPosition)
-    // 外壳级提示通道：悬浮球「别家码」这类播报落在主窗口——页面各自的 Snackbar 在 NavHost
-    // 里，够不到壳层的球（球的动作是壳级、不属于任何一页）
+    // 外壳级提示通道：侧栏扫一扫「别家码」这类播报落在主窗口——页面各自的 Snackbar 在
+    // NavHost 里，够不到壳层
     val shellSnackbar = remember { SnackbarHostState() }
     val shellScope = rememberCoroutineScope()
-    // 悬浮球的双击动作：扫一扫，复用与今日页「+ → 扫一扫」同一套三档分流（车码 / 机身码 / 别家码）
-    val startBallScan = rememberQuickScan(
+    // 侧栏扫一扫：复用与今日页同一条三档分流（车码 / 机身码 / 别家码）
+    val startQuickScan = rememberQuickScan(
         onEbike = { carNum ->
             openSubpage(context, SubpageRequest(screen = SubpageScreen.RIDE, focusItemId = carNum))
         },
@@ -1168,16 +1166,9 @@ internal fun JuwApp(
             )
         },
     )
-    // 悬浮球让开状态栏与底栏：可拖动区域 = 窗口 − 状态栏 −（手势条 + 底栏高）
-    val statusBarTopDp = with(LocalDensity.current) {
-        WindowInsets.statusBars.getTop(this).toDp()
-    }
+    // 壳层提示卡让开底栏：手势条 + 底栏高（悬浮胶囊按胶囊高算，普通底栏按 M3 默认高）
     val bottomReserveDp = navBarInsetDp +
         if (floatingNavBar) FloatingPillHeight + FloatingBarBottomMargin else PlainBottomBarHeight
-    // 悬浮球只在主窗口三个 Tab 显示（二级页是独立 Activity 窗口，本就看不到它；
-    // 充值弹层挂在壳层、没有独立路由，不涉及挂球判定）
-    val floatingBallOnTab = currentRoute == Routes.TODAY || currentRoute == Routes.WEEK ||
-        currentRoute == Routes.JW
 
     // 侧栏里点普通入口**不收侧栏**（2026-10-21 用户口径，与设置同一个姿势）：
     // 二级页是独立窗口，直接盖在侧栏上；返回时侧栏还开着，用户接着点下一项。
@@ -1261,7 +1252,7 @@ internal fun JuwApp(
                 },
                 onScan = {
                     drawer.close()
-                    startBallScan()
+                    startQuickScan()
                 },
             )
         }
@@ -1580,36 +1571,10 @@ internal fun JuwApp(
                 snackbar = shellSnackbar,
                 scope = shellScope,
             )
-            // 应用内悬浮球（DESIGN §3.1）：主窗口三个 Tab 常驻。显示设置面板打开时
-            // （bottomBarVisible 为 false）一并收起，免得压在面板上。
-            // 单击在「预报名执行期间」（DESIGN §4.45，2026-10-21）临时变为弹出抢活动仪表板
-            // （通知之外的进程内重开入口），其余时间仍是付款码；双击扫一扫不受影响。
-            if (floatingBallEnabled && floatingBallOnTab && bottomBarVisible) {
-                val preregRunning by edu.jxslu.schedule.ui.wenqu.WenquPreregRunner.dash
-                    .collectAsStateWithLifecycle()
-                FloatingBallOverlay(
-                    position = floatingBallPosition,
-                    // 单击 → 付款码页（独立窗口）；预报名执行中 → 抢活动仪表板
-                    onTap = {
-                        if (preregRunning.isRunning) {
-                            edu.jxslu.schedule.ui.wenqu.WenquPreregDashboardHost.reopen()
-                        } else {
-                            openSubpage(context, SubpageRequest(screen = SubpageScreen.PAY_CODE))
-                        }
-                    },
-                    // 双击 → 扫一扫（车码 / 机身码 / 别家码三档分流，见 startBallScan）
-                    onDoubleTap = startBallScan,
-                    onPositionChange = { pos ->
-                        shellScope.launch { repo.setFloatingBallPosition(pos) }
-                    },
-                    topInset = statusBarTopDp,
-                    bottomInset = bottomReserveDp,
-                )
-            }
         }
     }
         }
-        // 外壳级提示通道（悬浮球「别家码」、充值下单 / 支付失败、房间绑定结果）：
+        // 外壳级提示通道（侧栏扫一扫「别家码」、充值下单 / 支付失败、房间绑定结果）：
         // 挂在**根层**、画在卡片与侧栏之上——侧栏展开时主卡被推到屏幕右侧，卡内的
         // SnackbarHost 会跟着跑出可视区；充值弹层开在侧栏上时，失败提示必须看得见。
         // 贴底、让开底栏，位置与卡内时一致。

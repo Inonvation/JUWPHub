@@ -384,8 +384,8 @@
   别把两条并成一条。
 
 - **扫到车号后「确认可用就自动开锁」**（2026-10-15 用户要求；**确认闸保留**）：
-  两条扫码入口——骑行页「扫车身码」（`focusCar(carNum, autoUnlock = true)`）与今日页
-  「+ → 扫一扫」/ 悬浮球带车号进页（`setPendingFocusCar(carNum, autoUnlock = true)`）——
+  两条扫码入口——骑行页「扫车身码」（`focusCar(carNum, autoUnlock = true)`）与侧栏
+  「扫一扫」带车号进页（`setPendingFocusCar(carNum, autoUnlock = true)`）——
   识别出车号后照旧回填 + 车辆卡，并在**确认这辆车可用**后发一次
   `BikeMapEvent.AutoUnlockReady`；页面收到后走**开锁的同一套闸**（`requestKvcxAction`：
   定位前置 + 二次确认），即「识别 → 确认 → 本机开锁」，不再要用户再点一次开锁。

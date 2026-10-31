@@ -378,7 +378,7 @@ internal object ReminderNotifications {
 
     /**
      * 灵动岛倒计时卡片（DESIGN §3.7，2026-10-29）：提前量提醒不再是「发一条就走」的
-     * 一次性通知，而是**常驻到上课时刻**的 Live Update——状态栏一枚芯片（`剩8分`）、
+     * 一次性通知，而是**常驻到上课时刻**的 Live Update——状态栏一枚芯片（`南B208·8分`）、
      * 下拉一张卡（课名 + 地点/上课时刻 + 系统倒计时 + 进度条）。
      *
      * 与提前量提醒共用同一条去重键（`Before`）：键已落 = 这节课的提醒处理过
@@ -513,7 +513,8 @@ internal object ReminderNotifications {
      *
      * 三层时间表达各有分工，别互相替代：
      * - 卡片头部：系统 chronometer 倒数到上课时刻（秒级，不靠我们重发）；
-     * - 芯片：`剩8分`（HyperOS 3 的芯片不显示 chronometer，只能给短文案，
+     * - 芯片：`南B208·8分`（地点缩到 5 字以内再拼分钟数，`chipPlace` / `liveChipText`；
+     *   HyperOS 3 的芯片不显示 chronometer、也没有第二个槽放地点，只能压缩进这一行，
      *   见 `EbikeFreeRideNotifier.countdownNotification` 的实测记录）；
      * - 进度条：提前量窗口走完的比例，与芯片分钟数同一口径。
      */
@@ -528,7 +529,7 @@ internal object ReminderNotifications {
         val nowMillis = now.atZone(zone).toInstant().toEpochMilli()
         val text = liveClassLine(slots, plan.course)
         return NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_bell)
+            .setSmallIcon(R.drawable.ic_stat_class)
             .setContentTitle(plan.course.name)
             .setContentText(text)
             .setCategory(NotificationCompat.CATEGORY_EVENT)
@@ -546,7 +547,7 @@ internal object ReminderNotifications {
             .setTimeoutAfter((startAtMillis - nowMillis).coerceAtLeast(0L) + LIVE_GRACE_MILLIS)
             .setContentIntent(mainContentIntent(context))
             .setRequestPromotedOngoing(true)
-            .setShortCriticalText(liveChipText(plan.minutesLeft(now)))
+            .setShortCriticalText(liveChipText(plan.course.position, plan.minutesLeft(now)))
             .build()
     }
 
@@ -584,7 +585,7 @@ internal object ReminderNotifications {
     ): Boolean {
         ensureChannel(context)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_bell)
+            .setSmallIcon(R.drawable.ic_stat_class)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))

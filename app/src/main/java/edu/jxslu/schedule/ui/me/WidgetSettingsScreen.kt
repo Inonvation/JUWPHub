@@ -1,6 +1,10 @@
 package edu.jxslu.schedule.ui.me
 
+import android.app.StatusBarManager
+import android.content.ComponentName
 import android.content.Context
+import android.graphics.drawable.Icon
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,10 +52,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.LocalTimeLike
 import edu.jxslu.schedule.domain.buildTodayState
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
@@ -62,6 +68,9 @@ import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.courseColor
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.tile.PayCodeTileService
+import edu.jxslu.schedule.ui.tile.QiekjWaterTileService
+import edu.jxslu.schedule.ui.tile.QzxyWaterTileService
 import edu.jxslu.schedule.ui.widget.CampusCardWidgetReceiver
 import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 import edu.jxslu.schedule.ui.widget.QiekjWaterWidgetReceiver
@@ -112,6 +121,11 @@ import java.time.LocalDate
 fun WidgetSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
 
+    // 快捷设置磁贴（DESIGN §3.32）：应用内添加要 API 33+ 的 StatusBarManager；
+    // 低版本没有这个 API，只能走系统「编辑快捷设置」。
+    val canAddTile = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        context.getSystemService(StatusBarManager::class.java) != null
+
     // 能力/权限状态：从系统设置返回（onResume）时重读，保证徽标与真实状态一致
     var caps by remember { mutableStateOf(readCaps(context)) }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -147,6 +161,12 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
     val showNotice: (String) -> Unit = { message ->
         scope.launch {
             snackbar.showNotice(AppNoticeVisuals(message, tone = NoticeTone.Warning))
+        }
+    }
+    // 磁贴添加的结果有三种语气（已添加 / 已在 / 失败），不能都套 Warning
+    val showTileNotice: (String, NoticeTone) -> Unit = { message, tone ->
+        scope.launch {
+            snackbar.showNotice(AppNoticeVisuals(message, tone = tone))
         }
     }
 
@@ -193,6 +213,36 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                         },
                     )
                 }
+                Spacer(Modifier.height(6.dp))
+            }
+
+            SettingsSection(
+                title = "快捷设置磁贴",
+                subtitle = if (canAddTile) {
+                    "下拉通知栏 → 编辑，把磁贴拖出来；也可以在这里直接添加"
+                } else {
+                    "下拉通知栏 → 编辑快捷设置，把 JUWPHub 的磁贴拖出来"
+                },
+            ) {
+                Spacer(Modifier.height(4.dp))
+                tileEntries.forEach { entry ->
+                    AddRow(
+                        label = entry.label,
+                        description = entry.description,
+                        icon = entry.icon,
+                        iconTint = entry.iconTint,
+                        added = 0,
+                        canPin = canAddTile,
+                        onAdd = {
+                            requestTile(context, entry) { message, tone ->
+                                showTileNotice(message, tone)
+                            }
+                        },
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+                Bullet("三个磁贴都固定灰色：它们只做动作入口，不表示凭证 / 登录状态；灰色仍可点。")
+                Bullet("点付款码进付款码页（未配置凭证时进校园卡设置）；点开水磁贴进页并自动开水 / 开阀（未登录只进登录页）。")
                 Spacer(Modifier.height(6.dp))
             }
 
@@ -307,7 +357,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                 Bullet("四个条目各自独立添加，可以同时上桌面。")
                 Bullet("课表与「今日」页一致，余额与左侧栏钱包卡一致。")
                 Bullet("跟随系统深浅色；校园卡余额与电费不在渲染时联网。")
-                Bullet("「还有 N 分钟」按刷新时刻计算，两次刷新之间不会跳动。")
+                Bullet("课表卡的倒计时由系统计时器驱动，每秒跳动；上下课 / 课间时刻自动切换，App 被杀也照走。")
                 Spacer(Modifier.height(6.dp))
                 LauncherNoteRow()
                 Spacer(Modifier.height(6.dp))
@@ -374,6 +424,82 @@ private val entries = listOf(
         countOf = { it.qzxyAdded },
     ),
 )
+
+/** 快捷设置磁贴条目（DESIGN §3.32）：系统侧要 component + 单色 drawable，页面侧用 HugeIcons。 */
+private data class TileEntry(
+    val label: String,
+    val description: String,
+    val service: Class<*>,
+    val icon: ImageVector,
+    val iconTint: Color,
+    val drawableRes: Int,
+)
+
+private val tileEntries = listOf(
+    TileEntry(
+        label = "付款码",
+        description = "点磁贴直达一卡通付款码；未配置凭证时进校园卡设置",
+        service = PayCodeTileService::class.java,
+        icon = HugeIcons.Wallet03,
+        iconTint = Color(0xFF1F7A4D),
+        drawableRes = R.drawable.ic_tile_pay_code,
+    ),
+    TileEntry(
+        label = "胖乖开水",
+        description = "点磁贴进胖乖生活并自动开水；未登录时停在登录页",
+        service = QiekjWaterTileService::class.java,
+        icon = HugeIcons.Droplet,
+        iconTint = Color(0xFF0F7C7C),
+        drawableRes = R.drawable.ic_tile_qiekj_water,
+    ),
+    TileEntry(
+        label = "趣智开水",
+        description = "点磁贴进趣智校园并自动开阀；未登录 / 没设备时停在页面引导",
+        service = QzxyWaterTileService::class.java,
+        icon = HugeIcons.GlassWater,
+        iconTint = Color(0xFF2A6489),
+        drawableRes = R.drawable.ic_tile_qzxy_water,
+    ),
+)
+
+/**
+ * 应用内添加磁贴（API 33+）：系统弹确认框，结果码映射成一句话。
+ * 低版本 / 没有 StatusBarManager 的 ROM 直接给手动路径，不假装成功。
+ */
+private fun requestTile(
+    context: Context,
+    entry: TileEntry,
+    onResult: (String, NoticeTone) -> Unit,
+) {
+    val manager = context.getSystemService(StatusBarManager::class.java)
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || manager == null) {
+        onResult("当前系统不支持应用内添加，请下拉通知栏 → 编辑快捷设置手动添加", NoticeTone.Info)
+        return
+    }
+    // 部分 ROM 的 StatusBarManager 会直接抛 SecurityException / 空实现；
+    // 兜住后给手动路径，不让设置页崩在一个便利入口上。
+    runCatching {
+        manager.requestAddTileService(
+            ComponentName(context, entry.service),
+            entry.label,
+            Icon.createWithResource(context, entry.drawableRes),
+            ContextCompat.getMainExecutor(context),
+        ) { result ->
+            when (result) {
+                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED ->
+                    onResult("已添加「${entry.label}」", NoticeTone.Success)
+
+                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED ->
+                    onResult("「${entry.label}」已在快捷设置里", NoticeTone.Info)
+
+                else ->
+                    onResult("没有添加成功，请下拉通知栏 → 编辑快捷设置手动添加", NoticeTone.Warning)
+            }
+        }
+    }.onFailure {
+        onResult("当前系统不支持应用内添加，请下拉通知栏 → 编辑快捷设置手动添加", NoticeTone.Warning)
+    }
+}
 
 private fun readCaps(context: Context): WidgetCaps = WidgetCaps(
     canPin = WidgetCapabilities.canPin(context),

@@ -119,7 +119,7 @@ fun SettingsScreen(
             SettingsSection(title = "应用") {
                 SettingItem(
                     title = "外观与交互",
-                    subtitle = "主题 · 字体 · 导航 · 悬浮球",
+                    subtitle = "主题 · 字体 · 导航",
                     icon = HugeIcons.Palette,
                     onClick = onOpenAppearanceSettings,
                 )

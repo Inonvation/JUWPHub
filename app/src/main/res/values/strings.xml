@@ -23,4 +23,10 @@
     <string name="widget_water_qiekj_description">小票余额与积分；点「去开水」直达开水，点其余位置进开水页</string>
     <string name="widget_water_qzxy_label">JUWPHub · 趣智开水</string>
     <string name="widget_water_qzxy_description">趣智余额与用水状态；点「去开水」直达开阀，点其余位置进趣智页</string>
+
+    <!-- 快捷设置磁贴（DESIGN §3.32）：label 是磁贴图标下方的短标签，别写长名，
+         快捷设置里放不下（3–4 字最稳）。 -->
+    <string name="tile_pay_code_label">付款码</string>
+    <string name="tile_qiekj_water_label">胖乖开水</string>
+    <string name="tile_qzxy_water_label">趣智开水</string>
 </resources>

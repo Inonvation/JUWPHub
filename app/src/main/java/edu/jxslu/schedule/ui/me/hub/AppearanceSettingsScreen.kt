@@ -68,7 +68,6 @@ import me.rerere.hugeicons.stroke.Palette
 import me.rerere.hugeicons.stroke.SwatchBook
 import me.rerere.hugeicons.stroke.TextFont
 import me.rerere.hugeicons.stroke.Vibrate
-import me.rerere.hugeicons.stroke.Wallet01
 
 /**
  * 设置 → 应用 → 外观与交互（DESIGN §3.3）。
@@ -85,7 +84,6 @@ fun AppearanceSettingsScreen(
     ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val floatingBallEnabled by viewModel.floatingBallEnabled.collectAsStateWithLifecycle()
     val haptics = rememberAppHaptics()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -188,13 +186,6 @@ fun AppearanceSettingsScreen(
                         viewModel.setStartPage(startPages[index])
                         showNotice("已保存，重启应用后生效")
                     },
-                )
-                SettingSwitchRow(
-                    title = "悬浮球",
-                    subtitle = "常驻快捷入口：付款码 · 扫一扫，可拖动",
-                    checked = floatingBallEnabled,
-                    onCheckedChange = viewModel::setFloatingBallEnabled,
-                    icon = HugeIcons.Wallet01,
                 )
             }
         }

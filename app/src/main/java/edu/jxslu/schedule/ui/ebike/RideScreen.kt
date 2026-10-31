@@ -857,6 +857,16 @@ fun RideScreen(
                         clusters = if (showSpots) emptyList() else state.clusters,
                         // 高亮跟列表的展开态走：点标记与在列表里展开是同一件事的两个入口
                         selectedKey = state.expandedKey,
+                        // 「按车辆」模式（2026-10-29）：逐辆画图标，点图标 = 选中这辆车
+                        // （动作条换成车辆卡，与点列表行同一条路）
+                        bikes = if (showSpots) emptyList() else state.bikes,
+                        byBike = state.byBike && !showSpots,
+                        selectedBikeCarNum = pickedCar,
+                        onBikeTap = { carNum ->
+                            haptics.tap()
+                            ebikeViewModel.onCarInput(carNum)
+                            pickedCar = carNum
+                        },
                         userLat = state.userLat,
                         userLng = state.userLng,
                         userAccuracyMeters = state.userAccuracyMeters,
@@ -996,6 +1006,25 @@ fun RideScreen(
                         onSpotTap = { spot ->
                             // 触感由 AppCardRow 自己发
                             viewModel.onFocusPoint(spot.lat, spot.lng)
+                        },
+                        // 「按车辆」模式的平铺列表：选中的那辆高亮并滚过去
+                        selectedCarNum = pickedCar,
+                        // 显示方式切换（2026-10-29）：纯展示切换，不重查接口；给一句提示
+                        // 说明主动作变成了什么（与切换使用方式那枚 chip 同一口径）
+                        onToggleByBike = {
+                            haptics.tap()
+                            val next = !state.byBike
+                            viewModel.setByBike(next)
+                            showNotice(
+                                scope,
+                                snackbar,
+                                if (next) {
+                                    "已切换为按车辆显示，点地图上的车辆图标看详情"
+                                } else {
+                                    "已切换为按停车点显示"
+                                },
+                                NoticeTone.Info,
+                            )
                         },
                     )
 

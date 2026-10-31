@@ -146,6 +146,23 @@ data class BikeMapUiState(
      */
     val onlyOurCampus: Boolean = true,
     /**
+     * 地图的**显示方式**（2026-10-29 用户要求）：true = 按车辆逐个画图标，
+     * false = 按停车点聚成数字圈（默认）。
+     *
+     * 「按车辆」时地图不再画聚合圈，每辆车画一枚小车图标、点图标直接出这辆车的详情
+     * （车辆卡 + 主按钮）；列表同时换成**平铺的车辆列表**（[bikes]），与地图同一粒度。
+     * 开关态进 DataStore（`ebike_map_by_bike`），下次进页保持。
+     */
+    val byBike: Boolean = false,
+    /**
+     * 过滤后（未封顶）的车辆列表，按距离升序：**「按车辆」模式的唯一数据源**。
+     *
+     * 与 [clusters] 同一批输入（同一套筛选 + 1200/1000 米展示上限），只是不做聚簇、
+     * 也不吃 [MAX_CLUSTER_COUNT] 封顶——按车辆看就是要把这一带的车都摆出来。
+     * 聚合模式不用它（地图与列表都走 [clusters]），所以只在 [byBike] 时被消费。
+     */
+    val bikes: List<NearbyBike> = emptyList(),
+    /**
      * 需要在列表里定位过去的停车点；[focusNonce] 递增用来区分"又点了一次同一个点"。
      *
      * 点地图标记时列表要滚到对应的卡片并高亮（DESIGN §3.9）——标记在屏幕中央，
@@ -477,6 +494,9 @@ class BikeMapViewModel(
             setOnlyOurCampus(prefs.ebikeMapOnlyOurCampus.first())
         }
         viewModelScope.launch {
+            setByBike(prefs.ebikeMapByBike.first())
+        }
+        viewModelScope.launch {
             val saved = prefs.ebikeMapViewport.first()
             // 定位已经先回来了：它要的是"我在哪"，不是"我上次看哪"，别再拉回去
             if (locatedOnce) return@launch
@@ -608,6 +628,20 @@ class BikeMapViewModel(
         // 图层同吃这一份筛选（还车点按围栏过滤，见 KvcxZones.campusOnly）
         applyZones()
         viewModelScope.launch { prefs.setEbikeMapOnlyOurCampus(value) }
+    }
+
+    /**
+     * 切换地图显示方式（按停车点 ↔ 按车辆，2026-10-29）。
+     *
+     * 纯展示切换：数据已在手上，只重算展示用的那一份（[BikeMapUiState.bikes] /
+     * [BikeMapUiState.clusters]），**不重新请求接口**（与两个筛选开关同一口径）。
+     * 切回聚合时顺手收起已展开的停车点卡——那张卡在「按车辆」模式下根本不存在。
+     */
+    fun setByBike(value: Boolean) {
+        if (_uiState.value.byBike == value) return
+        _uiState.update { it.copy(byBike = value) }
+        rebuildClusters()
+        viewModelScope.launch { prefs.setEbikeMapByBike(value) }
     }
 
     /**
@@ -1038,9 +1072,15 @@ class BikeMapViewModel(
         } else {
             fetched
         }
+        // 「按车辆」模式的展示范围更小（500 米，2026-10-30 用户口径「范围少一点避免卡顿」）
+        val maxDistance = if (state.byBike) {
+            BikeNearby.BIKE_MODE_MAX_DISTANCE_METERS
+        } else {
+            BikeNearby.MAX_NEARBY_DISTANCE_METERS
+        }
         val shown = anchored
             // 撒点采样会把上限外的车也捞回来，那些不算"附近"
-            .filter { it.distanceMeters <= BikeNearby.MAX_NEARBY_DISTANCE_METERS }
+            .filter { it.distanceMeters <= maxDistance }
             // 只看本校：车队归属 + 围栏双条件（师大校园的车在这里被挡掉）
             .let { list ->
                 if (state.onlyOurCampus) {
@@ -1080,10 +1120,16 @@ class BikeMapViewModel(
             }
             current.copy(
                 clusters = clusters,
+                // 「按车辆」模式的唯一数据源：同一套筛选、不吃簇封顶（见 BikeMapUiState.bikes）
+                bikes = shown,
                 bikeCount = shown.size,
                 clusterOverflow = allClusters.size - clusters.size,
-                // 列表换了一批，展开态只在那个停车点还在时保留
-                expandedKey = current.expandedKey?.takeIf { key -> clusters.any { it.key == key } },
+                // 列表换了一批，展开态只在那个停车点还在时保留；按车辆模式没有卡片可展开
+                expandedKey = if (current.byBike) {
+                    null
+                } else {
+                    current.expandedKey?.takeIf { key -> clusters.any { it.key == key } }
+                },
                 highlightedCar = highlighted,
             )
         }
@@ -1186,14 +1232,20 @@ class BikeMapViewModel(
         //
         // 环半径按视口缩放（[BikeNearby.sampleRadiusMeters]）：放大到只看一条路时不再查
         // 视界之外的几百米（2026-10-29 用户口径「范围跟着视图比例缩小」）。
-        val ring = ringSampleCount(pendingZoom)
-        val radius = BikeNearby.sampleRadiusMeters(viewportHalfDiagonalMeters)
+        // 「按车辆」模式上限更小（250 米，见 [BikeNearby.BIKE_MODE_SAMPLE_RADIUS_METERS]）。
+        val byBike = _uiState.value.byBike
+        // 「按车辆」模式固定 4 个采样点：环半径只有 250 米，缩得很小时再撒 8 个方位
+        // 纯属多发 4 个请求（2026-10-30 用户口径「请求少一点」）
+        val ring = if (byBike) 4 else ringSampleCount(pendingZoom)
+        val radius = BikeNearby.sampleRadiusMeters(viewportHalfDiagonalMeters, byBike = byBike)
         val (ringBikes, fillBikes) = coroutineScope {
             val ringJob = async { mergeSamples(lat, lng, centerBikes, ring, radius) }
             // 补全的桩从**中心结果**里挑：用户正看着的那处大桩一定在最近的 20 辆里，
-            // 不必等环回来（等了就又是两拍落地）
-            val fillJob = async { fillBigSpot(lat, lng, centerBikes) }
-            ringJob.await() to fillJob.await()
+            // 不必等环回来（等了就又是两拍落地）。
+            // **「按车辆」模式不补**（2026-10-30 用户口径「请求少一点」）：地图上没有聚合圈、
+            // 那个数字没人看，4 个偏移查询纯属白花——一次刷新从 9 个请求降到 5 个。
+            val fillJob = if (byBike) null else async { fillBigSpot(lat, lng, centerBikes) }
+            ringJob.await() to (fillJob?.await().orEmpty())
         }
         val merged = BikeNearby.mergeBikes(ringBikes, fillBikes)
         applyResult(lat, lng, merged, stillLoading = false)

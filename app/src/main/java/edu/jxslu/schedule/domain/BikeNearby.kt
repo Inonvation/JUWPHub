@@ -216,17 +216,35 @@ object BikeNearby {
     const val MAX_NEARBY_DISTANCE_METERS = 1000
 
     /**
+     * 「按车辆」模式的采样半径上限（米，2026-10-30 用户口径「按车辆显示刷新范围和请求可以
+     * 少一点避免卡顿」）：逐辆画图标时一屏几十上百枚已经很密，再捞四百米外的车只是白花请求、
+     * 白占列表与每帧绘制。实际半径仍按视口缩放（[sampleRadiusMeters]），只是上限收到 250。
+     */
+    const val BIKE_MODE_SAMPLE_RADIUS_METERS = 250.0
+
+    /**
+     * 「按车辆」模式的展示距离上限（米）：与采样半径配套收小，列表与地图只留眼前这一片。
+     * 聚合模式仍用 [MAX_NEARBY_DISTANCE_METERS]（1000 米，覆盖全校）。
+     */
+    const val BIKE_MODE_MAX_DISTANCE_METERS = 500
+
+    /**
      * 采样环半径（纯函数，单测锁定）：按视口半对角线缩放，夹在
-     * [SAMPLE_RADIUS_MIN_METERS] ~ [SAMPLE_RADIUS_METERS] 之间。
+     * [SAMPLE_RADIUS_MIN_METERS] ~ 上限之间（聚合模式 [SAMPLE_RADIUS_METERS]，
+     * 「按车辆」模式 [BIKE_MODE_SAMPLE_RADIUS_METERS]）。
      *
      * 视口还没量到（0 / 负数 / 非有限）时按上限算：宁可多查一圈，也别在首帧只查中心。
      */
-    fun sampleRadiusMeters(viewportHalfDiagonalMeters: Double): Double {
+    fun sampleRadiusMeters(
+        viewportHalfDiagonalMeters: Double,
+        byBike: Boolean = false,
+    ): Double {
+        val max = if (byBike) BIKE_MODE_SAMPLE_RADIUS_METERS else SAMPLE_RADIUS_METERS
         if (!viewportHalfDiagonalMeters.isFinite() || viewportHalfDiagonalMeters <= 0.0) {
-            return SAMPLE_RADIUS_METERS
+            return max
         }
         return (viewportHalfDiagonalMeters * SAMPLE_VIEWPORT_RATIO)
-            .coerceIn(SAMPLE_RADIUS_MIN_METERS, SAMPLE_RADIUS_METERS)
+            .coerceIn(SAMPLE_RADIUS_MIN_METERS, max)
     }
 
     /**

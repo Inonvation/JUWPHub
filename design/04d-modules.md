@@ -1431,13 +1431,12 @@ Manifest 每条都要 `exported="true"` + `android.permission.BIND_QUICK_SETTING
 - 趣智 = `Graph.qzxy(ctx).localSession() != null`。
 
 `onStartListening` 在 IO 协程里读（不碰网络、不在主线程读 EncryptedSharedPreferences），
-读完按 `TileAction.lit` 设 `STATE_ACTIVE/INACTIVE`：付款码磁贴 `lit` 恒 false（纯动作
-入口，不表示凭证状态）；开水磁贴 `lit` = 登录态。`onClick` 只用缓存，缓存缺失时同步补读
-一次（毫秒级）。**不用 `requestListeningState`**：下拉通知栏必先触发 `onStartListening`，
-点击时状态已是新的。
+读完只刷新 `onClick` 用的缓存；磁贴底色**一律 `STATE_INACTIVE`**（三个都是纯动作入口，
+不表示凭证 / 登录状态）。`onClick` 只用缓存，缓存缺失时同步补读一次（毫秒级）。
+**不用 `requestListeningState`**：下拉通知栏必先触发 `onStartListening`，点击时缓存已是新的。
 
-`ready` 与 `lit` 分工：`ready` 只决定落点 / 是否自动开水（付款码有凭证进码页、没凭证进
-设置页），`lit` 只决定磁贴底色。别把两者合并——付款码就是「有凭证但恒灰」的组合。
+`ready` 只决定落点 / 是否自动开水（付款码有凭证进码页、没凭证进设置页；开水磁贴已登录
+才自动开），**不参与底色**。别把两者合并——三个磁贴都是「有状态也不点亮」。
 
 **自动开水**：只在磁贴点击时 `WaterAutoStart.arm`；令牌是进程内单槽、页面首帧消费、
 不进 `SubpageRequest`，所以窗口链恢复不会重开阀。未登录 / 用水中 / 流程中由页面 VM

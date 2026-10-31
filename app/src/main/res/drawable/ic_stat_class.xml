@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知小图标（上课提醒）：状态栏只渲染 alpha 通道，必须是单色 vector。
+     形状 = Material Symbols「school」学士帽（Iconify material-symbols 集合）；
+     与铃铛区分开——这条通知说的是「去哪上课」，不是「有件事提醒你」。
+     实心形状，16dp 下不糊；勿改成描边款。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M21,17v-6.9L12,15L1,9l11,-6l11,6v8zM12,21l-7,-3.8v-5l7,3.8l7,-3.8v5z" />
+</vector>

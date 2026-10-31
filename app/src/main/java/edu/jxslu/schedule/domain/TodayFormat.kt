@@ -78,13 +78,18 @@ fun liveClassLine(slots: List<TimeSlot>, course: Course): String {
 }
 
 /**
- * 灵动岛芯片上的短文案：`剩8分`。
+ * 灵动岛芯片上的短文案：`南B208·8分`（无地点时退回 `剩8分`）。
  *
- * 芯片宽 96dp，超过 7 个字符可能只留图标（与 `EbikeFreeRide.countdownChipText`
- * 同一约束）；提前量上限 30 分钟，最长 `剩30分` 四个字符，安全。
+ * 芯片宽 96dp、只有一个文字槽（官方口径：不到 7 个字符完整显示，放不下一半就只剩图标），
+ * 所以地点与分钟数只能靠**压缩拼接**共用这一行：地点先过 [chipPlace] 收到 5 字以内，
+ * 再接分钟数——7~9 个字符，系统按「能放多少放多少」处理。
+ * **地点占前位**：这是「马上要出门」的场景，没有教室号的那串分钟数没有用；被截时先丢后半截。
  * 分钟数由 `ReminderPlan.minutesLeft` 给，这里只管拼。
  */
-fun liveChipText(minutesLeft: Long): String = "剩${minutesLeft}分"
+fun liveChipText(position: String, minutesLeft: Long): String {
+    val place = chipPlace(position)
+    return if (place.isEmpty()) "剩${minutesLeft}分" else "$place·${minutesLeft}分"
+}
 
 /** `3-4 节` / `5 节`：今日页统一卡左列的节次短标签（与 [sectionRange] 的「第3-4节」区分）。 */
 fun sectionShortLabel(course: Course): String =
@@ -135,6 +140,23 @@ fun compactPosition(position: String): String {
     if (!tail.isNullOrEmpty()) return tail
 
     return if (raw.any { it == '(' || it == '（' || it == ')' || it == '）' }) "" else raw
+}
+
+/** 芯片上地点的字符预算：`南B208`(5) 是教务括号写法的常见上限，再长就挤掉分钟数。 */
+private const val CHIP_PLACE_MAX = 5
+
+/**
+ * 芯片上的地点牌：[compactPosition] 之后再压一道，收到 5 个字符以内。
+ *
+ * `教学南大楼(南B302)` → `南B302`（括号已由 [compactPosition] 剥掉）；
+ * 楼名过长时取「首字 + 房间号」——`工程训练中心210` → `工210`，房间号是唯一不能猜的部分。
+ * 没有房间号（纯楼名）就截前 5 字：宁可给楼名，也别把房号截成半个（`工程训练中`）。
+ */
+fun chipPlace(position: String): String {
+    val compact = compactPosition(position)
+    if (compact.length <= CHIP_PLACE_MAX) return compact
+    val room = compact.takeLastWhile { it.isDigit() }
+    return if (room.isEmpty()) compact.take(CHIP_PLACE_MAX) else compact.first() + room
 }
 
 /**

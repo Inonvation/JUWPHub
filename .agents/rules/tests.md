@@ -68,7 +68,7 @@
 `CourseRemarkTest`（课程备注搬运：mergeKey 匹配/kid 区分/新行不覆盖/多行同 key）、
 `ScheduleExporterTest`（日历/CSV 事件展开）、`ReminderPlannerTest`（提醒时刻与有效期窗口）、
 `LiveClassUpdateTest`（倒计时卡片：剩余分钟向上取整且不低于 1 / 进度按提前量窗口、迟到从中间起步 /
-正文地点在前 / 芯片文案长度）、
+正文地点在前 / 芯片「地点·分钟」压缩拼接、长楼名取首字 + 房号、无地点退回「剩 N 分」）、
 `CalendarSyncDefaultsTest`（日历提醒档位表）、`TimetablePrefsDefaultsTest`（显示偏好默认值契约）、
 `GridFontDecouplingTest` / `GridFontScaleTest`（课表字号解耦与收敛）、
 `PanelSnapTest`（面板高度吸附）、`CompactPositionTest`（地点压缩）、

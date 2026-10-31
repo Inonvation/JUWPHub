@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.ui.ebike
 
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -14,12 +15,14 @@ import edu.jxslu.schedule.domain.BikeStatus
 import edu.jxslu.schedule.domain.GcjPoint
 import edu.jxslu.schedule.domain.KvcxParkSpot
 import edu.jxslu.schedule.domain.KvcxZones
+import edu.jxslu.schedule.domain.NearbyBike
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Overlay
 import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 /** 标记配色。由 UI 层按当前主题传进来，本类不碰 Compose。 */
 internal data class BikeMarkerColors(
@@ -77,6 +80,23 @@ internal class BikeMarkerOverlay(private val density: Float) : Overlay() {
 
     /** 待绘制的停车点。 */
     var clusters: List<BikeCluster> = emptyList()
+
+    /**
+     * 「按车辆」模式要逐辆画的车（已按距离升序，2026-10-29）；[byBike] = false 时不消费。
+     *
+     * 最多一百多辆，逐辆画圆 + 描边 + 小车字形会顶不住拖动帧率，所以图标**预渲染成位图**
+     * （见 [bikeIcon]），每帧只做一次 `drawBitmap`。
+     */
+    var bikes: List<NearbyBike> = emptyList()
+
+    /** 地图显示方式：true = 每辆车一枚图标，false = 停车点聚合圈（2026-10-29）。 */
+    var byBike: Boolean = false
+
+    /** 选中的车号（点地图图标 / 点列表行）：画加粗描边；null = 没选中。 */
+    var selectedBikeCarNum: String? = null
+
+    /** 点中某辆车图标的回调（仅 [byBike] 模式）；Compose 侧每次重组刷新，别捕获旧状态。 */
+    var onBikeTap: (String) -> Unit = {}
 
     /** 校区围栏顶点（GCJ-02，DESIGN §3.9「只看本校」）；不足 3 个点不画。 */
     var fence: List<GcjPoint> = emptyList()
@@ -156,6 +176,20 @@ internal class BikeMarkerOverlay(private val density: Float) : Overlay() {
     private val hitRadiusPx = 24f * density
 
     /**
+     * 「按车辆」模式的图标尺寸（dp，直径）：2026-10-30 由 20 放大到 **24**（用户口径
+     * 「图标可以放大一点」）——20dp 下小车字形挤在圆里、拇指也不好点；24 与聚合圈同档，
+     * 但圆里是小车而不是数字，一眼分得出两种模式。
+     */
+    private val bikeIconDiameterDp = 24f
+    private val bikeIconRadiusPx = bikeIconDiameterDp * density / 2f - 1.5f * density
+
+    /** 单车图标的命中半径（dp）：图标再密也取最近的一辆，拇指不用瞄准。 */
+    private val bikeHitRadiusPx = 22f * density
+
+    /** 单车图标位图缓存：键 = 图标主色（主题切换后颜色变，键跟着变）。 */
+    private val bikeIcons = HashMap<Int, Bitmap>()
+
+    /**
      * 屏幕外剔除的余量（dp）：投影点离画布边比这个还远就不画。
      *
      * 48dp 足够盖住标记半径（簇最大 15dp + 描边）与还车点多边形（几十米，z17 下约几十像素），
@@ -230,28 +264,33 @@ internal class BikeMarkerOverlay(private val density: Float) : Overlay() {
         drawFence(canvas, mapView, out)
         // 图层压在围栏之上、车辆标记之下（与官方 zIndex：服务区 3 < 禁停 4 < 还车点 5 < 车 6 同序）
         drawZones(canvas, mapView, out, margin)
-        for (cluster in clusters) {
-            mapView.project(cluster.lat, cluster.lng, out)
-            val x = out.x.toFloat()
-            val y = out.y.toFloat()
-            // 屏幕外不画（2026-09-29）：拖动时每帧都要重画所有标记，几十个离屏的
-            // drawCircle + drawText 纯属白干，正是「有点卡」的一部分
-            if (canvas.offscreen(x, y, margin)) continue
-            val selected = cluster.key == selectedKey
-            val radius = (if (selected) 15f else 12f) * density
+        if (byBike) {
+            // 「按车辆」模式（2026-10-29）：逐辆画小车图标，不画聚合圈
+            drawBikes(canvas, mapView, out, margin)
+        } else {
+            for (cluster in clusters) {
+                mapView.project(cluster.lat, cluster.lng, out)
+                val x = out.x.toFloat()
+                val y = out.y.toFloat()
+                // 屏幕外不画（2026-09-29）：拖动时每帧都要重画所有标记，几十个离屏的
+                // drawCircle + drawText 纯属白干，正是「有点卡」的一部分
+                if (canvas.offscreen(x, y, margin)) continue
+                val selected = cluster.key == selectedKey
+                val radius = (if (selected) 15f else 12f) * density
 
-            fill.color = clusterColor(cluster)
-            canvas.drawCircle(x, y, radius, fill)
+                fill.color = clusterColor(cluster)
+                canvas.drawCircle(x, y, radius, fill)
 
-            ring.strokeWidth = (if (selected) 3f else 2f) * density
-            ring.color = if (selected) colors.selectedRing else Color.WHITE
-            canvas.drawCircle(x, y, radius, ring)
+                ring.strokeWidth = (if (selected) 3f else 2f) * density
+                ring.color = if (selected) colors.selectedRing else Color.WHITE
+                canvas.drawCircle(x, y, radius, ring)
 
-            label.color = colors.label
-            label.textSize = (if (selected) 13f else 12f) * density
-            val count = countLabel(cluster.bikes.size)
-            // 基线 = 圆心下移半点字高，比直接减 descent 稳（不同字体的 descent 差得多）
-            canvas.drawText(count, x, y - (label.ascent() + label.descent()) / 2f, label)
+                label.color = colors.label
+                label.textSize = (if (selected) 13f else 12f) * density
+                val count = countLabel(cluster.bikes.size)
+                // 基线 = 圆心下移半点字高，比直接减 descent 稳（不同字体的 descent 差得多）
+                canvas.drawText(count, x, y - (label.ascent() + label.descent()) / 2f, label)
+            }
         }
 
         // 识别高亮：画在簇标记之上、「当前用车」与蓝点之下——它是"看这辆"的指示，
@@ -359,6 +398,23 @@ internal class BikeMarkerOverlay(private val density: Float) : Overlay() {
                 return true
             }
         }
+        if (byBike) {
+            // 「按车辆」模式（2026-10-29）：命中判定按车图标来，取最近的一辆
+            if (bikes.isEmpty()) return false
+            var bikeHit: String? = null
+            var bestBike = Float.MAX_VALUE
+            bikes.forEach { bike ->
+                mapView.project(bike.lat, bike.lng, out)
+                val distance = hypot(out.x - e.x, out.y - e.y)
+                if (distance <= bikeHitRadiusPx && distance < bestBike) {
+                    bestBike = distance
+                    bikeHit = bike.carNum
+                }
+            }
+            val carNum = bikeHit ?: return false
+            onBikeTap(carNum)
+            return true
+        }
         if (clusters.isEmpty()) return false
         var hit: String? = null
         var best = Float.MAX_VALUE
@@ -385,11 +441,66 @@ internal class BikeMarkerOverlay(private val density: Float) : Overlay() {
         else -> colors.unavailable
     }
 
+    /**
+     * 「按车辆」模式：逐辆画小车图标（2026-10-29）。
+     *
+     * 图标是**预渲染位图**（[bikeIcon]）：一百多辆逐辆画圆 + 描边 + 小车字形，
+     * 拖动时每帧都要重画，实测会顶不住；位图每辆只剩一次 blit。选中那辆多画一圈描边。
+     * 屏幕外照样剔除（与聚合圈同一条）。
+     */
+    private fun drawBikes(canvas: Canvas, mapView: MapView, out: Point, margin: Float) {
+        for (bike in bikes) {
+            mapView.project(bike.lat, bike.lng, out)
+            val x = out.x.toFloat()
+            val y = out.y.toFloat()
+            if (canvas.offscreen(x, y, margin)) continue
+            val icon = bikeIcon(bikeColor(bike))
+            canvas.drawBitmap(icon, x - icon.width / 2f, y - icon.height / 2f, null)
+            if (bike.carNum == selectedBikeCarNum) {
+                ring.strokeWidth = 2.5f * density
+                ring.color = colors.selectedRing
+                canvas.drawCircle(x, y, bikeIconRadiusPx + 2f * density, ring)
+            }
+        }
+    }
+
+    /** 单车图标的颜色：与聚合圈同一套语义，只是按这一辆自己的状态判。 */
+    private fun bikeColor(bike: NearbyBike): Int = when (bike.status) {
+        BikeStatus.Available -> colors.available
+        BikeStatus.LowBattery -> colors.lowBattery
+        BikeStatus.Offline, BikeStatus.Disabled -> colors.unavailable
+    }
+
+    /**
+     * 单车图标位图（按颜色缓存）：实心圆 + 白描边 + 白色小车字形。
+     *
+     * 颜色跟着主题变（[colors] 每次重组由 Compose 侧刷新），所以缓存键是颜色本身；
+     * 主题切换时旧位图留着不删（最多几个 20dp 的位图，几十 KB）。
+     */
+    private fun bikeIcon(color: Int): Bitmap = bikeIcons.getOrPut(color) {
+        val size = (bikeIconDiameterDp * density).roundToInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val center = size / 2f
+        fill.color = color
+        canvas.drawCircle(center, center, bikeIconRadiusPx, fill)
+        ring.strokeWidth = 1.5f * density
+        ring.color = Color.WHITE
+        canvas.drawCircle(center, center, bikeIconRadiusPx, ring)
+        drawScooterGlyph(canvas, center, center - 0.6f * density, color = Color.WHITE)
+        bitmap
+    }
+
     /** 当前用车标记里的小车（两轮 + 踏板 + 立管 + 把手），比写字省地方也跨语言。 */
-    private fun drawScooterGlyph(canvas: Canvas, x: Float, y: Float) {
+    private fun drawScooterGlyph(
+        canvas: Canvas,
+        x: Float,
+        y: Float,
+        color: Int = colors.rideGlyph,
+    ) {
         val d = density
-        glyphFill.color = colors.rideGlyph
-        glyphStroke.color = colors.rideGlyph
+        glyphFill.color = color
+        glyphStroke.color = color
         glyphStroke.strokeWidth = 1.9f * d
         val wheelY = y + 3.8f * d
         canvas.drawCircle(x - 5.4f * d, wheelY, 2.2f * d, glyphFill)

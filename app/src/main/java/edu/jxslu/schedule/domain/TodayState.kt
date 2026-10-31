@@ -76,6 +76,12 @@ data class TodayState(
      * 不带小节序号——课时卡已有「第3-4节」，再标一个「第1节」是第二套编号。
      */
     val ongoingCountdown: String? = null,
+    /**
+     * [ongoingCountdown] 的结构化版本（目标时刻 + 前后缀）。桌面小组件把它交给系统
+     * `Chronometer` 自走（DESIGN §3.6「倒计时」），与今日页同源，不另算一套。
+     * 没有正在上的课时为 null。
+     */
+    val ongoingCountdownTarget: CountdownTarget? = null,
     /** 正在上课时的整门课进度 0f..1f；其余情况 null（不画进度条） */
     val ongoingProgress: Float? = null,
     /** 今天排了课，但已经全部上完 */
@@ -162,6 +168,9 @@ fun buildTodayState(
     val tomorrowDay = tomorrow.dayOfWeek.value
     val tomorrowWeek = semester?.let { ScheduleCalculator.weekNumberOf(it, tomorrow) } ?: 0
     val tomorrowInTerm = semester != null && ScheduleCalculator.isWeekInTerm(semester, tomorrowWeek)
+    // 倒计时文案与结构化目标从同一次计算出：桌面 Chronometer 与今日页不会出现
+    // 「页面 24 分钟、桌面 25 分钟」这种两套口径
+    val ongoingTarget = ongoing?.let { ongoingCountdownTarget(slots, it, now) }
 
     return TodayState(
         loading = false,
@@ -180,7 +189,8 @@ fun buildTodayState(
         timeline = timeline,
         minutesToNext = next?.let { minutesUntilStart(slots, it, now) },
         minutesToOngoingEnd = ongoing?.let { minutesUntilEnd(slots, it, now) },
-        ongoingCountdown = ongoing?.let { ongoingCountdownLabel(slots, it, now) },
+        ongoingCountdown = ongoingTarget?.label(now.toMinutes()),
+        ongoingCountdownTarget = ongoingTarget,
         ongoingProgress = ongoing?.let { ongoingProgress(slots, it, now) },
         todayAllDone = dayCourses.isNotEmpty() && dayCourses.all { phases[it.id] == CoursePhase.Ended },
         todayEmpty = dayCourses.isEmpty(),
@@ -231,50 +241,77 @@ fun ongoingProgress(
 }
 
 /**
- * 正在上课时的细粒度倒计时文案。
+ * 倒计时的结构化目标：文案前缀 / 后缀 + 目标时刻（当天 0 点起的分钟数）。
  *
- * 大节内两小节之间有 5 分钟课间：上课时说「第3节 · 还有 xx 分钟下课」，
- * 课间说「课间 · 还有 xx 分钟上课」。
+ * 桌面小组件把它交给系统 `Chronometer`（目标时刻 + 前后缀）自己走字，
+ * 不再把「还有 N 分钟」算成静态字符串；今日页仍用 [label] 的整分文案。
+ * 两处同源，口径不会分叉。
  *
+ * @param prefix `还有 ` / `第3节 · 还有 ` / `课间 · 还有 `
+ * @param suffix `下课` / `上课`
+ * @param targetMinutes 目标时刻（当天 0 点起的分钟数）
+ */
+data class CountdownTarget(
+    val prefix: String,
+    val suffix: String,
+    val targetMinutes: Int,
+) {
+    /** 整分文案（今日页口径）：`第3节 · 还有 25 分钟下课`。 */
+    fun label(nowMinutes: Int): String = "$prefix${targetMinutes - nowMinutes} 分钟$suffix"
+}
+
+/**
+ * 正在上课时的细粒度倒计时目标。
+ *
+ * 大节内两小节之间有 5 分钟课间：上课时目标是小节结束，课间目标是下一小节开始。
  * 节次号用**作息小节号**（`slot.number`），与焦点卡标题的「第3-4节」同一套坐标；
  * 旧版用课程内序号（`index + 1`），于是「正在上课 · 第3-4节」旁边挂着「第1节」——
  * 同一张卡上两套编号，是今日页显乱的来源之一。
  *
  * 自定义时间课没有小节表，退回整门口径。
  */
-fun ongoingCountdownLabel(
+fun ongoingCountdownTarget(
     slots: List<TimeSlot>,
     course: Course,
     now: LocalTimeLike,
-): String? {
+): CountdownTarget? {
     val cur = now.toMinutes()
     if (course.isCustomTime) {
-        val mins = minutesUntilEnd(slots, course, now) ?: return null
-        return "还有 $mins 分钟下课"
+        val end = ScheduleCalculator.courseEndMinutes(slots, course) ?: return null
+        return if (end > cur) CountdownTarget("还有 ", "下课", end) else null
     }
     val courseSlots = slots
         .filter { it.number in course.startSection..course.endSection }
         .sortedBy { it.number }
     if (courseSlots.isEmpty()) {
-        return minutesUntilEnd(slots, course, now)?.let { "还有 $it 分钟下课" }
+        val end = ScheduleCalculator.courseEndMinutes(slots, course) ?: return null
+        return if (end > cur) CountdownTarget("还有 ", "下课", end) else null
     }
     courseSlots.forEachIndexed { index, slot ->
         val start = ScheduleCalculator.toMinutes(slot.startTime)
         val end = ScheduleCalculator.toMinutes(slot.endTime)
+        if (end <= start) return@forEachIndexed
         if (cur in start until end) {
-            val mins = end - cur
-            return if (courseSlots.size <= 1) {
-                "还有 $mins 分钟下课"
-            } else {
-                "第${slot.number}节 · 还有 $mins 分钟下课"
-            }
+            return CountdownTarget(
+                prefix = if (courseSlots.size <= 1) "还有 " else "第${slot.number}节 · 还有 ",
+                suffix = "下课",
+                targetMinutes = end,
+            )
         }
         if (index < courseSlots.lastIndex) {
             val nextStart = ScheduleCalculator.toMinutes(courseSlots[index + 1].startTime)
             if (cur in end until nextStart) {
-                return "课间 · 还有 ${nextStart - cur} 分钟上课"
+                return CountdownTarget("课间 · 还有 ", "上课", nextStart)
             }
         }
     }
-    return minutesUntilEnd(slots, course, now)?.let { "还有 $it 分钟下课" }
+    val end = ScheduleCalculator.courseEndMinutes(slots, course) ?: return null
+    return if (end > cur) CountdownTarget("还有 ", "下课", end) else null
 }
+
+/** 正在上课时的细粒度倒计时文案（今日页口径）；由 [ongoingCountdownTarget] 派生。 */
+fun ongoingCountdownLabel(
+    slots: List<TimeSlot>,
+    course: Course,
+    now: LocalTimeLike,
+): String? = ongoingCountdownTarget(slots, course, now)?.label(now.toMinutes())

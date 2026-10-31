@@ -1350,17 +1350,32 @@ internal fun RideBikePanel(
     onOpenCarNumber: () -> Unit,
     onOpenFilter: () -> Unit,
     onSpotTap: (KvcxParkSpot) -> Unit,
+    /** 当前选中的车号（车辆卡上那辆）：平铺列表里高亮它，并滚过去（2026-10-29）。 */
+    selectedCarNum: String? = null,
+    /** 头行那枚显示方式切换：按停车点 ↔ 按车辆。 */
+    onToggleByBike: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
     // 点地图标记 / 识别定位要滚到对应分组卡片：记录每张卡在滚动内容里的 y 偏移
     val clusterOffsets = remember { mutableMapOf<String, Int>() }
+    // 「按车辆」模式的平铺列表：点地图上的车辆图标后滚到这一行（2026-10-29）
+    val bikeOffsets = remember { mutableMapOf<String, Int>() }
+    LaunchedEffect(state.byBike, selectedCarNum) {
+        if (!state.byBike) return@LaunchedEffect
+        val carNum = selectedCarNum ?: return@LaunchedEffect
+        if (showSpots) return@LaunchedEffect
+        val y = awaitSettledOffset(carNum, bikeOffsets) ?: return@LaunchedEffect
+        scrollState.animateScrollTo((y - 8).coerceAtLeast(0))
+    }
     LaunchedEffect(state.focusNonce) {
         val key = state.focusKey ?: return@LaunchedEffect
         // 面板里现在不是车辆列表（骑行态让位给还车点）：记账里留着的是**上一批车辆卡**的偏移，
         // 拿去滚还车点列表只会跳到不相干的位置。按车号定位那条路（`focusCar`）在骑行态也会
         // 设 focusKey，所以这道闸必须留着。
         if (showSpots) return@LaunchedEffect
+        // 「按车辆」模式没有停车点卡：记账里是上一批簇卡的偏移，滚过去只会跳错位置
+        if (state.byBike) return@LaunchedEffect
         // **等这张卡的位置落定再滚**（判据见 [awaitSettledOffset]）：点地图上的数字时，
         // 列表里上一张展开的卡正在收起（[BAR_FALL_MS] 的高度动画），目标卡还在往上走——
         // 按当场记下的位置直接滚过去会**滚过头**，卡片落到视口上方，用户看到的是"列表滚了、
@@ -1441,6 +1456,9 @@ internal fun RideBikePanel(
                         onClick = onOpenCarNumber,
                     )
                 }
+                // 显示方式切换（2026-10-29）：按停车点 ↔ 按车辆。图标显示**当前模式**、
+                // 按车辆时走主色；点一下切过去。摆在筛选左边——两者都是"怎么看这批车"
+                RideMapModeButton(byBike = state.byBike, onClick = onToggleByBike)
                 // 筛选收成一枚图标、摆在刷新左边（2026-09-30 用户口径）：两枚开关常驻会吃掉
                 // 面板一大截高度，而列表本身才是这块面板的主角
                 RideFilterButton(
@@ -1535,40 +1553,79 @@ internal fun RideBikePanel(
                         onAction = onResetToCampus,
                     )
 
-                    else -> {
-                        // 卡片按簇键做进出场淡入淡出（见 AnimatedCardList）：
-                        // 旧版换一批结果时整列硬切，卡片凭空出现/消失
-                        AnimatedCardList(
-                            items = state.clusters,
-                            itemKey = { it.key },
-                            spacing = 8.dp,
-                            label = "clusterCards",
-                        ) { cluster ->
-                            RideClusterCard(
-                                cluster = cluster,
-                                expanded = cluster.key == state.expandedKey,
-                                distanceFromUser = state.distanceFromUser,
-                                caps = caps,
-                                onClick = { onClusterTap(cluster.key) },
-                                onPick = onPick,
-                                onUnlock = onUnlock,
-                                onGenerateForCar = onGenerateForCar,
-                                modifier = Modifier.onGloballyPositioned { coords ->
-                                    clusterOffsets[cluster.key] =
-                                        coords.positionInParent().y.roundToInt()
-                                },
-                            )
-                        }
-                        // 封顶之外还有更远的停车点：说清一句，别让用户以为这一带就这么多
-                        if (state.clusterOverflow > 0) {
-                            Text(
-                                text = "还有 ${state.clusterOverflow} 处更远，把地图拖过去看",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 6.dp),
-                            )
+                    // 「按车辆」模式（2026-10-29）：平铺的车辆列表，与地图的逐辆图标同一粒度。
+                    // 点行 = 选中这辆车（动作条换成车辆卡）；点地图上的车辆图标也落到这条
+                    // （选中态高亮 + 列表滚过去，见上面的 LaunchedEffect）。
+                    // 两种列表之间走淡入淡出（与面板「车辆 ↔ 还车点」同一节拍）：切显示方式时
+                    // 整列硬换会"啪"一下，看不出是同一批车换了种排法
+                    else -> Crossfade(
+                        targetState = state.byBike,
+                        animationSpec = tween(BAR_FADE_IN_MS),
+                        label = "mapModeList",
+                    ) { byBike ->
+                        if (byBike) {
+                            // 平铺车辆列表用普通 Column + key，**不走 AnimatedCardList**：这里最多
+                            // 一百多行，AnimatedContent 换批时会把新旧两份同时组合（三百多张卡），
+                            // 刷新一次就卡一下；行身份用 carNum 做 key，换批时原地更新。
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                state.bikes.forEach { bike ->
+                                    key(bike.carNum) {
+                                        RideBikeCard(
+                                            bike = bike,
+                                            selected = bike.carNum == selectedCarNum,
+                                            distanceFromUser = state.distanceFromUser,
+                                            caps = caps,
+                                            onClick = { onPick(bike.carNum) },
+                                            onUnlock = onUnlock,
+                                            onGenerate = onGenerateForCar,
+                                            modifier = Modifier.onGloballyPositioned { coords ->
+                                                bikeOffsets[bike.carNum] =
+                                                    coords.positionInParent().y.roundToInt()
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                // 卡片按簇键做进出场淡入淡出（见 AnimatedCardList）：
+                                // 旧版换一批结果时整列硬切，卡片凭空出现/消失
+                                AnimatedCardList(
+                                    items = state.clusters,
+                                    itemKey = { it.key },
+                                    spacing = 8.dp,
+                                    label = "clusterCards",
+                                ) { cluster ->
+                                    RideClusterCard(
+                                        cluster = cluster,
+                                        expanded = cluster.key == state.expandedKey,
+                                        distanceFromUser = state.distanceFromUser,
+                                        caps = caps,
+                                        onClick = { onClusterTap(cluster.key) },
+                                        onPick = onPick,
+                                        onUnlock = onUnlock,
+                                        onGenerateForCar = onGenerateForCar,
+                                        modifier = Modifier.onGloballyPositioned { coords ->
+                                            clusterOffsets[cluster.key] =
+                                                coords.positionInParent().y.roundToInt()
+                                        },
+                                    )
+                                }
+                                // 封顶之外还有更远的停车点：说清一句，别让用户以为这一带就这么多
+                                if (state.clusterOverflow > 0) {
+                                    Text(
+                                        text = "还有 ${state.clusterOverflow} 处更远，把地图拖过去看",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 6.dp),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1674,6 +1731,29 @@ private fun <T> AnimatedCardList(
                 key(itemKey(item)) { content(item) }
             }
         }
+    }
+}
+
+/**
+ * 地图显示方式切换（2026-10-29）：按停车点（聚合圈 + 数字）↔ 按车辆（逐辆图标）。
+ *
+ * 图标显示**当前模式**、按车辆时走主色——用户一眼知道自己现在看的是哪一种，点一下切过去。
+ * 不做分段控件：头行已经有「按车号 / 筛选 / 刷新」，再塞两段会把标题挤成两行。
+ */
+@Composable
+private fun RideMapModeButton(byBike: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
+        Icon(
+            if (byBike) HugeIcons.ScooterElectric else HugeIcons.MapPin,
+            contentDescription = if (byBike) {
+                "当前按车辆显示，点此切换为按停车点"
+            } else {
+                "当前按停车点显示，点此切换为按车辆"
+            },
+            tint = if (byBike) scheme.primary else scheme.onSurface.copy(alpha = 0.7f),
+            modifier = Modifier.size(19.dp),
+        )
     }
 }
 
@@ -1893,6 +1973,11 @@ private fun RideBikeRow(
     onClick: () -> Unit,
     onUnlock: () -> Unit,
     onGenerate: () -> Unit,
+    /**
+     * 左内边距：在停车点卡里缩进到停车点名那一列（14 + 图标 18 + 间距 10，2026-09-30）；
+     * 「按车辆」模式的平铺列表没有上一层标题，给 14 即可（2026-10-29）。
+     */
+    startPadding: Dp = 42.dp,
 ) {
     val scheme = MaterialTheme.colorScheme
     val haptics = rememberAppHaptics()
@@ -1903,9 +1988,7 @@ private fun RideBikeRow(
                 haptics.tap()
                 onClick()
             }
-            // 缩进到停车点名那一列（14 + 图标 18 + 间距 10）：车号与它属于同一个点这件事
-            // 一眼看得出来，而不是和图标平级（2026-09-30）
-            .padding(start = 42.dp, end = 14.dp, top = 9.dp, bottom = 9.dp),
+            .padding(start = startPadding, end = 14.dp, top = 9.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -1947,8 +2030,42 @@ private fun RideBikeRow(
     }
 }
 
-// ──────────────────────────── 车号 / 出码面板 ────────────────────────────
+/**
+ * 「按车辆」模式的平铺卡片（2026-10-29）：一张卡一辆车。
+ *
+ * 行内容与停车点卡里的车辆行是同一个 [RideBikeRow]（车号 / 状态 / 电量 / 车型 / 距离 +
+ * 行尾动作），只是没有上一层标题、左内边距收回到 14dp；选中的那辆整卡高亮，与停车点卡
+ * 展开态同一套视觉。点行 = 选中这辆车（动作条换成车辆卡），与点地图上的车辆图标同一条路。
+ */
+@Composable
+private fun RideBikeCard(
+    bike: NearbyBike,
+    selected: Boolean,
+    distanceFromUser: Boolean,
+    caps: EbikeCapabilities,
+    onClick: () -> Unit,
+    onUnlock: (String) -> Unit,
+    onGenerate: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AppCard(
+        modifier = modifier.fillMaxWidth(),
+        highlighted = selected,
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        RideBikeRow(
+            bike = bike,
+            distanceFromUser = distanceFromUser,
+            canUnlock = caps.directUnlock,
+            onClick = onClick,
+            onUnlock = { onUnlock(bike.carNum) },
+            onGenerate = { onGenerate(bike.carNum) },
+            startPadding = 14.dp,
+        )
+    }
+}
 
+// ──────────────────────────── 车号 / 出码面板 ────────────────────────────
 /**
  * 车号面板（2026-09-30；2026-10-01 收口）：**生成乘车码与按车号用车共用的唯一容器**。
  *
