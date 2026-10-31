@@ -1242,10 +1242,13 @@ class KvcxRideControllerTest {
         session.underway = null
         kvcx.returnBike()
         assertNotNull(kvcx.state.value.returnSummary)
+        // 结算卡 8 秒自动收尾的计时基准与结果卡同帧落
+        assertTrue(kvcx.state.value.returnSummaryAt > 0L)
 
         kvcx.dismissReturnSummary()
 
         assertNull(kvcx.state.value.returnSummary)
+        assertEquals(0L, kvcx.state.value.returnSummaryAt)
     }
 
     @Test
@@ -1285,6 +1288,9 @@ class KvcxRideControllerTest {
         assertFalse(initial.needsSettle)
         assertNull(kvcx.state.value.ride)
         assertNull(kvcx.state.value.busy)
+        // 结算卡 8 秒自动收尾的计时基准：后台补结算结果不能把它重置（倒计时不重来）
+        val summaryAt = kvcx.state.value.returnSummaryAt
+        assertTrue(summaryAt > 0L)
         // 结束订单成功后不再补查“订单消失”；扣款结果也在后台等。
         assertEquals(queriesBeforeReturn, session.queryCalls)
 
@@ -1295,6 +1301,7 @@ class KvcxRideControllerTest {
         assertEquals(false, updated.settled)
         assertEquals(350L, updated.owedCents)
         assertTrue(updated.needsSettle)
+        assertEquals(summaryAt, kvcx.state.value.returnSummaryAt)
     }
 
     @Test
@@ -1317,6 +1324,7 @@ class KvcxRideControllerTest {
         kvcx.unlock("100000669")
 
         assertNull(kvcx.state.value.returnSummary)
+        assertEquals(0L, kvcx.state.value.returnSummaryAt)
         assertNotNull(kvcx.state.value.ride)
         assertEquals(true, kvcx.state.value.ride?.locked)
         assertTrue(kvcx.state.value.unlockCooldownUntil >= before + UNLOCK_COOLDOWN_MS)

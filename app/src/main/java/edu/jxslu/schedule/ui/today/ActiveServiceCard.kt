@@ -1,6 +1,10 @@
 package edu.jxslu.schedule.ui.today
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -9,6 +13,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -49,6 +54,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSession
 import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
@@ -86,15 +92,17 @@ import me.rerere.hugeicons.stroke.ChevronRight
  * - U净：`UjingRepository.orderState`（落盘快照），对表沿用 10s TTL 节流。
  *
  * 动效：行的出现/消失走 `AnimatedVisibility`（进 220ms / 退 160ms，ui-common 口径），
- * 卡体 `animateContentSize` 收平高度；计时文案 `tnum` 等宽 + 每秒走（不做 crossfade，
+ * 卡体高度跟着行的展开/收拢自然收平（**不要再套一层 `animateContentSize`**：两层高度动画
+ * 叠加会互相追着跑，行收完了卡还在慢慢缩）；计时文案 `tnum` 等宽 + 每秒走（不做 crossfade，
  * 高频数值口径）；进行中行首一枚 900ms 呼吸圆点（同 `WateringBadge` 手法）。
  *
  * 结束动作的两段反馈（2026-10-29，用户报「点了还车/结束用水没有任何反馈，成功后卡片直接消失」）：
  * 1. **动作中**：行尾动作钮换成置灰的「还车中… 12s」/「结束中…」+ 一枚 12dp 转圈，快趣带已等秒数，
  *    趣智副行直接展示流程当前步骤（`QzxyFlowState.Working.step`）——等待有解释，不是卡住；
- * 2. **成功后**：行数据一没就没，旧版那一帧直接退场；现在先亮 1.4 秒「已还车 / 已结束用水」完成态
+ * 2. **成功后**：行数据一没就没，旧版那一帧直接退场；现在先亮 8 秒「已还车 / 已结束用水」完成态
  *    （静态点 + 成功色勾 + 结果摘要），再走常规退场。完成态与进行中行共用同一个
  *    `AnimatedVisibility`（内容就地切换）——分成两条会同时占两行高，卡体当场弹一下。
+ *    **完成态本身可点**（2026-10-31 用户要求）：整行进对应的服务页，结果摘要那里还能细看。
  *
  * 快趣骑行中（明确未锁车）把**整张卡片的边缘**点亮（`AppCard.highlighted` +
  * `highlightedFill = false`：主色 1.5dp 描边、不抬底色，180ms 过渡）：卡内行保持平铺，
@@ -191,8 +199,17 @@ internal fun ActiveServiceCard(
     // 完成态要交代「刚结束的是哪台设备、用了多久」：数据消失后原对象就没了，留住最后一份
     val lastQzxyWatering = rememberLastValue(qzxyWatering)
     val lastWaterSession = rememberLastValue(waterSession)
+    // 快趣的还车摘要还有第二个消失来源：骑行页 8 秒自动「继续找车」会清掉
+    // `returnSummary`（2026-10-31）。完成行优先读实时值（同帧落卡不闪），
+    // 实时值没了再用最后一份，别让「已还车」的副行突然变成「订单已结束」。
+    val lastKvcxSummary = rememberLastValue(kvcxState?.returnSummary)
+    // 进行中 ⇄ 完成态交叉淡入时，退场那份读到的 ride / 订单已经是 null——留住最后一份
+    // 非空值，旧内容才不会在淡出途中变成空白（与结算卡同一手法）。
+    val lastRide = rememberLastValue(ride)
+    val lastUjingLive = rememberLastValue(ujingLive)
+    val lastUjingDone = rememberLastValue(ujingDone)
     // 结束成功的「已完成」停留（2026-10-29）：动作一成功行数据就没了，旧版那一帧直接退场，
-    // 用户既看不到「结束中」也看不到结果。现在先亮 1.4 秒完成态，再走常规退场。
+    // 用户既看不到「结束中」也看不到结果。现在先亮 8 秒完成态，再走常规退场。
     // 快趣那份在列表层算（见 [kvcxDone]：它还决定卡片要不要留在原位）。
     val qzxyDone = rememberDoneLinger(qzxyVisible, qzxyStopping)
     val waterDone = rememberDoneLinger(waterVisible, waterStopping)
@@ -201,6 +218,11 @@ internal fun ActiveServiceCard(
     val qzxyRow = qzxyVisible || qzxyDone
     val waterRow = waterVisible || waterDone
     val anyActive = kvcxRow || freeRideVisible || waterRow || qzxyRow || ujingRow
+    // 退场沿用最后显示的形态（见 rememberLastRowMode）：自然到期 / 后台还车不在收拢动画里
+    // 闪成完成态，完成态停留结束也不闪回进行中
+    val kvcxLastMode = rememberLastRowMode(active = kvcxVisible, done = kvcxDone)
+    val qzxyLastMode = rememberLastRowMode(active = qzxyVisible, done = qzxyDone)
+    val ujingLastMode = rememberLastRowMode(active = ujingLive != null, done = ujingDone != null)
 
     // 整卡壳的显隐也走 AnimatedVisibility：**不能 early return**——组合一卸载，
     // 收拢动画就没有载体了（用户报的「状态卡片消失是瞬间消失的」正是它）。
@@ -222,10 +244,24 @@ internal fun ActiveServiceCard(
                 enter = EnterRow,
                 exit = ExitRow,
             ) {
-                if (kvcxVisible) {
-                    if (ride != null && kvcxOnUnlock != null && kvcxOnLock != null && kvcxOnReturn != null) {
+                // 进行中 ⇄ 完成态：内容交叉淡入 + 容器高度动画（完成态没有行底进度条，
+                // 直接换内容会让卡片矮一截硬跳；见 [rowSwapSpec]）
+                AnimatedContent(
+                    targetState = kvcxVisible,
+                    transitionSpec = { rowSwapSpec() },
+                    // 旧内容按顶对齐淡出：文字左缘与首行基线都不动，只有卡片下沿收上去
+                    contentAlignment = Alignment.TopStart,
+                    label = "kvcxActiveToDone",
+                ) { active ->
+                    // 退场（active / done 都假）沿用最后显示的形态：自然到期 / 后台自动还车
+                    // 不在收拢动画里闪成「已还车」，完成态停留结束也不闪回「骑行中」
+                    val showDone = !active && (kvcxDone || kvcxLastMode.active == false)
+                    val shownRide = ride ?: lastRide
+                    if (!showDone && shownRide != null && kvcxOnUnlock != null &&
+                        kvcxOnLock != null && kvcxOnReturn != null
+                    ) {
                         KvcxActiveRow(
-                            ride = ride,
+                            ride = shownRide,
                             state = kvcxState ?: KvcxRideState(),
                             freeStartAt = kvcxFreeStartAt,
                             onUnlock = kvcxOnUnlock,
@@ -233,9 +269,12 @@ internal fun ActiveServiceCard(
                             onReturn = kvcxOnReturn,
                             onOpen = onOpenEbike,
                         )
+                    } else if (showDone) {
+                        KvcxDoneRow(
+                            summary = kvcxState?.returnSummary ?: lastKvcxSummary,
+                            onOpen = onOpenEbike,
+                        )
                     }
-                } else {
-                    KvcxDoneRow(summary = kvcxState?.returnSummary)
                 }
             }
             // 免费时长行（小程序方式）：骑行行不出现时才轮到它（账号方式的骑行信息更全，
@@ -268,19 +307,26 @@ internal fun ActiveServiceCard(
                 enter = EnterRow,
                 exit = ExitRow,
             ) {
-                if (qzxyVisible) {
-                    qzxyWatering?.let { watering ->
+                AnimatedContent(
+                    targetState = qzxyVisible,
+                    transitionSpec = { rowSwapSpec() },
+                    contentAlignment = Alignment.TopStart,
+                    label = "qzxyActiveToDone",
+                ) { active ->
+                    val showDone = !active && (qzxyDone || qzxyLastMode.active == false)
+                    val shownWatering = qzxyWatering ?: lastQzxyWatering
+                    if (!showDone && shownWatering != null) {
                         QzxyActiveRow(
-                            watering = watering,
+                            watering = shownWatering,
                             deviceEnded = qzxyDeviceEnded,
                             stopping = qzxyStopping,
                             step = qzxyStopStep,
                             onStop = qzxyOnStop,
                             onOpen = onOpenQzxy,
                         )
+                    } else if (showDone) {
+                        QzxyDoneRow(watering = lastQzxyWatering, onOpen = onOpenQzxy)
                     }
-                } else {
-                    QzxyDoneRow(watering = lastQzxyWatering)
                 }
             }
             AnimatedDivider(visible = qzxyRow && ujingRow)
@@ -289,11 +335,25 @@ internal fun ActiveServiceCard(
                 enter = EnterRow,
                 exit = ExitRow,
             ) {
-                if (ujingLive != null) {
-                    UjingActiveRow(order = ujingLive, onOpen = onOpenUjing)
-                } else {
-                    ujingDone?.let {
-                        UjingDoneRow(order = it, onOpen = onOpenUjing, onDismiss = onUjingDismiss)
+                AnimatedContent(
+                    targetState = ujingLive != null,
+                    transitionSpec = { rowSwapSpec() },
+                    contentAlignment = Alignment.TopStart,
+                    label = "ujingActiveToDone",
+                ) { live ->
+                    val showDone = !live &&
+                        (ujingDone != null || ujingLastMode.active == false)
+                    val shownLive = ujingLive ?: lastUjingLive
+                    if (!showDone && shownLive != null) {
+                        UjingActiveRow(order = shownLive, onOpen = onOpenUjing)
+                    } else if (showDone) {
+                        (ujingDone ?: lastUjingDone)?.let {
+                            UjingDoneRow(
+                                order = it,
+                                onOpen = onOpenUjing,
+                                onDismiss = onUjingDismiss,
+                            )
+                        }
                     }
                 }
             }
@@ -329,7 +389,7 @@ private fun FreeRideSlot(
  * 开水行：同上，秒级走时留在本行；超过 5 分钟（过期）回调 [onExpired] 撤行。
  *
  * [session] 可为 null：会话成功后落盘 store 已清空，但完成态（[done]）还要在这条 Slot 里
- * 再亮 1.4 秒——Slot 若跟着会话一起卸载，退场就没有载体了（2026-10-29）。
+ * 再亮 8 秒——Slot 若跟着会话一起卸载，退场就没有载体了（2026-10-29）。
  */
 @Composable
 private fun WaterSlot(
@@ -347,18 +407,28 @@ private fun WaterSlot(
     }
     val active = session != null && !session.isStale(now)
     LaunchedEffect(active) { if (!active) onExpired() }
+    val lastMode = rememberLastRowMode(active = active, done = done)
     AnimatedVisibility(visible = active || done, enter = EnterRow, exit = ExitRow) {
-        if (active && session != null) {
-            WaterActiveRow(
-                session = session,
-                now = now,
-                stopping = stopping,
-                canStop = canStop,
-                onEnd = onEnd,
-                onOpen = onOpen,
-            )
-        } else {
-            WaterDoneRow(session = lastSession)
+        AnimatedContent(
+            targetState = active,
+            transitionSpec = { rowSwapSpec() },
+            contentAlignment = Alignment.TopStart,
+            label = "waterActiveToDone",
+        ) { isActive ->
+            val showDone = !isActive && (done || lastMode.active == false)
+            val shownSession = session ?: lastSession
+            if (!showDone && shownSession != null) {
+                WaterActiveRow(
+                    session = shownSession,
+                    now = now,
+                    stopping = stopping,
+                    canStop = canStop,
+                    onEnd = onEnd,
+                    onOpen = onOpen,
+                )
+            } else if (showDone) {
+                WaterDoneRow(session = lastSession, onOpen = onOpen)
+            }
         }
     }
 }
@@ -377,8 +447,11 @@ private fun rememberLiveSecond(key: Any?, stillActive: (Long) -> Boolean): State
         }
     }
 
-/** 完成态停留时长：够看清「已还车 / 已结束用水」+ 一行结果，又不至于挡着往下看。 */
-private const val DoneLingerMillis = 1_400L
+/**
+ * 完成态停留时长（2026-10-31 用户口径 8 秒）：1.4 秒只够看见，来不及看清结果，
+ * 也来不及点进详情。
+ */
+private const val DoneLingerMillis = 8_000L
 
 /**
  * 动作收尾后多久内数据消失还算「这次动作的结果」。
@@ -390,39 +463,87 @@ private const val DoneLingerMillis = 1_400L
 private const val EndActionGraceMillis = 6_000L
 
 /**
- * 「结束成功 → 完成态停留」闸（2026-10-29）。
+ * 外层卡片退场（[ExitRow]，160ms）之后多留的余量。
  *
- * [visible] = 行数据是否还在；[ending] = 结束动作是否正在跑。两者同帧翻假时，
- * 光看当帧判不出来（动作停下与数据消失是同一帧），所以 [ending] 一旦为真就记一笔，
- * 由 [visible] 翻假那一帧消费；没等到数据消失（失败 / 被挡）就在 [EndActionGraceMillis]
- * 后作废。
+ * 列表层（`TodayContent`）用它决定条目什么时候允许换位：退场动画还在画卡片时挪条目，
+ * `animateItem` 会演成「一边淡出一边往下掉」。等退场画完再换位，换的就是一张不可见的卡。
+ */
+internal const val ServiceCardExitGraceMillis = 200L
+
+/**
+ * 「结束成功 → 完成态停留」的帧级状态机（原 `rememberDoneLinger` 的判据抽出，2026-10-31）。
+ *
+ * 输入每帧的 (visible, ending)，返回该帧是否显示完成态。
+ *
+ * **必须在组合期同步推进**，不能放进 `LaunchedEffect`：行数据消失与完成态亮起必须同一帧。
+ * 异步会晚一帧——那一帧「有骑行 → 卡片置顶」的判据先掉回 false，`LazyColumn` 把条目从
+ * 顶部挪到列表下方（`animateItem` 开始位移动画），下一帧完成态亮起再把条目挪回顶部：
+ * 用户看到的就是一张「已还车」卡从下面窜上来（2026-10-31 报障）。
+ *
+ * [visible] 翻真时清掉停留；翻假时只有「跑过结束动作」（[ending] 曾为真）才亮完成态——
+ * 到期自然收尾 / 后台自动还车不算。
+ */
+internal class DoneLingerGate(visible: Boolean = false) {
+    private var lastVisible = visible
+    private var sawEnding = false
+    private var lingering = false
+
+    /** 推进一帧，返回该帧是否显示完成态。 */
+    fun frame(visible: Boolean, ending: Boolean): Boolean {
+        // 动作与数据同帧收尾时，顺序不能反：先记「刚结束」，再判「数据没了」
+        if (ending) sawEnding = true
+        if (visible != lastVisible) {
+            lastVisible = visible
+            if (visible) {
+                lingering = false
+            } else if (sawEnding) {
+                sawEnding = false
+                lingering = true
+            }
+        }
+        return lingering
+    }
+
+    /** 宽限期到：结束动作没等到数据消失（失败 / 被挡），之后的数据退场不算「刚结束」。 */
+    fun expireEnding() {
+        sawEnding = false
+    }
+
+    /** 停留时间到。 */
+    fun expireLinger() {
+        lingering = false
+    }
+}
+
+/**
+ * 「结束成功 → 完成态停留」闸（2026-10-29，判据 2026-10-31 改为帧级同步）。
+ *
+ * 组合期同步推进 [DoneLingerGate]：状态写入只发生在跳变那一帧，其余时候只读。
+ * 8 秒停留与 6 秒宽限是异步的，放副作用里。
  *
  * `internal` 而不是私有：快趣那份要在列表层（`TodayContent`）算——它还决定卡片要不要
  * 留在课程区之前（见 `ActiveServiceCard` 的 `kvcxDone`）。
  */
 @Composable
 internal fun rememberDoneLinger(visible: Boolean, ending: Boolean): Boolean {
-    val done = remember { mutableStateOf(false) }
-    val sawEnding = remember { mutableStateOf(false) }
-    LaunchedEffect(ending) {
-        if (ending) {
-            sawEnding.value = true
-        } else if (sawEnding.value) {
-            delay(EndActionGraceMillis)
-            sawEnding.value = false
-        }
-    }
-    LaunchedEffect(visible) {
-        if (visible) {
-            done.value = false
-        } else if (sawEnding.value) {
-            sawEnding.value = false
-            done.value = true
+    val gate = remember { DoneLingerGate(visible) }
+    val linger = remember { mutableStateOf(false) }
+    val shown = gate.frame(visible = visible, ending = ending)
+    if (linger.value != shown) linger.value = shown
+    LaunchedEffect(linger.value) {
+        if (linger.value) {
             delay(DoneLingerMillis)
-            done.value = false
+            gate.expireLinger()
+            linger.value = false
         }
     }
-    return done.value
+    LaunchedEffect(ending) {
+        if (!ending) {
+            delay(EndActionGraceMillis)
+            gate.expireEnding()
+        }
+    }
+    return linger.value
 }
 
 /** 记住最后一个非空值：行数据消失后，完成态还要用它交代「刚结束的是哪台设备」。 */
@@ -431,6 +552,31 @@ private fun <T : Any> rememberLastValue(value: T?): T? {
     val last = remember { mutableStateOf(value) }
     LaunchedEffect(value) { if (value != null) last.value = value }
     return last.value
+}
+
+/**
+ * 行退场时沿用最后一次显示的形态（2026-10-31）。
+ *
+ * `active` / `done` 同时翻假的那一帧，外层 `AnimatedVisibility` 还要用 160ms 收拢；
+ * 内容若按当前值二选一，会在收拢动画里闪成另一态——自然到期（开水 5 分钟 / 趣智 1 小时）
+ * 闪「已结束」、后台自动还车闪「已还车」。这里记住最后一次真正显示过的形态，退场沿用它。
+ *
+ * 普通持有者，不驱动重组：形态变化本身一定伴随一次组合，读到的就是当帧的最新值。
+ */
+private class LastRowMode {
+    /** true = 最后显示进行中；false = 最后显示完成态；null = 还没显示过。 */
+    var active: Boolean? = null
+}
+
+@Composable
+private fun rememberLastRowMode(active: Boolean, done: Boolean): LastRowMode {
+    val holder = remember { LastRowMode() }
+    if (active) {
+        holder.active = true
+    } else if (done) {
+        holder.active = false
+    }
+    return holder
 }
 
 /** 完成态行尾的成功色勾（静态；呼吸点已停，勾负责把「结束了」说清）。 */
@@ -457,6 +603,24 @@ private val EnterRow = fadeIn(tween(220)) +
     expandVertically(tween(220, easing = FastOutSlowInEasing), expandFrom = Alignment.Top)
 private val ExitRow = fadeOut(tween(160)) +
     shrinkVertically(tween(160), shrinkTowards = Alignment.Top)
+
+/**
+ * 进行中 ⇄ 完成态的就地切换（2026-10-31）：内容交叉淡入 + 容器高度 200ms 收平。
+ *
+ * 完成态没有行底进度条，比进行中矮 11dp；直接换内容会让卡片高度硬跳一截（用户报
+ * 「卡片高度瞬间少 11dp」）。`SizeTransform` 把这段高度做成动画，旧内容按 TopStart
+ * 对齐淡出——文字左缘与首行基线不动，只有卡片下沿收上去。**别把 `contentAlignment`
+ * 改成 Center**：两态高度不同，居中会让文字在过渡中上下滑一下。
+ *
+ * `using` 是 [AnimatedContentTransitionScope] 的成员扩展，只能在 `transitionSpec`
+ * 的接收者作用域里调用，所以做成扩展函数而不是顶层 `ContentTransform` 常量。
+ */
+private fun AnimatedContentTransitionScope<*>.rowSwapSpec(): ContentTransform =
+    (fadeIn(tween(180)) togetherWith fadeOut(tween(120))).using(
+        SizeTransform(clip = true) { _, _ ->
+            tween<IntSize>(200, easing = FastOutSlowInEasing)
+        },
+    )
 
 /** 品牌图标：与侧栏同款位图，24dp。**必须用 `Image`**——`Icon(painter)` 会把位图整体
  *  染成 LocalContentColor（真机上呈黑色块），侧栏同款位图就是用 `Image` 渲染的。
@@ -523,6 +687,13 @@ private fun ActiveRow(
         animationSpec = tween(AppCardDefaults.HighlightTransitionMillis),
         label = "serviceRowContainer",
     )
+    // 进度值 400ms 补间（ui-common 高频数值口径）：计时每秒更新一次，条形平滑推进，
+    // 不做数字 crossfade；行切换时 progress 变 null，进度条随容器高度一起收掉。
+    val animatedProgress by animateFloatAsState(
+        targetValue = (progress ?: 0f).coerceIn(0f, 1f),
+        animationSpec = tween(400),
+        label = "serviceRowProgress",
+    )
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -570,7 +741,10 @@ private fun ActiveRow(
             BrandIcon(brandRes, alpha = if (muted) 0.5f else 1f)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // 标题与状态词按**基线**对齐（2026-10-31）：两者字号不同（bodyMedium /
+                // labelSmall），CenterVertically 会让小一号的状态词比标题低 2sp 左右，
+                // 一行里看着「没坐齐」。alignByBaseline 把首行基线锁在一起。
+                Row(verticalAlignment = Alignment.Top) {
                     Text(
                         text = title,
                         style = MaterialTheme.typography.bodyMedium,
@@ -583,7 +757,9 @@ private fun ActiveRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         // 标题先让位：状态词是固定宽度的短标签，不能被长标题挤成省略号
-                        modifier = Modifier.weight(1f, fill = false),
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .alignByBaseline(),
                     )
                     if (status != null) {
                         Spacer(Modifier.width(6.dp))
@@ -596,6 +772,7 @@ private fun ActiveRow(
                                 MaterialTheme.colorScheme.primary
                             },
                             maxLines = 1,
+                            modifier = Modifier.alignByBaseline(),
                         )
                     }
                 }
@@ -612,7 +789,7 @@ private fun ActiveRow(
         }
         if (progress != null) {
             LinearProgressIndicator(
-                progress = { progress.coerceIn(0f, 1f) },
+                progress = { animatedProgress },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 7.dp)
@@ -766,16 +943,21 @@ private fun KvcxAction.label(): String = when (this) {
 }
 
 /**
- * 快趣「已还车」完成态（2026-10-29）：订单结束、行数据消失后停留 1.4 秒。
+ * 快趣「已还车」完成态（2026-10-29，停留 8 秒 / 可点 2026-10-31）：订单结束、行数据消失后停留。
  * 副行 = 车号 · 本次时长 · 费用（`returnSummary` 就是还车那一刻算出来的那一份）。
+ * 点整行进骑行页——完成态也要能看结果明细（用户要求）。
  */
 @Composable
-private fun KvcxDoneRow(summary: KvcxReturnSummary?) {
+private fun KvcxDoneRow(summary: KvcxReturnSummary?, onOpen: () -> Unit) {
     ActiveRow(
         brandRes = edu.jxslu.schedule.R.drawable.ic_brand_kqcx,
         title = "快趣骑行",
         status = "已还车",
         pulsing = false,
+        // 完成态状态词与行尾勾同色（success）：别让「已还车」还是进行中的主色
+        statusColor = MaterialTheme.semanticColors.success,
+        onClick = onOpen,
+        onClickLabel = "查看骑行详情",
         subtitle = buildString {
             summary?.carNum?.let { append("车 ").append(it) }
             summary?.durationSeconds?.let { seconds ->
@@ -890,25 +1072,33 @@ private fun WaterActiveRow(
 }
 
 /**
- * 胖乖「已结束开水」完成态（2026-10-29）：流程成功、落盘会话清掉后停留 1.4 秒。
- * 副行 = 设备 · 本次出水时长（会话起点在 [session] 里，取的是消失前最后一份）。
+ * 胖乖「已结束开水」完成态（2026-10-29，停留 8 秒 / 可点 2026-10-31）：流程成功、落盘会话
+ * 清掉后停留。副行 = 设备 · 本次出水时长（会话起点在 [session] 里，取的是消失前最后一份）。
+ * 点整行进开水页。
  */
 @Composable
-private fun WaterDoneRow(session: QiekjWateringSession?) {
+private fun WaterDoneRow(session: QiekjWateringSession?, onOpen: () -> Unit) {
+    // 时长在完成态首次组合时定住：8 秒停留里父级偶发重组不该让「用时」继续涨
+    val duration = remember(session) {
+        session?.let {
+            QzxyWateringFormat.duration(
+                (System.currentTimeMillis() - it.startedAtMillis).coerceAtLeast(0L),
+            )
+        }
+    }
     ActiveRow(
         brandRes = edu.jxslu.schedule.R.drawable.ic_brand_pangguai,
         title = "胖乖生活",
         status = "已结束开水",
         pulsing = false,
+        statusColor = MaterialTheme.semanticColors.success,
+        onClick = onOpen,
+        onClickLabel = "查看开水详情",
         subtitle = session?.let { s ->
             buildString {
                 append(s.deviceName.ifBlank { "开水设备" })
                 append(" · 用时 ")
-                append(
-                    QzxyWateringFormat.duration(
-                        (System.currentTimeMillis() - s.startedAtMillis).coerceAtLeast(0L),
-                    ),
-                )
+                append(duration)
             }
         } ?: "本次出水已结束",
         trailing = { DoneCheck() },
@@ -987,25 +1177,33 @@ private fun QzxyActiveRow(
 }
 
 /**
- * 趣智「已结束用水」完成态（2026-10-29）：结算成功、本地记账清掉后停留 1.4 秒。
- * 副行 = 设备 · 本次用时；金额与账单在结算提示（Snackbar）和趣智页消费记录里。
+ * 趣智「已结束用水」完成态（2026-10-29，停留 8 秒 / 可点 2026-10-31）：结算成功、本地记账
+ * 清掉后停留。副行 = 设备 · 本次用时；金额与账单在结算提示（Snackbar）和趣智页消费记录里。
+ * 点整行进趣智页。
  */
 @Composable
-private fun QzxyDoneRow(watering: QzxyWatering?) {
+private fun QzxyDoneRow(watering: QzxyWatering?, onOpen: () -> Unit) {
+    // 同上：完成态停留期间把用时定住，别让重组把「用时」继续往上加
+    val duration = remember(watering) {
+        watering?.let {
+            QzxyWateringFormat.duration(
+                (System.currentTimeMillis() - it.startedAtMillis).coerceAtLeast(0L),
+            )
+        }
+    }
     ActiveRow(
         brandRes = edu.jxslu.schedule.R.drawable.ic_brand_qzxy,
         title = "趣智校园",
         status = "已结束用水",
         pulsing = false,
+        statusColor = MaterialTheme.semanticColors.success,
+        onClick = onOpen,
+        onClickLabel = "查看用水详情",
         subtitle = watering?.let { w ->
             buildString {
                 append(w.deviceName.ifBlank { "热水器" })
                 append(" · 用时 ")
-                append(
-                    QzxyWateringFormat.duration(
-                        (System.currentTimeMillis() - w.startedAtMillis).coerceAtLeast(0L),
-                    ),
-                )
+                append(duration)
             }
         } ?: "本次用水已结束",
         trailing = { DoneCheck() },

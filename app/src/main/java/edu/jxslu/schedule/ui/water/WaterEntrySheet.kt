@@ -19,6 +19,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +34,7 @@ import edu.jxslu.schedule.domain.UnlockResult
 import edu.jxslu.schedule.domain.cashPaidAmount
 import edu.jxslu.schedule.domain.calculateActualCost
 import edu.jxslu.schedule.domain.ticketPaidAmount
+import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -59,8 +61,13 @@ fun WaterEntrySheet(
     // 失败详情与订单详情都是弹窗上的二级弹窗（与开水页 ErrorDetailDialog/OrderDetailDialog
     // 同一形态）；开水页私有，这里本地给等价实现，避免为两处拖出共享层
     var detailItem by remember { mutableStateOf<Any?>(null) }
+    // 关弹层一律「先播退场动画、再落状态」（ui-common.md）：面板里没有输入框，
+    // 走 rememberSheetDismisser。「完成」出口与 Qzxy / U净 面板同一口径，
+    // 不再把面板从组合里瞬间抽掉（2026-10-31 复核补）
+    val sheetState = rememberModalBottomSheetState()
+    val dismiss = rememberSheetDismisser(sheetState, onDismiss)
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -126,14 +133,10 @@ fun WaterEntrySheet(
                     onEndSession = onEndSession,
                     stopping = workingFlow?.stopping == true,
                 )
-                // 完成 = 这次开水到此为止：先归位流程态，再把面板收掉。
-                // 开水页上的同名按钮只归位、不收页（那里本来就是页面）——面板收掉才是
-                // 用户要的「点完成窗口就没了」（2026-09-27 用户反馈）
+                // 完成 = 这次开水到此为止：先播面板退场动画，再归位流程态并收页
+                // （`dismiss` 的顺序：hide → onDismiss → 这里传的 after）
                 is UnlockFlowState.Success -> OutlinedButton(
-                    onClick = {
-                        onDismissFlow()
-                        onDismiss()
-                    },
+                    onClick = { dismiss { onDismissFlow() } },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                 ) { Text("完成") }
             }

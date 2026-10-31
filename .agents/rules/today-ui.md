@@ -95,14 +95,32 @@
     快趣的秒数取 `busyAt`（还车链路最坏挂一两分钟），趣智标题切「正在结束…」、副行直接展示
     `QzxyFlowState.Working.step`（停阀 → 等设备结算 → 上报）。**悬置态（`unlockPending` /
     `lockPending`）仍只写「确认中…」不加转圈**——它可能挂到下次刷新才消解，转圈转久了像卡死。
-  - **成功后**：先亮 1.4 秒完成态（`KvcxDoneRow` / `QzxyDoneRow` / `WaterDoneRow`：静态点 +
-    `semanticColors.success` 勾 + 结果摘要），再走常规 160ms 退场。判据是 `rememberDoneLinger`：
+  - **成功后**：先亮 **8 秒**完成态（`KvcxDoneRow` / `QzxyDoneRow` / `WaterDoneRow`：静态点 +
+    `semanticColors.success` 勾 + 结果摘要；2026-10-31 用户口径从 1.4 秒延长），再走常规 160ms 退场；
+    **完成态整行可点**，落在对应服务页。判据是 `rememberDoneLinger` + `DoneLingerGate`：
     结束动作跑过（`busy == RETURN` / 趣智 `flow is Working` / 胖乖 `stopping`）且
     `EndActionGraceMillis`（6 秒）内行数据消失；**到期自然收尾不亮完成态**（165 秒自动关阀、
     后台自动还车 / 订单在别处结束）。
+  - **完成态判据必须在组合期同步推进**（2026-10-31，用户报「还车后卡片从下方窜出来」）：
+    不能用 `LaunchedEffect` 晚一帧——那一帧 `rideInProgress` 先翻假，`LazyColumn` 把
+    `active-services` 条目从顶部挪到作业卡之后（`animateItem` 开始位移），下一帧完成态亮起
+    再挪回顶部，观感就是「已还车」卡从下面窜上来。`DoneLingerGate.frame` 在组合里调用。
+  - **换位还要等退场画完**：完成态结尾外层卡还有 160ms 淡出 + 收拢，这期间条目不能换位
+    （否则 `animateItem` 演成一边淡出一边往下掉）。`TodayContent` 的 `kvcxPinned` 比完成态
+    多留 `ServiceCardExitGraceMillis`（200ms），换位时卡片已不可见。
   - **完成态与进行中行必须共用一个 `AnimatedVisibility`**（内容 `if (visible) 进行中 else 完成`）：
     拆成两条会同时占两行高、卡体当场弹一下。开水那行原来用 `waterSession?.let { WaterSlot }`，
     会话一清 Slot 就卸载、退场没有载体——现在 Slot 常驻、`session` 可为 null（2026-10-29 改）。
+  - **进行中 ⇄ 完成态的就地切换（2026-10-31 用户报「高度瞬间少 11dp」）**：两态内容走
+    `AnimatedContent` + `SizeTransform(200ms)` 交叉淡入。完成态没有行底进度条，直接换内容
+    会让卡片高度硬跳一截；高度动画由 `rowSwapSpec()` 收平。`contentAlignment = TopStart`，
+    文字左缘与首行基线不动——**别改 Center**（两态高度不同，居中会让文字在过渡中上下滑）。
+    退场（`active` / `done` 都假）用 `rememberLastRowMode` 沿用最后显示的形态：自然到期
+    （开水 5 分钟 / 趣智 1 小时）、后台自动还车不在 160ms 收拢动画里闪「已结束 / 已还车」，
+    完成态停留结束也不闪回「进行中」。退场那份读不到实时数据，用 `rememberLastValue` 兜。
+  - **文字与进度条的动效细节（2026-10-31）**：标题与状态词字号不同，走 `Modifier.alignByBaseline()`
+    锁首行基线（`CenterVertically` 会让小一号的状态词低约 2sp）；进度值走
+    `animateFloatAsState(400ms)` 平滑推进（ui-common 高频数值口径），不做数字 crossfade。
   - 今日页要收趣智的 `QzxyEvent.Notice`（`qzxyViewModel.events`）：结算成功 / 被挡的原因只在
     这条流里，今日页是「结束用水」的动作点，不收就静默丢掉（与开水 `WaterEvent` 同一条写法）。
 - **行底时长进度条（2026-10-22 用户要求）**：`ActiveRow(progress = …)` 在行内容之下画一条

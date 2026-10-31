@@ -185,6 +185,14 @@ data class KvcxRideState(
     val scoreAuthRequired: Boolean = false,
     /** 还车结果（非空即弹结果卡）。 */
     val returnSummary: KvcxReturnSummary? = null,
+    /**
+     * 还车结果卡出现的时刻（epoch ms；0 = 没有结果卡）。
+     *
+     * 结算卡 8 秒自动「继续找车」的倒计时基准（2026-10-31）。**放在控制器里而不是页面里**：
+     * 离开骑行页再回来（组合重建）时倒计时不能重新开始，过了 8 秒进页也不该再弹一张
+     * 过期的结算卡。与 [returnSummary] 同生共死，清卡时一并归零。
+     */
+    val returnSummaryAt: Long = 0L,
 )
 
 /**
@@ -601,6 +609,7 @@ class KvcxRideController internal constructor(
                         // 卡片只在"还完车待决定"这段时间成立。失败路径不经过这里，卡片保留，
                         // 用户可以原地再点一次。
                         returnSummary = null,
+                        returnSummaryAt = 0L,
                     )
                 }
                 // 成功触感也立即发：它属于"开锁成功"这一刻，不该被善后拖后
@@ -651,6 +660,7 @@ class KvcxRideController internal constructor(
                         fetchedAt = System.currentTimeMillis(),
                         unlockPending = true,
                         returnSummary = null,
+                        returnSummaryAt = 0L,
                     )
                 }
                 notice(
@@ -823,6 +833,8 @@ class KvcxRideController internal constructor(
                 unlockPending = false,
                 lockPending = false,
                 returnSummary = summary,
+                // 结算卡 8 秒自动收尾的倒计时基准（2026-10-31）：与结果卡同帧落
+                returnSummaryAt = System.currentTimeMillis(),
             )
         }
         effects.recordRide(summary)
@@ -860,9 +872,9 @@ class KvcxRideController internal constructor(
         }
     }
 
-    /** 关掉还车结果卡（用户点「知道了」）。 */
+    /** 关掉还车结果卡（用户点「知道了」/「继续找车」，或 8 秒自动收尾）。 */
     fun dismissReturnSummary() {
-        _state.update { it.copy(returnSummary = null) }
+        _state.update { it.copy(returnSummary = null, returnSummaryAt = 0L) }
     }
 
     /**

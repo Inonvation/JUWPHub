@@ -95,6 +95,7 @@ import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
@@ -185,7 +186,25 @@ fun RideScreen(
         EbikeFreeRide.isActive(prefs.rideStartAt, System.currentTimeMillis())
     val riding = ride != null || timerActive
     // 结算卡只属于账号方式（小程序方式没有本机还车这个动作）
-    val summary = if (caps.inAppRide) kvcxState.returnSummary else null
+    val rawSummary = if (caps.inAppRide) kvcxState.returnSummary else null
+    /**
+     * 结算卡 8 秒自动「继续找车」（2026-10-31 用户要求）：用户主动点过「重新使用该车 /
+     * 去微信结清」后置 true，本次结果卡不再自动收尾——正在决策 / 正在付款，不该把卡片抽走。
+     * 按 `returnSummaryAt` 重置：新的一单还车后重新计时。
+     */
+    var settleAutoCancelled by remember(kvcxState.returnSummaryAt) { mutableStateOf(false) }
+    // 过期的结算卡不再渲染（离开页面很久再回来不闪一帧）；主动点过上面两个动作则保留
+    val summaryExpired = rawSummary != null && kvcxState.returnSummaryAt > 0L &&
+        System.currentTimeMillis() >= kvcxState.returnSummaryAt + SettleAutoContinueMillis
+    val summary = rawSummary.takeUnless { !settleAutoCancelled && summaryExpired }
+    // 倒计时截止时刻（0 = 不自动收尾）：从控制器里的结果卡出现时刻起算，跨页面重建不重来
+    val settleDeadlineAt = if (summary != null && !settleAutoCancelled &&
+        kvcxState.returnSummaryAt > 0L
+    ) {
+        kvcxState.returnSummaryAt + SettleAutoContinueMillis
+    } else {
+        0L
+    }
     // 手里有没有一张能用的码：小程序方式的主动作在"有码"之后翻面
     val hasCode = ebikeState.generatedBikeId != null && ebikeState.generatedBitmap != null
     /**
@@ -199,6 +218,26 @@ fun RideScreen(
 
     /** 选中车辆后动作区换成车辆卡（[RideActionArea] 的一种形态）；null = 不显示。 */
     var pickedCar by remember { mutableStateOf<String?>(null) }
+    /**
+     * 「继续找车」的收尾（手动按钮与 8 秒自动收尾共用，2026-10-31）：清结算卡、收起车辆卡，
+     * 再刷新列表——列表还停在骑前那批快照，刚还的这辆车可能仍按「可用」挂在旧位置上。
+     */
+    val continueFinding: () -> Unit = {
+        pickedCar = null
+        viewModel.kvcx.dismissReturnSummary()
+        viewModel.refresh()
+    }
+    // 结算卡 8 秒自动「继续找车」：倒计时基准在控制器里（`returnSummaryAt`），离开页面再
+    // 回来不重新计时；到点走与手动按钮同一条收尾。用户主动点过「重新使用该车 / 去微信结清」
+    // 就跳过（`settleAutoCancelled`），把卡片留给正在进行的动作 / 付款。
+    LaunchedEffect(kvcxState.returnSummaryAt, rawSummary != null) {
+        val summaryAt = kvcxState.returnSummaryAt
+        if (rawSummary == null || summaryAt <= 0L) return@LaunchedEffect
+        val remain = summaryAt + SettleAutoContinueMillis - System.currentTimeMillis()
+        if (remain > 0L) delay(remain)
+        if (settleAutoCancelled) return@LaunchedEffect
+        continueFinding()
+    }
     /**
      * 想让哪辆车出码（车号）；车号面板里按它对齐二维码。
      *
@@ -988,6 +1027,7 @@ fun RideScreen(
                             timerStartAt = prefs.rideStartAt,
                             timerCanEnd = ride == null,
                             summary = summary,
+                            settleDeadlineAt = settleDeadlineAt,
                             hasCode = hasCode,
                             onDismissPicked = { pickedCar = null },
                             onWechatScan = wechatScanPlain,
@@ -1025,6 +1065,8 @@ fun RideScreen(
                             onEndTimer = { showEndTimerConfirm = true },
                             onTimerExpired = { timerExpired = true },
                             onSettle = {
+                                // 用户已经在付款路径上：取消 8 秒自动收尾，别把结算卡抽走
+                                settleAutoCancelled = true
                                 haptics.tap()
                                 openWechatForSettle(context) { message ->
                                     showNotice(scope, snackbar, message, NoticeTone.Info)
@@ -1032,17 +1074,14 @@ fun RideScreen(
                             },
                         onContinue = {
                             haptics.tap()
-                            pickedCar = null
-                            viewModel.kvcx.dismissReturnSummary()
-                            // 还完车接着找下一辆（这个出口的本意）：列表还停在骑前那批快照
-                            // ——刚还的这辆车可能仍按「可用」挂在开骑前的旧位置上。
-                            // 刷新由这个点击驱动，符合「刷新只由用户动作触发」的纪律
-                            viewModel.refresh()
+                            continueFinding()
                         },
                         // 结算卡上的「重新使用该车」（2026-10-10）：与其它开锁同一个入口——
                         // 定位权限、二次确认、零重试都走 requestKvcxAction 那套闸；
-                        // 结算卡由控制器在开锁成功 / 未确认时清（失败保留，可原地重试）
+                        // 结算卡由控制器在开锁成功 / 未确认时清（失败保留，可原地重试）。
+                        // 用户已开始决策，取消 8 秒自动收尾（否则开启中的「已等 Ns」会被抽走）
                         onReuseCar = { carNum ->
+                            settleAutoCancelled = true
                             requestKvcxAction(KvcxAction.UNLOCK, carNum)
                         },
                         // 形态 key 由页面算（唯一出处 rideBarKey）：页面靠它冻结地图让位高度

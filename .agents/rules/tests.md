@@ -34,7 +34,8 @@
 `CookieBridgeTest`（cookie 拼接：hostOnly 不写 Domain/Secure/HttpOnly/Path）、
 `MemoryCookieJarTest`（分桶/快照/回灌/路径匹配）、`ProfileSyncRulesTest`（学籍卡补抓闸门：班级空/今日试过/隔日重试）、`TokenFreshnessTest`（落盘 token 新鲜度：过期/时钟回拨）、
 `OneClickImportTest`（一键导入：页面形态判定/合成/警示文案/脏字段容错）、
-`ImportJsonShapeTest`（导入 JSON：课程字段契约，以及成绩/学期作息/学业完成情况三段可选备份的往返与降级）、`TodayStateTest`、`QiekjSignTest`、
+`ImportJsonShapeTest`（导入 JSON：课程字段契约，以及成绩/学期作息/学业完成情况三段可选备份的往返与降级）、`TodayStateTest`、
+`DoneLingerGateTest`（今日页服务卡完成态：数据消失与完成态同帧 / 自然收尾与宽限到期不亮 / 停留到期 / 下一单立刻收位）、`QiekjSignTest`、
 `WeeksTextTest`（周次文本：压缩区间 / 范围·全角·顿号·`至` / 单双周后缀 / 脏 token 抠数字 / 40 周上限）、
 `ParseWeeksInputTest`（课程编辑页周次输入：单双周预设按钮 + 委托 `WeeksText` 的接线）、
 `JwHtmlTest`（教务壳页学期下拉：按 id/name 收窄 / value 优先文本兜底 / 学期格式校验）、
@@ -54,6 +55,7 @@
 `EbikeQrTest`（共享单车出码：URL 拼装/车号校验/BitMatrix 参数/最近车号序列化）、
 `EbikeFreeRideTest`（免费时长提醒：提醒点/下一个未过点/迟到窗口/去重键带起点/通知 id 不撞号）、
 `EbikeAutoReturnTest`（自动还车：触发点恒早于免费结束/提前量吸附/执行窗口/重试判定与循环时序/文案）、
+`SettleAutoContinueTest`（结算卡 8 秒自动继续找车：倒计时向上取整/到点归零/离开页面很久直接归零）、
 `YktKeyboardTest`（校园卡键盘：字形 MD5 表/双射硬校验/密文构造/协议自检）、
 `YktModelsTest`（一卡通响应解析：BOM 剥离/错误码/CARD 账户提取）、
 `MarkdownParserTest`（Markdown 子集：块/行内/嵌套/未闭合按字面回退/中文数字混排）、

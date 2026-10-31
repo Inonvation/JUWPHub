@@ -286,6 +286,12 @@ internal fun RideActionArea(
     timerStartAt: Long,
     timerCanEnd: Boolean,
     summary: KvcxReturnSummary?,
+    /**
+     * 结算卡自动「继续找车」的截止时刻（epoch ms；0 = 不自动收尾）。
+     * 页面按 `KvcxRideState.returnSummaryAt + SettleAutoContinueMillis` 算好传进来；
+     * 用户点了「重新使用该车 / 去微信结清」后传 0（取消倒计时）。
+     */
+    settleDeadlineAt: Long,
     /** 小程序方式下"码已经生成好了"：只有这时才给「打开微信扫一扫」。 */
     hasCode: Boolean,
     onDismissPicked: () -> Unit,
@@ -409,6 +415,7 @@ internal fun RideActionArea(
                 unlockCooldownUntil = unlockCooldownUntil,
                 timerCanEnd = timerCanEnd,
                 summary = summary,
+                settleDeadlineAt = settleDeadlineAt,
                 onWechatScan = onWechatScan,
                 onScanBodyCode = onScanBodyCode,
                 onOpenCarNumber = onOpenCarNumber,
@@ -445,6 +452,25 @@ internal const val BAR_FALL_MS = 190
 /** 动作条状态之间做交叉淡入，别让内容"啪"地换一块。 */
 private const val BAR_FADE_IN_MS = 200
 private const val BAR_FADE_OUT_MS = 120
+
+/**
+ * 结算卡自动「继续找车」的停留时长（2026-10-31 用户口径 8 秒，与今日页完成态同档）。
+ *
+ * 从还车成功那一刻起算（`KvcxRideState.returnSummaryAt`）：离开骑行页再回来不重新计时，
+ * 过了 8 秒进页也不再弹一张过期的结算卡。用户主动点「重新使用该车 / 去微信结清」后
+ * 由页面取消自动收尾（正在决策 / 正在付款，不该把卡片抽走）。
+ */
+internal const val SettleAutoContinueMillis = 8_000L
+
+/**
+ * 「继续找车」按钮上的剩余秒数（向上取整；0 = 已到点 / 没有截止时刻）。
+ * 纯函数：单测在 `SettleAutoContinueTest`。
+ */
+internal fun settleContinueSecondsLeft(deadlineAt: Long, now: Long): Int {
+    if (deadlineAt <= 0L) return 0
+    val remain = deadlineAt - now
+    return if (remain <= 0L) 0 else ((remain + 999L) / 1_000L).toInt()
+}
 
 /**
  * 状态色（整卡底 / 描边 / 胶囊）渐变时长。
@@ -586,6 +612,8 @@ private fun RideActionButtons(
     unlockCooldownUntil: Long,
     timerCanEnd: Boolean,
     summary: KvcxReturnSummary?,
+    /** 结算卡自动「继续找车」的截止时刻（0 = 不自动收尾）；见 [RideActionArea] 同名参数。 */
+    settleDeadlineAt: Long,
     onWechatScan: () -> Unit,
     onScanBodyCode: () -> Unit,
     onOpenCarNumber: () -> Unit,
@@ -622,6 +650,9 @@ private fun RideActionButtons(
     // 显示「锁车 3s」倒计时（2026-10-10）；到点翻闸点亮按钮。无条件调用，
     // 见上面 busyNow 的纪律。
     val coolingSeconds = rememberUnlockCooldownSeconds(unlockCooldownUntil)
+    // 结算卡自动「继续找车」的倒计时（2026-10-31）：只在结算态有截止时刻；
+    // 每秒只重组这一块动作区，地图不跟着动
+    val settleSeconds = rememberSettleSecondsLeft(settleDeadlineAt)
     when {
         key == BAR_FINDING_PLAIN ->
             RideActionButton("按车号生成乘车码", onOpenCarNumber, icon = HugeIcons.QrCode01)
@@ -762,6 +793,8 @@ private fun RideActionButtons(
                 }
                 RideActionButton(
                     text = "继续找车",
+                    // 高频倒计时走独立的 suffix，不进 crossfade（ui-common 动效口径）
+                    countdownSuffix = settleSeconds.takeIf { it > 0 }?.let { "${it}s" },
                     onClick = onContinue,
                     modifier = Modifier.weight(1f),
                 )
@@ -807,6 +840,28 @@ private fun rememberUnlockCooldownSeconds(until: Long): Int {
             seconds = unlockCooldownSecondsLeft(until, now)
             if (remain <= 0L) break
             delay(minOf(remain, 1_000L))
+        }
+    }
+    return seconds
+}
+
+/**
+ * 结算卡「继续找车」的剩余秒数（2026-10-31）：每秒一拍，到点停表。
+ *
+ * [deadlineAt] = 0 表示不自动收尾（没有结算卡 / 用户已主动点了别的动作），循环立即结束，
+ * 不空转。数字只在动作区这一块重组，不会带着地图每秒重绘。
+ */
+@Composable
+private fun rememberSettleSecondsLeft(deadlineAt: Long): Int {
+    var seconds by remember(deadlineAt) {
+        mutableStateOf(settleContinueSecondsLeft(deadlineAt, System.currentTimeMillis()))
+    }
+    LaunchedEffect(deadlineAt) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            seconds = settleContinueSecondsLeft(deadlineAt, now)
+            if (deadlineAt <= 0L || now >= deadlineAt) break
+            delay(minOf(deadlineAt - now, 1_000L))
         }
     }
     return seconds
@@ -2440,6 +2495,11 @@ private fun RideActionButton(
     enabled: Boolean = true,
     /** true = 实心（主动作）；false = 描边（次动作，或者与主动作并排的另一半）。 */
     filled: Boolean = true,
+    /**
+     * 高频倒计时后缀（如「8s」）：**不进 AnimatedContent 的 targetState**，每秒变化只更新
+     * 这枚 Text，不触发整段文字的 crossfade（ui-common：高频数值不做 crossfade）。
+     */
+    countdownSuffix: String? = null,
 ) {
     val shape = RoundedCornerShape(23.dp)
     val size = modifier
@@ -2461,13 +2521,26 @@ private fun RideActionButton(
                 if (icon != null) {
                     Icon(icon, contentDescription = null, modifier = Modifier.size(19.dp))
                 }
-                Text(
-                    text = current,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = current,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (countdownSuffix != null) {
+                        Text(
+                            text = countdownSuffix,
+                            // 等宽数字：8s → 7s 时标签不左右抖
+                            style = MaterialTheme.typography.titleMedium
+                                .copy(fontFeatureSettings = "tnum"),
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
+                    }
+                }
             }
         }
     }

@@ -1038,13 +1038,25 @@ private fun TodayContent(
     // 有在案骑行时把「进行中服务」卡提到课程区之前（2026-10-22 用户口径）：骑行是最需要
     // 一眼看到的状态，课程 / 作业多的时候原位置会落到首屏之外；没有在案订单时留在原位。
     //
-    // 还车成功后的 1.4 秒完成态（2026-10-29）也要留在这个位置：`ride` 在成功那一刻就没了，
-    // 只看 ride 的话卡片会带着「已还车」当场挪回列表中间（animateItem 滑走），完成态白做。
+    // 还车成功后的 8 秒完成态（2026-10-29；时长 2026-10-31 改）也要留在这个位置：`ride`
+    // 在成功那一刻就没了，只看 ride 的话卡片会带着「已还车」当场挪回列表中间。
     val kvcxDone = rememberDoneLinger(
         visible = kvcxRideState?.ride != null,
         ending = kvcxRideState?.busy == KvcxAction.RETURN,
     )
-    val rideInProgress = kvcxRideState?.ride != null || kvcxDone
+    // 完成态退场（160ms 淡出 + 收拢）期间卡片还在画：这时把条目挪回下方位置，`animateItem`
+    // 会演成「一边淡出一边往下掉」。位置比完成态多留 200ms，换位发生在卡片已经不可见之后
+    // （与入场「从下面窜上来」同一根因，2026-10-31）。
+    var kvcxPinned by remember { mutableStateOf(false) }
+    LaunchedEffect(kvcxDone) {
+        if (kvcxDone) {
+            kvcxPinned = true
+        } else {
+            delay(ServiceCardExitGraceMillis)
+            kvcxPinned = false
+        }
+    }
+    val rideInProgress = kvcxRideState?.ride != null || kvcxDone || kvcxPinned
     val activeServicesCard: @Composable (Modifier) -> Unit = { cardModifier ->
         ActiveServiceCard(
             kvcxState = kvcxRideState,
