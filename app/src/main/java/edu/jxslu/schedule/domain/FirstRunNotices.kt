@@ -31,7 +31,7 @@ object FirstRunNotices {
      * 文案版本号。**改任何一份的任何一个字都要 +1**——落盘的同意记录按版本比对
      * （`domain/NoticeConsent.isConsented`），不 bump 就等于"改了文案但用户不必重看"。
      */
-    const val VERSION = 3
+    const val VERSION = 4
 
     /** 弹出顺序：先说自己是什么，再说责任。 */
     val ORDER: List<FirstRunNotice> = listOf(FirstRunNotice.UserNotice, FirstRunNotice.Disclaimer)
@@ -81,7 +81,8 @@ private const val USER_NOTICE_INTRO =
  * 学校 / 平台接口之间流转。
  */
 private val USER_NOTICE_ITEMS = listOf(
-    "**完全免费**；任何付费代下、转卖或重打包的安装包均与开发者无关。",
+    "**JUWPHub 永远免费开源**。如果你是在任何地方「花钱买到」的，说明你被骗了，请立即退款。" +
+        "任何收费版本均为二次打包的诈骗版本，与本项目无关。",
     "**仅限本人账号使用**。课表、成绩、流水与登录凭证**只在本机保存**（Keystore 加密，" +
         "排除云备份），登录时只发给对应平台官方接口；应用无自建服务器，**不采集、不出售数据**。",
     "除完成你发起的登录、查询、充值等请求所必需外，只有两处第三方请求：" +
