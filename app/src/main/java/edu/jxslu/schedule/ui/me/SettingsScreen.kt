@@ -38,6 +38,7 @@ import me.rerere.hugeicons.stroke.Agreement01
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.BellRing
 import me.rerere.hugeicons.stroke.CalendarSetting01
+import me.rerere.hugeicons.stroke.Heart
 import me.rerere.hugeicons.stroke.InformationCircle
 import me.rerere.hugeicons.stroke.Palette
 import me.rerere.hugeicons.stroke.Settings01
@@ -51,7 +52,7 @@ import me.rerere.hugeicons.stroke.Shield01
  * 在教务 Tab。设置页只留仍需要配置或查看的入口。
  *
  * 应用组拆成「外观与交互」「功能」两页；关于组拆成「权限与存储」「关于与更新」
- * 「条款与声明」三页，避免一个页面里混着主题、更新、缓存和条款。
+ * 「条款与声明」「支持开发」四页，避免一个页面里混着主题、更新、缓存和条款。
  *
  * 进页仍会做一次「班级为空就补抓」的 ProfileSync（闸门在 `ProfileSyncRules`，
  * 每天最多一次、失败静默）——左侧栏那行身份（姓名 / 班级）靠它填。
@@ -66,6 +67,7 @@ fun SettingsScreen(
     onOpenPermissionsStorage: () -> Unit = {},
     onOpenAboutUpdate: () -> Unit = {},
     onOpenTerms: () -> Unit = {},
+    onOpenSupportDev: () -> Unit = {},
     /** 从侧栏齿轮进来时给返回箭头（独立窗口，恒有）。 */
     onBack: (() -> Unit)? = null,
     viewModel: MeViewModel = viewModel(
@@ -168,6 +170,12 @@ fun SettingsScreen(
                     subtitle = "用户须知 · 免责声明 · 充值风险",
                     icon = HugeIcons.Agreement01,
                     onClick = onOpenTerms,
+                )
+                SettingItem(
+                    title = "支持开发",
+                    subtitle = "扫码赞赏作者 · 完全自愿",
+                    icon = HugeIcons.Heart,
+                    onClick = onOpenSupportDev,
                 )
             }
         }

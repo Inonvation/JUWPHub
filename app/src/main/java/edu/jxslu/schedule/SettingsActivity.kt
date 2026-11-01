@@ -52,6 +52,9 @@ class SettingsActivity : ComponentActivity() {
                     onOpenTerms = {
                         SubpageActivity.start(this, SubpageScreen.TERMS_DECLARATIONS)
                     },
+                    onOpenSupportDev = {
+                        SubpageActivity.start(this, SubpageScreen.SUPPORT_DEV)
+                    },
                     onBack = { finish() },
                 )
             }

@@ -22,6 +22,7 @@ import edu.jxslu.schedule.ui.me.hub.AppearanceSettingsScreen
 import edu.jxslu.schedule.ui.me.hub.FeatureSettingsScreen
 import edu.jxslu.schedule.ui.me.hub.PermissionsStorageScreen
 import edu.jxslu.schedule.ui.me.hub.QuietHoursScreen
+import edu.jxslu.schedule.ui.me.hub.SupportDevScreen
 import edu.jxslu.schedule.ui.me.hub.TermsDeclarationsScreen
 import edu.jxslu.schedule.ui.me.hub.TimetableHubScreen
 import edu.jxslu.schedule.ui.me.hub.WidgetCalendarHubScreen
@@ -166,6 +167,8 @@ enum class SubpageScreen {
     ABOUT_UPDATE,
     /** 设置 → 关于 → 条款与声明（用户须知 · 免责 · 充值风险，DESIGN §3.3） */
     TERMS_DECLARATIONS,
+    /** 设置 → 关于 → 支持开发（说明文案 + 赞赏码，完全自愿，2026-11-01） */
+    SUPPORT_DEV,
     /** 今日 → 校园卡付款码展示页（DESIGN §3.10；FLAG_SECURE 独立窗口） */
     PAY_CODE,
     /** 付款码/设置 → 消费流水（月汇总 + 分页列表，DESIGN §4.19 B4） */
@@ -527,6 +530,7 @@ class SubpageActivity : ComponentActivity() {
             )
             SubpageScreen.ABOUT_UPDATE -> AboutUpdateScreen(onBack = onBack)
             SubpageScreen.TERMS_DECLARATIONS -> TermsDeclarationsScreen(onBack = onBack)
+            SubpageScreen.SUPPORT_DEV -> SupportDevScreen(onBack = onBack)
             SubpageScreen.PAY_CODE -> PayCodeScreen(
                 onBack = onBack,
                 onOpenStatement = { SubpageActivity.start(this, SubpageScreen.CAMPUS_STATEMENT) },
