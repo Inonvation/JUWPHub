@@ -1210,6 +1210,14 @@ class DisplayPrefsStore(internal val context: Context) {
         combine(shortcutsEnabled, shortcuts, ::ShortcutSettings)
 
     /**
+     * 「取快递」弹窗里「其他」分类的展开态（2026-11-01）。全局项，**默认折叠**：
+     * 弹窗首屏只铺预设，自定义条目点标题才展开；存的是用户上一次的显式选择。
+     */
+    val shortcutOtherExpanded: Flow<Boolean> = context.displayDataStore.data.map { p ->
+        p[KEY_SHORTCUTS_OTHER_EXPANDED] ?: false
+    }.distinctUntilChanged()
+
+    /**
      * 成绩页统计口径：任选课是否计入加权平均分/平均绩点（DESIGN §4.15）。
      * 默认关 = 排除（作者学校综测同样不计任选课）；公开仓库用户可自行打开。
      */
@@ -1483,6 +1491,11 @@ class DisplayPrefsStore(internal val context: Context) {
 
     suspend fun setShortcutsEnabled(value: Boolean) {
         context.displayDataStore.edit { it[KEY_SHORTCUTS_ENABLED] = value }
+    }
+
+    /** 「其他」分类展开态（见 [shortcutOtherExpanded]）：用户每次点标题都落盘。 */
+    suspend fun setShortcutOtherExpanded(value: Boolean) {
+        context.displayDataStore.edit { it[KEY_SHORTCUTS_OTHER_EXPANDED] = value }
     }
 
     suspend fun setWeatherEnabled(value: Boolean) {

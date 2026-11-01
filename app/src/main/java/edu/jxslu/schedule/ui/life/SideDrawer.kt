@@ -360,6 +360,9 @@ fun SideDrawerContent(
     var detail by remember { mutableStateOf<WalletDetail?>(null) }
     val shortcutSettings by remember(context) { Graph.repository(context).shortcutSettings }
         .collectAsStateWithLifecycle(initialValue = ShortcutSettings())
+    // 「其他」分类的展开态（2026-11-01）：默认折叠，用户的显式选择落 DataStore。
+    val shortcutOtherExpanded by prefs.shortcutOtherExpanded
+        .collectAsStateWithLifecycle(initialValue = false)
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val notice: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
@@ -505,6 +508,10 @@ fun SideDrawerContent(
     if (showShortcutSheet) {
         ShortcutSheet(
             settings = shortcutSettings,
+            otherExpanded = shortcutOtherExpanded,
+            onOtherExpandedChange = { expanded ->
+                scope.launch { prefs.setShortcutOtherExpanded(expanded) }
+            },
             onDismiss = { showShortcutSheet = false },
             onLaunchItem = { item -> ShortcutLauncher.launch(context, item)?.let(notice) },
             onPinItem = { item -> ShortcutPinner.pin(context, item)?.let(notice) },

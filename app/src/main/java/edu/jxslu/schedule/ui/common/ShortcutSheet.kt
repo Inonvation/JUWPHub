@@ -1,5 +1,12 @@
 package edu.jxslu.schedule.ui.common
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -42,9 +50,15 @@ import edu.jxslu.schedule.domain.ShortcutItem
 import edu.jxslu.schedule.domain.ShortcutSettings
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.ChevronDown
+import me.rerere.hugeicons.stroke.ChevronUp
 import me.rerere.hugeicons.stroke.Edit02
 import me.rerere.hugeicons.stroke.Link01
 import me.rerere.hugeicons.stroke.PackageSearch01
+
+/** 「其他」分类展开 / 收起动效：与项目区块口径一致（进 220ms、退 160ms）。 */
+private const val OTHER_ENTER_MILLIS = 220
+private const val OTHER_EXIT_MILLIS = 160
 
 /**
  * 取快递弹窗（从下弹出）：预设归「取快递」段、自定义归「其他」段，中间一条分割线；
@@ -53,6 +67,9 @@ import me.rerere.hugeicons.stroke.PackageSearch01
  * 「取快递」段末尾另有一条「菜鸟批量查」整宽行：它是 App 内页面（粘贴多个单号一次导入
  * 菜鸟），与「点一下拉起外部 App」的图标块不同，故单独一行、放在预设块之下。
  *
+ * **「其他」分类默认折叠**（2026-11-01）：首屏只铺预设，自定义条目点分类标题才展开；
+ * 展开态由调用侧持久化（[otherExpanded] / [onOtherExpandedChange]），下次打开沿用。
+ *
  * 2026-10-19 从生活页移到今日页「江水生活」里的图标入口：组件本身搬进 ui/common，
  * 生活页与今日页不再各留一份。关弹层走 [rememberSheetDismisser]，点条目先播退场再拉起。
  */
@@ -60,6 +77,9 @@ import me.rerere.hugeicons.stroke.PackageSearch01
 @Composable
 fun ShortcutSheet(
     settings: ShortcutSettings,
+    /** 「其他」分类是否展开；调用侧从 DataStore 读，缺省 = 折叠。 */
+    otherExpanded: Boolean,
+    onOtherExpandedChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     onLaunchItem: (ShortcutItem) -> Unit,
     onPinItem: (ShortcutItem) -> Unit,
@@ -109,14 +129,33 @@ fun ShortcutSheet(
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
             }
-            ShortcutCategoryLabel("其他", customs.size)
-            ShortcutTileGrid(
-                items = customs,
-                onLaunch = { item -> dismiss { onLaunchItem(item) } },
-                onPin = { item -> dismiss { onPinItem(item) } },
-                onEdit = { id -> dismiss { onEdit(id) } },
-                onAdd = { dismiss { onAdd() } },
+            ShortcutCategoryHeader(
+                title = "其他",
+                count = customs.size,
+                expanded = otherExpanded,
+                onToggle = { onOtherExpandedChange(!otherExpanded) },
             )
+            AnimatedVisibility(
+                visible = otherExpanded,
+                enter = fadeIn(tween(OTHER_ENTER_MILLIS, easing = FastOutSlowInEasing)) +
+                    expandVertically(
+                        animationSpec = tween(OTHER_ENTER_MILLIS, easing = FastOutSlowInEasing),
+                        expandFrom = Alignment.Top,
+                    ),
+                exit = fadeOut(tween(OTHER_EXIT_MILLIS, easing = FastOutSlowInEasing)) +
+                    shrinkVertically(
+                        animationSpec = tween(OTHER_EXIT_MILLIS, easing = FastOutSlowInEasing),
+                        shrinkTowards = Alignment.Top,
+                    ),
+            ) {
+                ShortcutTileGrid(
+                    items = customs,
+                    onLaunch = { item -> dismiss { onLaunchItem(item) } },
+                    onPin = { item -> dismiss { onPinItem(item) } },
+                    onEdit = { id -> dismiss { onEdit(id) } },
+                    onAdd = { dismiss { onAdd() } },
+                )
+            }
         }
     }
 }
@@ -139,6 +178,54 @@ private fun ShortcutCategoryLabel(title: String, count: Int) {
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
             )
         }
+    }
+}
+
+/**
+ * 可折叠分类标题：「其他 · N 项」+ 右侧箭头，整行可点。
+ *
+ * 命中区至少 48dp（小字号下也点得准）；箭头只做视觉指示，语义交给整行的
+ * onClickLabel——TalkBack 读「展开其他」，不再把图标名重复念一遍。
+ */
+@Composable
+private fun ShortcutCategoryHeader(
+    title: String,
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(
+                onClickLabel = if (expanded) "收起$title" else "展开$title",
+                onClick = onToggle,
+            )
+            .heightIn(min = 48.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+        )
+        if (count > 0) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = "· $count 项",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        Icon(
+            imageVector = if (expanded) HugeIcons.ChevronUp else HugeIcons.ChevronDown,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 

@@ -351,6 +351,10 @@ fun TodayScreen(
     var showUjingSheet by remember { mutableStateOf(false) }
     val shortcutSettings by remember(context) { Graph.repository(context).shortcutSettings }
         .collectAsStateWithLifecycle(initialValue = ShortcutSettings())
+    // 「其他」分类的展开态（2026-11-01）：默认折叠，与侧栏共用同一个持久化偏好。
+    val shortcutPrefs = remember(context) { Graph.displayPrefs(context) }
+    val shortcutOtherExpanded by shortcutPrefs.shortcutOtherExpanded
+        .collectAsStateWithLifecycle(initialValue = false)
     var ujingOrderRefreshedAt by remember { mutableStateOf(0L) }
     val refreshUjingOrderIfStale: () -> Unit = {
         val id = ujingRepo.currentOrder()?.orderId
@@ -889,6 +893,10 @@ fun TodayScreen(
     if (showShortcutSheet) {
         ShortcutSheet(
             settings = shortcutSettings,
+            otherExpanded = shortcutOtherExpanded,
+            onOtherExpandedChange = { expanded ->
+                scope.launch { shortcutPrefs.setShortcutOtherExpanded(expanded) }
+            },
             onDismiss = { showShortcutSheet = false },
             onLaunchItem = { item ->
                 ShortcutLauncher.launch(context, item)?.let { message ->

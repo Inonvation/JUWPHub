@@ -264,8 +264,9 @@ HugeIcons 的 `isTransitive = false` 仍保留（只用它的图标 AAR，不让
 
 ### 4.16 快捷方式（2026-09-19，P6）
 
-**存储**：不进 Room。DataStore 两个键：`shortcuts_enabled`（bool，默认 true）、
-`shortcuts_json`（整个列表一个 JSON，模式同 `view_prefs_json`）。
+**存储**：不进 Room。DataStore 三个键：`shortcuts_enabled`（bool，默认 true）、
+`shortcuts_json`（整个列表一个 JSON，模式同 `view_prefs_json`）、
+`shortcuts_other_expanded`（bool，默认 false，弹窗「其他」分类的展开态，2026-11-01）。
 缺省或脏 JSON 一律回退内置预设列表——自己写自己的数据，读路径不抛异常。
 读写路径都过 `migratePresets`，流带 `distinctUntilChanged`（DataStore 任何键的写入
 都不惊动值没变的观察者）。
