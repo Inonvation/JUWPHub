@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Inonvation/JUWPHub/releases/latest"><img src="https://img.shields.io/github/v/release/Inonvation/JUWPHub" alt="Latest Release"></a>
   <a href="#-下载与安装"><img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white" alt="Android 8.0+"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPLv3"></a>
 </p>
 
 <p align="center">
@@ -34,7 +34,7 @@
 - **趣智校园** — 蓝牙开热水、余额、账单、充值
 - **快趣出行** — 地图找车、扫码开锁、免费时长提醒
 - **U净** — 扫码下单、支付宝支付、完成提醒
-- **生活** — 取快递、空调遥控、天气、图片水印 / 长图拼接 / 菜鸟批量查
+- **生活** — 取快递、天气、图片水印 / 长图拼接 / 菜鸟批量查
 - **教务** — 校历、选课、教学日历、请假、宿舍报修、学生评教
 - **其他** — 笔记与作业、收件箱、AI 调课、数据备份
 
@@ -79,11 +79,13 @@
 >
 > - 登录教务、调用胖乖生活、趣智校园、快趣出行、U净与校园卡等接口，均**模拟正常客户端操作**；账号与接口存在变更风险，**使用后果自负**。
 > - 校园卡付款码**等同现金**：**仅限本人使用**，勿截图或分享，泄露可能被盗刷；由此造成的损失**开发者不负责**。
-> - **严禁**绕过付费、伪造官方身份、售卖本软件及其脚本、攻击学校网站、爬取售卖敏感数据、逆向学校系统；积分任务仅限本人账号，平台规则与账号风险自担。
+> - **严禁**绕过付费、伪造官方身份、以 JUWPHub 名义售卖本软件及其脚本、攻击学校网站、爬取售卖敏感数据、逆向学校系统；积分任务仅限本人账号，平台规则与账号风险自担。
 > - 项目**仅供学习交流**；因不正当使用造成的损失**开发者不负责**。如有侵权，请联系删除。
 
 问题、建议或想新增功能，欢迎提 [Issue](https://github.com/Inonvation/JUWPHub/issues)。
 
 ## 📄 License
 
-[MIT](LICENSE)
+Copyright (C) 2026 Inonvation。本项目以 [GPL-3.0](LICENSE) 发布。
+
+你可以自由使用、修改、分发；分发修改版或衍生作品时，必须同样以 GPL-3.0 开放源码。

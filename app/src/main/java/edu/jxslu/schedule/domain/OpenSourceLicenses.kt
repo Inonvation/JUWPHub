@@ -21,7 +21,7 @@ object OpenSourceLicenses {
 
     /** 本应用自己的许可。 */
     const val SELF_NAME: String = "JUWPHub（本应用）"
-    const val SELF_LICENSE: String = "MIT"
+    const val SELF_LICENSE: String = "GPL-3.0"
 
     /** HugeIcons 的口径说明，逐字显示在弹窗底部。 */
     const val HUGEICONS_NOTE: String =

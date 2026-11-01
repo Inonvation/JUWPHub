@@ -74,7 +74,7 @@ import me.rerere.hugeicons.stroke.Shield01
 import me.rerere.hugeicons.stroke.SoftwareLicense
 import me.rerere.hugeicons.stroke.SystemUpdate01
 
-/** 公开仓库地址（MIT）；「开源仓库」点击后经系统浏览器打开。 */
+/** 公开仓库地址（GPL-3.0）；「开源仓库」点击后经系统浏览器打开。 */
 private const val REPO_URL = "https://github.com/Inonvation/JUWPHub"
 
 /**
@@ -192,7 +192,7 @@ fun AboutUpdateScreen(
                 )
                 SettingItem(
                     title = "开源许可",
-                    subtitle = "本应用 MIT · 主要第三方组件清单",
+                    subtitle = "本应用 GPL-3.0 · 主要第三方组件清单",
                     icon = HugeIcons.SoftwareLicense,
                     onClick = { showLicenses = true },
                 )

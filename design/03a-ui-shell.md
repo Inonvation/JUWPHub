@@ -196,8 +196,8 @@
   条文唯一实现在 `domain/Disclaimer.kt`，与仓库根 `README.md` 的「免责声明」一节
   逐条对应；免费 / 下载来源、数据只存本机等事实告知在「用户须知」里，不在这里重复。
   正文里的 `**...**` 由 `ui/common/emphasizedText` 渲染成加粗。
-- **开源许可** → 组件清单弹窗，数据在 `domain/OpenSourceLicenses.kt`（本应用 MIT +
-  7 条第三方组件，逐条核过官方仓库 LICENSE 或构件 POM）。HugeIcons 的 Compose 封装
+- **开源许可** → 组件清单弹窗，数据在 `domain/OpenSourceLicenses.kt`（本应用 GPL-3.0 +
+  6 条第三方组件，逐条核过官方仓库 LICENSE 或构件 POM）。HugeIcons 的 Compose 封装
   （`com.github.rikkahub:hugeicons-compose`）仓库未声明许可，按上游图标集 MIT 口径标注，
   这条差异写在弹窗正文里。
 

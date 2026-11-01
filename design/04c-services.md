@@ -181,7 +181,7 @@
 | [dlkz/kqcx-bikemap](https://github.com/dlkz/kqcx-bikemap) | **AGPL-3.0** | 只读参考：接口地址、参数、字段名、GCJ-02 基准、聚合必要性的实测现象。**未复用其代码** |
 | [Wuwang777/Kuaiqu_RemoteScan](https://github.com/Wuwang777/Kuaiqu_RemoteScan) | MIT | 只读参考：接口契约与「token 不校验」的结论。Node 项目，无 Kotlin 代码可取 |
 
-本仓库为 MIT。kqcx-bikemap 是 AGPL-3.0，抄它的代码会让整个仓库被迫改按 AGPL 发布，
+本仓库为 GPL-3.0。kqcx-bikemap 是 AGPL-3.0，抄它的代码会让整个仓库被迫改按 AGPL 发布，
 因此只取接口契约这一层事实（地址、参数名、字段名不受版权保护），实现全部自行编写。
 
 #### 测试清单（JVM）
