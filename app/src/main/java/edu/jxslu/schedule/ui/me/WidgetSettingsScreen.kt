@@ -108,10 +108,13 @@ import java.time.LocalDate
  *
  * 1. 添加到桌面：四行添加条目，各自 `requestPinAppWidget`、各自计数徽标；
  * 2. 课表尺寸形态：四张预览（同一份快照按四档裁剪，只作说明用）收进 2×2 网格省纵向空间；
- * 3. 校园卡（主区）：口径 / 更新时机 / 点击行为 bullets + 「在小组件中隐藏余额」开关（默认关）；
- * 4. 电费（副行）：读数口径 / 「小组件自身不联网」/ 点击行为 bullets；
- * 5. 开水卡（胖乖 · 趣智）：口径 / 更新时机 / 胶囊直达与「点其余位置只进页面」bullets；
- * 6. 后台及时性（可选）/ 说明：各条目共用。
+ * 3. 校园卡（主区）：口径 / 点击行为 bullets + 「在小组件中隐藏余额」开关（默认关）；
+ * 4. 电费（副行）：口径 / 点击行为 bullets；
+ * 5. 开水卡（胖乖 · 趣智）：口径 / 胶囊直达与「点其余位置只进页面」bullets；
+ * 6. 后台及时性（可选）/ 说明（更新时机在此各条目共用）：各条目共用。
+ *
+ * 2026-11-01 **文案精简**：更新时机合并进「说明」一次说清，各条 bullet 压到一行；
+ * 只删说明文字，分区结构与交互规则不动。
  *
  * 交互规则不变（用户已拍板「自动检测 + 逐项申请」）：进页只读检测；**首次进入**自动弹
  * 一次说明弹层（含一键添加课表条目），此后不再自动弹；不主动拉任何系统框。
@@ -241,8 +244,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                     )
                 }
                 Spacer(Modifier.height(2.dp))
-                Bullet("三个磁贴都固定灰色：它们只做动作入口，不表示凭证 / 登录状态；灰色仍可点。")
-                Bullet("点付款码进付款码页（未配置凭证时进校园卡设置）；点开水磁贴进页并自动开水 / 开阀（未登录只进登录页）。")
+                Bullet("磁贴固定灰色，只做动作入口；灰色也能点。")
                 Spacer(Modifier.height(6.dp))
             }
 
@@ -287,11 +289,8 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
 
             SettingsSection(title = "校园卡", subtitle = "数据与点击") {
                 Spacer(Modifier.height(4.dp))
-                Bullet("余额只算正式卡（食堂 / 门禁）；电子账户余额不上卡片，在付款码页与左侧栏钱包看。")
-                Bullet("点小组件任意位置 = 打开全屏付款码页：防截屏、亮度拉满、扫码后自动退出。")
-                Bullet("余额更新：打开 App、进付款码页或从左侧栏进充值页即时更新；后台约每 2 小时一次；" +
-                    "取数失败保留上次余额与更新时刻，不会清空。")
-                Bullet("未开启凭证时显示引导文案，点击前往「我的 → 校园卡」。")
+                Bullet("只显示食堂 / 门禁的正式卡余额，电子账户不上卡片。")
+                Bullet("点卡片出示全屏付款码；没配置凭证时进校园卡设置。")
                 HideBalanceSwitch(
                     checked = hideBalance,
                     onCheckedChange = { checked ->
@@ -306,24 +305,16 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
 
             SettingsSection(title = "电费（卡片副行）", subtitle = "数据与点击") {
                 Spacer(Modifier.height(4.dp))
-                Bullet("副行显示最近一次读数：剩余电量（度）+ 按单价折合金额。卡片窄到 2 格时" +
-                    "只留「电费 23.7 度 · ¥14.69」，单价括号省掉。")
-                Bullet("更新时机：进充值页 / 侧栏钱包刷新 / 每日余额检查后同步；小组件自身不联网取数" +
-                    "（读数密度 = 打开 App 的密度）。")
-                Bullet("点副行 = 打开「缴费账单 · 用电统计」；点卡片其余位置 = 出示付款码。")
-                Bullet("还没有读数时显示引导；凭证关闭时一并回落，不残留旧数字。")
+                Bullet("副行显示最近读数：剩余电量与折合金额。")
+                Bullet("点电费行进用电统计，点其余位置出示付款码。")
                 Spacer(Modifier.height(2.dp))
             }
 
             SettingsSection(title = "开水卡（胖乖 · 趣智）", subtitle = "固定 2×2，不可拖动；数据与点击") {
                 Spacer(Modifier.height(4.dp))
-                Bullet("胖乖卡主区是小票余额（能付水钱的那个），副行给积分；趣智卡主区是余额，" +
-                    "用水中时整卡切成「用水中」+ 设备与已用时长。")
-                Bullet("更新时机：打开开水页 / 趣智页或今日页卡片刷新后即时同步；后台约每 2 小时一次；" +
-                    "取数失败保留上次数据与更新时刻，不会清空。")
-                Bullet("趣智「用水中」是本机记账：开阀 / 结算时即时上桌面；超过 1 小时未结算视为残留，不再显示。")
-                Bullet("点「去开水」胶囊 = 进对应页面并自动开水（未登录 / 没设备时停在页面里引导，" +
-                    "趣智开阀还需要在水器旁连蓝牙）；点卡片其余位置只进页面，结算仍在页面完成。")
+                Bullet("胖乖显示小票余额 + 积分；趣智显示余额，用水中时整卡切换。")
+                Bullet("趣智「用水中」即时上桌面，超过 1 小时未结算自动隐藏。")
+                Bullet("点「去开水」直达开水 / 开阀（趣智需在水器旁连蓝牙），点其余位置只进页面。")
                 Spacer(Modifier.height(2.dp))
             }
 
@@ -354,10 +345,10 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
 
             SettingsSection(title = "说明") {
                 Spacer(Modifier.height(6.dp))
-                Bullet("四个条目各自独立添加，可以同时上桌面。")
-                Bullet("课表与「今日」页一致，余额与左侧栏钱包卡一致。")
-                Bullet("跟随系统深浅色；校园卡余额与电费不在渲染时联网。")
-                Bullet("课表卡的倒计时由系统计时器驱动，每秒跳动；上下课 / 课间时刻自动切换，App 被杀也照走。")
+                Bullet("卡片自身不联网，数据在打开对应页面时即时更新。")
+                Bullet("后台约每 2 小时补一次，失败时保留上次数据。")
+                Bullet("四个条目可同时上桌面，内容与 App 内一致，跟随系统深浅色。")
+                Bullet("课表卡倒计时每秒跳动，上下课 / 课间自动切换。")
                 Spacer(Modifier.height(6.dp))
                 LauncherNoteRow()
                 Spacer(Modifier.height(6.dp))
@@ -627,7 +618,7 @@ private fun HideBalanceSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Un
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text = "桌面可能被旁人看到；隐藏后显示 ¥ ••••，点击仍可出示付款码",
+                text = "隐藏后桌面显示 ¥ ••••，点击仍可出示付款码",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
@@ -937,10 +928,8 @@ private fun IntroDialog(
         text = {
             Text(
                 text = "课表：小到 2×2 看下一节，拖到 4×4 变本周课表。\n\n" +
-                    "校园卡 · 电费：桌面看余额大字与电费小字；点卡片出示付款码，" +
-                    "点电费那一行进用电统计。\n\n" +
-                    "小组件在上下课时刻自动更新；希望更及时可在页面下方开启" +
-                    "「忽略电池优化」与「允许自启动」（可选，不开也能用）。",
+                    "校园卡 · 电费：桌面看余额与电费，点卡片出示付款码。\n\n" +
+                    "小组件上下课自动更新；页面下方可开启更及时的后台刷新（可选）。",
                 style = MaterialTheme.typography.bodyMedium,
             )
         },
