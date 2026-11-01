@@ -1313,40 +1313,6 @@ RGBA_F16 / RGBA_1010102 这类非常规配置，不该漏给出图侧。
 今日页那行在 `TodayScreen` 直接订阅 `Graph.displayPrefs(context).toolboxEnabled`。
 `DisplayPrefsDefaultsTest` 钉住默认开。
 
-### 4.48 空调遥控：宿舍美的空调（2026-10-16；2026-10-18 补 R05D；2026-10-20 移除 A1 + 加扩展键；UI 见 §3.31）
-
-寝室美的空调的红外遥控：**状态 → 6 字节帧 → ConsumerIrManager 脉冲序列**，
-纯本机发射（`TRANSMIT_IR` 普通权限，安装即授予），不联网、不落账号。**只走 R05D**
-（国内美的挂机；A1 口径 2026-10-20 整套删除，真机不认）。
-
-- **R05D**（`domain/MideaR05d`）：6 字节 = 固定头 `B2 4D` + 功能字节 B + `~B` +
-  模式/温度字节 C + `~C`，整帧原样连发两遍，没有额外校验和；关机 = 专用帧
-  `B2 4D 7B 84 E0 1F`；温度 / 模式 / 风速查码表（温度非二进制顺序，送风取 0xEF
-  的「无定义」档）；波形 = 头 4400/4400 → 48 位 → 550/5220 → 头 → 48 位 →
-  550/8800，一组约 192ms。实测向量 `B2 4D BF 40 D0 2F`（自动风 26℃ 制冷）/
-  `B2 4D 7B 84 E0 1F`（关机）由 `MideaR05dTest` 钉死。
-- **扩展键**（2026-10-20，编码来自第三方《R05d 电控功能说明书》与早期抓码，
-  **真机未验证**）：摆风 `B2 4D 6B 94 E0 1F`、强劲 `B5 4A F5 0A A2 5D`（再按一次
-  关闭）都是固定帧发两遍；ECO 先发 `B2 4D E0 1F 03 FC` 再发当前状态帧两遍，
-  取消 = 只发状态帧两遍（三帧约 286ms，仍在预算内）。睡眠 / 屏显没有公开编码，
-  不做；定时（C/D 字节）未做。
-- **发射**（`data/ir/AcIrBlaster`）：`ConsumerIrManager.transmit(MideaR05d.FREQUENCY_HZ,
-  pattern)`；`supported = hasIrEmitter()`；失败（无发射器 / 系统拒绝 / 时长超预算）
-  返回带原因的结果，页面提示。**每次 `transmit` 只放一组**（≈192ms；ECO 三帧
-  ≈286ms），普通操作只发 1 次（一次 = 一声蜂鸣）；小米 `ir-spi` HAL 会整条丢弃
-  超长序列。
-- **状态**（`data/prefs/AcRemotePrefsStore`）：独立 DataStore `ac_remote_prefs`
-  （power / mode / temp_c / fan / r05d_swing_on / r05d_turbo_on / r05d_eco_on；
-  模式与风速存枚举名；A1 时代的 `mode_bits` / `fan_bits` 读取时迁移一次，保存时
-  清掉遗留键）。每次操作发完整状态帧 + 写回；`AcRemoteViewModel` 把发射放
-  `Dispatchers.Default` 并用 `Mutex` 串行化（`transmit` 在部分机型上同步等发完；
-  连点与温度长按连发都不允许并发、顺序要保）。普通状态更新会清 `ecoOn`
-  （说明书：取消经济 = 只发普通帧）。
-- **入口**：左侧栏「生活」→「空调遥控」（2026-10-20 起收进侧栏）；
-  路由 `SubpageScreen.AC_REMOTE`。
-- **后续**（未做）：睡眠（无公开编码，需红外接收头抓原装遥控）、定时（C/D 字节）、
-  屏显；Coolix 等第三套口径不再引入，R05D 已覆盖当前机型。
-
 ### 4.49 宿舍报修进度：收件箱列表报修行 · 原生详情 · 办结提醒（2026-10-19；UI 见 §3.3 / §3.15 / §3.24）
 
 宿舍报修本身仍在学工 WebView 里提交（§4.26），App 只**只读**抄一份「个人提交记录」

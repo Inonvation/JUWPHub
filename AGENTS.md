@@ -37,7 +37,6 @@
 | 共享单车 / 地图 / 免费时长提醒 / 自动还车 | `.agents/rules/ebike.md` |
 | 快趣账号登录 / 用车 / 卡券 / 设置 | `.agents/rules/ebike-account.md` |
 | 充值弹层 / 一卡通 / 电费 / 胖乖生活 | `.agents/rules/life-power.md` |
-| 宿舍空调遥控（侧栏 · 江水生活，红外） | `.agents/rules/ac-remote.md` |
 | 天气（今日页顶栏提示 · 天气页） | `.agents/rules/weather.md` |
 | 百宝箱（图片水印 / 拼接 / 菜鸟批量查） | `.agents/rules/toolbox.md` |
 | U净 洗衣房（美的校园洗衣） | `.agents/rules/ujing.md` |
@@ -275,7 +274,7 @@ MainActivity
    PowerBankPay / Onboarding / SubpageActivity（二级页，路由枚举见 SubpageScreen）
 
 domain/       纯 JVM 逻辑：课程/作息/学期/成绩/考试/调课差异/笔记作业/单车/水控/AI prompt/
-              问渠规则/天气/百宝箱/空调红外/报修/选课（按主题分文件，单测在 app/src/test）
+              问渠规则/天气/百宝箱/报修/选课（按主题分文件，单测在 app/src/test）
 data/local    Room v20（表清单见「工程实况」；迁移只加不删，实体索引必须与迁移对齐）
 data/repo     ScheduleRepository（备份模型在 ScheduleBackup）+ 各业务 Repository / Sync
 data/prefs    DataStore 显示偏好（DisplayPrefsStore + 按功能拆出的扩展文件）
@@ -289,7 +288,6 @@ data/qzxy     趣智校园（蓝牙水控协议与状态机）
 data/ai       AI 调课（OpenAI 兼容流式 + 工具调用）
 data/wenqu    问渠（JWT/活动/记录/蹲点/预报名）
 data/weather  天气（Open-Meteo，30 分钟 TTL）
-data/ir       空调红外发射（R05D）
 ui/           页面按业务包：today/week/life/me/jw/water/qzxy/campus/...；公共件在 ui/common
 Graph.kt      单例装配（新增依赖从这里进）
 JuwApplication ensureDefaults（节次/学期；课表不预置）+ 小组件冷启动刷新

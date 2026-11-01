@@ -103,7 +103,6 @@ import me.rerere.hugeicons.stroke.ChevronRight
 import me.rerere.hugeicons.stroke.HeartHandshake
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.QrCodeScan
-import me.rerere.hugeicons.stroke.RemoteControl
 import me.rerere.hugeicons.stroke.ScooterElectric
 import me.rerere.hugeicons.stroke.Settings01
 import me.rerere.hugeicons.stroke.ShowerHead
@@ -186,7 +185,7 @@ data class ServiceActiveFlags(
  *   头像 + 姓名 + 班级整块可点，进学籍信息页（2026-10-21，入口从教务 Tab 挪来）；
  * - 校园卡与电费都是可点的余额行，详情弹层里放账单与充值；右侧一枚充值入口开选择弹层；
  *   电子账户与寝室电费并排一行（2026-10-21），省纵向空间；
- * - 生活（取快递 / 空调遥控 / 百宝箱 / 天气）· 江水生活（快趣 / 胖乖 / 趣智 / U净 / 问渠）
+ * - 生活（取快递 / 百宝箱 / 天气）· 江水生活（快趣 / 胖乖 / 趣智 / U净 / 问渠）
  *   · 学习（笔记 / 作业）三段，2026-10-21 起取消「工具」段：百宝箱与天气并入生活，
  *   五张服务卡单列品牌段；
  *   收件箱不进侧栏（2026-10-21 收口：唯一展示入口在今日页收件箱卡）；
@@ -203,7 +202,6 @@ fun SideDrawerContent(
     /** U净：整行进二级页；右侧空闲状态点开的是入口弹窗（在案订单 + 扫码 + 概览）。 */
     onOpenUjing: () -> Unit,
     onOpenUjingSheet: () -> Unit,
-    onOpenAcRemote: () -> Unit,
     onOpenRide: () -> Unit,
     /** 胖乖生活：整行进二级页；右侧余额点开的是入口弹窗（余额 / 积分 / 开水 / 结算）。 */
     onOpenWater: () -> Unit,
@@ -419,7 +417,7 @@ fun SideDrawerContent(
                     onPowerDetail = { detail = WalletDetail.Power },
                     onRecharge = { showRechargeChoice = true },
                 )
-                // 2026-10-21 用户口径：百宝箱 / 天气从「工具」并入「生活」（空调遥控之后）；
+                // 2026-10-21 用户口径：百宝箱 / 天气从「工具」并入「生活」；
                 // 快趣 / 胖乖 / 趣智 / U净 / 问渠五张服务卡单列「江水生活」。
                 DrawerSection("生活") {
                     DrawerRow(
@@ -427,7 +425,6 @@ fun SideDrawerContent(
                         icon = HugeIcons.Package01,
                         onClick = { showShortcutSheet = true },
                     )
-                    DrawerRow("空调遥控", HugeIcons.RemoteControl, onClick = onOpenAcRemote)
                     if (toolboxEnabled) {
                         DrawerRow("百宝箱", HugeIcons.Toolbox, onClick = onOpenToolbox)
                     }

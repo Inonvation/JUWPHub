@@ -18,8 +18,6 @@ import edu.jxslu.schedule.data.power.PowerClient
 import edu.jxslu.schedule.data.power.PowerDebugDump
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
-import edu.jxslu.schedule.data.ir.AcIrBlaster
-import edu.jxslu.schedule.data.prefs.AcRemotePrefsStore
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.qiekj.QiekjOrderHistoryStore
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
@@ -297,12 +295,6 @@ object Graph {
 
     @Volatile
     private var powerReadingStore: PowerReadingStore? = null
-
-    @Volatile
-    private var acRemotePrefsStore: AcRemotePrefsStore? = null
-
-    @Volatile
-    private var acIrBlaster: AcIrBlaster? = null
 
     @Volatile
     private var transcriptClient: TranscriptClient? = null
@@ -931,20 +923,6 @@ object Graph {
         powerReadingStore ?: synchronized(this) {
             powerReadingStore ?: PowerReadingStore(JuwDatabase.get(context.applicationContext).powerReadingDao())
                 .also { powerReadingStore = it }
-        }
-
-    /** 空调遥控状态（DESIGN §4.48）：虚拟遥控的最后设定，本机持久化、跨窗口共用一份。 */
-    fun acRemotePrefsStore(context: Context): AcRemotePrefsStore =
-        acRemotePrefsStore ?: synchronized(this) {
-            acRemotePrefsStore ?: AcRemotePrefsStore(context.applicationContext)
-                .also { acRemotePrefsStore = it }
-        }
-
-    /** 空调红外发射（DESIGN §4.48）：ConsumerIrManager 包装，单例。 */
-    fun acIrBlaster(context: Context): AcIrBlaster =
-        acIrBlaster ?: synchronized(this) {
-            acIrBlaster ?: AcIrBlaster(context.applicationContext)
-                .also { acIrBlaster = it }
         }
 
     /**

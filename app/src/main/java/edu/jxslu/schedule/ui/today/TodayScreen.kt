@@ -169,7 +169,6 @@ import me.rerere.hugeicons.stroke.Droplet
 import me.rerere.hugeicons.stroke.ShowerHead
 import me.rerere.hugeicons.stroke.Menu01
 import me.rerere.hugeicons.stroke.Package01
-import me.rerere.hugeicons.stroke.RemoteControl
 import me.rerere.hugeicons.stroke.WashingMachine
 import me.rerere.hugeicons.stroke.ScooterElectric
 import edu.jxslu.schedule.domain.TodayTip
@@ -199,7 +198,7 @@ private const val KVCX_RIDE_QUERY_TTL_MILLIS = 60_000L
  * - 点课程（焦点卡/课程行）弹**只读详情**（[CourseDetailSheet]，与课表页同口径），
  *   编辑/删除是详情里的二级动作——直跳编辑器易误触。
  *
- * 底部固定区（2026-10-20）：**整块 dock 已收进左侧栏**（取快递 / U净 / 空调遥控 /
+ * 底部固定区（2026-10-20）：**整块 dock 已收进左侧栏**（取快递 / U净 /
  * 快趣出行 / 胖乖 / 趣智 / 问渠 / 笔记 / 作业 / 百宝箱 / 天气）。
  * 今日页只留课程与提示，课程区拿回全部高度；列表最后一项自己让开悬浮胶囊
  * （[LocalBottomBarClearance]）。旧的 dock 组件与 `todayDockExpanded` 偏好一并删除。
@@ -232,8 +231,6 @@ fun TodayScreen(
     onOpenShortcuts: (String?) -> Unit = {},
     /** 江水生活「取快递」弹窗里的「菜鸟批量查」：多单号一次导入取件码 */
     onOpenCainiao: () -> Unit = {},
-    /** 江水生活「空调遥控」图标：寝室美的空调红外页（DESIGN §3.31） */
-    onOpenAcRemote: () -> Unit = {},
     /** 今日页宿舍报修卡：原生进度页（DESIGN §4.49） */
     onOpenDormRepair: () -> Unit = {},
     /** 收件箱卡「查看更多」：打开收件箱页（DESIGN §3.24，2026-10-21 起唯一入口在卡片上） */

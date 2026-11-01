@@ -1220,7 +1220,6 @@ internal fun JuwApp(
                 // 弹窗挂在外壳层（侧栏 300dp 宽会被裁），所以进页与开弹窗是两条回调
                 onOpenUjing = { openFromDrawer(SubpageScreen.UJING, null) },
                 onOpenUjingSheet = { showUjingSheet = true },
-                onOpenAcRemote = { openFromDrawer(SubpageScreen.AC_REMOTE, null) },
                 onOpenRide = { openFromDrawer(SubpageScreen.RIDE, null) },
                 onOpenWater = { openFromDrawer(SubpageScreen.WATER, null) },
                 onOpenWaterSheet = { showWaterSheet = true },
@@ -1400,9 +1399,6 @@ internal fun JuwApp(
                             },
                             onOpenCainiao = {
                                 SubpageActivity.start(context, SubpageScreen.TOOLBOX_CAINIAO)
-                            },
-                            onOpenAcRemote = {
-                                SubpageActivity.start(context, SubpageScreen.AC_REMOTE)
                             },
                             // 宿舍报修进度（DESIGN §4.49）：今日页卡片进原生只读详情页
                             onOpenDormRepair = {
