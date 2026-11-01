@@ -31,30 +31,7 @@ class SettingsActivity : ComponentActivity() {
             // 否则设置窗口会绕过深浅色与固定字号（2026-10-22 审计）
             JuwRoot {
                 SettingsScreen(
-                    onOpenAppearanceSettings = {
-                        SubpageActivity.start(this, SubpageScreen.APPEARANCE_SETTINGS)
-                    },
-                    onOpenFeatureSettings = {
-                        SubpageActivity.start(this, SubpageScreen.FEATURE_SETTINGS)
-                    },
-                    onOpenTimetableHub = {
-                        SubpageActivity.start(this, SubpageScreen.TIMETABLE_HUB)
-                    },
-                    onOpenWidgetCalendarHub = {
-                        SubpageActivity.start(this, SubpageScreen.WIDGET_CALENDAR_HUB)
-                    },
-                    onOpenPermissionsStorage = {
-                        SubpageActivity.start(this, SubpageScreen.PERMISSIONS_STORAGE)
-                    },
-                    onOpenAboutUpdate = {
-                        SubpageActivity.start(this, SubpageScreen.ABOUT_UPDATE)
-                    },
-                    onOpenTerms = {
-                        SubpageActivity.start(this, SubpageScreen.TERMS_DECLARATIONS)
-                    },
-                    onOpenSupportDev = {
-                        SubpageActivity.start(this, SubpageScreen.SUPPORT_DEV)
-                    },
+                    onOpen = { screen -> SubpageActivity.start(this, screen) },
                     onBack = { finish() },
                 )
             }

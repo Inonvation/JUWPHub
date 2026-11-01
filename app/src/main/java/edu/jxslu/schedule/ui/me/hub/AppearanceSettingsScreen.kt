@@ -72,8 +72,9 @@ import me.rerere.hugeicons.stroke.Vibrate
 /**
  * 设置 → 应用 → 外观与交互（DESIGN §3.3）。
  *
- * 原「通用设置」的观感与布局、页面与导航两节；功能开关拆到
- * [FeatureSettingsScreen]。主题读写仍走 [MeViewModel]，改完立即生效。
+ * 原「通用设置」的观感与布局、页面与导航两节；功能开关已上提到设置根页
+ * （天气 / 快捷方式 / 百宝箱），本页只留外观与导航。主题读写仍走 [MeViewModel]，
+ * 改完立即生效。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

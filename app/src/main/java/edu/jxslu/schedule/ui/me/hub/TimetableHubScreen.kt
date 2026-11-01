@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.me.hub
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,16 +19,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,55 +47,61 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.data.DefaultData
+import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.SettingsTag
+import edu.jxslu.schedule.ui.common.WheelValueDialog
+import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.me.MeUiState
 import edu.jxslu.schedule.ui.me.MeViewModel
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AiBrain01
-import me.rerere.hugeicons.stroke.Alert02
-import me.rerere.hugeicons.stroke.CalendarSync
-import me.rerere.hugeicons.stroke.Clock01
-import me.rerere.hugeicons.stroke.Database
-import me.rerere.hugeicons.stroke.GridView
+import edu.jxslu.schedule.ui.me.OneShot
+import edu.jxslu.schedule.ui.me.TimeSlotEditorCard
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 /**
- * 我的 → 课表（DESIGN §3.3，2026-09-28 二次改版）：hero 卡 + 配置 → 使用 → 数据。
+ * 设置 → 课表（DESIGN §3.3，2026-11-01 与「课表设置」合并）。
  *
- * hero 卡（本轮新增）：当前课表名 + 学期起止 + 周数 + 课程数，视觉语言复用
- * 今日页焦点卡（主色 8% 底 + 左缘 3dp 主色竖条）——进页先确认「我在改哪张表」，
- * 再动手配置。从教务导入统一走教务 Tab，本页不再重复放置入口。
+ * 本页只回答「这张课表怎么算周次、怎么排作息」：当前课表 hero + 学期起止 /
+ * 总周数 + 作息表。课表管理、导入导出、调课、调课检测、AI 调课都是独立动作，
+ * 已上提到设置根页，不再经过本页中转。
  *
- * 上课提醒 2026-09-28 迁往「提醒与桌面」hub（与小组件、日历同属
- * 「课表数据送到哪里」）。成绩查询 2026-09-24 挪进学习页。
- *
- * 考试 2026-09-30 从「使用」区的内联开关收成入口行（`ExamAlertRows` 删除），同日傍晚
- * 连入口一起挪去「我的 → 学习」（用户口径：考试跟成绩一起看），本页不再有考试相关行。
+ * 学期区支持切换编辑目标（chips）：每张课表各有独立的开学日期/总周数，
+ * 选中哪张就编辑哪张；作息区仍固定编辑当前课表。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimetableHubScreen(
     onBack: () -> Unit,
-    onOpenTimetableManage: () -> Unit,
-    onOpenTimetableSettings: () -> Unit,
-    onOpenDataSettings: () -> Unit,
-    onOpenCourseTweak: () -> Unit,
-    onOpenScheduleChanges: () -> Unit,
-    /** AI 调课（DESIGN §4.39）：粘贴调课通知 → 模型给结构化建议 → 勾选落库。 */
-    onOpenAiSchedule: () -> Unit,
     viewModel: MeViewModel = viewModel(
         factory = MeViewModel.Factory(Graph.repository(LocalContext.current)),
     ),
 ) {
-    val context = LocalContext.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val oneShot by viewModel.oneShot.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    var datePickerOpen by remember { mutableStateOf(false) }
+    var weeksPickerOpen by remember { mutableStateOf(false) }
 
-    // 调课检测（DESIGN §4.17 重立）：入口行脚注显示待处置差异数——
-    // 通知错过的话，这里是唯一常驻入口。计数按「一次调课」= 1 处（与处置页同口径），
-    // 不能用缓存行数：单周调课在缓存里是两行
-    val pendingChanges by remember { Graph.displayPrefs(context) }.schedulePendingChanges
-        .collectAsStateWithLifecycle(initialValue = null)
-    val pendingCount = remember(pendingChanges) { pendingChanges?.groupCount() ?: 0 }
+    LaunchedEffect(oneShot) {
+        when (val s = oneShot) {
+            is OneShot.Message -> {
+                snackbar.showNotice(s.text)
+                viewModel.consumeOneShot()
+            }
+            else -> Unit
+        }
+    }
+
+    // 编辑目标 = 学期区 chips 选中的课表（configTargetId）；无配置时展示默认值兜底
+    val semester = state.configSemester
+    val startDateText = semester?.startDate ?: DefaultData.defaultSemester.startDate
+    val totalWeeks = semester?.totalWeeks ?: DefaultData.defaultSemester.totalWeeks
+    val targetName = state.timetables.firstOrNull { it.id == state.configTargetId }?.name.orEmpty()
 
     Scaffold(
         topBar = {
@@ -98,6 +114,7 @@ fun TimetableHubScreen(
                 },
             )
         },
+        snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -109,51 +126,112 @@ fun TimetableHubScreen(
         ) {
             TimetableHero(state = state)
 
-            // 配置与数据（2026-10-07 并节）：都是「管这张课表」的动作，单行节没必要单独立卡
-            SettingsSection(title = "配置与数据") {
-                SettingItem(
-                    title = "课表管理",
-                    subtitle = "新建 · 切换 · 删除课表",
-                    icon = HugeIcons.GridView,
-                    onClick = onOpenTimetableManage,
+            SettingsSection(
+                title = if (targetName.isBlank()) "学期" else "学期 · $targetName",
+                subtitle = "每张课表各有独立的开学日期与总周数；点课表名切换编辑目标",
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    state.timetables.forEach { timetable ->
+                        FilterChip(
+                            selected = timetable.id == state.configTargetId,
+                            onClick = { viewModel.selectConfigTarget(timetable.id) },
+                            label = {
+                                Text(
+                                    if (timetable.id == state.currentTimetableId) {
+                                        "${timetable.name} · 当前"
+                                    } else {
+                                        timetable.name
+                                    },
+                                )
+                            },
+                        )
+                    }
+                }
+                Text(
+                    if (state.configSemester == null) {
+                        "该课表还没配过学期，选一次开学日期即自动创建"
+                    } else {
+                        "该课表第 ${state.configWeek} 周 · 共 ${state.configCourseCount} 门课"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
                 )
                 SettingItem(
-                    title = "课表设置",
-                    titleTag = "当前课表",
-                    subtitle = "学期起止 · 总周数 · 作息时间",
-                    icon = HugeIcons.Clock01,
-                    onClick = onOpenTimetableSettings,
+                    title = "开学日期",
+                    subtitle = "第 1 周周一所在周为开学周",
+                    value = startDateText,
+                    onClick = { datePickerOpen = true },
                 )
                 SettingItem(
-                    title = "课表数据",
-                    subtitle = "JSON 导出 / 导入 · 清空课程",
-                    icon = HugeIcons.Database,
-                    onClick = onOpenDataSettings,
+                    title = "总周数",
+                    subtitle = "周次选择器与「第 N 周」的范围",
+                    value = "$totalWeeks 周",
+                    onClick = { weeksPickerOpen = true },
                 )
             }
 
-            SettingsSection(title = "使用") {
-                SettingItem(
-                    title = "调课",
-                    subtitle = "把某天的课调到另一天 · 仅本机生效",
-                    icon = HugeIcons.CalendarSync,
-                    onClick = onOpenCourseTweak,
-                )
-                SettingItem(
-                    title = "调课检测",
-                    titleTag = if (pendingCount > 0) "${pendingCount}处差异" else null,
-                    subtitle = "与教务最新课表比对，发现变动提醒并可选合并",
-                    icon = HugeIcons.Alert02,
-                    onClick = onOpenScheduleChanges,
-                )
-                SettingItem(
-                    title = "AI 调课",
-                    subtitle = "粘贴调课通知，由 AI 给出改动建议 · 需自备 API Key",
-                    icon = HugeIcons.AiBrain01,
-                    onClick = onOpenAiSchedule,
-                )
-            }
+            // 作息表固定编辑当前课表：标题里点名（2026-10-07 收口）
+            TimeSlotEditorCard(
+                headerNote = "固定编辑当前课表「${state.timetableName.ifBlank { "—" }}」",
+                slots = state.timeSlots,
+                onSave = viewModel::saveTimeSlots,
+                onReset = viewModel::resetTimeSlots,
+            )
         }
+    }
+
+    if (datePickerOpen) {
+        // rememberDatePickerState 放在 if 块内：每次打开重建，初始选中跟随当前值，
+        // 避免上一次取消的选择残留
+        val dateState = rememberDatePickerState(
+            initialSelectedDateMillis = runCatching {
+                LocalDate.parse(startDateText).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+            }.getOrNull(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { datePickerOpen = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerOpen = false
+                        val picked = dateState.selectedDateMillis?.let { millis ->
+                            Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                        }
+                        if (picked != null) {
+                            // 选完即存：日期由控件保证合法，不再需要「保存」按钮收口
+                            viewModel.saveSemester(
+                                picked.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                                totalWeeks,
+                            )
+                        }
+                    },
+                ) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { datePickerOpen = false }) { Text("取消") }
+            },
+        ) {
+            DatePicker(state = dateState)
+        }
+    }
+
+    if (weeksPickerOpen) {
+        WheelValueDialog(
+            title = "总周数",
+            values = (1..30).map { "$it 周" },
+            initialIndex = totalWeeks - 1,
+            onConfirm = { index ->
+                weeksPickerOpen = false
+                viewModel.saveSemester(startDateText, index + 1)
+            },
+            onDismiss = { weeksPickerOpen = false },
+        )
     }
 }
 
@@ -163,7 +241,7 @@ fun TimetableHubScreen(
  * 提示条消失后仍是「哪张课表在生效」的常驻确认位。
  */
 @Composable
-private fun TimetableHero(state: edu.jxslu.schedule.ui.me.MeUiState) {
+private fun TimetableHero(state: MeUiState) {
     val primary = MaterialTheme.colorScheme.primary
     val semester = state.configSemester
     val week = state.configWeek

@@ -1372,9 +1372,9 @@ internal fun JuwApp(
                             onOpenJwImport = {
                                 JwImportActivity.start(context)
                             },
-                            // 「尚未开学」空态 CTA：跳课表设置子页（独立窗口）
+                            // 「尚未开学」空态 CTA：跳课表页（学期 / 作息，独立窗口）
                             onOpenTimetableSettings = {
-                                SubpageActivity.start(context, SubpageScreen.TIMETABLE_SETTINGS)
+                                SubpageActivity.start(context, SubpageScreen.TIMETABLE_HUB)
                             },
                             // 胖乖生活卡常显（未登录给未登录态，显示设置可关，DESIGN §3.3）；
                             // 登录态由 WaterViewModel 自带，外层不再按登录与否隐藏整卡

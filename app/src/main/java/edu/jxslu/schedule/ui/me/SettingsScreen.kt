@@ -28,31 +28,38 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.BuildConfig
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
+import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.SettingItem
+import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.rememberResumeTick
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Agreement01
+import me.rerere.hugeicons.stroke.AiBrain01
+import me.rerere.hugeicons.stroke.Alert02
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.BellRing
 import me.rerere.hugeicons.stroke.CalendarSetting01
+import me.rerere.hugeicons.stroke.CalendarSync
+import me.rerere.hugeicons.stroke.Database
+import me.rerere.hugeicons.stroke.Flash
+import me.rerere.hugeicons.stroke.GridView
 import me.rerere.hugeicons.stroke.Heart
 import me.rerere.hugeicons.stroke.InformationCircle
+import me.rerere.hugeicons.stroke.NotificationSnooze02
 import me.rerere.hugeicons.stroke.Palette
-import me.rerere.hugeicons.stroke.Settings01
 import me.rerere.hugeicons.stroke.Shield01
+import me.rerere.hugeicons.stroke.SunCloud01
+import me.rerere.hugeicons.stroke.Toolbox
 
 /**
- * 设置页（DESIGN §3.3）：独立窗口里的入口页。
+ * 设置根页（DESIGN §3.3）：独立窗口里的入口页。
  *
- * 2026-10-21 起按对象重排为四组：应用 → 课表 → 通知 → 关于。学习与校园服务
- * 不再从这里进：笔记 / 作业 / 账号在左侧栏，成绩 / 考试 / 课表导入等教务数据
- * 在教务 Tab。设置页只留仍需要配置或查看的入口。
- *
- * 应用组拆成「外观与交互」「功能」两页；关于组拆成「权限与存储」「关于与更新」
- * 「条款与声明」「支持开发」四页，避免一个页面里混着主题、更新、缓存和条款。
+ * 2026-11-01 重排为 7 节：外观与交互 → 功能 → 课表 → 提醒 → 桌面与日历 →
+ * 数据与权限 → 关于。根页只做入口，不再有「功能 / 课表 / 提醒与桌面」
+ * 这类中转 hub；每个入口最多一跳进到叶子页。支持开发归「关于」。
  *
  * 进页仍会做一次「班级为空就补抓」的 ProfileSync（闸门在 `ProfileSyncRules`，
  * 每天最多一次、失败静默）——左侧栏那行身份（姓名 / 班级）靠它填。
@@ -60,14 +67,7 @@ import me.rerere.hugeicons.stroke.Shield01
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onOpenAppearanceSettings: () -> Unit = {},
-    onOpenFeatureSettings: () -> Unit = {},
-    onOpenTimetableHub: () -> Unit = {},
-    onOpenWidgetCalendarHub: () -> Unit = {},
-    onOpenPermissionsStorage: () -> Unit = {},
-    onOpenAboutUpdate: () -> Unit = {},
-    onOpenTerms: () -> Unit = {},
-    onOpenSupportDev: () -> Unit = {},
+    onOpen: (SubpageScreen) -> Unit,
     /** 从侧栏齿轮进来时给返回箭头（独立窗口，恒有）。 */
     onBack: (() -> Unit)? = null,
     viewModel: MeViewModel = viewModel(
@@ -112,24 +112,43 @@ fun SettingsScreen(
             val profileClass by remember {
                 prefsStore.profileClass
             }.collectAsState(initial = "")
+            val pendingChanges by remember { prefsStore.schedulePendingChanges }
+                .collectAsStateWithLifecycle(initialValue = null)
+            val pendingCount = remember(pendingChanges) { pendingChanges?.groupCount() ?: 0 }
             LaunchedEffect(resumeTick) {
                 if (profileClass.isBlank()) {
                     runCatching { Graph.profileSync(context).syncOnce() }
                 }
             }
 
-            SettingsSection(title = "应用") {
+            SettingsSection(title = "外观与交互") {
                 SettingItem(
                     title = "外观与交互",
-                    subtitle = "主题 · 字体 · 导航",
+                    subtitle = "主题 · 字体 · 触感 · 导航",
                     icon = HugeIcons.Palette,
-                    onClick = onOpenAppearanceSettings,
+                    onClick = { onOpen(SubpageScreen.APPEARANCE_SETTINGS) },
+                )
+            }
+
+            SettingsSection(title = "功能") {
+                SettingItem(
+                    title = "天气",
+                    subtitle = "今日页顶栏天气提示 · 数据来自 Open-Meteo",
+                    icon = HugeIcons.SunCloud01,
+                    onClick = { onOpen(SubpageScreen.WEATHER_SETTINGS) },
                 )
                 SettingItem(
-                    title = "功能",
-                    subtitle = "AI 调课 · 天气 · 快捷方式 · 百宝箱",
-                    icon = HugeIcons.Settings01,
-                    onClick = onOpenFeatureSettings,
+                    title = "快捷方式",
+                    subtitle = "编辑今日页快捷入口 · 预设与自定义",
+                    icon = HugeIcons.Flash,
+                    onClick = { onOpen(SubpageScreen.SHORTCUTS) },
+                )
+                SettingSwitchRow(
+                    title = "百宝箱",
+                    subtitle = "左侧栏「百宝箱」入口：水印 · 拼接 · 菜鸟批量查",
+                    checked = state.displayPrefs.toolboxEnabled,
+                    onCheckedChange = viewModel::setToolboxEnabled,
+                    icon = HugeIcons.Toolbox,
                 )
             }
 
@@ -139,43 +158,104 @@ fun SettingsScreen(
                     title = "课表",
                     subtitle = "当前：${state.timetableName.ifBlank { "—" }}$weekSuffix",
                     icon = HugeIcons.CalendarSetting01,
-                    onClick = onOpenTimetableHub,
+                    onClick = { onOpen(SubpageScreen.TIMETABLE_HUB) },
+                )
+                SettingItem(
+                    title = "调课",
+                    subtitle = "把某天的课调到另一天 · 仅本机生效",
+                    icon = HugeIcons.CalendarSync,
+                    onClick = { onOpen(SubpageScreen.COURSE_TWEAK) },
+                )
+                SettingItem(
+                    title = "调课检测",
+                    titleTag = if (pendingCount > 0) "${pendingCount}处差异" else null,
+                    subtitle = "与教务最新课表比对，发现变动提醒并可选合并",
+                    icon = HugeIcons.Alert02,
+                    onClick = { onOpen(SubpageScreen.SCHEDULE_CHANGES) },
+                )
+                SettingItem(
+                    title = "AI 调课服务",
+                    subtitle = "服务地址 · 模型 · API Key · 教师名脱敏",
+                    icon = HugeIcons.AiBrain01,
+                    onClick = { onOpen(SubpageScreen.AI_SETTINGS) },
+                )
+                SettingItem(
+                    title = "AI 调课",
+                    subtitle = "粘贴调课通知，由 AI 给出改动建议 · 需自备 API Key",
+                    icon = HugeIcons.AiBrain01,
+                    onClick = { onOpen(SubpageScreen.AI_SCHEDULE) },
                 )
             }
 
-            SettingsSection(title = "通知") {
+            SettingsSection(title = "提醒") {
                 SettingItem(
-                    title = "提醒与桌面",
-                    subtitle = "上课提醒 · 桌面小组件 · 日历同步",
+                    title = "提醒",
+                    subtitle = "上课 / 作业截止通知 · 提前量可调 · 点通知直达",
                     icon = HugeIcons.BellRing,
-                    onClick = onOpenWidgetCalendarHub,
+                    onClick = { onOpen(SubpageScreen.REMINDER_SETTINGS) },
+                )
+                SettingItem(
+                    title = "免扰时段",
+                    subtitle = "睡眠与午休时段内通知推迟到时段结束补发 · 可自定义",
+                    icon = HugeIcons.NotificationSnooze02,
+                    onClick = { onOpen(SubpageScreen.QUIET_HOURS) },
+                )
+            }
+
+            SettingsSection(title = "桌面与日历") {
+                SettingItem(
+                    title = "桌面小组件",
+                    subtitle = "课表 · 校园卡电费 · 开水卡 · 一键添加",
+                    icon = HugeIcons.GridView,
+                    onClick = { onOpen(SubpageScreen.WIDGET_SETTINGS) },
+                )
+                SettingItem(
+                    title = "日历同步",
+                    subtitle = "课表写入系统日历 · 提前提醒随同步写入",
+                    icon = HugeIcons.CalendarSetting01,
+                    onClick = { onOpen(SubpageScreen.CALENDAR_SETTINGS) },
+                )
+            }
+
+            SettingsSection(title = "数据与权限") {
+                SettingItem(
+                    title = "课表管理",
+                    subtitle = "新建 · 切换 · 删除课表",
+                    icon = HugeIcons.GridView,
+                    onClick = { onOpen(SubpageScreen.TIMETABLE_MANAGE) },
+                )
+                SettingItem(
+                    title = "导入 / 导出 / 清空",
+                    subtitle = "JSON 备份与恢复 · 清空课程",
+                    icon = HugeIcons.Database,
+                    onClick = { onOpen(SubpageScreen.DATA_SETTINGS) },
+                )
+                SettingItem(
+                    title = "权限与存储",
+                    subtitle = "通知 · 日历 · 定位 · 缓存 · 诊断日志",
+                    icon = HugeIcons.Shield01,
+                    onClick = { onOpen(SubpageScreen.PERMISSIONS_STORAGE) },
                 )
             }
 
             SettingsSection(title = "关于") {
                 SettingItem(
-                    title = "权限与存储",
-                    subtitle = "权限 · 缓存 · 诊断日志",
-                    icon = HugeIcons.Shield01,
-                    onClick = onOpenPermissionsStorage,
-                )
-                SettingItem(
                     title = "关于与更新",
                     subtitle = "版本 v${BuildConfig.VERSION_NAME} · 检查更新 · 自动检查",
                     icon = HugeIcons.InformationCircle,
-                    onClick = onOpenAboutUpdate,
+                    onClick = { onOpen(SubpageScreen.ABOUT_UPDATE) },
                 )
                 SettingItem(
                     title = "条款与声明",
                     subtitle = "用户须知 · 免责声明 · 充值风险",
                     icon = HugeIcons.Agreement01,
-                    onClick = onOpenTerms,
+                    onClick = { onOpen(SubpageScreen.TERMS_DECLARATIONS) },
                 )
                 SettingItem(
                     title = "支持开发",
                     subtitle = "扫码赞赏作者 · 完全自愿",
                     icon = HugeIcons.Heart,
-                    onClick = onOpenSupportDev,
+                    onClick = { onOpen(SubpageScreen.SUPPORT_DEV) },
                 )
             }
         }

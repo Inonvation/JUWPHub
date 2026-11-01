@@ -1,11 +1,8 @@
 package edu.jxslu.schedule.ui.me
 
 import android.Manifest
-import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -21,13 +18,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,13 +30,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
-import edu.jxslu.schedule.startActivityOutsideApp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,7 +58,7 @@ import kotlinx.coroutines.runBlocking
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AlarmClock
 import me.rerere.hugeicons.stroke.BellRing
-import me.rerere.hugeicons.stroke.Notification01
+import me.rerere.hugeicons.stroke.Notification03
 import me.rerere.hugeicons.stroke.Task01
 
 /**
@@ -91,6 +81,7 @@ fun ReminderSettingsScreen(
     val enabled by viewModel.enabled.collectAsStateWithLifecycle()
     val lead by viewModel.leadMinutes.collectAsStateWithLifecycle()
     val homeworkEnabled by viewModel.homeworkEnabled.collectAsStateWithLifecycle()
+    val strongReminderVibration by viewModel.strongReminderVibration.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var showLeadPicker by remember { mutableStateOf(false) }
@@ -130,18 +121,7 @@ fun ReminderSettingsScreen(
         }
     }
 
-    // 通知权限状态：进页与从系统设置返回（ON_RESUME）时各读一次
-    val notifEnabled = remember { mutableStateOf(false) }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                notifEnabled.value = NotificationManagerCompat.from(context).areNotificationsEnabled()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
+    // 通知权限状态与申请入口在「数据与权限 → 权限与存储」，本页只负责提醒开关本身
 
     Scaffold(
         topBar = {
@@ -189,11 +169,13 @@ fun ReminderSettingsScreen(
                     onClick = { showLeadPicker = true },
                     icon = HugeIcons.AlarmClock,
                 )
-                SettingItem(
-                    title = "系统通知权限",
-                    subtitle = if (notifEnabled.value) "已开启" else "未开启 · 未授权时提醒不会显示",
-                    onClick = { openNotificationSettings(context) },
-                    icon = HugeIcons.Notification01,
+                // 提醒发出时直接震动，可穿透免打扰；原在「提醒与桌面」hub，2026-11-01 并回本页
+                SettingSwitchRow(
+                    title = "通知强提醒",
+                    subtitle = "提醒发出时直接震动，可穿透免打扰；关闭时按系统设置振动",
+                    checked = strongReminderVibration,
+                    onCheckedChange = viewModel::setStrongReminderVibration,
+                    icon = HugeIcons.Notification03,
                 )
             }
 
@@ -217,7 +199,8 @@ fun ReminderSettingsScreen(
             // 说明卡：只留运行行为里用户测得到、且别处没说的两条——省电推迟（对应
             // 权限设置的改善出口）与重启自动恢复
             SettingsSection(title = "说明") {
-                SettingsNote("提醒可能被系统省电推迟；在「权限设置」允许忽略电池优化可改善")
+                SettingsNote("通知与日历权限在「数据与权限 → 权限与存储」逐项申请")
+                SettingsNote("提醒可能被系统省电推迟；在「数据与权限 → 权限与存储」允许忽略电池优化可改善")
                 SettingsNote("手机重启后自动恢复，无需打开 App")
             }
         }
@@ -234,24 +217,6 @@ fun ReminderSettingsScreen(
             },
             onDismiss = { showLeadPicker = false },
         )
-    }
-}
-
-/** 跳系统应用通知设置；不支持时退回应用详情页（与小组件页的「尽力而为」同一策略）。 */
-private fun openNotificationSettings(context: Context) {
-    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-    try {
-        // 二级页窗口拉系统设置也走 startActivityOutsideApp：抑制右推入过渡，
-        // 不然从设置回来时本页会凭空重放一次入场动画（同关于页的理由）
-        context.startActivityOutsideApp(intent)
-    } catch (_: Exception) {
-        runCatching {
-            context.startActivityOutsideApp(
-                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                    .setData(android.net.Uri.fromParts("package", context.packageName, null)),
-            )
-        }
     }
 }
 
@@ -284,6 +249,14 @@ class ReminderSettingsViewModel(
             runBlocking { repo.homeworkReminderEnabled.first() },
         )
 
+    /** 通知强提醒（2026-10-06）：提醒发出后额外直接震一次，可穿透免打扰。 */
+    val strongReminderVibration: StateFlow<Boolean> = repo.strongReminderVibration
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            runBlocking { repo.strongReminderVibration.first() },
+        )
+
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message
 
@@ -297,6 +270,10 @@ class ReminderSettingsViewModel(
 
     fun setHomeworkEnabled(value: Boolean) {
         viewModelScope.launch { repo.setHomeworkReminderEnabled(value) }
+    }
+
+    fun setStrongReminderVibration(value: Boolean) {
+        viewModelScope.launch { repo.setStrongReminderVibration(value) }
     }
 
     fun setLeadMinutes(minutes: Int) {

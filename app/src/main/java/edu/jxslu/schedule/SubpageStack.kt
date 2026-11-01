@@ -57,10 +57,13 @@ internal data class SubpageRequest(
                 ?: LEGACY_NAMES[raw]?.let { screenOf(it) }
         }
 
-        /** 旧枚举名 → 现枚举名（2026-09-29 出码页与地图页合并为「骑行」）。 */
+        /** 旧枚举名 → 现枚举名（2026-09-29 出码页与地图页合并为「骑行」；2026-11-01 设置合并）。 */
         private val LEGACY_NAMES = mapOf(
             "EBIKE" to "RIDE",
             "EBIKE_MAP" to "RIDE",
+            "TIMETABLE_SETTINGS" to "TIMETABLE_HUB",
+            "PERMISSION_SETTINGS" to "PERMISSIONS_STORAGE",
+            "WIDGET_CALENDAR_HUB" to "REMINDER_SETTINGS",
         )
 
         /**

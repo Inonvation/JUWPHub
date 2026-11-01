@@ -11,21 +11,17 @@ import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.ui.me.CalendarSettingsScreen
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
 import edu.jxslu.schedule.ui.me.JwAccountScreen
-import edu.jxslu.schedule.ui.me.PermissionSettingsScreen
 import edu.jxslu.schedule.ui.me.ReminderSettingsScreen
 import edu.jxslu.schedule.ui.me.ShortcutSettingsScreen
-import edu.jxslu.schedule.ui.me.TimetableSettingsScreen
 import edu.jxslu.schedule.ui.me.WidgetSettingsScreen
 import edu.jxslu.schedule.ui.me.hub.AboutUpdateScreen
 import edu.jxslu.schedule.ui.me.hub.AccountsHubScreen
 import edu.jxslu.schedule.ui.me.hub.AppearanceSettingsScreen
-import edu.jxslu.schedule.ui.me.hub.FeatureSettingsScreen
 import edu.jxslu.schedule.ui.me.hub.PermissionsStorageScreen
 import edu.jxslu.schedule.ui.me.hub.QuietHoursScreen
 import edu.jxslu.schedule.ui.me.hub.SupportDevScreen
 import edu.jxslu.schedule.ui.me.hub.TermsDeclarationsScreen
 import edu.jxslu.schedule.ui.me.hub.TimetableHubScreen
-import edu.jxslu.schedule.ui.me.hub.WidgetCalendarHubScreen
 import edu.jxslu.schedule.ui.campus.CampusCalendarScreen
 import edu.jxslu.schedule.ui.campus.CampusCardSettingsScreen
 import edu.jxslu.schedule.ui.campus.DormRepairScreen
@@ -84,13 +80,11 @@ import edu.jxslu.schedule.ui.wenqu.WenquSettingsScreen
 
 /** 二级页种类；通过 extra 传给 [SubpageActivity]，值必须与 enum 名一致。 */
 enum class SubpageScreen {
-    /** 我的 → 课表管理 */
+    /** 设置 → 数据与权限 → 课表管理 */
     TIMETABLE_MANAGE,
-    /** 我的 → 课表设置（学期 · 作息） */
-    TIMETABLE_SETTINGS,
-    /** 我的 → 课表数据 */
+    /** 设置 → 数据与权限 → 导入 / 导出 / 清空 */
     DATA_SETTINGS,
-    /** 我的 → 调课（快捷操作，DESIGN §4.11） */
+    /** 设置 → 课表 → 调课（快捷操作，DESIGN §4.11） */
     COURSE_TWEAK,
     /** 我的/今日 → 胖乖生活（开水卡显示与点击方式并入页内，DESIGN §3.4） */
     WATER,
@@ -98,15 +92,13 @@ enum class SubpageScreen {
     QZXY,
     /** 趣智校园 → 诊断与调试（DESIGN §3.18；设备现场 · 服务表 · 试签名 · 日志） */
     QZXY_DEBUG,
-    /** 我的 → 桌面小组件（DESIGN §3.6） */
+    /** 设置 → 桌面与日历 → 桌面小组件（DESIGN §3.6） */
     WIDGET_SETTINGS,
-    /** 我的 → 权限设置（电池优化 · 自启动/锁后台 · 通知，DESIGN §3.12） */
-    PERMISSION_SETTINGS,
-    /** 我的 → 日历同步（提醒时长 · 一键删除，DESIGN §4.12） */
+    /** 设置 → 桌面与日历 → 日历同步（提醒时长 · 一键删除，DESIGN §4.12） */
     CALENDAR_SETTINGS,
-    /** 我的 → 上课提醒（DESIGN §3.7） */
+    /** 设置 → 提醒 → 提醒（DESIGN §3.7） */
     REMINDER_SETTINGS,
-    /** 我的 → 快捷方式（DESIGN §3.8） */
+    /** 设置 → 功能 → 快捷方式（DESIGN §3.8） */
     SHORTCUTS,
     /** 我的 → 成绩查询（按学期存储，DESIGN §4.15） */
     SCORES,
@@ -148,19 +140,15 @@ enum class SubpageScreen {
     CAMPUS_CARD_SETTINGS,
     /** 我的 → 教务账户（原生信息页，DESIGN §3.3；不再一点就开导入 WebView） */
     JW_ACCOUNT,
-    /** 设置 → 应用 → 外观与交互（主题 · 字体 · 导航，DESIGN §3.3） */
+    /** 设置 → 外观与交互（主题 · 字体 · 导航，DESIGN §3.3） */
     APPEARANCE_SETTINGS,
-    /** 设置 → 应用 → 功能（AI 调课 · 天气 · 快捷方式 · 百宝箱，DESIGN §3.3） */
-    FEATURE_SETTINGS,
-    /** 设置 → 课表（配置 · 使用 · 数据，DESIGN §3.3） */
+    /** 设置 → 课表（学期 · 作息，DESIGN §3.3） */
     TIMETABLE_HUB,
-    /** 设置 → 通知 → 提醒与桌面（DESIGN §3.3） */
-    WIDGET_CALENDAR_HUB,
-    /** 提醒与桌面 → 免扰时段（预置夜间/午休 · 可编辑，时段内通知推迟补发，DESIGN §3.7，2026-10-07） */
+    /** 设置 → 提醒 → 免扰时段（预置夜间/午休 · 可编辑，时段内通知推迟补发，DESIGN §3.7，2026-10-07） */
     QUIET_HOURS,
     /** 我的 → 账号与登录（全量账号状态 · 补登入口，2026-10-20，DESIGN §3.3） */
     ACCOUNTS,
-    /** 设置 → 关于 → 权限与存储（权限 · 缓存 · 诊断日志，DESIGN §3.3） */
+    /** 设置 → 数据与权限 → 权限与存储（权限 · 缓存 · 诊断日志，DESIGN §3.3） */
     PERMISSIONS_STORAGE,
     /** 设置 → 关于 → 关于与更新（版本 · 更新 · 开源，DESIGN §3.3） */
     ABOUT_UPDATE,
@@ -335,7 +323,6 @@ class SubpageActivity : ComponentActivity() {
     ) {
         when (screen) {
             SubpageScreen.TIMETABLE_MANAGE -> TimetableManageScreen(onBack = onBack)
-            SubpageScreen.TIMETABLE_SETTINGS -> TimetableSettingsScreen(onBack = onBack)
             SubpageScreen.DATA_SETTINGS -> DataSettingsScreen(onBack = onBack)
             SubpageScreen.COURSE_TWEAK -> CourseTweakScreen(onBack = onBack)
             SubpageScreen.WATER -> WaterScreen(onBack = onBack, autoStart = autoStart)
@@ -382,7 +369,6 @@ class SubpageActivity : ComponentActivity() {
                 onBack = onBack,
             )
             SubpageScreen.WIDGET_SETTINGS -> WidgetSettingsScreen(onBack = onBack)
-            SubpageScreen.PERMISSION_SETTINGS -> PermissionSettingsScreen(onBack = onBack)
             SubpageScreen.CALENDAR_SETTINGS -> CalendarSettingsScreen(onBack = onBack)
             SubpageScreen.REMINDER_SETTINGS -> ReminderSettingsScreen(onBack = onBack)
             SubpageScreen.SHORTCUTS ->
@@ -417,23 +403,7 @@ class SubpageActivity : ComponentActivity() {
                 onOpenPayCode = { SubpageActivity.start(this, SubpageScreen.PAY_CODE) },
             )
             SubpageScreen.JW_ACCOUNT -> JwAccountScreen(onBack = onBack)
-            SubpageScreen.TIMETABLE_HUB -> TimetableHubScreen(
-                onBack = onBack,
-                onOpenTimetableManage = {
-                    SubpageActivity.start(this, SubpageScreen.TIMETABLE_MANAGE)
-                },
-                onOpenTimetableSettings = {
-                    SubpageActivity.start(this, SubpageScreen.TIMETABLE_SETTINGS)
-                },
-                onOpenDataSettings = { SubpageActivity.start(this, SubpageScreen.DATA_SETTINGS) },
-                onOpenCourseTweak = { SubpageActivity.start(this, SubpageScreen.COURSE_TWEAK) },
-                onOpenScheduleChanges = {
-                    SubpageActivity.start(this, SubpageScreen.SCHEDULE_CHANGES)
-                },
-                onOpenAiSchedule = {
-                    SubpageActivity.start(this, SubpageScreen.AI_SCHEDULE)
-                },
-            )
+            SubpageScreen.TIMETABLE_HUB -> TimetableHubScreen(onBack = onBack)
             SubpageScreen.SCHEDULE_CHANGES -> ScheduleChangesScreen(onBack = onBack)
             SubpageScreen.AI_SCHEDULE -> AiChatScreen(
                 onBack = onBack,
@@ -451,14 +421,6 @@ class SubpageActivity : ComponentActivity() {
                 )
             SubpageScreen.APPEARANCE_SETTINGS -> AppearanceSettingsScreen(
                 onBack = onBack,
-            )
-            SubpageScreen.FEATURE_SETTINGS -> FeatureSettingsScreen(
-                onBack = onBack,
-                onOpenShortcuts = { SubpageActivity.start(this, SubpageScreen.SHORTCUTS) },
-                onOpenAiSettings = { SubpageActivity.start(this, SubpageScreen.AI_SETTINGS) },
-                onOpenWeatherSettings = {
-                    SubpageActivity.start(this, SubpageScreen.WEATHER_SETTINGS)
-                },
             )
             // 天气（DESIGN §3.29）：详情与设置各自独立窗口，与其它二级页同规格
             SubpageScreen.WEATHER -> WeatherScreen(onBack = onBack)
@@ -481,26 +443,6 @@ class SubpageActivity : ComponentActivity() {
             SubpageScreen.TOOLBOX_WATERMARK -> WatermarkScreen(onBack = onBack)
             SubpageScreen.TOOLBOX_STITCH -> StitchScreen(onBack = onBack)
             SubpageScreen.TOOLBOX_CAINIAO -> CainiaoQueryScreen(onBack = onBack)
-            SubpageScreen.WIDGET_CALENDAR_HUB -> WidgetCalendarHubScreen(
-                onBack = onBack,
-                onOpenWidgetSettings = {
-                    SubpageActivity.start(this, SubpageScreen.WIDGET_SETTINGS)
-                },
-                onOpenCalendarSettings = {
-                    SubpageActivity.start(this, SubpageScreen.CALENDAR_SETTINGS)
-                },
-                // 上课提醒 2026-09-28 自课表 hub 迁入（与小组件、日历同属「课表送达渠道」）
-                onOpenReminderSettings = {
-                    SubpageActivity.start(this, SubpageScreen.REMINDER_SETTINGS)
-                },
-                onOpenPermissionSettings = {
-                    SubpageActivity.start(this, SubpageScreen.PERMISSION_SETTINGS)
-                },
-                // 免扰时段（DESIGN §3.7，2026-10-07）：提醒区入口
-                onOpenQuietHours = {
-                    SubpageActivity.start(this, SubpageScreen.QUIET_HOURS)
-                },
-            )
             SubpageScreen.QUIET_HOURS -> QuietHoursScreen(onBack = onBack)
             SubpageScreen.ACCOUNTS -> AccountsHubScreen(
                 onBack = onBack,
@@ -517,12 +459,7 @@ class SubpageActivity : ComponentActivity() {
                 onOpenWenqu = { SubpageActivity.start(this, SubpageScreen.WENQU) },
                 onOpenAiSettings = { SubpageActivity.start(this, SubpageScreen.AI_SETTINGS) },
             )
-            SubpageScreen.PERMISSIONS_STORAGE -> PermissionsStorageScreen(
-                onBack = onBack,
-                onOpenPermissionSettings = {
-                    SubpageActivity.start(this, SubpageScreen.PERMISSION_SETTINGS)
-                },
-            )
+            SubpageScreen.PERMISSIONS_STORAGE -> PermissionsStorageScreen(onBack = onBack)
             SubpageScreen.ABOUT_UPDATE -> AboutUpdateScreen(onBack = onBack)
             SubpageScreen.TERMS_DECLARATIONS -> TermsDeclarationsScreen(onBack = onBack)
             SubpageScreen.SUPPORT_DEV -> SupportDevScreen(onBack = onBack)

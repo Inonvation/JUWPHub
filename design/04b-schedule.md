@@ -187,7 +187,7 @@ Description = `教师：xxx`，Location = 教室；含逗号/引号的字段按 
 | 周网格 | `ui/widget/WidgetModel.kt` 的纯函数 builder（`buildWeekModel`）：列取 `ScheduleCalculator.visibleDays`、行取小节号、重叠同列只画一门、高亮列按「今天还有课 → 今天；否则明天」 |
 | 边界计算 | `domain/TodayBoundary.kt` 的 `nextTodayBoundaryMinutes()`（纯 JVM，单测钉死） |
 | 格式化 | `domain/TodayFormat.kt`（由 `TodayScreen.kt` 提出，`compactPosition` 一并下移）；校园卡 / 电费数字与时刻在 `ui/widget/LifeWidgetModels.kt` 的 `LifeWidgetFormat`（Locale.US） |
-| 配色 | 复用 `ui/common/CourseUi.kt` 的 `courseColor()`（16 色粉彩）；进度条为 12 段分色（Glance 无 `fillMaxWidth(fraction)`）；胶囊/强调色（合并卡按钮、开水两卡胶囊与「用水中」大字）跟随「设置 → 应用 → 外观与交互」所选**主题配色**的浅色主色（`widgetAccentColor`，2026-09-28；此前固定品牌青 `#0F7C7C`），切换配色即时重渲染 |
+| 配色 | 复用 `ui/common/CourseUi.kt` 的 `courseColor()`（16 色粉彩）；进度条为 12 段分色（Glance 无 `fillMaxWidth(fraction)`）；胶囊/强调色（合并卡按钮、开水两卡胶囊与「用水中」大字）跟随「设置 → 外观与交互」所选**主题配色**的浅色主色（`widgetAccentColor`，2026-09-28；此前固定品牌青 `#0F7C7C`），切换配色即时重渲染 |
 | 数据读取 | `Graph.repository(appContext)` + `repo.ensureDefaults()`，全部 applicationContext，无跨进程 |
 | 添加 | `AppWidgetManager.requestPinAppWidget`（API 26+）；不支持时降级为桌面长按引导 |
 | 点击 | 课表：整卡 → 今日页、4×4 网格区 → 课表页；校园卡 → 付款码页（未开凭证 → 校园卡设置页）；电费 → 用电统计页；胖乖开水 / 趣智开水：胶囊「去开水」→ 页面并自动开水（`water_start` / `qzxy_start` + `WaterAutoStart` 一次性令牌）、整卡其余 → 页面（route extra 共 `pay_code` / `power_bill` / `campus_card` / `water` / `qzxy` / `water_start` / `qzxy_start`，消费后起 `SubpageActivity`） |
@@ -500,7 +500,7 @@ settle 后结果落盘（`onboarding_sync_outcome_json`），主界面在 `onboa
   **带震动**、category `EVENT`；带震动的提醒 channel 用新 id `_v2`，早期无震动的旧 id 由
   `ensureChannels` 清掉——channel 建出来后震动改不动，「删掉重建」也因 delete 异步而无效）。
   两条提醒除通知外还各发一次**直接震动**（`ReminderVibration.vibrate`，2026-09-30；
-  **2026-10-06 起收在「通知强提醒」开关后面，默认关**（入口：我的 → 提醒与桌面 → 提醒，2026-10-07 迁入），见 §3.3 该节）：
+  **2026-10-06 起收在「通知强提醒」开关后面，默认关**（入口：设置 → 提醒 → 提醒页，2026-11-01 并回），见 §3.3 该节）：
   渠道震动要 `VIBRATE` 权限才生效（manifest 此前一直没声明，用户报的「没有震动」就是它，
   已补），直接震动则连渠道被用户关掉都还能震——提醒关乎计费，宁可多一路信号。
   **横幅（heads-up）弹不弹由系统 / ROM 决定**：App 只能给 HIGH 渠道 + 不静音，
