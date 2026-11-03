@@ -18,14 +18,23 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
- * AI 调课的应用留痕（DESIGN §4.39，2026-10-07）：每次**成功落库**记一条，`filesDir`
- * 一份 JSON（新记录在顶、上限 [CAP] 条），供「调课记录」页查看与**撤销**。
+ * 课表改动的应用留痕（DESIGN §4.39 / §4.17，2026-10-07；2026-11-03 起收录两路写入口）：
+ * 每次**成功落库**记一条，`filesDir` 一份 JSON（新记录在顶、上限 [CAP] 条），供
+ * 「调课记录」页查看；AI 调课那部分还能**撤销**。
+ *
+ * 两个来源（[AiApplyRecord.source]）：
+ * - [AiApplyRecord.SOURCE_AI]：AI 调课（`applyLocalChanges`）。存档行带 before/after，
+ *   可栈式撤销。
+ * - [AiApplyRecord.SOURCE_DETECT]：调课检测的「合并所选」（`applyScheduleChanges`）。
+ *   只留痕**不可撤销**——那次合并推进了检测基线，反向撤课表却不退基线会让 App
+ *   以为已与教务一致、差异从此不再提醒（要撤得连基线一起退，见 §4.17 的取舍）。
+ *   因此这类记录不存 entries，只存摘要与计数。
  *
  * 为什么不是 Room：这层只是「用户做过什么」的旁路账本——语义与收件箱（留痕层）同类，
  * 与业务表没有外键关系；文件坏了按空处理，不影响主链路。选型与 `ScheduleBaselineStore`
  * 一致（filesDir + kotlinx JSON），数据是用户自己课表的派生记录，不加密、随备份走。
  *
- * **撤销是栈式的**：只能撤「最新一条未撤销」的记录（`latestUndoable`）。撤掉它之后，
+ * **撤销是栈式的**：只能撤「最新一条未撤销」的 AI 记录（`latestUndoable`）。撤掉它之后，
  * 上一条才轮到可撤——调课是一串累积改动，倒着剥才是安全语义；跳着撤会让后来的改动
  * 压在旧快照上，产生半截还原。状态闸（`ScheduleUndo.plan` 逐条比指纹、对不上就跳过）
  * 仍然兜底：应用之后用户手动改过的行不会被静默吞掉。
@@ -94,17 +103,20 @@ class AiApplyHistoryStore(context: Context) {
             list.map { if (it.id == id && !it.undone) it.copy(undone = true) else it }
 
         /**
-         * 可撤销的记录 = 最新一条**未撤销**（列表新在前）。
+         * 可撤销的记录 = 最新一条**未撤销的 AI 记录**（列表新在前）。
          *
          * 不存在「跳着撤」：更早的记录要等它上面的都撤掉之后才轮到。
          * [aliveTimetableIds] 非空时跳过**课表已被删除**的记录——它们永远撤不动，
          * 但不该把栈堵死（用户还得能撤更早的记录）；`null` = 未知（不跳过，兜底旧行为）。
+         * **教务合并的记录同样不挡栈**：它们本就不可撤销，堵在上面会让之后的 AI 应用
+         * 永远撤不了（这类记录只留痕，见类注释）。
          */
         fun latestUndoable(
             list: List<AiApplyRecord>,
             aliveTimetableIds: Set<Long>? = null,
         ): AiApplyRecord? = list.firstOrNull {
-            !it.undone && (aliveTimetableIds == null || it.timetableId in aliveTimetableIds)
+            !it.undone && it.source == AiApplyRecord.SOURCE_AI &&
+                (aliveTimetableIds == null || it.timetableId in aliveTimetableIds)
         }
 
         /** 序列化（纯函数，round-trip 有单测）。 */
@@ -119,19 +131,41 @@ class AiApplyHistoryStore(context: Context) {
 @Serializable
 data class AiApplyRecord(
     val id: Long = 0L,
+    /**
+     * 写入口：[SOURCE_AI]（AI 调课）或 [SOURCE_DETECT]（调课检测的合并）。
+     * 缺省按 AI 兜底——2026-11-03 之前的旧文件里全是 AI 记录。
+     */
+    val source: String = SOURCE_AI,
     val appliedCourses: Int = 0,
     val appliedOverrides: Int = 0,
     val skipped: Int = 0,
+    /**
+     * 按「处」计的条数（调课检测：**有落库的组**数——一次单周调课 = 1 处 / 库里 2 行，
+     * 组里一行被指纹挡掉时仍算这一处已生效；AI 调课按行计，故为 0）。两种口径别混着显示。
+     */
+    val appliedGroups: Int = 0,
     /** 落库时的课表 id：撤销要按它落，不能按「撤销那一刻的当前课表」。 */
     val timetableId: Long = 0L,
     /** 一行摘要（受影响的课程名），列表里显示。 */
     val summary: String = "",
+    /** 撤销所需的存档行；[SOURCE_DETECT] 不存（不可撤销）。 */
     val entries: List<AiAppliedEntryRow> = emptyList(),
     val overrideIds: List<Long> = emptyList(),
     val undone: Boolean = false,
 ) {
     /** 合计处数（课表改动 + 日期覆盖）。 */
     val applied: Int get() = appliedCourses + appliedOverrides
+
+    /** 这条记录能不能撤销：只有 AI 调课那条链存了反向存档行。 */
+    val undoable: Boolean get() = source == SOURCE_AI
+
+    companion object {
+        /** AI 调课（`applyLocalChanges`）。 */
+        const val SOURCE_AI = "ai"
+
+        /** 调课检测的「合并所选」（`applyScheduleChanges`）：只留痕，不可撤销。 */
+        const val SOURCE_DETECT = "detect"
+    }
 }
 
 /** [AppliedEntry] 的可序列化形态（before / after 走 [ScheduleCourseRow]，带 id）。 */

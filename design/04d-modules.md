@@ -516,10 +516,10 @@ deviceFallback`（UI 不另写 if）。
 | `data/ai/AiScheduleClient` | `/chat/completions`（流式，支持 `images` → 多模态 `content` 数组）与 `/models`；**无日志拦截器** |
 | `data/ai/AiCredentialStore` | API Key 加密存储（`secure_ai`） |
 | `data/repo/AiImageStore` | AI 图片（`filesDir/ai_img/`，**会话级**，口径 1600 / q80 / 强制 JPEG / 上限 4 张） |
-| `data/repo/AiApplyHistoryStore` | AI 调课应用留痕（`filesDir/ai_apply_history.json`，CAP 50、新在前；栈式撤销判据 `latestUndoable`；存档行 = `ScheduleCourseRow`，带行 id 与自定义时间） |
+| `data/repo/AiApplyHistoryStore` | 课表改动留痕（`filesDir/ai_apply_history.json`，CAP 50、新在前；`source` = `ai`（AI 调课）/ `detect`（调课检测合并，**只留痕不可撤销**）；栈式撤销判据 `latestUndoable` 只认 `ai` 记录；存档行 = `ScheduleCourseRow`，带行 id 与自定义时间） |
 | `ui/ai/AiChatViewModel` + `AiChatScreen` + `AiNoticeCard` + `AiProposalCard` | 单页工作单主页面（2026-10-07 v2：通知卡 + 上次应用条 + 结果区 + 贴底动作条；壳与两张卡拆三个文件） |
-| `ui/ai/AiChatModels` | 工作单状态（`AiWorkState` / `AiPhase` / `AiAppliedReceipt` / `aiBarSpec` / `noticeDirty` / `aiHistorySummary`；回执跨轮保留，`proposalSeq` 判归属，`historyId` 对留痕） |
-| `ui/ai/AiHistoryViewModel` + `AiHistoryScreen` | 「调课记录」页（`SubpageScreen.AI_HISTORY`）：跨会话撤销，只允许撤最新一条未撤销 |
+| `ui/ai/AiChatModels` | 工作单状态（`AiWorkState` / `AiPhase` / `AiAppliedReceipt` / `aiBarSpec` / `noticeDirty`；回执跨轮保留，`proposalSeq` 判归属，`historyId` 对留痕）。记录摘要 `scheduleApplySummary` 在 `domain/ScheduleUndo`（两路写入口共用） |
+| `ui/ai/AiHistoryViewModel` + `AiHistoryScreen` | 「调课记录」页（`SubpageScreen.AI_HISTORY`，AI 页与调课检测页顶栏历史图标都进）：AI 记录跨会话撤销，只允许撤最新一条未撤销；`source = detect` 的记录只列出来（行上标「教务合并」，无撤销动作） |
 | `ui/ai/AiThumb` | AI 图片缩略图 + LRU 缓存；全屏看大图走 `ImageViewerDialog`（`ImageSource.AiNotice`） |
 | `ui/ai/SchedulePreviewGrid` | 预览网格（纯渲染；`changedCellSet` + `previewWeeksOf` 两个伴生纯函数） |
 | `ui/ai/AiSettingsViewModel` + `AiSettingsScreen` | 配置页（含「能力 · 支持图片识别」） |
@@ -580,7 +580,8 @@ schema 声明、勾选默认全勾与撤销态、空串字段当未提供、已�
 **`ScheduleUndoTest` 11 例**（倒序、逐类型反向、脏条目跳过、状态闸、REMOVED 的 mergeKey 闸）+
 **`AiWorkflowTest` 7 例**（底栏动作映射、空结果换主按钮、FAILED 次按钮、
 `noticeDirty`、`previewWeeksOf`、回执跨轮归属、记录摘要）+ **`AiApplyHistoryStoreTest`
-8 例**（列表维护 / 栈式判据 / 已删课表不挡栈 / JSON 往返保真：行 id 与自定义时间不许丢）。
+11 例**（列表维护 / 栈式判据 / 已删课表不挡栈 / **教务合并记录不挡 AI 撤销栈** /
+JSON 往返保真：行 id 与自定义时间不许丢、`source` 与按处计数、旧文件缺 `source` 按 AI 兜底）。
 
 **2026-10-06 二轮**（用户实测「校历调休通知答出『不做改动』」）：见 §4.40。
 **2026-10-06 三轮**（用户实测「不是流式」「看不出课表会变成什么样」「思考顶掉结果」）：
@@ -640,6 +641,16 @@ CAP 50，新在前），**栈式撤销**：只允许撤最新一条未撤销（`
 ⑥ 细节：模型回 `""` 的 position 当未提供（原先会静默清地点）；失败卡补「已解析 N 处」
 一行；统计条改 `FlowRow` 防大字体裁 chip；折叠/展开退场期交互禁点（防「弹回」）；
 命中区补齐 44dp；留痕写盘失败落日志；`addImage` 补 CE 穿透。
+
+**2026-11-03 合并留痕轮**（用户要求「调课检测的调课支持历史记录显示」）：留痕扩成
+**两路写入口共用一份**（`AiApplyRecord.source` = `ai` / `detect`），调课检测的「合并所选」
+成功后也追加一条，行上标「教务合并」，计数按**处**（组，`appliedGroups`）而不是行；
+顶栏历史图标把两个页面都接到同一张「调课记录」页。`latestUndoable` 加 `source = ai` 闸
+——教务合并记录本就不可撤销，堵在栈顶会让之后的 AI 应用永远撤不了。记录摘要
+`aiHistorySummary` 从 `ui/ai` 下沉成 `domain.scheduleApplySummary`（两处共用一份口径）。
+**教务合并不可撤销是取舍不是遗漏**：合并同时推进了检测基线，只反向撤课表不退基线，
+下次检查拿「已与教务一致」的基线比对，那批差异从此不再报出——撤回等于悄悄关掉检测
+（要真撤得连基线一起退，见 §4.17）。
 
 **2026-10-07 复查二轮**（用户报「同一通知应用完再发，仍然报差异；『应用前』还是调课前的」）：
 根因三件、逐条修——① **模型看不见已生效的日期安排**（课表清单只有课程行）→ `userMessage`

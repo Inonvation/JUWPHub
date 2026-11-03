@@ -216,23 +216,3 @@ fun noticeDirty(work: AiWorkState, draft: String, attachments: List<String>): Bo
     if (work.phase == AiPhase.IDLE) return false
     return draft.trim() != work.noticeText || attachments != work.noticeImages
 }
-
-/**
- * 「调课记录」里一行摘要（纯函数）：从**真正落库的**条目取课程名——
- * 不用勾选集合，勾了但被指纹挡掉的条目不该出现在记录里。最多列 3 门，多了报总数。
- */
-fun aiHistorySummary(entries: List<AppliedEntry>, overrideCount: Int): String {
-    val names = entries.mapNotNull { (it.after ?: it.before)?.name?.takeIf(String::isNotBlank) }.distinct()
-    val head = when {
-        names.isEmpty() -> ""
-        names.size <= 3 -> names.joinToString("、")
-        else -> names.take(3).joinToString("、") + " 等 ${names.size} 门"
-    }
-    return buildString {
-        append(head)
-        if (overrideCount > 0) {
-            if (isNotEmpty()) append("；")
-            append("日期覆盖 $overrideCount 项")
-        }
-    }
-}

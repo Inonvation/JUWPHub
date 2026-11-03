@@ -162,17 +162,26 @@ AGPL 是强 copyleft：**抄它的代码会让整个仓库被迫改证**。所�
   勾选集合 + 回执 + `collapsed`。新一轮分析替换结果字段但**保留 receipt**。
   追问链（previous / isFollowUp）随对话式一起砍，重试 = 同文本同图原样重发。
 
-## 调课记录与跨会话撤销（2026-10-07，§4.39）
+## 调课记录与跨会话撤销（2026-10-07，§4.39；2026-11-03 扩成两路写入口）
 
-AI 页顶栏历史图标 → `SubpageScreen.AI_HISTORY`（`AiHistoryScreen` + `AiHistoryViewModel`）。
-主页面的「撤销」只覆盖本次会话的回执，杀进程就没了；这一页是**跨会话**的长效留痕与
-撤销入口。数据 = `data/repo/AiApplyHistoryStore`（`filesDir/ai_apply_history.json`，
-CAP 50、新在前，用户自己的操作历史，**随备份走**——不排除）。
+AI 页与调课检测页顶栏的历史图标 → `SubpageScreen.AI_HISTORY`（`AiHistoryScreen` +
+`AiHistoryViewModel`）。主页面的「撤销」只覆盖本次会话的回执，杀进程就没了；这一页是
+**跨会话**的长效留痕与撤销入口。数据 = `data/repo/AiApplyHistoryStore`
+（`filesDir/ai_apply_history.json`，CAP 50、新在前，用户自己的操作历史，**随备份走**——不排除）。
 
-- **每次真正落库记一条**（`apply()` 成功后 `append`）；零落库不算（`AiNothingApplied`
-  早退）。记录含撤销所需的全部信息：`appliedCourses/Overrides`、`skipped`、
-  `timetableId`、`summary`（`aiHistorySummary()` 纯函数从**落库条目**取课程名）、
-  存档行 `entries`、`overrideIds`。
+- **两路写入口共用一份留痕**（`AiApplyRecord.source`）：`ai` = AI 调课（`applyLocalChanges`），
+  `detect` = 调课检测的「合并所选」（`applyScheduleChanges`，2026-11-03 加）。行上按来源标
+  「AI 调课 / 教务合并」。旧文件缺 `source` 时按 `ai` 兜底（`AiApplyHistoryStoreTest` 钉住）。
+- **每次真正落库记一条**（`apply()` / `mergeSelected()` 成功后 `append`）；零落库不算
+  （AI 侧 `AiNothingApplied` 早退，检测侧 `report.applied == 0` 不记）。AI 记录含撤销所需的
+  全部信息：`appliedCourses/Overrides`、`skipped`、`timetableId`、`summary`
+  （`domain.scheduleApplySummary()` 纯函数从**落库条目**取课程名）、存档行 `entries`、
+  `overrideIds`。**`detect` 记录不存 entries**（不可撤销，只留摘要与计数），计数用
+  `appliedGroups`（按处 / 组，与合并回执同口径），别拿 `appliedCourses`（行）当处显示。
+- **只有 `ai` 记录可撤**：`detect` 记录撤不动也不挡栈（`latestUndoable` 只认 `source = ai`），
+  否则合并一次之后上一次 AI 调课就永远撤不了。**别给检测合并加撤销**：合并推进了检测基线，
+  只反向撤课表不退基线，下次检查拿「已与教务一致」的基线比对，那批差异从此不再报出
+  ——撤回等于悄悄关掉检测（要真撤得连基线一起退，见 §4.17 的取舍）。
 - **撤销是栈式的**：`AiApplyHistoryStore.latestUndoable()` = 最新一条未撤销；
   撤掉它之后上一条才轮到可撤。**UI 与 VM 双处校验**同一条判据（`AiHistoryViewModel.undo`
   里也要判）。放开成「任意记录可撤」= 后来的改动压在旧快照上，半截还原。

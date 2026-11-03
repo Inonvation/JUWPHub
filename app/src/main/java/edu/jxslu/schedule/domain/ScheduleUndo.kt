@@ -117,3 +117,26 @@ data class AppliedEntry(
     val before: Course? = null,
     val after: Course? = null,
 )
+
+/**
+ * 「调课记录」里一行摘要（纯函数）：从**真正落库的**条目取课程名——
+ * 不用勾选集合，勾了但被指纹挡掉的条目不该出现在记录里。最多列 3 门，多了报总数。
+ *
+ * 两路写入口共用（AI 调课 / 调课检测合并），所以落在 domain 而不是某个 UI 包里：
+ * 摘要口径只有这一份。
+ */
+fun scheduleApplySummary(entries: List<AppliedEntry>, overrideCount: Int): String {
+    val names = entries.mapNotNull { (it.after ?: it.before)?.name?.takeIf(String::isNotBlank) }.distinct()
+    val head = when {
+        names.isEmpty() -> ""
+        names.size <= 3 -> names.joinToString("、")
+        else -> names.take(3).joinToString("、") + " 等 ${names.size} 门"
+    }
+    return buildString {
+        append(head)
+        if (overrideCount > 0) {
+            if (isNotEmpty()) append("；")
+            append("日期覆盖 $overrideCount 项")
+        }
+    }
+}

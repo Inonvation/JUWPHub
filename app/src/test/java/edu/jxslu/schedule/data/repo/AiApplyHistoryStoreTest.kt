@@ -11,9 +11,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * AI 调课留痕（DESIGN §4.39，2026-10-07）的纯逻辑：列表维护、栈式撤销判据、
- * 以及 **JSON 往返的保真度**——留痕存的是撤销所需的全部信息，行 id 与自定义时间
- * 丢了，跨会话的「撤销」就会撤错行或把用户的自定义时间清掉。
+ * 课表改动留痕（DESIGN §4.39 / §4.17，2026-10-07）的纯逻辑：列表维护、栈式撤销判据、
+ * 两个来源（AI 调课 / 调课检测合并）的区分，以及 **JSON 往返的保真度**——留痕存的是
+ * 撤销所需的全部信息，行 id 与自定义时间丢了，跨会话的「撤销」就会撤错行或把用户的
+ * 自定义时间清掉。
  *
  * 落盘路径（filesDir）依赖 Android 运行时，不在 JVM 测（同 UjingHistoryStore 口径）；
  * encode/decode 是纯函数，直接测 round-trip。
@@ -39,8 +40,14 @@ class AiApplyHistoryStoreTest {
         kind = CourseKind.Theory,
     )
 
-    private fun record(id: Long, undone: Boolean = false, timetable: Long = 1L) = AiApplyRecord(
+    private fun record(
+        id: Long,
+        undone: Boolean = false,
+        timetable: Long = 1L,
+        source: String = AiApplyRecord.SOURCE_AI,
+    ) = AiApplyRecord(
         id = id,
+        source = source,
         appliedCourses = 1,
         appliedOverrides = 0,
         skipped = 0,
@@ -108,6 +115,26 @@ class AiApplyHistoryStoreTest {
         assertEquals(once, AiApplyHistoryStore.markUndoneIn(once, 42L))
     }
 
+    @Test
+    fun `教务合并的记录不挡 AI 的撤销栈`() {
+        // 检测合并排在 AI 应用之后：它本身撤不动（没存反向存档行），也不该把
+        // 更早的 AI 应用堵死——否则合并一次就再也撤不了上一次 AI 调课
+        val list = listOf(
+            record(3L, source = AiApplyRecord.SOURCE_DETECT),
+            record(2L),
+            record(1L),
+        )
+        assertEquals(2L, AiApplyHistoryStore.latestUndoable(list, setOf(1L))!!.id)
+        assertFalse(list.first().undoable)
+        assertTrue(list[1].undoable)
+        // 全是合并记录 = 没有可撤的
+        assertNull(
+            AiApplyHistoryStore.latestUndoable(
+                listOf(record(3L, source = AiApplyRecord.SOURCE_DETECT)),
+            ),
+        )
+    }
+
     // ---------------- 序列化往返 ----------------
 
     @Test
@@ -153,5 +180,37 @@ class AiApplyHistoryStoreTest {
     @Test
     fun `空表往返`() {
         assertTrue(AiApplyHistoryStore.decode(AiApplyHistoryStore.encode(emptyList())).isEmpty())
+    }
+
+    @Test
+    fun `教务合并记录的来源与按处计数往返保真`() {
+        val detect = AiApplyRecord(
+            id = 1_730_000_000_000L,
+            source = AiApplyRecord.SOURCE_DETECT,
+            appliedCourses = 2,
+            appliedGroups = 1,
+            skipped = 1,
+            timetableId = 5L,
+            summary = "大学物理",
+        )
+        val decoded = AiApplyHistoryStore.decode(AiApplyHistoryStore.encode(listOf(detect)))
+        assertEquals(listOf(detect), decoded)
+        assertEquals(AiApplyRecord.SOURCE_DETECT, decoded.single().source)
+        assertEquals(1, decoded.single().appliedGroups)
+        assertFalse(decoded.single().undoable)
+    }
+
+    @Test
+    fun `旧留痕文件没有 source 字段时按 AI 兜底`() {
+        // 2026-11-03 之前的文件里全是 AI 记录，缺字段必须降级成可撤销而不是消失
+        val legacy = """
+            [{"id":1,"appliedCourses":2,"appliedOverrides":0,"skipped":0,
+              "timetableId":5,"summary":"高等数学","entries":[],"overrideIds":[],"undone":false}]
+        """.trimIndent()
+        val decoded = AiApplyHistoryStore.decode(legacy)
+        assertEquals(1, decoded.size)
+        assertEquals(AiApplyRecord.SOURCE_AI, decoded.single().source)
+        assertTrue(decoded.single().undoable)
+        assertEquals(2, decoded.single().appliedCourses)
     }
 }

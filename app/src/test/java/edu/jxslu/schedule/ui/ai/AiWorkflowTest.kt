@@ -8,6 +8,7 @@ import edu.jxslu.schedule.domain.OverrideKind
 import edu.jxslu.schedule.domain.ScheduleDiff
 import edu.jxslu.schedule.domain.ScheduleOverride
 import edu.jxslu.schedule.domain.SemesterConfig
+import edu.jxslu.schedule.domain.scheduleApplySummary
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -223,12 +224,12 @@ class AiWorkflowTest {
             AppliedEntry(kind = ScheduleDiff.ChangeKind.MODIFIED, before = course(), after = course()),
             AppliedEntry(kind = ScheduleDiff.ChangeKind.REMOVED, before = course()),
         )
-        assertEquals("高等数学", aiHistorySummary(entries, 0))
+        assertEquals("高等数学", scheduleApplySummary(entries, 0))
         val many = (1..5).map {
             AppliedEntry(kind = ScheduleDiff.ChangeKind.ADDED, after = course().copy(name = "课$it"))
         }
-        assertEquals("课1、课2、课3 等 5 门", aiHistorySummary(many, 0))
-        assertEquals("高等数学；日期覆盖 2 项", aiHistorySummary(entries, 2))
-        assertEquals("日期覆盖 1 项", aiHistorySummary(emptyList(), 1))
+        assertEquals("课1、课2、课3 等 5 门", scheduleApplySummary(many, 0))
+        assertEquals("高等数学；日期覆盖 2 项", scheduleApplySummary(entries, 2))
+        assertEquals("日期覆盖 1 项", scheduleApplySummary(emptyList(), 1))
     }
 }

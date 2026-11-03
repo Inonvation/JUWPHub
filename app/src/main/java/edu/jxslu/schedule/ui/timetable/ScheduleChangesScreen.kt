@@ -40,12 +40,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.data.repo.AiApplyRecord
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.ScheduleAlertDefaults
 import edu.jxslu.schedule.domain.ScheduleDiff
 import edu.jxslu.schedule.domain.SchedulePendingChanges
+import edu.jxslu.schedule.domain.scheduleApplySummary
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
@@ -56,6 +58,8 @@ import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.reminder.ScoreAlertReminder
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.History
 
 /**
  * 调课处置页（DESIGN §4.17，2026-10-04 重立）：教务课表与基线比对出的差异在这里
@@ -74,10 +78,18 @@ import kotlinx.coroutines.launch
  * - 冲突条目（`ScheduleDiff.isConflicted`：REMOVED/MODIFIED 与你修改过的课相关；
  *   ADDED 是「已有同一节课」，合并会跳过）默认不勾，采纳与否由用户逐条决定——
  *   REMOVED/MODIFIED 应用会覆盖你自己的修改。
+ *
+ * 每次**真正落库**的合并向 `AiApplyHistoryStore` 记一条留痕（2026-11-03）：顶栏历史图标
+ * 进「调课记录」页，与 AI 调课的应用记录同列、按来源标注。这类记录**不可撤销**——
+ * 合并推进了检测基线，只反向撤课表而不退基线会让 App 以为已与教务一致、差异从此
+ * 不再提醒（取舍见 store 类注释）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScheduleChangesScreen(onBack: () -> Unit) {
+fun ScheduleChangesScreen(
+    onBack: () -> Unit,
+    onOpenHistory: () -> Unit,
+) {
     val context = LocalContext.current
     val prefs = remember { Graph.displayPrefs(context) }
     val repo = remember { Graph.repository(context) }
@@ -186,6 +198,28 @@ fun ScheduleChangesScreen(onBack: () -> Unit) {
                 group.indexes.all { it in accepted && it in report.appliedIndexes }
             }
             val skippedGroups = acceptedGroups - appliedGroups
+            // 留痕（DESIGN §4.17 / §4.39）：真正落库才记一条，零落库的一轮不留痕
+            // （与 AI 调课「零落库不算应用」同口径）。只存摘要与计数、不存反向存档行——
+            // 这条链不可撤销，理由见 AiApplyHistoryStore 类注释
+            if (report.applied > 0) {
+                // 留痕的「处」= **有落库的组**，不是「整组全部生效」：一组里一行被指纹挡掉
+                // （用户只改过两行里的一行）时，这处变动客观上已经改了一半，记成 0 处是假账；
+                // 回执文案仍按「整组生效」报，两处口径的差别就是下面这句 skipped 的含义
+                val touchedGroups = groups.count { group ->
+                    group.indexes.any { it in accepted && it in report.appliedIndexes }
+                }
+                Graph.aiApplyHistoryStore(context).append(
+                    AiApplyRecord(
+                        id = System.currentTimeMillis(),
+                        source = AiApplyRecord.SOURCE_DETECT,
+                        appliedCourses = report.applied,
+                        appliedGroups = touchedGroups,
+                        skipped = skippedGroups,
+                        timetableId = snapshot.timetableId,
+                        summary = scheduleApplySummary(report.entries, 0),
+                    ),
+                )
+            }
             val detail = if (skippedGroups > 0) {
                 "，$skippedGroups 处未完整应用（与你的修改冲突或已有同一节课）"
             } else {
@@ -216,6 +250,9 @@ fun ScheduleChangesScreen(onBack: () -> Unit) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenHistory) {
+                        Icon(HugeIcons.History, contentDescription = "调课记录")
+                    }
                     TextButton(onClick = ::refreshNow, enabled = !busy) { Text("重新检查") }
                 },
             )

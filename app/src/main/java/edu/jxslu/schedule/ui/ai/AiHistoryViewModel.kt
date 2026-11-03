@@ -22,6 +22,8 @@ import kotlinx.coroutines.launch
  *
  * 数据 = [AiApplyHistoryStore]（filesDir JSON，跨会话）——本页是**跨会话**的撤销入口：
  * AI 调课主页面的「撤销」只覆盖本次会话的回执，杀进程就没了；记录页补上长效留痕。
+ * 调课检测的合并记录也记在同一份留痕里（2026-11-03），但**不可撤销**（见 store 类注释），
+ * 本页只负责把它们列出来。
  *
  * **撤销是栈式的**：只允许撤「最新一条未撤销」的记录。撤掉它之后上一条才轮到可撤——
  * 调课是一串累积改动，倒着剥才是安全语义；跳着撤会让后来的改动压在旧快照上，
@@ -68,6 +70,7 @@ class AiHistoryViewModel(
 
     private suspend fun undo(record: AiApplyRecord): Result<Int> {
         if (record.undone) return Result.failure(IllegalStateException("这条记录已经撤销过了"))
+        if (!record.undoable) return Result.failure(IllegalStateException("教务合并的记录不可撤销"))
         if (undoing) return Result.failure(IllegalStateException("正在处理，请稍候"))
         // 先扣闸再进第一个挂起点：双击的第二下必须在闸位落下前被挡住
         undoing = true

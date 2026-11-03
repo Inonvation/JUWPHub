@@ -404,7 +404,10 @@ class SubpageActivity : ComponentActivity() {
             )
             SubpageScreen.JW_ACCOUNT -> JwAccountScreen(onBack = onBack)
             SubpageScreen.TIMETABLE_HUB -> TimetableHubScreen(onBack = onBack)
-            SubpageScreen.SCHEDULE_CHANGES -> ScheduleChangesScreen(onBack = onBack)
+            SubpageScreen.SCHEDULE_CHANGES -> ScheduleChangesScreen(
+                onBack = onBack,
+                onOpenHistory = { SubpageActivity.start(this, SubpageScreen.AI_HISTORY) },
+            )
             SubpageScreen.AI_SCHEDULE -> AiChatScreen(
                 onBack = onBack,
                 onOpenSettings = { SubpageActivity.start(this, SubpageScreen.AI_SETTINGS) },

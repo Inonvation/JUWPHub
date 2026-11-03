@@ -19,6 +19,7 @@ import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.domain.ScheduleOverride
 import edu.jxslu.schedule.domain.SemesterConfig
+import edu.jxslu.schedule.domain.scheduleApplySummary
 import edu.jxslu.schedule.ui.common.NoticeTone
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -595,7 +596,7 @@ class AiChatViewModel(
                 appliedOverrides = result.overrideIds.size,
                 skipped = result.report.skipped,
                 timetableId = result.timetableId,
-                summary = aiHistorySummary(result.report.entries, result.overrideIds.size),
+                summary = scheduleApplySummary(result.report.entries, result.overrideIds.size),
                 entries = result.report.entries.map { it.toRow() },
                 overrideIds = result.overrideIds,
             )

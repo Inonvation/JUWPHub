@@ -53,10 +53,12 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * 「调课记录」页（DESIGN §3.25 / §4.39，2026-10-07）：AI 调课每次应用的本机留痕，
- * 跨会话可撤销（栈式：只能撤最近一条未撤销，见 [AiHistoryViewModel]）。
+ * 「调课记录」页（DESIGN §3.25 / §4.39 / §4.17，2026-10-07）：课表改动的本机留痕，
+ * 两个写入口同列——AI 调课（跨会话可撤销，栈式：只能撤最近一条未撤销，见
+ * [AiHistoryViewModel]）与调课检测的「合并所选」（**只留痕、不可撤销**，见
+ * `AiApplyHistoryStore` 类注释）。入口：AI 调课页顶栏历史图标、调课检测页顶栏历史图标。
  *
- * 入口在 AI 调课页顶栏（历史图标）。列表观感与全 App 一致：`AppCard` + 16dp 横距。
+ * 列表观感与全 App 一致：`AppCard` + 16dp 横距。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,7 +114,8 @@ fun AiHistoryScreen(onBack: () -> Unit) {
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "在「AI 调课」里应用所选后，每次都会记在这里；\n最近一次可以撤销",
+                        "在「AI 调课」里应用所选、或在「调课检测」里合并差异后，每次都会记在这里\n" +
+                            "AI 调课最近一次可以撤销；教务合并只留痕",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                         textAlign = TextAlign.Center,
@@ -126,7 +129,7 @@ fun AiHistoryScreen(onBack: () -> Unit) {
             }
             Column(Modifier.fillMaxSize().padding(padding)) {
                 Text(
-                    "只能撤销最近一次；更早的记录仅供查看",
+                    "AI 调课只能撤销最近一次未撤销的应用；教务合并的记录仅留痕",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -143,8 +146,9 @@ fun AiHistoryScreen(onBack: () -> Unit) {
                             record = record,
                             canUndo = record.id == undoable?.id,
                             // 课表已删除的记录永远撤不动（反向写会向不存在的课表塞孤儿行），
-                            // 行上标出来，别让用户点了才知道；alive 未知（首帧）时不标
-                            deadTimetable = !record.undone &&
+                            // 行上标出来，别让用户点了才知道；alive 未知（首帧）时不标。
+                            // 只对可撤销的记录判——教务合并本来就撤不动，标「课表已删除」是误导
+                            deadTimetable = record.undoable && !record.undone &&
                                 aliveIds?.let { record.timetableId !in it } == true,
                             onUndo = { confirming = record },
                         )
@@ -181,7 +185,8 @@ fun AiHistoryScreen(onBack: () -> Unit) {
     }
 }
 
-/** 一条应用记录：时间 + 摘要 + 计数；右侧按状态给「撤销 / 已撤销 / 课表已删除」。 */
+/** 一条应用记录：时间 + 来源 + 摘要 + 计数；右侧按状态给「撤销 / 已撤销 / 课表已删除」。
+ *  教务合并的记录没有右侧动作（不可撤销）。 */
 @Composable
 private fun AiHistoryRow(
     record: AiApplyRecord,
@@ -211,9 +216,17 @@ private fun AiHistoryRow(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     buildString {
-                        append("已应用 ").append(record.applied).append(" 处")
-                        if (record.appliedOverrides > 0) {
-                            append("（日期覆盖 ").append(record.appliedOverrides).append("）")
+                        append(sourceLabel(record))
+                        append(" · ")
+                        // 两种来源的计数口径不同：AI 按行（「已应用 2 处」= 两行），
+                        // 检测按「一次调课」的组（合并回执也是按组报）。别混着写
+                        if (record.source == AiApplyRecord.SOURCE_DETECT) {
+                            append("已合并 ").append(record.appliedGroups).append(" 处变动")
+                        } else {
+                            append("已应用 ").append(record.applied).append(" 处")
+                            if (record.appliedOverrides > 0) {
+                                append("（日期覆盖 ").append(record.appliedOverrides).append("）")
+                            }
                         }
                         if (record.skipped > 0) append(" · 跳过 ").append(record.skipped)
                     },
@@ -242,6 +255,10 @@ private fun AiHistoryRow(
         }
     }
 }
+
+/** 来源标签：两个写入口同列展示，一眼分得清哪条是教务合并（不可撤销）。 */
+private fun sourceLabel(record: AiApplyRecord): String =
+    if (record.source == AiApplyRecord.SOURCE_DETECT) "教务合并" else "AI 调课"
 
 private val SAME_YEAR = DateTimeFormatter.ofPattern("M月d日 HH:mm")
 private val OTHER_YEAR = DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm")
