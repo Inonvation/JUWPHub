@@ -21,6 +21,8 @@ import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.courseRemarksCarriedOver
 import edu.jxslu.schedule.domain.CourseFilter
 import edu.jxslu.schedule.domain.CourseKind
+import edu.jxslu.schedule.domain.ExamMerge
+import edu.jxslu.schedule.domain.ExamMapper.ExamEntry
 import edu.jxslu.schedule.domain.CourseTweaker
 import edu.jxslu.schedule.domain.AppliedEntry
 import edu.jxslu.schedule.domain.ScheduleDiff
@@ -861,6 +863,42 @@ class ScheduleRepository(
             }
         }
         return added
+    }
+
+    /**
+     * 考试安排**自动合并**（DESIGN §4.33，2026-11-03）：把教务最新考试列表并进**当前课表**，
+     * 缺的补、时间/考场变了的原地改（保 id / 配色 / 备注），不删行。返回实际写入的行数。
+     *
+     * 与手动导入的分工：手动导入允许用户挑目标课表、跨学期（估算开学日兜底），
+     * 自动写库没有确认弹窗，所以多一道**学期守卫**——课表自己带学期号且与考试学期不同
+     * 就直接跳过（不是这张表的事，别把别的学期的考试塞进来）。
+     *
+     * **不推进调课检测基线**：基线本就只装 Theory+Lab（教务课表页抓不到考试），
+     * 而且这里不能调 [refreshBaselineFromDb]——它会清掉待处置的调课差异与已阅指纹。
+     * 写考试行不影响 [ScheduleDiff]（两侧都先滤掉考试）。
+     */
+    suspend fun mergeExamCourses(entries: List<ExamEntry>, term: String): Int {
+        val ttId = currentTimetableId.first()
+        val timetable = db.timetableDao().getById(ttId) ?: return 0
+        val ttTerm = timetable.term.orEmpty()
+        if (ttTerm.isNotBlank() && term.isNotBlank() && ttTerm != term) return 0
+        val slots = db.timeSlotDao().getForTimetable(ttId).map { it.toDomain() }
+        val config = db.semesterConfigDao().getForTimetable(ttId)?.toDomain()
+        val existing = getTimetableCourses(ttId)
+        val plan = ExamMerge.plan(existing, entries, slots, config, term)
+        if (plan.isEmpty) return 0
+        db.withTransaction {
+            plan.updates.forEach { (_, new) ->
+                db.courseDao().upsert(CourseEntity.fromDomain(new).copy(timetableId = ttId))
+            }
+            val used = existing.map { it.colorIndex }.toMutableList()
+            plan.adds.forEach { course ->
+                val colored = course.copy(colorIndex = ScheduleCalculator.nextColorIndex(used))
+                db.courseDao().upsert(CourseEntity.fromDomain(colored).copy(timetableId = ttId))
+                used += colored.colorIndex
+            }
+        }
+        return plan.size
     }
 
     /**

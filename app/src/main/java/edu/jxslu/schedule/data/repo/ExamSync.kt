@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.data.repo
 
+import android.util.Log
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.jw.ExamScheduleParser
 import edu.jxslu.schedule.data.jw.JwHtml
@@ -25,16 +26,20 @@ import kotlinx.coroutines.sync.Mutex
  * 翻页抓全量，解析用 [ExamScheduleParser.parseFetchJson]——与教务 WebView 导入
  * **同一份解析口径**，只是传输层换成 OkHttp（同 `ScoreSync` 与成绩页的关系）。
  *
- * **绝不写课程表**：检测出的变更只随 [Result.Updated] 交给提醒层发通知，
- * 点通知落教务导入页，用户确认后才写库——考试进课表只有手动导入一条路。
+ * **检测出的变动会写课表**（2026-11-03 起）：检测到变动且「考试变动自动合并」开着时，
+ * 把最新考试列表交给 [ScheduleRepository.mergeExamCourses] 并进当前课表（补/改考试行，
+ * 不删、不动普通课程）。开关关着 = 只随 [Result.Updated] 交给提醒层发通知，
+ * 点通知落考试页，用户仍可手动导入。**不再有「绝不写课程表」的红线**：用户 2026-11-03
+ * 要求默认开自动合并，写库前没有确认弹窗——由开关与学期守卫兜住。
  *
  * 闸门与基线纪律：
- * - 只服务提醒：开关关着直接 Skipped，一行网络请求都不发；
+ * - 提醒与自动合并任一开着才跑（提醒关、只开合并也要能并表）；两个都关直接 Skipped，
+ *   一行网络请求都不发；
  * - 间隔 + `exam_check_millis`（失败不写时刻，下个周期自动补查）；`eager` 只由
  *   冷启动补查传入（阈值减半，见 [AutoSyncRules.shouldAttemptAt]），周期任务不传；
  * - 壳页学期缓存（[AutoSyncRules.shellTermCacheUsable]）：TTL 内复用上次抓到的学期，
  *   省一个壳页 GET；force（手动更新按钮）永远真抓；
- * - 基线为空（首跑）或学期切换 = 只存基线**不通知**，防首跑/换学期整表刷屏；
+ * - 基线为空（首跑）或学期切换 = 只存基线**不通知也不并表**，防首跑/换学期整表刷屏；
  * - 撤考忽略（[ExamChangeDetector] 的口径），宁可少打扰。
  */
 class ExamSync(
@@ -43,6 +48,8 @@ class ExamSync(
     private val snapshotStore: ExamSnapshotStore,
     /** 收件箱留痕（DESIGN §4.38）：检测出的变更顺手入箱，与发不发系统通知无关。 */
     private val inbox: InboxRepository,
+    /** 考试变动自动合并（DESIGN §4.33）：检测到变动后写当前课表的考试行。 */
+    private val repo: ScheduleRepository,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
 
@@ -50,11 +57,15 @@ class ExamSync(
     private val mutex = Mutex()
 
     sealed interface Result {
-        /** [changes] 是检测到的变更（可能为空 = 抓到了但没变动）；[term] 是教务实际返回的学期。 */
+        /**
+         * [changes] 是检测到的变更（可能为空 = 抓到了但没变动）；[term] 是教务实际返回的学期。
+         * [merged] 是本次自动合并写进当前课表的行数（开关关着 / 没变动 / 学期守卫挡下时都是 0）。
+         */
         data class Updated(
             val term: String,
             val count: Int,
             val changes: List<ExamChangeDetector.Change> = emptyList(),
+            val merged: Int = 0,
         ) : Result
 
         data object Skipped : Result
@@ -76,10 +87,12 @@ class ExamSync(
 
     private suspend fun syncLocked(force: Boolean, eager: Boolean): Result {
         val alertOn = prefs.examAlertEnabled.first()
+        val autoMergeOn = prefs.examAutoMergeEnabled.first()
         val intervalHours = prefs.examAlertIntervalHours.first()
         val now = nowMillis()
         if (!force) {
-            if (!alertOn) return Result.Skipped
+            // 提醒关着、但自动合并开着时仍要检查：合并靠这趟检查发现变动
+            if (!alertOn && !autoMergeOn) return Result.Skipped
             if (!AutoSyncRules.shouldAttemptAt(prefs.examAlertCheckMillis(), intervalHours, now, eager)) {
                 return Result.Skipped
             }
@@ -149,7 +162,22 @@ class ExamSync(
                 )
             }
         }
-        return Result.Updated(term = term, count = exams.size, changes = changes)
+        // 自动合并（DESIGN §4.33，2026-11-03）：只在真有变动时写课表——没变动就别碰库。
+        // 放在基线落盘之后：合并失败不能连累「基线推进 + 通知」这两件主事。
+        // 失败只记日志不重试；下次真变动时按整份列表重新对账，这次漏掉的会一起补上。
+        val merged = if (autoMergeOn && changes.isNotEmpty()) {
+            try {
+                repo.mergeExamCourses(exams, term)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "auto merge exams failed", e)
+                0
+            }
+        } else {
+            0
+        }
+        return Result.Updated(term = term, count = exams.size, changes = changes, merged = merged)
     }
 
     /** 考试变更的消息正文：新发布的给时刻与考场，调整的给「调整后 → 调整前」对照。 */
@@ -188,6 +216,8 @@ class ExamSync(
     }
 
     companion object {
+        private const val TAG = "ExamSync"
+
         /** 翻页上限，同 [ScoreSync.MAX_PAGES]：挡住 count 异常时不至于空转。 */
         const val MAX_PAGES = 20
 

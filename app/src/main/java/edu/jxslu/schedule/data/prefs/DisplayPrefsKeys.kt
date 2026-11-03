@@ -159,6 +159,9 @@ internal val KEY_TEXTBOOK_BACKFILL_MILLIS = longPreferencesKey("textbook_backfil
         // 成绩/考试变动提醒（DESIGN §4.33）：两开关 + 间隔 + 各自上次成功检查时刻
 internal val KEY_SCORE_ALERT_ENABLED = booleanPreferencesKey("score_alert_enabled")
 internal val KEY_EXAM_ALERT_ENABLED = booleanPreferencesKey("exam_alert_enabled")
+        // 考试变动后自动合并当前课表（DESIGN §4.33，2026-11-03）：独立于提醒开关，
+        // 提醒关着也要能自动并表
+internal val KEY_EXAM_AUTO_MERGE_ENABLED = booleanPreferencesKey("exam_auto_merge_enabled")
         // 成绩/考试变动提醒（DESIGN §4.33）：2026-10-04 起四链间隔各自独立，
         // KEY_ALERT_INTERVAL_HOURS 保留只为老用户读取回退，不再写入
 internal val KEY_SCORE_INTERVAL_HOURS = intPreferencesKey("score_alert_interval_hours")

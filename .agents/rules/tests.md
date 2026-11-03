@@ -44,6 +44,7 @@
 `WidgetModelTest`（小组件：尺寸分档/行数预算/**明日接棒**/周网格列序与去重叠/旧 JSON 兼容）、
 `LifeWidgetModelsTest`（生活卡纯逻辑：2 小时取数闸门含时钟回拨/分转元与度数格式化/电费副行宽窄两档文案/合并快照 codec round-trip/窄档排版阈值）、
 `ExamMapperTest`（考试→课条目映射，含历史学期估算）、
+`ExamMergeTest`（考试变动自动合并：补缺 / 内容一致不写 / 原地改保本地字段 / 改期复用旧行 / 不删行）、
 `ExamScheduleParserTest` / `ScoreParserTest`（注入 fetch JSON 解析）、`ScoreCalculatorTest`（学期/学年汇总）、
 `ScoreGroupsTest`（成绩学年分组与年级标签）、
 `ScholarProgressRulesTest`（学业完成情况纯逻辑：学分单元格解析/修读状态归一/完整性校验/总账求和（在修从明细算并去重）/搜索过滤）、

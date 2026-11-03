@@ -324,6 +324,19 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /**
+     * 考试变动后**自动合并当前课表**。**默认开**（2026-11-03 用户口径）。
+     *
+     * 与 [examAlertEnabled] 相互独立：提醒关着也要能并表，所以考试检查链的闸门是
+     * 「提醒 || 自动合并」。合并只补/改考试行，不删、不动普通课程（`ScheduleRepository.mergeExamCourses`）。
+     */
+    val examAutoMergeEnabled: Flow<Boolean> =
+        context.displayDataStore.data.map { it[KEY_EXAM_AUTO_MERGE_ENABLED] ?: true }
+
+    suspend fun setExamAutoMergeEnabled(value: Boolean) {
+        context.displayDataStore.edit { it[KEY_EXAM_AUTO_MERGE_ENABLED] = value }
+    }
+
+    /**
      * 成绩变动提醒的检查间隔（小时）。**2026-10-04 起四条提醒链各自独立**（用户口径：
      * 成绩/考试/选课/调课分开设置），旧共用键 `KEY_ALERT_INTERVAL_HOURS` 只作老用户
      * 读取回退——新键没写过时沿用旧值，写过后永远优先，无需一次性迁移。

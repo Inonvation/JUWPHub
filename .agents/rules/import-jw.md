@@ -133,9 +133,19 @@
   2026-10-04 起壳页带 **12 小时 TTL 缓存**（`AutoSyncRules.shellTermCacheUsable`，考试/选课共用判据）：
   学期下拉一学期才变一次，TTL 内不再打壳页；force（手动更新）永远真抓。学期翻年最多滞后半个
   窗口，而翻年发生在假期，旧学期查出来是空的正巧无害。
-- **考试绝不写课程表**：`ExamSync` 只读 + 与 `ExamSnapshotStore`（filesDir 基线）比对 +
-  发通知；点通知落**考试页**（`SubpageScreen.EXAMS`，2026-09-30 由直达 `JwImportActivity`
-  改过来），导入入口在该页页尾。给这条链加「顺手写库」等于把静默写课表做进后台，禁止。
+- **考试写课表有两条口**（2026-11-03 改口径，此前是「绝不写课程表」）：① **自动合并**
+  （考试设置里「自动合并到当前课表」，`exam_auto_merge_enabled`，默认开）——`ExamSync`
+  检测到变动后把最新考试列表交给 `ScheduleRepository.mergeExamCourses`，`domain/ExamMerge.kt`
+  对账：同名 + 同周 + 同日 = 原地改（保 id/配色/备注）、同名但日期不在最新列表 = 改期复用旧行、
+  其余新增，**不删行**；只写当前课表，课表带学期号且与考试学期不同就跳过，也不推进调课基线。
+  ② **手动导入**（考试页导入卡 → 确认弹窗），仍是唯一能挑目标课表 / 跨学期的入口。
+  给这条链再加写库路径前先读 DESIGN §4.33「考试变动自动合并」——自动写库没有确认弹窗，
+  多一条口就是多一处静默改课表。
+- **提醒与自动合并是两个开关、一条检查链**：`exam_alert_enabled` 只管发不发通知，
+  `exam_auto_merge_enabled` 只管写不写课表；`ExamSync` 的闸门是「提醒 || 合并」
+  （两个都关 = Skipped，零请求），`ScoreAlertReminder.check` 里同理——**提醒关、合并开时
+  仍要叫醒考试那一路**，但 `checkExams(notify = false)` 一条通知都不发。周期任务的
+  「全关撤销」也按这条链算，别只看提醒开关。
 - **`startAtExam` 只改登录后的落页**（2026-09-30）：`JwImportActivity.start(startAtExam = true)`
   让课表模式的窗口登录后直接开 `xsksap_query`，从而**不触发** `autoImportOnTheoryReady`
   的一键导入（理论+实验）。考试页的导入卡必须带这个参数——不带的话，用户点「导入考试安排
@@ -144,7 +154,8 @@
   与理论课表的 `autoImportOnTheoryReady` 同构、共用 `autoImportTried` 与 `busy`，
   两条各判自己的页型。出口两条：有安排 → 识别结果确认弹窗（默认合并）；没安排 →
   「暂时没有考试安排」弹窗（`emptyExamTerm`，教务考前数周才录入，`count=0` 是正常空态，
-  文案不要写成错误）。**这是省点击不是省确认**：写库仍要过确认弹窗，红线不变。
+  文案不要写成错误）。**这是省点击不是省确认**：手动导入仍要过确认弹窗（自动合并是
+  另一条开关控制的口，见上）。
 - **首跑/换学期不通知**：基线为空或 `Snapshot.term` 与本次抓到的学期不一致 → 只存基线、
   返回空变更。删掉这道闸，用户开开关的那一刻会被整表考试刷屏。
 - **检查时刻只在成功后落**（`score_check_millis` / `exam_check_millis`），失败不写——
@@ -171,7 +182,7 @@
   `ScoreAlertReminder.ensurePeriodicWork` 仍只排一个周期任务，按四链最小档叫醒。
 - **考试页的列表与提醒同源**（2026-09-30）：列表读 `ExamSnapshotStore`（`ExamSync` 每次
   成功检查落的基线），所以**没把考试导进课表也能看**；页尾的导入卡只是「进课表」的口子，
-  考试进课表仍然只有手动导入一条路。列表里「新增/调整」标用 `ExamChangeDetector.keyOf`
+  自动合并另由考试设置里的开关控制（见上）。列表里「新增/调整」标用 `ExamChangeDetector.keyOf`
   算的身份键——**别在 UI 里另写一套键**，两份迟早漂。顶栏「更新」= `ExamSync.sync(force = true)`。
 - **任选课口径开关只在成绩设置页**（2026-09-30）：成绩页汇总卡的重复开关已删，
   note 行的 `excludedCount` 文案负责展示当前口径生效中。别在两处各放一个开关——

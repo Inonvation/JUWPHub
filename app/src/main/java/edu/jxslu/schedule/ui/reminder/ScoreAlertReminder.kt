@@ -52,10 +52,11 @@ import edu.jxslu.schedule.data.prefs.wenquGrabPinnedId
  *    切换时 `ExamSync` 返回空变更，这里只按变更列表发，天然满足。
  * 2. **没变更就不发**：检查成功但成绩/考试没动静是常态，静默；有变更也各发一条
  *    （成绩一条、考试一条），同一次检查内不合并——两者的点击落点不同。
- * 3. **考试只提醒不写库**：点通知落**考试页**（`SubpageScreen.EXAMS`，2026-09-30 由
- *    教务导入页改过来）——详情、提醒开关、导入入口在同一页，看完再决定导不导入；
- *    写库仍要用户在导入页点「导入考试安排」并过确认弹窗，考试进课表只有手动一条路
- *    （DESIGN §4.33 红线）。
+ * 3. **考试提醒与自动合并是两件事**（2026-11-03 起）：提醒开关只决定发不发通知；
+ *    「考试变动自动合并」（默认开，`exam_auto_merge_enabled`）决定检测到变动后要不要
+ *    把最新考试列表并进当前课表（写库在 `ExamSync` → `ScheduleRepository.mergeExamCourses`，
+ *    只补/改考试行）。提醒关、合并开时本类仍要叫醒考试那一路，但一条通知都不发；
+ *    点通知落**考试页**（`SubpageScreen.EXAMS`，2026-09-30 由教务导入页改过来）。
  *
  * **工作名与 Worker 类名一经发布不要改**：`KEEP` 策略下老任务按类名实例化，
  * 改名会让已排的周期任务实例化失败且不会重排，兜底永久消失（同 `BalanceAlertCheckWorker`）。
@@ -122,11 +123,12 @@ object ScoreAlertReminder {
             // 盯了指定活动（问渠蹲点）也要靠这趟周期任务：没有它，「名额空出」永远看不到
             val pinned = prefs.wenquGrabPinnedId.first() > 0L
             val scoreOn = prefs.scoreAlertEnabled.first()
-            val examOn = prefs.examAlertEnabled.first()
+            // 考试链的「开」= 提醒开或自动合并开：合并靠这趟检查发现变动（2026-11-03）
+            val examChainOn = prefs.examAlertEnabled.first() || prefs.examAutoMergeEnabled.first()
             val selectionOn = prefs.selectionAlertEnabled.first()
             val scheduleOn = prefs.scheduleAlertEnabled.first()
             val wenquOn = prefs.wenquActivityAlertEnabled.first()
-            if (!scoreOn && !examOn && !selectionOn && !scheduleOn && !wenquOn && !pinned) {
+            if (!scoreOn && !examChainOn && !selectionOn && !scheduleOn && !wenquOn && !pinned) {
                 workManager.cancelUniqueWork(PERIODIC_WORK)
                 prefs.setAlertPeriodicInterval(0)
                 return
@@ -135,7 +137,7 @@ object ScoreAlertReminder {
             // 只开 24h 调课提醒也会被关着的 6h 成绩/考试档拖成 6h 醒来）。
             val intervalHours = buildList {
                 if (scoreOn) add(ScoreAlertDefaults.coerceIntervalHours(prefs.scoreAlertIntervalHours.first()))
-                if (examOn) add(ScoreAlertDefaults.coerceIntervalHours(prefs.examAlertIntervalHours.first()))
+                if (examChainOn) add(ScoreAlertDefaults.coerceIntervalHours(prefs.examAlertIntervalHours.first()))
                 if (selectionOn) {
                     add(ScoreAlertDefaults.coerceIntervalHours(prefs.selectionAlertIntervalHours.first()))
                 }
@@ -241,13 +243,15 @@ object ScoreAlertReminder {
             }
             val scoreOn = prefs.scoreAlertEnabled.first()
             val examOn = prefs.examAlertEnabled.first()
+            // 考试链：提醒与自动合并各自独立，任一开着就要跑检查（合并靠它发现变动）
+            val examChainOn = examOn || prefs.examAutoMergeEnabled.first()
             val selectionOn = prefs.selectionAlertEnabled.first()
             val scheduleOn = prefs.scheduleAlertEnabled.first()
             val wenquOn = prefs.wenquActivityAlertEnabled.first()
-            if (!scoreOn && !examOn && !selectionOn && !scheduleOn && !wenquOn && !wenquPinned) return
+            if (!scoreOn && !examChainOn && !selectionOn && !scheduleOn && !wenquOn && !wenquPinned) return
             val notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
             if (scoreOn) checkScores(context, notificationsEnabled, eager)
-            if (examOn) checkExams(context, notificationsEnabled, eager)
+            if (examChainOn) checkExams(context, notificationsEnabled, eager, notify = examOn)
             // 选课提醒自带落盘去重与闹钟重排（DESIGN §4.35），这里只负责按周期叫醒它
             if (selectionOn) SelectionAlertReminder.check(context)
             // 调课检测（DESIGN §4.17 重立）：第四路搭同一趟车，闸门与静默纪律在 ScheduleSync.check
@@ -298,10 +302,21 @@ object ScoreAlertReminder {
     // 考试
     // ------------------------------------------------------------------
 
-    private suspend fun checkExams(context: Context, notificationsEnabled: Boolean, eager: Boolean) {
+    /**
+     * 考试那一路：检查（顺带自动合并课表，见 `ExamSync`）+ 按需发通知。
+     * [notify] = 提醒开关开着；关着时只合并、不发通知（开关独立，2026-11-03）。
+     */
+    private suspend fun checkExams(
+        context: Context,
+        notificationsEnabled: Boolean,
+        eager: Boolean,
+        notify: Boolean,
+    ) {
         when (val result = Graph.examSync(context).sync(eager = eager)) {
             is ExamSync.Result.Updated -> {
                 if (result.changes.isEmpty()) return
+                if (!notify) return
+                val text = examsText(result.changes, result.merged)
                 // 免扰时段（DESIGN §3.7）：考试变动是事实型通知，拦下待补发
                 val held = notificationsEnabled && QuietHoursGate.intercept(
                     context,
@@ -312,7 +327,7 @@ object ScoreAlertReminder {
                         category = NotificationCompat.CATEGORY_REMINDER,
                         title = if (result.changes.size == 1) "考试安排有变动"
                         else "有 ${result.changes.size} 条考试变动",
-                        text = examsText(result.changes),
+                        text = text,
                         enqueuedAt = System.currentTimeMillis(),
                         launch = PendingLaunch(
                             kind = PendingLaunch.Kind.SUBPAGE,
@@ -322,7 +337,7 @@ object ScoreAlertReminder {
                         ),
                     ),
                 )
-                if (notificationsEnabled && !held) postExams(context, result.changes)
+                if (notificationsEnabled && !held) postExams(context, result.changes, text)
             }
             else -> Unit
         }
@@ -344,8 +359,11 @@ object ScoreAlertReminder {
         }
     }
 
-    /** 考试通知正文（共用口径同 [scoresText]）。 */
-    private fun examsText(changes: List<ExamChangeDetector.Change>): String {
+    /**
+     * 考试通知正文（共用口径同 [scoresText]）。
+     * [merged] > 0 时补一行「已自动合并到课表」：自动写库没有确认弹窗，通知里必须说一声。
+     */
+    private fun examsText(changes: List<ExamChangeDetector.Change>, merged: Int = 0): String {
         val lines = changes.take(MAX_LINES).map { change ->
             val prefix = if (change.kind == ExamChangeDetector.Kind.NEW) "新增" else "调整"
             val e = change.entry
@@ -360,6 +378,7 @@ object ScoreAlertReminder {
         return buildString {
             append(lines.joinToString("\n"))
             if (rest > 0) append("\n等 $rest 条")
+            if (merged > 0) append("\n已自动合并到课表")
         }
     }
 
@@ -396,8 +415,8 @@ object ScoreAlertReminder {
     private fun postExams(
         context: Context,
         changes: List<ExamChangeDetector.Change>,
+        text: String,
     ) {
-        val text = examsText(changes)
         ensureChannel(context)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_bell)

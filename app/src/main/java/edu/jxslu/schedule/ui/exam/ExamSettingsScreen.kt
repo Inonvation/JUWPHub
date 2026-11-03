@@ -40,10 +40,12 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Import
 
 /**
- * 考试设置（2026-10-20）：考试页的提醒设置与「导入到课表」卡片统一收在这里。
+ * 考试设置（2026-10-20）：考试页的提醒设置、自动合并开关与「导入到课表」卡片统一收在这里。
  *
- * 考试列表页只保留列表、刷新与网页核对；设置页负责提醒开关、自动检查间隔和导入入口。
- * 间隔仍与成绩提醒各一份 DataStore 值，互不牵动。
+ * 考试列表页只保留列表、刷新与网页核对；设置页负责提醒开关、自动检查间隔、
+ * **考试变动自动合并当前课表**（2026-11-03，默认开）和导入入口。
+ * 间隔仍与成绩提醒各一份 DataStore 值，互不牵动；自动合并与提醒开关也各自独立
+ * （提醒关着也能并表，检查链的闸门是「提醒 || 自动合并」）。
  */
 @Composable
 fun ExamSettingsScreen(onBack: () -> Unit) {
@@ -53,6 +55,7 @@ fun ExamSettingsScreen(onBack: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
 
     val enabled by prefs.examAlertEnabled.collectAsState(initial = true)
+    val autoMerge by prefs.examAutoMergeEnabled.collectAsState(initial = true)
     val intervalHours by prefs.examAlertIntervalHours
         .collectAsState(initial = ScoreAlertDefaults.INTERVAL_DEFAULT)
     var intervalPickerOpen by remember { mutableStateOf(false) }
@@ -101,6 +104,24 @@ fun ExamSettingsScreen(onBack: () -> Unit) {
             SettingsNote("提醒需要已保存统一认证账号；点通知回到考试安排页。")
         }
 
+        SettingsSection(
+            title = "考试变动自动合并",
+            subtitle = "检测到新发布或调整的考试时，自动写进当前课表",
+        ) {
+            SettingSwitchRow(
+                title = "自动合并到当前课表",
+                subtitle = "只补/改考试条目，不动普通课程；关掉后仍可手动导入",
+                checked = autoMerge,
+                onCheckedChange = { want ->
+                    scope.launch { prefs.setExamAutoMergeEnabled(want) }
+                    // 与提醒开关同一口径：改完按新规则当场评估一次
+                    scope.launch { ScoreAlertReminder.onSettingsChanged(context) }
+                },
+            )
+            SettingsNote("自动合并按教务最新考试列表对账：缺的补、时间/考场变了的原地改，" +
+                "不删已有考试；与当前课表的学期不同时不动它。")
+        }
+
         AppCardRow(onClick = { JwImportActivity.start(context, startAtExam = true) }) {
             Column(Modifier.weight(1f)) {
                 Text(
@@ -122,7 +143,7 @@ fun ExamSettingsScreen(onBack: () -> Unit) {
             )
         }
 
-        SettingsNote("考试只提醒、不自动写课表；导入动作始终需要你在确认弹窗里点一下。")
+        SettingsNote("导入动作始终需要你在确认弹窗里点一下；自动合并只写考试条目。")
     }
 
     if (intervalPickerOpen) {

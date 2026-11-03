@@ -65,10 +65,11 @@ import kotlinx.coroutines.withContext
  * 两件事：
  *
  * 1. **考试列表**：读 [ExamSnapshotStore]（[ExamSync] 每次检查成功后落的基线）——
- *    顶栏「更新」强制走一次 `ExamSync.sync(force = true)`（OkHttp 直取，不写课表），
- *    本次探测到的变动在对应卡上标「新增 / 调整」；已结束的排到列表末尾并置灰；
- * 2. **设置入口**：提醒开关 / 自动检查间隔 / 导入到课表统一收进「考试设置」
- *    （[SubpageScreen.EXAM_SETTINGS]）。考试进课表仍只有手动导入一条路（DESIGN §4.14 红线）。
+ *    顶栏「更新」强制走一次 `ExamSync.sync(force = true)`（OkHttp 直取；检测到变动时
+ *    按开关自动合并当前课表），本次探测到的变动在对应卡上标「新增 / 调整」；
+ *    已结束的排到列表末尾并置灰；
+ * 2. **设置入口**：提醒开关 / 自动检查间隔 / 自动合并课表 / 手动导入统一收进「考试设置」
+ *    （[SubpageScreen.EXAM_SETTINGS]）。
  *
  * 导入窗口现在从「考试设置」页打开，本页不再消费导入结果。
  */
@@ -113,7 +114,8 @@ fun ExamScreen(onBack: () -> Unit) {
                         val message = when {
                             result.count == 0 -> "${result.term} 还没有考试安排（教务考前数周才录入）"
                             result.changes.isEmpty() -> "已更新：${result.term} 共 ${result.count} 场"
-                            else -> "已更新：${result.term}，检测到 ${result.changes.size} 条变动"
+                            else -> "已更新：${result.term}，检测到 ${result.changes.size} 条变动" +
+                                if (result.merged > 0) "，已合并 ${result.merged} 场到课表" else ""
                         }
                         snackbar.showNotice(
                             AppNoticeVisuals(
@@ -175,7 +177,7 @@ fun ExamScreen(onBack: () -> Unit) {
         item {
             Text(
                 "列表是教务最近一次检查到的考试安排，与「考试变动提醒」同一份数据；" +
-                    "考试只提醒不自动写课表，提醒设置与导入都在右上角「设置」里。",
+                    "变动提醒、自动合并课表与手动导入都在右上角「设置」里。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 modifier = Modifier.padding(top = 2.dp),

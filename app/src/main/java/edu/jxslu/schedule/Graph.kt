@@ -413,7 +413,7 @@ object Graph {
             ).also { scoreSync = it }
         }
 
-    /** 考试安排自动检查单例（DESIGN §4.33）：只服务变动提醒，绝不写课程表。 */
+    /** 考试安排自动检查单例（DESIGN §4.33）：变动提醒 + 自动合并当前课表。 */
     fun examSync(context: Context): ExamSync =
         examSync ?: synchronized(this) {
             examSync ?: ExamSync(
@@ -421,6 +421,7 @@ object Graph {
                 prefs = displayPrefs(context),
                 snapshotStore = ExamSnapshotStore(context),
                 inbox = inboxRepository(context),
+                repo = repository(context),
             ).also { examSync = it }
         }
 
