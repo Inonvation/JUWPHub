@@ -10,10 +10,11 @@ data class LicenseEntry(
 /**
  * 「关于 → 开源许可」卡片的数据（DESIGN §3.3）。
  *
- * 分两段：[ENTRIES] 是随 APK 分发的主要组件，[REFERENCES] 是只参考过接口契约 /
- * 交互形态、**代码未进入本仓库**的公开项目（README「参考与致谢」那几条）。测试专用的
- * JUnit 不上屏。许可名逐个核过官方仓库的 LICENSE 文件或构件 POM（组件 2026-09-27、
- * 参考项目 2026-11-03），**改依赖 / 换参考来源时要一并核**，不要按印象填。
+ * 分两段：[ENTRIES] 是随 APK 分发的第三方组件与外部数据服务，[REFERENCES] 是只参考过
+ * 接口契约 / 交互形态、**代码未进入本仓库**的公开项目（README「参考与致谢」那几条）。
+ * 测试专用的 JUnit 不上屏。许可名逐个核过官方仓库的 LICENSE、构件 POM 或服务条款
+ * （组件 2026-09-27、参考项目与服务 2026-11-03），**改依赖 / 换参考来源时要一并核**，
+ * 不要按印象填。
  *
  * HugeIcons 单独说明：图标集本身（hugeicons/hugeicons）是 MIT，但本项目实际引用的
  * Compose 封装 `com.github.rikkahub:hugeicons-compose` 仓库里没有 LICENSE 文件，
@@ -25,21 +26,22 @@ object OpenSourceLicenses {
     const val SELF_NAME: String = "JUWPHub（本应用）"
     const val SELF_LICENSE: String = "GPL-3.0"
 
+    /** 第三方组件与服务分区的标题。 */
+    const val ENTRIES_TITLE: String = "第三方组件与服务"
+
     /** HugeIcons 的口径说明，逐字显示在弹窗底部。 */
     const val HUGEICONS_NOTE: String =
-        "HugeIcons 图标集为 MIT；本项目引用的 Compose 封装仓库未声明许可，此处按上游图标集口径标注。"
+        "HugeIcons 图标集为 MIT，Compose 封装仓库未声明许可。"
 
     /** 弹窗底部的一句总说明。 */
     const val FOOTER: String =
-        "以上组件与参考项目的完整许可文本见各自官方仓库；本应用的许可全文见仓库根目录 LICENSE。"
+        "完整许可文本见各官方仓库；本应用许可见仓库根目录 LICENSE。"
 
     /** 「参考项目」分区标题，逐字显示在组件清单之后。 */
     const val REFERENCES_TITLE: String = "参考项目（未包含其代码）"
 
     /** 参考项目的口径说明，逐字显示在该分区下方。 */
-    const val REFERENCES_NOTE: String =
-        "以上仓库只参考接口地址、参数与交互形态，未复用其代码；kqcx-bikemap 为 AGPL-3.0，" +
-            "复用会要求本项目改按 AGPL 发布。许可名为各仓库 LICENSE 现状（2026-11-03 核对）。"
+    const val REFERENCES_NOTE: String = "以上仓库只参考接口与交互，未复用其代码。"
 
     val ENTRIES: List<LicenseEntry> = listOf(
         LicenseEntry(
@@ -63,6 +65,16 @@ object OpenSourceLicenses {
             url = "https://github.com/zxing/zxing",
         ),
         LicenseEntry(
+            name = "zxing-android-embedded（扫码）",
+            license = "Apache-2.0",
+            url = "https://github.com/journeyapps/zxing-android-embedded",
+        ),
+        LicenseEntry(
+            name = "支付宝 SDK（U净 支付）",
+            license = "Alipay Sdk（专有）",
+            url = "https://opendocs.alipay.com/open/204",
+        ),
+        LicenseEntry(
             name = "osmdroid（地图）",
             license = "Apache-2.0",
             url = "https://github.com/osmdroid/osmdroid",
@@ -71,6 +83,11 @@ object OpenSourceLicenses {
             name = "HugeIcons（图标）",
             license = "MIT",
             url = "https://github.com/hugeicons/hugeicons",
+        ),
+        LicenseEntry(
+            name = "Open-Meteo（天气数据）",
+            license = "CC BY 4.0",
+            url = "https://open-meteo.com/",
         ),
     )
 

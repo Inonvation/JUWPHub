@@ -195,12 +195,13 @@
   条文唯一实现在 `domain/Disclaimer.kt`，与仓库根 `README.md` 的「免责声明」一节
   逐条对应；免费 / 下载来源、数据只存本机等事实告知在「用户须知」里，不在这里重复。
   正文里的 `**...**` 由 `ui/common/emphasizedText` 渲染成加粗。
-- **开源许可** → 组件清单弹窗，数据在 `domain/OpenSourceLicenses.kt`（本应用 GPL-3.0 +
-  6 条第三方组件，逐条核过官方仓库 LICENSE 或构件 POM）。HugeIcons 的 Compose 封装
-  （`com.github.rikkahub:hugeicons-compose`）仓库未声明许可，按上游图标集 MIT 口径标注，
-  这条差异写在弹窗正文里。2026-11-03 补「参考项目」分区：README 致谢里的 5 个仓库
-  （`OpenSourceLicenses.REFERENCES`），只参考接口契约 / 交互形态、**代码未进本仓库**；
-  kqcx-bikemap 是 AGPL-3.0，弹窗里写明复用会传染；quzhi-lite 仓库无 LICENSE，标「未声明许可」。
+- **开源许可** → 组件清单弹窗，数据在 `domain/OpenSourceLicenses.kt`，分「第三方组件与服务」
+  与「参考项目」两段。组件 9 条：AndroidX / Kotlin / OkHttp·Retrofit / ZXing core /
+  zxing-android-embedded / 支付宝 SDK（专有）/ osmdroid / HugeIcons / Open-Meteo（CC BY 4.0），
+  逐条核过官方仓库 LICENSE、构件 POM 或服务条款。HugeIcons 的 Compose 封装
+  （`com.github.rikkahub:hugeicons-compose`）仓库未声明许可，按上游图标集 MIT 口径标注。
+  参考项目 5 条（README 致谢里的仓库）：只参考接口与交互、**代码未进本仓库**；quzhi-lite
+  仓库无 LICENSE，标「未声明许可」。小字只写口径，不写理由与核对日期（2026-11-03 用户口径）。
 
 弹窗实现在 `ui/common/LegalDialogs.kt`：`NoticeDialog` 是长文声明的**共用实现**，
 `DisclaimerDialog` 只是它的免责声明薄封装（标题/正文取自 `domain/Disclaimer.kt`）。

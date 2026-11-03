@@ -201,6 +201,10 @@ fun LicensesDialog(onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+                Text(
+                    text = OpenSourceLicenses.ENTRIES_TITLE,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
                 OpenSourceLicenses.ENTRIES.forEach { entry -> LicenseRow(entry) }
                 Text(
                     text = OpenSourceLicenses.HUGEICONS_NOTE,
