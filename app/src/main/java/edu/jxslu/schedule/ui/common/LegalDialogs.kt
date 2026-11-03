@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.Disclaimer
+import edu.jxslu.schedule.domain.LicenseEntry
 import edu.jxslu.schedule.domain.OpenSourceLicenses
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
@@ -180,7 +181,7 @@ private fun CountdownRing(remainingMs: Long, totalMs: Long, modifier: Modifier =
 }
 
 /**
- * 开源许可弹窗：本应用许可 + 随包分发的主要第三方组件。
+ * 开源许可弹窗：本应用许可 + 随包分发的主要第三方组件 + 只作参考的公开项目。
  *
  * 数据在 [OpenSourceLicenses]；这里只负责排版，不写死任何组件或许可名。
  */
@@ -200,20 +201,20 @@ fun LicensesDialog(onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
-                OpenSourceLicenses.ENTRIES.forEach { entry ->
-                    Text(
-                        text = entry.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = entry.license,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(bottom = 10.dp),
-                    )
-                }
+                OpenSourceLicenses.ENTRIES.forEach { entry -> LicenseRow(entry) }
                 Text(
                     text = OpenSourceLicenses.HUGEICONS_NOTE,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+                Text(
+                    text = OpenSourceLicenses.REFERENCES_TITLE,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                OpenSourceLicenses.REFERENCES.forEach { entry -> LicenseRow(entry) }
+                Text(
+                    text = OpenSourceLicenses.REFERENCES_NOTE,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
@@ -228,5 +229,20 @@ fun LicensesDialog(onDismiss: () -> Unit) {
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("关闭") }
         },
+    )
+}
+
+/** 一条许可记录：名字一行、许可名一行（次要色），组件与参考项目共用同一排版。 */
+@Composable
+private fun LicenseRow(entry: LicenseEntry) {
+    Text(
+        text = entry.name,
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    Text(
+        text = entry.license,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        modifier = Modifier.padding(bottom = 10.dp),
     )
 }

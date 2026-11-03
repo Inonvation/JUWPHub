@@ -212,7 +212,7 @@ fun AboutUpdateScreen(
                 )
                 SettingItem(
                     title = "开源许可",
-                    subtitle = "本应用 GPL-3.0 · 主要第三方组件清单",
+                    subtitle = "本应用 GPL-3.0 · 第三方组件与参考项目",
                     icon = HugeIcons.SoftwareLicense,
                     onClick = { showLicenses = true },
                 )

@@ -68,11 +68,13 @@
 
 ## 🙏 参考与致谢
 
-- [kqcx-bikemap](https://github.com/dlkz/kqcx-bikemap) — 快趣出行车辆接口
-- [拾光课程表](https://github.com/XingHeYuZhuan/shiguangschedule) — 课表 JSON 互通格式
-- [light-life](https://github.com/Inonvation/light-life) — 胖乖生活（开水）协议
-- [linyu](https://github.com/yehu-imei/linyu) — 趣智校园接口
-- [quzhi-lite](https://github.com/wzk-chi/quzhi-lite) — 趣智校园接口
+以下项目只参考接口契约与交互形态，**未复用其代码**；许可名按各仓库 LICENSE 现状标注（2026-11-03 核对）。
+
+- [kqcx-bikemap](https://github.com/dlkz/kqcx-bikemap) — 快趣出行车辆接口 · **AGPL-3.0**（复用其代码会要求本项目改按 AGPL 发布）
+- [拾光课程表](https://github.com/XingHeYuZhuan/shiguangschedule) — 课表 JSON 互通格式 · Apache-2.0
+- [light-life](https://github.com/Inonvation/light-life) — 胖乖生活（开水）协议 · MIT
+- [linyu](https://github.com/yehu-imei/linyu) — 趣智校园接口 · MIT
+- [quzhi-lite](https://github.com/wzk-chi/quzhi-lite) — 趣智校园接口 · 未声明许可（仓库无 LICENSE）
 - 等
 
 ## ⚠️ 免责声明
