@@ -275,4 +275,35 @@ class EbikeFreeRideTest {
         assertFalse(EbikeFreeRide.shouldStartCountdown(start, 0L))
         assertFalse(EbikeFreeRide.shouldStartCountdown(0L, 0L))
     }
+
+    @Test
+    fun `订单在别处结束只在账号方式且过了宽限才收本机计时`() {
+        // 2026-11-03：本机计时与在案订单是两套真相源——小程序里还了车，App 只查得到
+        // 「没有订单」，计时得有人收，否则骑行卡 / 常驻通知挂到免费窗口结束。
+        val wellIntoRide = minutesAfterStart(5)
+        // 账号方式 + 计时在案 + 已过宽限 → 收
+        assertTrue(EbikeFreeRide.shouldEndTimerWhenOrderGone(true, start, wellIntoRide))
+        // 宽限边界：刚好到 60 秒算过（>=），差 1 毫秒不算
+        assertTrue(
+            EbikeFreeRide.shouldEndTimerWhenOrderGone(
+                true,
+                start,
+                start + EbikeFreeRide.ORDER_GONE_GRACE_MS,
+            ),
+        )
+        assertFalse(
+            EbikeFreeRide.shouldEndTimerWhenOrderGone(
+                true,
+                start,
+                start + EbikeFreeRide.ORDER_GONE_GRACE_MS - 1L,
+            ),
+        )
+        // 刚建单那几秒：服务端还在异步落账，空回包是脏的——收了会变成「有订单没倒计时」
+        assertFalse(EbikeFreeRide.shouldEndTimerWhenOrderGone(true, start, start + 3_000L))
+        // 小程序方式：查不到订单是那一档的常态，计时是本机唯一真相，不能收
+        assertFalse(EbikeFreeRide.shouldEndTimerWhenOrderGone(false, start, wellIntoRide))
+        // 计时不在案（没计时 / 已过免费窗口）：空操作，账号页与今日页每次查询都会走到这里
+        assertFalse(EbikeFreeRide.shouldEndTimerWhenOrderGone(true, 0L, wellIntoRide))
+        assertFalse(EbikeFreeRide.shouldEndTimerWhenOrderGone(true, start, minutesAfterStart(16)))
+    }
 }

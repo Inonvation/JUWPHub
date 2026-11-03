@@ -34,6 +34,23 @@
 - 出码页的骑行状态（置顶「当前骑行」卡）只在**登录时进页查一次**、失败完全静默
   （`queryKvcxRideQuietly`）；手动刷新与动作后刷新另有出口。**不要**改成轮询——骑行卡的秒表是
   **本地走时**（`kvcxRideFetchedAt` + `totalDate` 每秒重算，不联网）。
+- **「查不到订单」= 这一轮骑行结束了，本机计时跟着收**（2026-11-03 修用户报的「App 里开锁、
+  微信小程序里还车，回 App 还有倒计时卡片，得点结束计时才消失」）：本机免费计时
+  （`ebikeRideStartAt`）与在案订单是**两套真相源**——计时只由「点扫一扫」「开锁成功」起，
+  只由 App 内还车 / 自动还车 /「结束计时」收。订单在别处结束时 App 只会「查不到订单」，
+  旧版只清 `ride`，计时一路挂到免费窗口结束（骑行卡变「骑行计时中」+ 倒计时、常驻通知、
+  自动还车闹钟全都在）。口径三条，别拆：
+  ① **所有刷新路径共用一个入口** `KvcxRideController.applySnapshot(ride)`（`query` /
+  `queryLockState` / `refreshInternal` / `syncAfterUnlock`），**别再各写
+  `_state.update { it.withRideSnapshot(...) }`**；落空时调副作用层
+  `onOrderGoneExternally()`，返回 true 才给一句「订单已在别处结束，本机计时已收掉」；
+  ② 收不收由 `EbikeFreeRide.shouldEndTimerWhenOrderGone` 判（纯函数，`EbikeFreeRideTest` 钉住）：
+  **只认账号方式**（小程序方式查不到订单是常态、计时是那一档唯一真相，收了就是误伤）+
+  计时在案 + **已过 `ORDER_GONE_GRACE_MS`（60 秒）**——刚建单那几秒服务端还在异步落账，
+  空回包是脏的（同 `syncAfterUnlock` 的坑），此刻收计时会变成「有订单没倒计时」；
+  ③ 收尾走**与手动还车同一条** `endRideAndBurn()`（清计时 / 撤闹钟 / 停常驻服务 /
+  撤自动还车 / 焚码），别另写一份。
+  代价：开锁后 60 秒内就在小程序里还车，这一轮不会被自动收（仍可点「结束计时」）。
 - 骑行订单字段已钉（解包骑行页消费代码 + 真机确认）：`carNum` / `bluetoothName` /
   `totalDate`（**已骑秒数**）/ `payMoney`（**分**）/ `lat` / `lng` / `lockStatus`（1=锁上，
   锁上不等于订单结束）/ `currentPercent`（电量）。无订单还可能是 **errorCode 12003**

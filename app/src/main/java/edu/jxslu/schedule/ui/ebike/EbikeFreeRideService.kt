@@ -43,6 +43,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  * （[STOP_GRACE_MS]）时停止。**不做开机补排**：15 分钟的计时重启后必然过期
  * （用户拍板 2026-09-22）。
  *
+ * **收尾只走 [removeNotification]**（2026-11-03）：它先关 [EbikeCountdownPostGate] 再摘通知，
+ * 保证最后一次 `notify` 一定排在 `stopForeground` 之前。直接写 `stopForeground` 会在
+ * 「tick 的 notify 与摘除在 system_server 里错序」时留下一条没人刷新的 ongoing 通知
+ * （还车后灵动岛不消失、倒计时冻住），而且是永久的。
+ *
  * 启动方一律用 [start] / [stop]，别自己拼 Intent。
  */
 class EbikeFreeRideService : Service() {
@@ -58,6 +63,12 @@ class EbikeFreeRideService : Service() {
     /** 屏幕是否亮着。由 [screenReceiver] 在主线程写、tick 协程在读，所以是 volatile。 */
     @Volatile
     private var screenOn = true
+
+    /**
+     * 「发通知 ↔ 摘通知」的先后闸（2026-11-03，见 [EbikeCountdownPostGate]）：
+     * tick 协程的每一次 notify 与收尾都过它，保证 notify 一定落在摘除之前。
+     */
+    private val postGate = EbikeCountdownPostGate()
 
     override fun onCreate() {
         super.onCreate()
@@ -88,6 +99,8 @@ class EbikeFreeRideService : Service() {
             EbikeFreeRideNotifier.countdownNotification(this, startAt, System.currentTimeMillis()),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
         )
+        // 通知已经挂上，这一轮才允许 tick 去刷它（见 postGate）
+        postGate.open()
         // 记下这一轮 tick 用的起点：换车时它变了，start() 就会重建
         runningStartAt = startAt
     }.onFailure {
@@ -120,7 +133,8 @@ class EbikeFreeRideService : Service() {
                     val visible = EbikeFreeRide.countdownChipText(startAt, now) +
                         '|' + EbikeFreeRide.progressPercent(startAt, now)
                     if (visible != lastPosted) {
-                        EbikeFreeRideNotifier.updateCountdown(this@EbikeFreeRideService, startAt, now)
+                        // 收尾已经开始（闸已关）：这一发不再发，循环也没有继续的必要
+                        if (!postCountdown(startAt, now)) return@launch
                         lastPosted = visible
                     }
                     // 等满一秒，或等屏幕状态变化（灭屏立刻停手，不用等满这一轮）
@@ -161,6 +175,13 @@ class EbikeFreeRideService : Service() {
         }.onFailure { Log.w(TAG, "register screen receiver failed", it) }
     }
 
+    /**
+     * 发一次倒计时通知（走 [postGate]，与收尾串行）。
+     * 返回 false = 收尾已经开始，这一次**没有发**（见 [EbikeCountdownPostGate]）。
+     */
+    private fun postCountdown(startAt: Long, now: Long): Boolean =
+        postGate.post { EbikeFreeRideNotifier.updateCountdown(this, startAt, now) }
+
     override fun onDestroy() {
         tickJob?.cancel()
         tickJob = null
@@ -169,13 +190,26 @@ class EbikeFreeRideService : Service() {
         screenReceiver = null
         runningStartAt = 0L
         // stopService 走的是这条路径（不经过 onStartCommand），通知得在这里摘
-        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        removeNotification()
         super.onDestroy()
+    }
+
+    /**
+     * 摘掉常驻通知的唯一实现（[shutdown] 与 [onDestroy] 都走它，可重入）。
+     *
+     * 顺序有讲究：**先关闸**（等在飞的那次 notify 落地、此后不再发）→ 摘前台通知 →
+     * 再显式取消一次。第三步不是多余的，理由见 [EbikeFreeRideNotifier.cancelCountdown]：
+     * 只 stopForeground 会在「notify 与摘除在 system_server 里错序」时留下永久残通知。
+     */
+    private fun removeNotification() {
+        postGate.seal()
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        EbikeFreeRideNotifier.cancelCountdown(this)
     }
 
     /** 摘掉常驻通知并结束自己。可重入（[onDestroy] 里的清理是幂等的）。 */
     private fun shutdown() {
-        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        removeNotification()
         stopSelf()
     }
 
@@ -237,5 +271,46 @@ class EbikeFreeRideService : Service() {
                 context.stopService(Intent(context, EbikeFreeRideService::class.java))
             }.onFailure { Log.w(TAG, "stop failed", it) }
         }
+    }
+}
+
+/**
+ * 「发通知 ↔ 摘通知」的先后闸（2026-11-03）。
+ *
+ * 问题的形状：倒计时通知每秒被 `NotificationManager.notify` 用同一 id 顶一次，摘除走
+ * `stopForeground(STOP_FOREGROUND_REMOVE)`。两条都是**异步**投给 system_server 的请求，
+ * 执行顺序只由到达顺序决定；而 tick 协程（`Dispatchers.Default`）与收尾（主线程
+ * `onDestroy`）不在同一线程上。tick 已经进了 notify、主线程这时在收尾，摘除先执行、
+ * notify 后落地——于是留下一条**没有任何人再刷新的 ongoing 通知**：芯片文案冻在最后一次
+ * 的秒数（用户看到的是「倒计时不动」），又是 ongoing 划不掉（「残留」）。这不是观感问题，
+ * 一旦发生就是永久的（没有服务再管那条通知）。
+ *
+ * 所以两边串行：每次发送都在 [post] 的锁内完成（**返回时 notify 已经交出去**），收尾先
+ * [seal]（等正在发的那一次落地、此后一律不再发）再摘除。不变量只有一条：
+ * **seal 返回之后，不允许再有任何一次发送**（`EbikeCountdownPostGateTest` 钉住）。
+ */
+internal class EbikeCountdownPostGate {
+
+    private val lock = Any()
+    private var sealed = false
+
+    /** 重新开闸（进前台挂上通知之后调用）。 */
+    fun open() {
+        synchronized(lock) { sealed = false }
+    }
+
+    /** 闸开着就执行一次发送并返回 true；已关闸返回 false、**不执行**。 */
+    fun post(block: () -> Unit): Boolean = synchronized(lock) {
+        if (sealed) {
+            false
+        } else {
+            block()
+            true
+        }
+    }
+
+    /** 关闸（幂等）。返回时：在飞的那一次发送已经落地，之后的 [post] 一律不执行。 */
+    fun seal() {
+        synchronized(lock) { sealed = true }
     }
 }

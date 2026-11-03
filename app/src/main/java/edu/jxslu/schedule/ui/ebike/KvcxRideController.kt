@@ -15,8 +15,10 @@ import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.data.kqcx.LockOutcome
 import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.data.kqcx.UnlockOutcome
+import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeRideCard
 import edu.jxslu.schedule.domain.EbikeRemoteRide
+import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KvcBusinessError
 import edu.jxslu.schedule.domain.KvcProtocolException
@@ -274,6 +276,16 @@ internal interface KvcxSideEffects {
     /** 还车善后：收计时（撤闹钟/停服务/清通知）+ 焚毁相册里的码 + 撤销自动还车闹钟。 */
     suspend fun endRideAndBurn()
 
+    /**
+     * 服务端**已经没有在案订单**了（账号方式）：本机若还挂着这一轮的免费计时，按还车口径收掉。
+     *
+     * 为什么需要（2026-11-03 用户报「小程序里还了车，回 App 还有倒计时卡片，得点结束计时」）：
+     * 计时与订单是两套真相源，订单在别处结束时 App 只查得到「没有订单」，计时得有人收。
+     * 返回 true = 本次确实收了（调用方给一句提示）；**必须幂等**：没有计时在案时返回 false，
+     * 因为账号页 / 今日页每次查询都会走到这里。判据见 [EbikeFreeRide.shouldEndTimerWhenOrderGone]。
+     */
+    suspend fun onOrderGoneExternally(): Boolean
+
     /** 记一条本机骑行记录（只有本机用车这条链路数据是齐的）。 */
     suspend fun recordRide(summary: KvcxReturnSummary)
 
@@ -309,6 +321,21 @@ internal object AppKvcxSideEffects : KvcxSideEffects {
         // 订单已经结束：自动还车再排着也没有对象可还
         EbikeAutoReturnReminder.cancel(Graph.appContext)
         burnPendingCodes(Graph.appContext, Graph.displayPrefs(Graph.appContext), force = true)
+    }
+
+    override suspend fun onOrderGoneExternally(): Boolean {
+        val prefs = Graph.displayPrefs(Graph.appContext)
+        val mode = runCatching { prefs.ebikeUseMode.first() }.getOrElse { EbikeUseMode.Default }
+        val startAt = runCatching { prefs.ebikeRideStartAt.first() }.getOrDefault(0L)
+        val end = EbikeFreeRide.shouldEndTimerWhenOrderGone(
+            inAppRide = mode.isAccount,
+            startAtMillis = startAt,
+            nowMillis = System.currentTimeMillis(),
+        )
+        if (!end) return false
+        // 与手动还车同一条收尾（清计时 / 撤闹钟 / 停常驻服务 / 撤自动还车 / 焚码），不另写一份
+        endRideAndBurn()
+        return true
     }
 
     override suspend fun recordRide(summary: KvcxReturnSummary) {
@@ -533,7 +560,7 @@ class KvcxRideController internal constructor(
             runCatching { session.queryUnderway() }
                 .onSuccess { ride ->
                     if (seq != snapshotSeq || read != readSeq) return@onSuccess
-                    _state.update { it.withRideSnapshot(ride) }
+                    applySnapshot(ride)
                 }
                 .onFailure {
                     if (seq == snapshotSeq && read == readSeq && !quiet) {
@@ -930,7 +957,7 @@ class KvcxRideController internal constructor(
             try {
                 val ride = session.queryUnderway()
                 if (seq == snapshotSeq && read == readSeq) {
-                    _state.update { it.withRideSnapshot(ride) }
+                    applySnapshot(ride)
                     notice(
                         when {
                             ride == null -> "没有进行中的订单"
@@ -1050,6 +1077,24 @@ class KvcxRideController internal constructor(
         lockPending = lockPending && ride != null && ride.locked == false,
     )
 
+    /**
+     * 快照落库 + 「订单在别处结束」的善后（2026-11-03）。**所有刷新路径都走它**
+     * （[query] / [queryLockState] / [refreshInternal] / [syncAfterUnlock]），别各写一份
+     * `_state.update { it.withRideSnapshot(...) }`。
+     *
+     * `ride == null` = 服务端没有在案订单。账号方式下本机免费计时（`ebikeRideStartAt`）与订单
+     * 是**两套真相源**：订单在微信小程序里结束时，这里若只清 `ride`，计时会一路挂到免费窗口
+     * 结束——骑行卡变「骑行计时中」+ 倒计时、常驻通知还在、自动还车闹钟还在，用户只能点
+     * 「结束计时」才收得掉。所以落空时交给副作用层按还车口径收尾（幂等，判据见
+     * [KvcxSideEffects.onOrderGoneExternally]）。
+     */
+    private suspend fun applySnapshot(ride: KqcxAuth.Ride?) {
+        _state.update { it.withRideSnapshot(ride) }
+        if (ride == null && effects.onOrderGoneExternally()) {
+            notice("订单已在别处结束，本机计时已收掉", NoticeTone.Info)
+        }
+    }
+
     /** 动作成功后的状态刷新：失败不动旧值（动作本身已成功，刷新失败不打扰）。 */
     private suspend fun refreshInternal() {
         val session = session ?: return
@@ -1057,7 +1102,7 @@ class KvcxRideController internal constructor(
         val read = ++readSeq
         runCatching { session.queryUnderway() }.onSuccess { ride ->
             if (seq != snapshotSeq || read != readSeq) return@onSuccess
-            _state.update { it.withRideSnapshot(ride) }
+            applySnapshot(ride)
         }
     }
 
@@ -1098,7 +1143,7 @@ class KvcxRideController internal constructor(
             // 查询期间用户可能已经还车 / 换了动作：慢回包不能把旧骑行卡写回来。
             if (seq != snapshotSeq || read != readSeq) return
             if (_state.value.ride?.carNum != carNum) return
-            _state.update { it.withRideSnapshot(fresh) }
+            applySnapshot(fresh)
             if (sentUnlock && fresh.locked == true) return
         }
     }

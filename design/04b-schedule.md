@@ -506,6 +506,21 @@ settle 后结果落盘（`onboarding_sync_outcome_json`），主界面在 `onboa
   **被划掉就收手**（`setDeleteIntent` → `EbikeCountdownDismissReceiver` → 记账 + 停常驻服务，
   `start` 对同一轮起点直接拒绝），提醒闹钟与 App 内倒计时块不受影响；
   到点提醒**不**由服务里的协程负责（屏幕关闭后 CPU 挂起，`delay` 会迟到几分钟）。
+  **收尾顺序是不变量**（2026-11-03 修「还车成功后灵动岛不消失、倒计时不动」）：倒计时通知每秒被
+  普通 `notify` 顶一次、摘除走 `stopForeground(STOP_FOREGROUND_REMOVE)`，两条请求都异步投给
+  system_server、只按到达顺序执行。tick 的 notify 若排在摘除之后落地，就留下一条**没人再刷新的
+  ongoing 通知**（芯片冻在最后一次的秒数、ongoing 划不掉）。所以发与摘串行
+  （`EbikeCountdownPostGate`：发送在锁内完成，收尾先关闸再摘），收尾最后再显式 `cancel` 一次；
+  `check` 的「无计时 / 已过期」分支也扫一次残通知。另：`check` 在动这一轮之前（重排闹钟 /
+  起服务）复核持久化的起点没变——并发的 `endRide` 可能已把它清成 0，否则还车后通知会被旧起点
+  重新挂上来。
+  **订单在别处结束（微信小程序 / 客服端）时本机计时跟着收**（2026-11-03）：计时与订单是两套
+  真相源，旧版只清 `ride`，计时会挂到免费窗口结束（骑行卡「骑行计时中」+ 倒计时、常驻通知、
+  自动还车闹钟全都在，用户只能点「结束计时」）。现在所有刷新路径落空都走
+  `KvcxRideController.applySnapshot` → `onOrderGoneExternally()`，判据
+  `EbikeFreeRide.shouldEndTimerWhenOrderGone`：账号方式 + 计时在案 + 过了 60 秒建单落账宽限
+  （`ORDER_GONE_GRACE_MS`，刚建单那几秒服务端还在落账、空回包是脏的）；**小程序方式不收**
+  ——那一档查不到订单是常态，计时是本机唯一真相。收尾复用还车那条 `endRideAndBurn()`。
   通知构建与两个 channel 在 `ui/ebike/EbikeFreeRideNotifier.kt`（倒计时 LOW 无震动 / 提醒 HIGH
   **带震动**、category `EVENT`；带震动的提醒 channel 用新 id `_v2`，早期无震动的旧 id 由
   `ensureChannels` 清掉——channel 建出来后震动改不动，「删掉重建」也因 delete 异步而无效）。

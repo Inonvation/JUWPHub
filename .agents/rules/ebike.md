@@ -589,19 +589,42 @@
   那会当场取消资格。工具链代价：compileSdk 36 + AGP 8.9.1 + androidx.core 1.17（见 AGENTS 工程实况）。
   两条到点提醒**不做**提升（不是 ongoing）。
 
+- **收尾顺序是不变量**（2026-11-03 修用户报的「还车成功后退后台灵动岛通知不消失、倒计时也不动」）：
+  倒计时通知每秒被普通 `notify` 顶一次（同一 id），摘除走
+  `stopForeground(STOP_FOREGROUND_REMOVE)`——两条都是异步投给 system_server，**执行顺序只由
+  到达顺序决定**，而 tick 协程在 `Dispatchers.Default`、收尾在主线程 `onDestroy`。tick 的 notify
+  排在摘除之后落地，就留下一条**没有任何人再刷新的 ongoing 通知**：芯片冻在最后一次的秒数
+  （用户看到的「倒计时不动」）、ongoing 划不掉（「残留」），而且是永久的——没有服务再管它。
+  三条口径，别拆：① **发与摘串行**（`EbikeCountdownPostGate`：每次 `updateCountdown` 在锁内
+  完成，收尾先 `seal` 再摘）；② 收尾最后**显式 `cancelCountdown` 一次**（`removeNotification`；
+  只 `stopForeground` 在错序、或 ROM 吞掉摘除时会留残）；③ `cancelAll`（无计时 / 已过期 /
+  还车）也扫一次，冷启动与周期核对顺手清掉上一版留下的残通知。
+  另：`check` 在动这一轮之前（重排闹钟 / 起服务）**复核一次持久化起点没变**——并发的
+  `endRide`（还车成功那条链路，手动与自动还车都走它）可能已把起点清成 0，拿旧起点重排会让
+  通知在还车后重新冒出来、闹钟还会顶掉新那一轮的排程。
+
+- **计时也会被「订单在别处结束」收掉**（2026-11-03）：账号方式下查不到在案订单 = 这一轮结束，
+  `KvcxRideController.applySnapshot` 会调副作用层的 `onOrderGoneExternally()` 按还车口径收尾
+  （清计时 / 停常驻服务 / 撤闹钟 / 焚码）。判据是 `EbikeFreeRide.shouldEndTimerWhenOrderGone`
+  （账号方式 + 计时在案 + 过了 60 秒建单落账宽限）——**小程序方式绝不能收**，那一档查不到
+  订单是常态。完整口径（含宽限期为什么是 60 秒、别再各写一份 `withRideSnapshot`）见
+  `ebike-account.md`「查不到订单 = 这一轮骑行结束了」。
+
 - 免费时长提醒（DESIGN §3.9）：**走 App 通知 + 前台服务常驻倒计时，不写系统日历**
   （2026-09-24 用户拍板改回；2026-09-23 那次「改系统日历」已作废）。
   两个提醒点（提前量点、免费结束）由 `AlarmManager.setAlarmClock` **精确**触发：
   系统级闹钟，到点唤醒设备、不受 Doze/省电推迟、**不需要任何特殊权限**
   （与上课提醒同一手法，requestCode 4003 与上课的 4002 错开）。
   **通知栏常驻倒计时**由 `EbikeFreeRideService` 承载（`specialUse` 类型；
-  `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_SPECIAL_USE`）。剩余时间**由服务每秒
-  重发一次通知文案**（`EbikeFreeRide.countdownText`，每秒一次是系统允许的上限），
-  但**只在亮屏时刷**：灭屏一个 notify 都不发（协程阻塞等屏幕亮，点亮补刷一次）——
-  这是省电的主要来源，别改回「不分屏幕状态一律每秒刷」；
-  **不要**改用系统 chronometer（`setUsesChronometer` / `setChronometerCountDown`）——
-  2026-09-24 在 Redmi K70 / 澎湃OS 实测：面板静止时系统不主动重绘，数字不动，
-  用户报「通知栏没有秒」。到点提醒**不要**改由服务里的协程 `delay` 负责——
+  `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_SPECIAL_USE`）。**正文是静态说明**，走秒靠两处：
+  卡片头部**用系统 chronometer**（`setWhen` + `setUsesChronometer` + `setChronometerCountDown`，
+  2026-10-19 起），芯片与进度条由服务每秒重发一次（`countdownChipText` / `progressPercent`，
+  每秒一次是系统允许的上限）。但**只在亮屏时刷**：灭屏一个 notify 都不发（协程阻塞等屏幕亮，
+  点亮补刷一次）——这是省电的主要来源，别改回「不分屏幕状态一律每秒刷」。
+  2026-09-24 在 Redmi K70 / 澎湃OS 实测的「面板静止时系统不重绘、数字不动」**只对芯片成立**
+  （HyperOS 3 的芯片不显示 chronometer），所以芯片不能交给系统计时器、必须每秒重发；
+  卡片头部用 chronometer 则是 2026-10-19 用户明确「我要看的就是倒计时」之后的口径。
+  到点提醒**不要**改由服务里的协程 `delay` 负责——
   屏幕关闭后 CPU 挂起，会迟到几分钟；服务只管展示与保活。
   channel 用新 id（`ebike_free_ride_countdown` / `ebike_free_ride_alert_v2`），提醒那个
   **带震动**（双震 pattern）且 category 用 `EVENT`（对齐上课提醒）；**不要复用首版的

@@ -259,6 +259,39 @@ object EbikeFreeRide {
         startAtMillis > 0 && nowMillis < freeEndMillis(startAtMillis)
 
     /**
+     * 「查不到在案订单」到「判定本机计时该收」之间的宽限（毫秒）。
+     *
+     * 60 秒远大于建单落账窗口（`KvcxRideController.UNLOCK_SYNC_ATTEMPTS` × 1.5 秒 ≈ 5 秒）。
+     * 代价：开锁后 60 秒内就在小程序里还车，这一轮不会被自动收（仍可点「结束计时」）。
+     * **别按"刚好够落账"去调小**：误收的后果（有订单却没倒计时、常驻通知也不再跟）比多挂一会儿重。
+     */
+    const val ORDER_GONE_GRACE_MS = 60_000L
+
+    /**
+     * 服务端**已经没有在案订单**时，本机这份免费计时该不该跟着收掉（2026-11-03）。
+     *
+     * 背景：本机计时（`ebikeRideStartAt`）与在案订单是**两套真相源**——计时只由「点扫一扫」
+     * 「开锁成功」起，只由 App 内还车 / 自动还车 / 「结束计时」收。订单在**别处**结束
+     * （微信小程序、客服端）时，App 侧只会「查不到订单」，计时会一路挂到免费窗口结束：
+     * 骑行卡变成「骑行计时中」+ 倒计时、常驻通知还在、自动还车闹钟还在，用户只能点
+     * 「结束计时」才收得掉（2026-11-03 用户报的正是这个）。
+     *
+     * 判据三条：
+     * - **只认账号方式**：小程序方式没有凭证、本来就查不到订单，计时是那一档的唯一真相
+     *   （用户还车也在小程序里做），**绝不能**被「查不到订单」收掉；
+     * - 计时在案：不在案时是空操作（账号页 / 今日页每次查询都会走到，必须幂等）；
+     * - 计时已过 [ORDER_GONE_GRACE_MS]：刚建单那几秒服务端还在异步落账、空回包是脏的
+     *   （见 `KvcxRideController.syncAfterUnlock` 的 KDoc），此刻收计时会变成「有订单没倒计时」。
+     */
+    fun shouldEndTimerWhenOrderGone(
+        inAppRide: Boolean,
+        startAtMillis: Long,
+        nowMillis: Long,
+    ): Boolean = inAppRide &&
+        isActive(startAtMillis, nowMillis) &&
+        nowMillis - startAtMillis >= ORDER_GONE_GRACE_MS
+
+    /**
      * 常驻倒计时服务要不要**重新下发起点**（重建 tick）。
      *
      * 判据是**起点是否变化**，不是「服务在不在跑」：上一轮没结束就换车时，服务还在跑、

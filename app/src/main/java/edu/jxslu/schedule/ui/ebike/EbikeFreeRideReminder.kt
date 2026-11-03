@@ -148,6 +148,11 @@ object EbikeFreeRideReminder {
 
         // 1) 没有在案计时，或计时与迟到窗口都已过：收干净（服务/闹钟/通知/状态/周期兜底）
         if (startAt <= 0L || (!active && !endDue)) {
+            // **收之前复核一次起点**（2026-11-03，与第 4 步同一纪律）：并发的 `startRide`
+            // （用户刚点扫一扫 / 开锁成功）可能已经写进新起点。拿开头读到的那份空状态去
+            // `cancelAll` 会把刚起的服务、刚排的闹钟与刚写下的提醒态一起撤掉——那之后
+            // 这一轮既没有倒计时也没有到点提醒，只能等下次进页补。起点变了就整段让位。
+            if (prefs.ebikeRideStartAt.first() != startAt) return@guarded Outcome.Nothing
             cancelAll(context)
             if (startAt > 0L) {
                 prefs.setEbikeRideStartAt(0L)
@@ -240,6 +245,12 @@ object EbikeFreeRideReminder {
 
         // 4) 重排下一个闹钟；周期兜底与前台服务按需起停（结束后 5 分钟窗口内不再起服务）
         if (active) {
+            // **动这一轮之前复核一次起点**（2026-11-03 修「还车成功后灵动岛又冒出来」）：
+            // 本函数开头读到的起点，可能已经被并发的 `endRide`（还车成功那条链路，手动与
+            // 自动还车都走它）清成 0，或已被换车改成新值。拿旧起点重排闹钟 / 起服务会让
+            // 常驻通知在还车之后重新挂上去、并一路刷到免费结束；闹钟还会把新那一轮的排程顶掉。
+            // 变了就整段让位：结束由 `endRide` 自己收尾，换车由 `startRide` 重新排。
+            if (prefs.ebikeRideStartAt.first() != startAt) return@guarded Outcome.Nothing
             scheduleNextAlarm(context, startAt, lead, now)
             ensurePeriodicWork(context)
             EbikeFreeRideService.start(context, startAt)
@@ -289,11 +300,19 @@ object EbikeFreeRideReminder {
         }.onFailure { Log.w(TAG, "cancelAlarm failed", it) }
     }
 
-    /** 清掉这一轮骑行的全部提醒态：闹钟 + 周期兜底 + 常驻服务 + 通知栏上的两条提醒。 */
+    /**
+     * 清掉这一轮骑行的全部提醒态：闹钟 + 周期兜底 + 常驻服务 + 通知栏上的倒计时与两条提醒。
+     *
+     * 倒计时那条**要单独取消一次**（2026-11-03）：它平时归前台服务管（`stop` 就该带走），
+     * 但服务收尾与每秒 notify 之间有过时序竞争、可能留下一条没人刷新的残通知
+     * （见 `EbikeFreeRideNotifier.cancelCountdown` 的 KDoc）。`check` 的「无计时 / 已过期」
+     * 分支也走这里，所以冷启动与周期核对会顺手把残通知扫干净。
+     */
     private fun cancelAll(context: Context) {
         cancelAlarm(context)
         cancelPeriodicWork(context)
         EbikeFreeRideService.stop(context)
+        EbikeFreeRideNotifier.cancelCountdown(context)
         EbikeFreeRideNotifier.cancelReminders(context)
     }
 

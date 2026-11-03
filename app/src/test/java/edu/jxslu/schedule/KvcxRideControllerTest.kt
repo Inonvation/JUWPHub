@@ -208,6 +208,15 @@ class KvcxRideControllerTest {
             endedRide++
         }
 
+        /** 「查不到在案订单」的善后：调用次数 + 本次是否真收了（返回值由用例指定）。 */
+        var orderGoneCalls = 0
+        var orderGoneReturns = false
+
+        override suspend fun onOrderGoneExternally(): Boolean {
+            orderGoneCalls++
+            return orderGoneReturns
+        }
+
         override suspend fun recordRide(summary: KvcxReturnSummary) {
             recorded += summary
         }
@@ -522,6 +531,50 @@ class KvcxRideControllerTest {
 
         assertEquals(8L, kvcx.state.value.ride?.totalDateSeconds)
         assertEquals(2, session.queryCalls)
+    }
+
+    @Test
+    fun `查不到在案订单时按还车口径收掉本机计时并提示`() {
+        // 2026-11-03 用户报：App 里开锁，去微信小程序还车，回 App 还有「骑行计时中」卡片
+        // 与倒计时，只能点「结束计时」才消失。根因是计时与订单两套真相源——订单查不到时
+        // 必须有人收计时（判据在副作用层：账号方式 + 计时在案 + 过了建单落账宽限）
+        val session = FakeSession()
+        session.underway = null
+        val effects = FakeEffects().apply { orderGoneReturns = true }
+        val kvcx = controller(session, effects)
+
+        kvcx.query(quiet = true)
+
+        assertEquals(1, effects.orderGoneCalls)
+        assertTrue(notices.any { it.first.contains("订单已在别处结束") })
+    }
+
+    @Test
+    fun `查不到订单但本机没有该收的计时时不打扰`() {
+        // 副作用层判「不该收」（小程序方式 / 刚建单还在落账 / 本来就没计时）：页面不出声，
+        // 骑行状态照常落位（ride = null）
+        val session = FakeSession()
+        session.underway = null
+        val effects = FakeEffects().apply { orderGoneReturns = false }
+        val kvcx = controller(session, effects)
+
+        kvcx.query(quiet = true)
+
+        assertEquals(1, effects.orderGoneCalls)
+        assertTrue(notices.isEmpty())
+        assertNull(kvcx.state.value.ride)
+    }
+
+    @Test
+    fun `查到在案订单不去碰本机计时`() {
+        val session = FakeSession()
+        val effects = FakeEffects()
+        val kvcx = controller(session, effects)
+
+        kvcx.query(quiet = true)
+
+        assertEquals(0, effects.orderGoneCalls)
+        assertNotNull(kvcx.state.value.ride)
     }
 
     @Test

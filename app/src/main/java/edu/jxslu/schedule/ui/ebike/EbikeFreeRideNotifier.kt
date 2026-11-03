@@ -238,6 +238,27 @@ internal object EbikeFreeRideNotifier {
     }
 
     /**
+     * 摘掉常驻倒计时通知（不依赖前台服务当前是否在跑）。
+     *
+     * **为什么不能只靠 `stopForeground`**（2026-11-03 修「还车成功后灵动岛不消失、倒计时也不动」）：
+     * 服务的通知每秒被 [updateCountdown] 用**普通 notify** 顶一次，而摘除走的是
+     * `stopForeground(STOP_FOREGROUND_REMOVE)`——两条都是到 system_server 的异步请求，
+     * 顺序**只由到达顺序决定**。tick 已经进了 notify、主线程这时在收尾，摘除就会先执行、
+     * notify 后落地，于是留下一条**没有任何人再刷新的 ongoing 通知**：芯片文案冻在最后一次
+     * 的秒数（看着是"倒计时不动"）、又是 ongoing 划不掉（"残留"）。服务侧的
+     * [EbikeCountdownPostGate] 保证 notify 一定先于摘除，这里再显式取消一次兜底——
+     * 系统侧摘除被 ROM 吞掉、或通知已被顶成「非前台」那一份时，只 stopForeground 会留残。
+     *
+     * `EbikeFreeRideReminder.cancelAll` 也调它：无计时在案时（冷启动 / 周期核对）顺手
+     * 把上一版留下的残通知扫掉。
+     */
+    fun cancelCountdown(context: Context) {
+        runCatching {
+            NotificationManagerCompat.from(context).cancel(EbikeFreeRide.NotificationIds.COUNTDOWN)
+        }.onFailure { Log.w(TAG, "cancelCountdown failed", it) }
+    }
+
+    /**
      * 提前量提醒。正文按**实际剩余**写（[EbikeFreeRide.leadText]）——
      * 闹钟被 ROM 推迟时，写死「还剩 3 分钟」而实际只剩 40 秒是假信息。
      *

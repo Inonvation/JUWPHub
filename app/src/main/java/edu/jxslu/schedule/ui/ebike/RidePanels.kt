@@ -765,13 +765,20 @@ private fun RideActionButtons(
             // 右边那句是说明、不是动作：**它吃剩余宽度**（旧版左边按钮 + `Spacer(weight)` +
             // 右边不参与分配，窄屏 / 大字体下会被切掉尾巴）。单行放不下就换行，不省略号——
             // 「开车 / 还车在微信小程序里完成」被截成半句比多占一行更糟。
+            // 文案按档分流（2026-11-03）：账号方式下这个形态只出现在「本机计时还在、订单查不到」
+            // 的短暂窗口（刚建单落账中 / 断网 / 订单在别处刚结束），说「在微信小程序里完成」
+            // 是错的——用户明明是在 App 里开的车。
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 TextButton(onClick = onEndTimer) { Text("结束计时") }
                 Text(
-                    text = "开车 / 还车在微信小程序里完成",
+                    text = if (caps.wechatScan) {
+                        "开车 / 还车在微信小程序里完成"
+                    } else {
+                        "订单状态待同步"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                     textAlign = TextAlign.End,
