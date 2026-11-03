@@ -82,7 +82,7 @@ object OpenSourceLicenses {
      */
     val REFERENCES: List<LicenseEntry> = listOf(
         LicenseEntry(
-            name = "kqcx-bikemap（快趣出行车辆接口）",
+            name = "kqcx-bikemap（快趣出行车辆部分接口）",
             license = "AGPL-3.0",
             url = "https://github.com/dlkz/kqcx-bikemap",
         ),
@@ -97,12 +97,12 @@ object OpenSourceLicenses {
             url = "https://github.com/Inonvation/light-life",
         ),
         LicenseEntry(
-            name = "linyu（趣智校园接口）",
+            name = "linyu（趣智校园部分接口）",
             license = "MIT",
             url = "https://github.com/yehu-imei/linyu",
         ),
         LicenseEntry(
-            name = "quzhi-lite（趣智校园接口）",
+            name = "quzhi-lite（趣智校园部分接口）",
             license = "未声明许可",
             url = "https://github.com/wzk-chi/quzhi-lite",
         ),
