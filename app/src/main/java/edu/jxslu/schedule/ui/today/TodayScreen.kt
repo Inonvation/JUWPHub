@@ -155,6 +155,7 @@ import edu.jxslu.schedule.ui.common.SectionHeader
 import edu.jxslu.schedule.ui.common.courseColor
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.water.WaterEvent
 import edu.jxslu.schedule.ui.water.WaterUiState
 import edu.jxslu.schedule.ui.water.WaterViewModel
@@ -674,21 +675,12 @@ fun TodayScreen(
         // 包住三态内容：空态（假期）也要能刷胖乖余额。
         // （2026-09-24：一卡通余额自今日页移除，不再参与刷新聚合。）
         //
-        // **指示器驻留**（2026-09-23 修「拉不动」观感）：M3 的 onRefresh 在松手且拉过
-        // 阈值后才回调，而 water 的 loading 标志要等 VM 协程跑起来才置 true——
-        // 直接聚合的话 isRefreshing 在回调瞬间还是 false，指示器被立刻收回，
-        // 体感就是「拉下去又弹回去、啥都没发生」。手动 manualRefreshing 兜住回调瞬间：
-        // 触发即置 true，等 loading 归零**且**最短驻留 650ms 后才收——
-        // 没得刷（未登录）时也驻留一个完整周期，给「刷新完成」的确定反馈。
+        // **指示器驻留**收进 ui/common/RefreshHold.kt（2026-11-05）：原来这里是手写的一份
+        // 650ms 驻留（manualRefreshing），守卫读的是捕获值、计时器又被 waterRefreshing 的
+        // 每次变化重启，仍会漏出一次「点亮 → 收 → 再点亮」——用户报的「下拉刷新抽搐回弹」。
+        // 现在点亮只认 onRefresh、busy 只续命，见 RefreshHoldGate 的 KDoc。
         val waterRefreshing = waterEntryState.loadingBalance || waterEntryState.loadingDevices
-        var manualRefreshing by remember { mutableStateOf(false) }
-        LaunchedEffect(manualRefreshing, waterRefreshing) {
-            if (!manualRefreshing) return@LaunchedEffect
-            if (waterRefreshing) return@LaunchedEffect
-            delay(650)
-            if (!waterRefreshing) manualRefreshing = false
-        }
-        val refreshing = manualRefreshing || waterRefreshing
+        val refreshHold = rememberRefreshHold(busy = waterRefreshing)
         val pullRefreshState = rememberPullToRefreshState()
         // 触感由 rememberAppHaptics 统一查开关（DisplayPrefs.hapticsEnabled），关掉时短路，
         // 调用点不用自己判断。onRefresh 只在拉过阈值松手时回调——它响就等于「下拉成功」，
@@ -704,12 +696,12 @@ fun TodayScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .pullToRefresh(
-                    isRefreshing = refreshing,
+                    isRefreshing = refreshHold.isRefreshing,
                     state = pullRefreshState,
                     threshold = TodayPullRefreshThreshold,
                     onRefresh = {
+                        refreshHold.begin()
                         haptics.tap()
-                        manualRefreshing = true
                         viewModel.refreshTick()
                         waterViewModel?.refreshBalance()
                         waterViewModel?.refreshDevices()
@@ -815,7 +807,7 @@ fun TodayScreen(
             }
             PullToRefreshDefaults.Indicator(
                 state = pullRefreshState,
-                isRefreshing = refreshing,
+                isRefreshing = refreshHold.isRefreshing,
                 modifier = Modifier.align(Alignment.TopCenter),
                 threshold = TodayPullRefreshThreshold,
             )

@@ -57,6 +57,7 @@ import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.reminder.ReminderChime
 import edu.jxslu.schedule.ui.reminder.ReminderVibration
@@ -163,9 +164,13 @@ fun WenquGrabScreen(onBack: () -> Unit) {
 
         // 过滤 + 置前后的最终列表（匹配目标的排在前面，见 UiState.visibleActivities）
         val visible = state.visibleActivities
+        // 指示器驻留口径见 ui/common/RefreshHold.kt（2026-11-05）：点亮只认 onRefresh，
+        // busy 只续命——直接接 state.refreshing 会让「秒失败 / 逐请求抖动」漏成抽搐回弹。
+        val refreshHold = rememberRefreshHold(busy = state.refreshing)
         PullToRefreshBox(
-            isRefreshing = state.refreshing,
+            isRefreshing = refreshHold.isRefreshing,
             onRefresh = {
+                refreshHold.begin()
                 haptics.tap()
                 vm.refresh()
             },

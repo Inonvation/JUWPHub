@@ -65,6 +65,7 @@ import edu.jxslu.schedule.ui.common.SkeletonBox
 import edu.jxslu.schedule.ui.common.SkeletonLine
 import edu.jxslu.schedule.ui.common.lineHeightDp
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Droplet
 import me.rerere.hugeicons.stroke.Sun01
@@ -125,6 +126,9 @@ fun WeatherScreen(
         },
     ) { padding ->
         val snapshot = state.snapshot
+        // 指示器驻留口径见 ui/common/RefreshHold.kt（2026-11-05）：原来这份 650ms 驻留写在
+        // WeatherViewModel.fetch 里（MIN_REFRESH_MILLIS），现在收进公共件，全项目一份。
+        val refreshHold = rememberRefreshHold(busy = state.refreshing)
         // 关掉本页的触底回弹（stretch overscroll，2026-10-11 用户报「滑到底部再滑会卡一下」）。
         // 机制：拖到头之后系统把**整个滚动内容**做拉伸（31+ 走 RenderEffect 图层），
         // 而本页是一条 `Column + verticalScroll` 的长内容（约 4 屏、30 多个 emoji 字形），
@@ -138,10 +142,11 @@ fun WeatherScreen(
                     .fillMaxSize()
                     .padding(padding)
                     .pullToRefresh(
-                        isRefreshing = state.refreshing,
+                        isRefreshing = refreshHold.isRefreshing,
                         state = pullState,
                         threshold = WeatherPullRefreshThreshold,
                         onRefresh = {
+                            refreshHold.begin()
                             haptics.tap()
                             viewModel.refresh()
                         },
@@ -180,7 +185,7 @@ fun WeatherScreen(
                 }
                 PullToRefreshDefaults.Indicator(
                     state = pullState,
-                    isRefreshing = state.refreshing,
+                    isRefreshing = refreshHold.isRefreshing,
                     modifier = Modifier.align(Alignment.TopCenter),
                     threshold = WeatherPullRefreshThreshold,
                 )

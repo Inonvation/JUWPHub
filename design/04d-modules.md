@@ -1247,8 +1247,9 @@ UI 见 §3.29。
 `load()` 返回 `Load(snapshot, fresh, atMs)`，`atMs` 是**这份数据自己的**取数时刻
 （回退旧值时就是旧那份的时刻，页面「更新于」据此显示）。
 
-**下拉刷新的最短驻留**：`WeatherViewModel.MIN_REFRESH_MILLIS = 650ms`，
-与今日页同口径——请求命中得再快也不让指示器一拉到顶就弹回去。
+**下拉刷新的最短驻留**：走 `ui/common/RefreshHold.kt` 的 `RefreshMinDwellMillis = 650ms`
+（2026-11-05 从 `WeatherViewModel.MIN_REFRESH_MILLIS` 收进公共件，全项目一份）——
+请求命中得再快也不让指示器一拉到顶就弹回去。
 
 **开关与取数纪律**：偏好键 `weather_enabled`（DataStore 全局项，**默认关**），
 单独一条流不进 `baseDisplayPrefs`（combine 已满员）；**关着时今日页一行网络都不发**。

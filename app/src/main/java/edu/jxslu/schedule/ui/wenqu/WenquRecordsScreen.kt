@@ -36,6 +36,7 @@ import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.showNotice
 import kotlinx.coroutines.launch
 
@@ -98,10 +99,14 @@ fun WenquRecordsScreen(onBack: () -> Unit) {
             return@Scaffold
         }
 
+        // 指示器驻留口径见 ui/common/RefreshHold.kt（2026-11-05）：点亮只认 onRefresh，
+        // busy 只续命——直接接 state.refreshing 会让「秒失败 / 逐请求抖动」漏成抽搐回弹。
+        val refreshHold = rememberRefreshHold(busy = state.refreshing)
         PullToRefreshBox(
             // 首屏取数不走下拉指示器（上面已有「正在读取志愿记录」），只有刷新时才转
-            isRefreshing = state.refreshing,
+            isRefreshing = refreshHold.isRefreshing,
             onRefresh = {
+                refreshHold.begin()
                 haptics.tap()
                 vm.load(force = true)
             },

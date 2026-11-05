@@ -63,7 +63,8 @@
   只静默更新。
 - **下拉刷新**：阈值 56dp，`pullToRefresh` 与 `PullToRefreshDefaults.Indicator`
   **必须同值**（写岔 = 图标到位了却没刷新）；容器吃 Scaffold 的 padding，否则指示器
-  整条滑入轨迹藏在顶栏后面；指示器最短驻留 650ms（`WeatherViewModel.MIN_REFRESH_MILLIS`）。
+  整条滑入轨迹藏在顶栏后面；指示器驻留走 `ui/common/RefreshHold.kt`（点亮只认下拉、
+  最短 650ms）——**别再把驻留写回 ViewModel**（2026-11-05 已从 `WeatherViewModel` 搬走）。
   只有用户真的下拉才转指示器——进页与失败重试都不转（那两条走骨架 / 静默更新）。
 - **空态外层套可滚动容器**：指示器靠嵌套滚动接手势，纯静态子节点接不住下拉。
 - **本页关掉了触底回弹**（`CompositionLocalProvider(LocalOverscrollConfiguration provides null)`，

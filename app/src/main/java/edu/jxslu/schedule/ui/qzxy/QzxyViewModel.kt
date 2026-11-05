@@ -690,31 +690,37 @@ class QzxyViewModel(
         // 账户手机号取自会话，用来在充值入口说清钱进哪个账户（登录输入框的值可能已被改过）
         val sessionPhone = repo.localSession()?.telephone.orEmpty()
         _uiState.update { it.copy(refreshingBalance = true, accountPhone = sessionPhone) }
-        if (knownProjectName.isNullOrBlank()) {
-            runCatching { repo.projectInfo() }
-                .onSuccess { project ->
-                    _uiState.update { it.copy(schoolName = project.projectName.orEmpty()) }
+        // 收尾必须走 finally：会话失效那条分支会提前 return，直接写在函数尾会让
+        // refreshingBalance 永远留在 true——指示器一直转，而且下一次下拉会被 M3 的
+        // `onRelease()` 里 `if (isRefreshing) return 0f` 整个吞掉（2026-11-05 排查）。
+        try {
+            if (knownProjectName.isNullOrBlank()) {
+                runCatching { repo.projectInfo() }
+                    .onSuccess { project ->
+                        _uiState.update { it.copy(schoolName = project.projectName.orEmpty()) }
+                    }
+                    .onFailure { error ->
+                        if (error is QzxySessionExpiredException) {
+                            handleFailure(error, "登录已失效")
+                            return@launch
+                        }
+                    }
+            } else {
+                _uiState.update { it.copy(schoolName = knownProjectName) }
+            }
+            runCatching { repo.balance() }
+                .onSuccess { balance ->
+                    _uiState.update { it.copy(balance = balance, balanceLoaded = true) }
+                    // 桌面趣智开水卡（DESIGN §3.6「开水两卡」）：余额已经在手上，顺手推一次
+                    runCatching { WaterWidgetSync.pushQzxyAccount(Graph.appContext, balance) }
                 }
                 .onFailure { error ->
-                    if (error is QzxySessionExpiredException) {
-                        handleFailure(error, "登录已失效")
-                        return@launch
-                    }
+                    _uiState.update { it.copy(balanceLoaded = true) }
+                    if (error is QzxySessionExpiredException) handleFailure(error, "登录已失效")
                 }
-        } else {
-            _uiState.update { it.copy(schoolName = knownProjectName) }
+        } finally {
+            _uiState.update { it.copy(refreshingBalance = false) }
         }
-        runCatching { repo.balance() }
-            .onSuccess { balance ->
-                _uiState.update { it.copy(balance = balance, balanceLoaded = true) }
-                // 桌面趣智开水卡（DESIGN §3.6「开水两卡」）：余额已经在手上，顺手推一次
-                runCatching { WaterWidgetSync.pushQzxyAccount(Graph.appContext, balance) }
-            }
-            .onFailure { error ->
-                _uiState.update { it.copy(balanceLoaded = true) }
-                if (error is QzxySessionExpiredException) handleFailure(error, "登录已失效")
-            }
-        _uiState.update { it.copy(refreshingBalance = false) }
     }
 
     // ── 设备 ──

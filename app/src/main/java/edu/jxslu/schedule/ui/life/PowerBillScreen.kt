@@ -64,6 +64,7 @@ import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.showNotice
 import java.time.YearMonth
 import kotlinx.coroutines.launch
@@ -168,10 +169,14 @@ fun PowerBillScreen(
                 }
             }
 
+            // 指示器驻留口径见 ui/common/RefreshHold.kt（2026-11-05）：点亮只认 onRefresh，
+            // busy 只续命——直接接 loading 会让「秒失败 / 逐请求抖动」漏成抽搐回弹。
+            val refreshHold = rememberRefreshHold(busy = state.loading && state.loaded)
             PullToRefreshBox(
                 // 首屏加载不用下拉指示器（列表还在「正在读取」态），只有刷新时才转
-                isRefreshing = state.loading && state.loaded,
+                isRefreshing = refreshHold.isRefreshing,
                 onRefresh = {
+                    refreshHold.begin()
                     haptics.tap()
                     viewModel.refresh()
                 },

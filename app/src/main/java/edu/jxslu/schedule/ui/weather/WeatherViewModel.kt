@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.domain.WeatherSnapshot
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -22,14 +21,6 @@ import kotlinx.coroutines.launch
  * 共用的只有仓库单例。
  */
 class WeatherViewModel(private val repo: WeatherRepository) : ViewModel() {
-
-    companion object {
-        /**
-         * 下拉刷新的最短驻留（与今日页同一口径，650ms）：请求命中得再快也不能让指示器
-         * 一拉到顶就弹回去，那样读起来像「拉了个寂寞」。慢于这个值就按真实耗时走。
-         */
-        const val MIN_REFRESH_MILLIS = 650L
-    }
 
     data class UiState(
         /** 首次加载（手里还没有任何数据）：页面铺骨架。 */
@@ -80,15 +71,11 @@ class WeatherViewModel(private val repo: WeatherRepository) : ViewModel() {
             // 指示器只在用户真的下拉过、且屏上有内容时转（首次进页不该闪一个圈）
             refreshing = showIndicator && previous.snapshot != null,
         )
-        job = viewModelScope.launch { fetch(force, dwell = showIndicator) }
+        job = viewModelScope.launch { fetch(force) }
     }
 
-    private suspend fun fetch(force: Boolean, dwell: Boolean) {
-        val startedAt = System.currentTimeMillis()
+    private suspend fun fetch(force: Boolean) {
         val result = repo.load(force = force)
-        // 指示器最短驻留：剩余时间补齐再收
-        val elapsed = System.currentTimeMillis() - startedAt
-        if (dwell && force && elapsed < MIN_REFRESH_MILLIS) delay(MIN_REFRESH_MILLIS - elapsed)
         val snapshot = result.snapshot
         _state.value = UiState(
             loading = false,

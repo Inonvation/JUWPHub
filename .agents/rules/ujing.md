@@ -34,6 +34,8 @@
   （传了才包 `PullToRefreshBox`），U净 用 `refreshing = loggedIn && boardRefreshing`、
   `onRefresh = { haptics.tap(); viewModel.refreshAll() }`。`refreshAll()` = `refreshBoard()`
   + `refreshOrder(silent = true)`（没有在案订单时后者自己早退，不会白发请求）。
+  指示器驻留由骨架内置（`rememberRefreshHold`，见 `.agents/rules/ui-common.md`），
+  调用方**不要**再接一遍 hold。
   未登录不接下拉：没有可刷的数据，只会空转。看板卡右上角的刷新图标保留（它是"刷新看板"
   这一个动作，与整页下拉不冲突）。
 - 扫码成功 → `UjingDraftStore.open`（Graph 单例，**进程内**）→ `openOrder` 事件 →

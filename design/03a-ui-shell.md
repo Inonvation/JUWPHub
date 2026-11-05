@@ -597,9 +597,12 @@ action/category：小组件点击与通知跳板都不带，它们该正常起�
   - **下拉刷新**（2026-09-23 加，M3 下拉刷新包住三态内容）：并行刷新一卡通余额 +
     胖乖余额/设备 + 今日时间状态（`refreshTick`）。空态（假期）同样可刷；课表/作业数据
     来自 Room Flow 实时响应，不参与指示器
-    - **指示器驻留**：`onRefresh` 回调的瞬间 campus/water 的 loading 标志还是 false，
-      直接聚合两者会让指示器立刻弹回，像「拉下去又弹回来、啥都没发生」。用
-      `manualRefreshing` 兜住回调瞬间，等两侧 loading 归零**且**最短驻留 650ms 后才收；
+    - **指示器驻留**（2026-11-05 收进 `ui/common/RefreshHold.kt`）：M3 把 `isRefreshing` 当
+      跳变信号用——每次变化起一次动画（互斥会让动画在空中掉头），且 `onRelease()` 开头
+      `if (isRefreshing) return 0f` 会把这次下拉整个吞掉。所以它**不能**直接接各 ViewModel
+      的 loading 标志（原来这里手写的 `manualRefreshing` 就是为此，但守卫读捕获值、计时器
+      又被 `waterRefreshing` 每次变化重启，仍会漏出「点亮 → 收 → 再点亮」）。现在点亮只认
+      `onRefresh` 里的 `begin()`，busy 只续命，不 busy 且距 begin 满 650ms 才收；
       都没得刷（未登录 / 开关关）时也驻留一个完整周期，给「刷新完成」的确定反馈
     - **触发触感**：`onRefresh` 里 `haptics.tap()`——它只在拉过阈值松手时回调，响一声即
       「下拉成功」。开关走全局 `DisplayPrefs.hapticsEnabled`（`rememberAppHaptics` 内部短路，

@@ -284,9 +284,15 @@ fun PageScaffoldColumn(
         if (onRefresh == null) {
             column(Modifier.padding(padding))
         } else {
+            // 指示器驻留走 RefreshHold（2026-11-05）：调用方给的 [refreshing] 是各自的
+            // loading 标志，直接接 M3 会漏出「点亮 → 收 → 再点亮」的抽搐（根因见 RefreshHoldGate）。
+            val refreshHold = rememberRefreshHold(busy = refreshing)
             PullToRefreshBox(
-                isRefreshing = refreshing,
-                onRefresh = onRefresh,
+                isRefreshing = refreshHold.isRefreshing,
+                onRefresh = {
+                    refreshHold.begin()
+                    onRefresh()
+                },
                 modifier = Modifier.fillMaxSize().padding(padding),
             ) {
                 column(Modifier)

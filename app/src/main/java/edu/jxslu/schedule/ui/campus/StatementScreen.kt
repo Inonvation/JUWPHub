@@ -61,6 +61,7 @@ import edu.jxslu.schedule.ui.common.MonthPickerDialog
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -130,9 +131,13 @@ fun StatementScreen(
             )
         },
     ) { padding ->
+        // 指示器驻留口径见 ui/common/RefreshHold.kt（2026-11-05）：点亮只认 onRefresh，
+        // busy 只续命。本页「无凭证」路径从不置 syncing，直接接它会让指示器停在阈值位不收。
+        val refreshHold = rememberRefreshHold(busy = state.syncing)
         PullToRefreshBox(
-            isRefreshing = state.syncing,
+            isRefreshing = refreshHold.isRefreshing,
             onRefresh = {
+                refreshHold.begin()
                 haptics.tap()
                 viewModel.refresh()
             },

@@ -52,6 +52,7 @@ import edu.jxslu.schedule.ui.common.MonthPickerDialog
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.PageBackButton
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.theme.semanticColors
 import java.time.YearMonth
 
@@ -120,10 +121,14 @@ fun KvcxOrdersScreen(onBack: () -> Unit = {}) {
                     viewModel.toggleOnlyPaid()
                 },
             )
+            // 指示器驻留口径见 ui/common/RefreshHold.kt（2026-11-05）：点亮只认 onRefresh，
+            // busy 只续命——本页 loading 在「定月份 + 读缓存」两步之后才置真，直接接它会漏帧。
+            val refreshHold = rememberRefreshHold(busy = state.loading && state.orders != null)
             PullToRefreshBox(
                 // 首屏加载由下面的 LoadingHint 表达；只有「已有数据再刷新」才转下拉指示器
-                isRefreshing = state.loading && state.orders != null,
+                isRefreshing = refreshHold.isRefreshing,
                 onRefresh = {
+                    refreshHold.begin()
                     haptics.tap()
                     viewModel.refresh()
                 },

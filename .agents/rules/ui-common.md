@@ -69,6 +69,37 @@
   样板：ui/scholar/ScholarScreen.kt（原先是裸 SnackbarHost + 首帧一屏纯空白 + 自造空态）。
 - 新页面偏离以上任何一条，要显式传参并在 KDoc 写理由。
 
+## 下拉刷新一律走 RefreshHold（2026-11-05）
+
+- 下拉刷新页面的 `isRefreshing` **不要直接接 ViewModel 的 loading 标志**，走
+  `ui/common/RefreshHold.kt`：
+
+  ```kotlin
+  val refreshHold = rememberRefreshHold(busy = state.refreshing)
+  PullToRefreshBox(
+      isRefreshing = refreshHold.isRefreshing,
+      onRefresh = { refreshHold.begin(); haptics.tap(); vm.refresh() },
+  ) { … }
+  ```
+
+- **根因**（用户报「下拉刷新抽搐回弹」）：M3 1.3.0 把 `isRefreshing` 当**跳变信号**——
+  `PullToRefreshElement.update()` 每次变化起一次动画（true → `animateToThreshold()`，
+  false → `animateToHidden()`），`Animatable` 的互斥会让后一次把前一次在空中掉头；
+  而 `onRelease()` 开头 `if (isRefreshing) return 0f`，标志已经为真时**这次下拉被整个吞掉**
+  （不回调、不触感，指示器停在手指离开的位置）。直接接 loading 会漏出三类抽搐：
+  刷新太快（缓存命中 / 未登录 / 秒失败）、一次下拉多个请求之间标志归零、
+  进页或回层的后台加载撞车。
+- **三条口径**：点亮只认 `begin()`（用户真下拉）；不 busy 且距 begin 满
+  `RefreshMinDwellMillis`（650ms）才收；busy 只续命、不点亮。`busy` 传各页原来的
+  「刷新还在跑」表达式（`state.refreshing` / `loading && loaded` 等），别统一改成 `loading`。
+- **容器要吃 Scaffold 的 padding**（否则指示器整条滑入轨迹藏在顶栏后面）；
+  **空态 / 加载态若是普通 `Column`，没有可滚动子节点就接不住下拉**——外层得套
+  `verticalScroll` 或 `LazyColumn`（天气页空态就是这么做的，今日页那三态还没套）。
+- 驻留**只在 UI 层做一处**：不要再往 ViewModel 里写 `delay(650)` 那套（原先天气页写过，
+  已搬走）。
+- **`PageScaffoldColumn` 已内置**（传了 `onRefresh` 才包 `PullToRefreshBox` + 驻留）：
+  这类页面只传 `refreshing` / `onRefresh`，**别在调用方再接一遍 hold**（U净 就是这种）。
+
 ## 卡片观感只有两处定义（描边卡 / 状态英雄卡）
 
 - 卡片观感**只有两处定义**，按「这张卡在页面里是什么角色」选，别自己另写一套：
