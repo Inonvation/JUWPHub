@@ -45,6 +45,9 @@
     （`UjingViewModel.pendingScan`）：`repo.loggedIn` 收集器在 false→true 时自动接着识别，
     用户不用回去重扫；超时作废，免得用户在别处登录也被推进一次识别。页内扫码入口
     本来只在登录后可见，这条拦截只作用于侧栏扫一扫进来的那一档。
+  - 进页后「识别成功 → 跳下单页」是**同一秒内的第二次窗口启动**：`openSubpage` 的防连点
+    （`LaunchGate`）必须按目标分槽，否则下单页导航会被静默吞掉、表现为「进了 U净 页但
+    没识别」（2026-11-05 修，口径见 `nav-window.md`）。
 - **扫码那一跳也留协议样本**（`UjingRepository.dumpScanWasher`，debug 专用）：`scanWasherCode`
   的**原文与响应**落 `filesDir/ujing_debug/scan_washer_<原文散列前 6 字节>.json`。
   原文只写在文件内容里、不进文件名；token 在请求头不落盘；落盘失败静默。这是「机身码到底长

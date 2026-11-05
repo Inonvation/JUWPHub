@@ -45,7 +45,7 @@ class SettingsActivity : ComponentActivity() {
 
     companion object {
         fun start(context: Context) {
-            if (!LaunchGate.allow()) return
+            if (!LaunchGate.allow("settings")) return
             context.startActivity(Intent(context, SettingsActivity::class.java))
         }
     }

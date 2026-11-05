@@ -208,7 +208,9 @@ internal fun subpageLaunchIntent(context: Context, request: SubpageRequest): Int
  * [Activity] context 才有窗口动画可言，非 Activity 只保证页面起得来。
  */
 internal fun openSubpage(context: Context, request: SubpageRequest) {
-    if (!LaunchGate.allow()) return
+    // 防连点按**目标页**分槽：同一页连点两次只开一个窗口，而「A 页开完立刻开 B 页」
+    // （U净 进页 → 识别成功 → 跳下单页）不能被吞掉，见 LaunchGate 的 KDoc
+    if (!LaunchGate.allow(request.screen.name)) return
     // 不带 NEW_TASK：从 Activity 启动时二级页要留在**当前** task 里（MainActivity 之上），
     // 带上了会先做一次 task 查找，行为虽等价但语义绕
     context.startActivity(request.applyTo(Intent(context, SubpageActivity::class.java)))
