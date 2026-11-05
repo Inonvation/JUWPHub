@@ -122,8 +122,9 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
         repo.currentTimetableId,
         targetConfigFlow,
     ) { config, currentTimetableId, target ->
-        val week = config.semester
-            ?.let { ScheduleCalculator.weekNumberOf(it, LocalDate.now()) } ?: 0
+        // 「本周」只认学期内的周次（学期外 0 = 不显示 / 不在学期内）：
+        // 裸 weekNumberOf 在学期结束后会涨到 30+，设置页与教务账号页会显示「第 37 周」
+        val week = ScheduleCalculator.todayWeekOf(config.semester, LocalDate.now()) ?: 0
         MeUiState(
             loading = false,
             semester = config.semester,
@@ -139,8 +140,7 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
             configTargetId = target.id,
             configSemester = target.semester,
             configCourseCount = target.courseCount,
-            configWeek = target.semester
-                ?.let { ScheduleCalculator.weekNumberOf(it, LocalDate.now()) } ?: 0,
+            configWeek = ScheduleCalculator.todayWeekOf(target.semester, LocalDate.now()) ?: 0,
         )
     }.stateIn(
         viewModelScope,

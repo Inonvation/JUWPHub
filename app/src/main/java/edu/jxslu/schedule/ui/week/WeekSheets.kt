@@ -56,8 +56,12 @@ import me.rerere.hugeicons.stroke.CalendarSync
 @Composable
 fun WeekPickerSheet(
     currentWeek: Int,
-    /** 真实的「本周」周次（todayWeek）：与正在查看的 [currentWeek] 是两回事，徽标用它。 */
-    todayWeek: Int,
+    /**
+     * 真实的「本周」周次（todayWeek）：与正在查看的 [currentWeek] 是两回事，徽标用它。
+     * **null = 今天不在这张课表的学期内**（未开学 / 已结束 / 未配置），此时没有「本周」
+     * 可回，入口整条不出现（2026-11-05：此前拿裸周次比较，学期外按钮永远挂着）。
+     */
+    todayWeek: Int?,
     totalWeeks: Int,
     weeksWithCourses: Set<Int>,
     /** 当前课表名；空白 = 不渲染切换入口。 */
@@ -80,7 +84,10 @@ fun WeekPickerSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text("选择周次", style = MaterialTheme.typography.titleLarge)
-                TextButton(onClick = onBackToCurrentWeek) { Text("回到本周") }
+                // 学期外没有「本周」，这条入口不出现（见 todayWeek 参数说明）
+                if (todayWeek != null) {
+                    TextButton(onClick = onBackToCurrentWeek) { Text("回到本周") }
+                }
             }
             Spacer(Modifier.height(4.dp))
             WeekChipGrid(
@@ -128,7 +135,8 @@ fun WeekPickerSheet(
 private fun WeekChipGrid(
     totalWeeks: Int,
     currentWeek: Int,
-    todayWeek: Int,
+    /** null = 今天不在这张课表的学期内：一格「本周」标记都不打。 */
+    todayWeek: Int?,
     weeksWithCourses: Set<Int>,
     onPick: (Int) -> Unit,
 ) {
@@ -145,7 +153,7 @@ private fun WeekChipGrid(
                     WeekChip(
                         week = week,
                         selected = week == currentWeek,
-                        isThisWeek = week == todayWeek,
+                        isThisWeek = todayWeek != null && week == todayWeek,
                         hasCourse = week in weeksWithCourses,
                         onClick = { onPick(week) },
                         modifier = Modifier.weight(1f),

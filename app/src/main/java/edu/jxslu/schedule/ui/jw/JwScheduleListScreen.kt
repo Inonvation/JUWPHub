@@ -102,8 +102,10 @@ fun JwScheduleListScreen(kind: CourseKind, onBack: () -> Unit) {
     // 只看这一张表（理论 / 实验）；覆盖计划与表无关，摊到 (周, 天) 后自然只影响命中的天
     val mine = remember(courses, kind) { courses.orEmpty().filter { it.kind == kind } }
     val plan = remember(overrides, semester) { ScheduleOverrides.plan(overrides, semester) }
+    // 「本周」只认学期内的周次：学期外给 null（没有可回的周次）。
+    // 用裸 weekNumberOf 的话，切到上学期课表后「回到本周」会永远挂着点不掉（同课表页，2026-11-05）
     val todayWeek = remember(semester) {
-        semester?.let { ScheduleCalculator.weekNumberOf(it, LocalDate.now()) }
+        ScheduleCalculator.todayWeekOf(semester, LocalDate.now())
     }
 
     // 周次状态：数据就绪前不定值（否则 Pager 先渲染第 1 周再跳本周，与课表页同一坑）。

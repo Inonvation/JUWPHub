@@ -153,10 +153,11 @@ fun TimetableHubScreen(
                     }
                 }
                 Text(
-                    if (state.configSemester == null) {
-                        "该课表还没配过学期，选一次开学日期即自动创建"
-                    } else {
-                        "该课表第 ${state.configWeek} 周 · 共 ${state.configCourseCount} 门课"
+                    when {
+                        state.configSemester == null -> "该课表还没配过学期，选一次开学日期即自动创建"
+                        // configWeek = 0：今天不在这张课表的学期内（未开学 / 已结束），不能印「第 0 周」
+                        state.configWeek <= 0 -> "该课表不在学期内 · 共 ${state.configCourseCount} 门课"
+                        else -> "该课表第 ${state.configWeek} 周 · 共 ${state.configCourseCount} 门课"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,

@@ -27,6 +27,20 @@
 - **远课轻提示（`NextStartHint`）已删**：不再有 60 分钟窗口的「下一节」提示。
 - 改版前先读 DESIGN §3.3 的 2026-10-13 段。
 
+## 学期外（今天不在这张课表的学期内，2026-11-05）
+
+- 「本周」**只有一个来源**：`ScheduleCalculator.todayWeekOf(semester, date)`（学期内 1..totalWeeks，
+  否则 null）。**不要**把 `weekNumberOf` 的裸结果当本周用——学期结束后它会一路涨到 30+，
+  课表页「回到本周」永远点不掉、今日页顶栏显示「第 37 周」（2026-11-05 用户报障的根因）。
+- 课表页：`WeekUiState.todayWeek == null` 时，右下角悬浮「回到本周」、周次弹层里的同名按钮、
+  「本周」chip 徽标全部不出现；`goToToday()` 是空操作。教务侧 `JwScheduleListScreen` 同口径。
+- 今日页：`TodayState.inTerm == false` 分三种文案——未配置学期 / 尚未开学（`afterTerm` 假）/
+  「当前课表不在本学期」（`afterTerm` 真，多半是切到了旧学期课表，CTA 去课表页换课表）。
+  `TodayState.week` 在学期外恒为 0，顶栏「第 N 周」随之消失；设置页 / 教务账号页的周次
+  同样只认「0 = 不在学期内」或学期内周次，不能印裸周次。
+- 空态 / 加载态的贴底收件箱卡吃 `LocalBottomBarClearance`：净空垫在 `TodayCenteredShell`
+  整列底部，**别只垫居中区**——那样卡的最后一行会被悬浮胶囊压住（用户报的「界面被挤压」）。
+
 ## 进行中服务卡（2026-10-21，DESIGN §3.3）
 
 - 位置：**没有在案骑行时在作业卡与收件箱列表之间**；**有在案骑行（`kvcxRideState?.ride != null`）

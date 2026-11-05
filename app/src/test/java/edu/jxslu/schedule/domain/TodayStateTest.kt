@@ -341,6 +341,43 @@ class TodayStateTest {
         assertFalse(s.tomorrowInTerm)
         assertTrue(s.tomorrowCourses.isEmpty())
         assertFalse(s.tomorrowVisible)
+        // 未开学不是「学期已结束」：两种学期外状态给不同文案
+        assertFalse(s.afterTerm)
+        // 界面上的「第 N 周」必须消失（裸周次在学期外是 0 或负数，不能进界面）
+        assertEquals(0, s.week)
+    }
+
+    /**
+     * 学期结束后：裸周次会一路涨到 30+，界面必须当「不在学期内」处理。
+     * 2026-11-05 用户报障：切到上学期课表后今日页仍显示「第 37 周」+「尚未开学」，
+     * 课表页的「回到本周」也永远点不掉。
+     */
+    @Test
+    fun afterTerm_weekIsZeroAndFlagged() {
+        // 学期 2026-08-31 起 20 周 → 第 20 周 2027-01-11..01-17，之后都算学期外
+        val afterEnd = LocalDate.parse("2027-03-01")
+        val s = buildTodayState(semester, slots, thursdayCourses, afterEnd, LocalTimeLike(10, 30))
+        assertFalse(s.inTerm)
+        assertTrue(s.afterTerm)
+        assertEquals(0, s.week)
+        assertTrue(s.remaining.isEmpty())
+        assertFalse(s.tomorrowInTerm)
+    }
+
+    /** 最后一周仍是学期内：`afterTerm` 只在「已过最后一周」为真，不能提前一周报。 */
+    @Test
+    fun lastWeekIsStillInTerm() {
+        // 学期 2026-08-31 起 20 周 → 第 20 周 2027-01-11..01-17
+        val s = buildTodayState(
+            semester,
+            slots,
+            emptyList(),
+            LocalDate.parse("2027-01-15"),
+            LocalTimeLike(9, 0),
+        )
+        assertTrue(s.inTerm)
+        assertFalse(s.afterTerm)
+        assertEquals(20, s.week)
     }
 
     @Test

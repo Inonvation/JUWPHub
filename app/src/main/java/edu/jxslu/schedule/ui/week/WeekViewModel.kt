@@ -40,7 +40,12 @@ import java.time.LocalDate
 data class WeekUiState(
     val loading: Boolean = true,
     val week: Int = 1,
-    val todayWeek: Int = 1,
+    /**
+     * 这张课表的「本周」周次；**null = 今天不在它的学期内**（学期未配置 / 未开学 / 已结束）。
+     * 界面所有「回到本周」类动作都以它为闸：学期外没有可回的周次，
+     * 此前拿裸周次（可能 > totalWeeks）比较，按钮会一直挂着点不掉（2026-11-05）。
+     */
+    val todayWeek: Int? = null,
     val semester: SemesterConfig? = null,
     val slots: List<TimeSlot> = emptyList(),
     /** 当前周课程 */
@@ -175,7 +180,8 @@ class WeekViewModel(
                 val semester = config.semester
                 val slots = config.slots
                 val prefs = config.prefs
-                val todayWeek = semester?.let { ScheduleCalculator.weekNumberOf(it, todayProvider()) } ?: 1
+                // 学期外给 null：裸周次（学期结束后 30+）不能当「本周」，见 WeekUiState.todayWeek
+                val todayWeek = ScheduleCalculator.todayWeekOf(semester, todayProvider())
                 val visible = loaded.filter { prefs.courseFilter.matches(it.kind) }
                 WeekUiState(
                     loading = false,
@@ -235,13 +241,9 @@ class WeekViewModel(
             // 打开课表默认落在本周。此前固定从第 1 周开始，
             // 开学几周后每次进课表都要手动点一次「回到本周」，与主流课表习惯不符。
             // 周次必须在 ready 置位（对外发第一帧）之前定好，否则首帧仍是第 1 周。
+            // 学期外（todayWeekOf 给 null）没有「本周」可落，停在默认的第 1 周。
             val semester = repo.semester.first()
-            if (semester != null) {
-                val week = ScheduleCalculator.weekNumberOf(semester, todayProvider())
-                if (ScheduleCalculator.isWeekInTerm(semester, week)) {
-                    weekFlow.value = week
-                }
-            }
+            ScheduleCalculator.todayWeekOf(semester, todayProvider())?.let { weekFlow.value = it }
             ready.value = true
         }
     }
@@ -341,9 +343,10 @@ class WeekViewModel(
 
     fun shiftWeek(delta: Int) = setWeek(weekFlow.value + delta)
 
+    /** 回到这张课表的「本周」；今天不在学期内时没有可回的周次，动作是空操作。 */
     fun goToToday() {
-        val sem = uiState.value.semester ?: return
-        weekFlow.value = ScheduleCalculator.weekNumberOf(sem, todayProvider()).coerceAtLeast(1)
+        val week = uiState.value.todayWeek ?: return
+        weekFlow.value = week
     }
 
     fun upsert(course: Course) {

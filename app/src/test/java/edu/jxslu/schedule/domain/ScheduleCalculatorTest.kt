@@ -44,6 +44,20 @@ class ScheduleCalculatorTest {
         assertFalse(ScheduleCalculator.isWeekInTerm(config, config.totalWeeks + 1))
     }
 
+    /**
+     * 「本周」只认学期内的周次：学期结束后 [ScheduleCalculator.weekNumberOf] 会一路涨到 30+，
+     * 直接当本周用会让课表页的「回到本周」永远点不掉（2026-11-05 报障根因）。
+     */
+    @Test
+    fun todayWeekOf_nullOutsideTerm() {
+        assertEquals(1, ScheduleCalculator.todayWeekOf(config, LocalDate.parse("2026-09-07")))
+        assertEquals(20, ScheduleCalculator.todayWeekOf(config, LocalDate.parse("2027-01-18")))
+        // 未开学（第 0 周 / 负数周）与学期结束后都必须是 null，不是裸周次
+        assertNull(ScheduleCalculator.todayWeekOf(config, LocalDate.parse("2026-09-06")))
+        assertNull(ScheduleCalculator.todayWeekOf(config, LocalDate.parse("2027-01-25")))
+        assertNull(ScheduleCalculator.todayWeekOf(null, LocalDate.parse("2026-09-07")))
+    }
+
     @Test
     fun dateOfMapsWeekDayToCalendarDate() {
         assertEquals(LocalDate.parse("2026-09-07"), ScheduleCalculator.dateOf(config, 1, 1))

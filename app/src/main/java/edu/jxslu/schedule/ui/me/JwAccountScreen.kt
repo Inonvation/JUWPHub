@@ -165,7 +165,8 @@ fun JwAccountScreen(onBack: () -> Unit) {
 
             SettingsSection(title = "学业信息") {
                 InfoRow("当前学期", state.semester?.startDate?.let { "$it 起" } ?: "未配置")
-                InfoRow("教学周", if (state.currentWeek > 0) "第 ${state.currentWeek} 周" else "未开始")
+                // 0 = 今天不在这张课表的学期内（未开学 / 已结束 / 未配置），不是「还没开学」
+                InfoRow("教学周", if (state.currentWeek > 0) "第 ${state.currentWeek} 周" else "不在学期内")
                 InfoRow("课表", "${state.timetableName.ifBlank { "—" }} · ${state.courseCount} 门课")
             }
 

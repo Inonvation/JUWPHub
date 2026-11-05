@@ -51,6 +51,17 @@ object ScheduleCalculator {
     /** 周次是否落在学期内（1..totalWeeks）。所有「在不在学期内」的判定都走这里。 */
     fun isWeekInTerm(config: SemesterConfig, week: Int): Boolean = week in 1..config.totalWeeks
 
+    /**
+     * 今天落在学期内的教学周次；今天不在学期内（含未配置学期）返回 null。
+     *
+     * 与 [weekNumberOf] 的分工：后者是不设上下界的算术结果（学期结束后会一路涨到 30+），
+     * 只能当「相差几周」用。界面上的「本周」必须是 1..totalWeeks 之内的周次——
+     * 直接拿裸周次比较，会出现「本周 = 第 37 周」而网格只有 20 周的情况，
+     * 课表页的「回到本周」于是永远点不掉（2026-11-05 用户报障的根因）。
+     */
+    fun todayWeekOf(config: SemesterConfig?, date: LocalDate): Int? =
+        config?.let { weekNumberOf(it, date).takeIf { week -> isWeekInTerm(it, week) } }
+
     /** 周次 + 星期 → 日期；学期缺失 / 参数越界时 null。 */
     fun dateOf(config: SemesterConfig?, week: Int, day: Int): LocalDate? {
         if (config == null) return null

@@ -35,6 +35,12 @@ data class TodayState(
     /** 今天的日期，顶栏「9月18日 周四」用 */
     val date: LocalDate = LocalDate.now(),
     val inTerm: Boolean = false,
+    /**
+     * 学期已配置，但今天已过最后一周（学期结束 / 当前课表是旧学期的课表）。
+     * 与「尚未开学」同为 [inTerm] = false，界面文案不同：这里要引导换课表，
+     * 那里要引导补开学日期（2026-11-05）。
+     */
+    val afterTerm: Boolean = false,
     val slots: List<TimeSlot> = emptyList(),
     val totalCourseCount: Int = 0,
 
@@ -127,11 +133,20 @@ fun buildTodayState(
     // 日期覆盖（调休 / 停课，§4.40）在这里摊平一次，今天与明天共用同一张表
     val plan = ScheduleOverrides.plan(overrides, semester)
     val day = today.dayOfWeek.value
-    val week = semester?.let { ScheduleCalculator.weekNumberOf(it, today) } ?: 0
-    val inTerm = semester != null && ScheduleCalculator.isWeekInTerm(semester, week)
+    // 「本周」只认学期内的周次（null = 今天不在学期内，含未配置学期）。
+    // 裸周次在学期结束后会一路涨到 30+，只能用来判断「学期已结束」，不能进界面：
+    // 顶栏此前会显示「第 37 周」、课表页的「回到本周」也永远点不掉（2026-11-05 用户报障）。
+    val termWeek = ScheduleCalculator.todayWeekOf(semester, today)
+    val inTerm = termWeek != null
+    val week = termWeek ?: 0
+    // 已过最后一周（学期结束 / 当前课表是旧学期的课表）：与「尚未开学」共用 inTerm=false，
+    // 但界面文案不同（前者要引导换课表，后者要引导设开学日期）。
+    // 只在学期外才算裸周次（学期内根本不需要，也省掉一次开学日解析）。
+    val afterTerm = termWeek == null && semester != null &&
+        ScheduleCalculator.weekNumberOf(semester, today) > semester.totalWeeks
 
-    val dayCourses = if (inTerm) {
-        ScheduleCalculator.coursesOnDay(courses, week, day, plan)
+    val dayCourses = if (termWeek != null) {
+        ScheduleCalculator.coursesOnDay(courses, termWeek, day, plan)
     } else {
         emptyList()
     }
@@ -166,8 +181,9 @@ fun buildTodayState(
 
     val tomorrow = today.plusDays(1)
     val tomorrowDay = tomorrow.dayOfWeek.value
-    val tomorrowWeek = semester?.let { ScheduleCalculator.weekNumberOf(it, tomorrow) } ?: 0
-    val tomorrowInTerm = semester != null && ScheduleCalculator.isWeekInTerm(semester, tomorrowWeek)
+    // 明天同口径：只在明天也落在学期内时给周次（0 = 明天不在学期内）
+    val tomorrowWeek = ScheduleCalculator.todayWeekOf(semester, tomorrow) ?: 0
+    val tomorrowInTerm = tomorrowWeek > 0
     // 倒计时文案与结构化目标从同一次计算出：桌面 Chronometer 与今日页不会出现
     // 「页面 24 分钟、桌面 25 分钟」这种两套口径
     val ongoingTarget = ongoing?.let { ongoingCountdownTarget(slots, it, now) }
@@ -179,6 +195,7 @@ fun buildTodayState(
         day = day,
         date = today,
         inTerm = inTerm,
+        afterTerm = afterTerm,
         slots = slots,
         totalCourseCount = courses.size,
         remaining = remaining,

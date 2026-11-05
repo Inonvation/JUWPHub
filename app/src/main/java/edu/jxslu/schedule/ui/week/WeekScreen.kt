@@ -530,7 +530,9 @@ fun WeekScreen(
             // 根因：顶栏右侧图标区已排满（眼睛 + 导入），且「回到本周」是低频的**纠偏**动作、
             // 不是常驻导航——放顶栏会与高频入口抢位置，也让顶栏在切周时左右跳动。
             // 放右下角后：位置固定不参与顶栏布局，拇指可达，底部再抬 24dp 避让外层底栏。
-            val showBackToWeek = !state.loading && displayWeek != state.todayWeek
+            // todayWeek == null（今天不在这张课表的学期内）= 没有「本周」可回，按钮不出现。
+            val todayWeek = state.todayWeek
+            val showBackToWeek = !state.loading && todayWeek != null && displayWeek != todayWeek
             if (showBackToWeek) {
                 BackToCurrentWeekButton(
                     onClick = { viewModel.goToToday() },

@@ -727,6 +727,34 @@ fun TodayScreen(
             when {
                 state.loading -> TodayLoadingContent()
 
+                // 学期已配好、但今天已过最后一周：多半是切到了旧学期的课表。
+                // 这里**不能**再报「尚未开学或未配置学期」——学期明明配好了，那句是假话
+                // （2026-11-05 用户报障）。点名这张课表的学期范围，两条出路都写清：
+                // 旧课表 → 去课表页换课表；日期填错 → 去课表设置改开学日期。
+                state.afterTerm -> {
+                    // afterTerm 蕴含 semester 非空；仍按可空写，避免正文里冒出 "null"。
+                    // 两段分开拼：`if … else … + "…"` 的优先级只把后半截挂到 else 分支上。
+                    val semester = state.semester
+                    val range = if (semester != null) {
+                        "这张课表按「${semester.startDate} 起 · 共 ${semester.totalWeeks} 周」算，" +
+                            "今天已超出它的学期范围。"
+                    } else {
+                        "今天不在这张课表的学期范围内。"
+                    }
+                    val body = range +
+                        "若是上学期的课表，去「课表」页顶部的课表名处切换到本学期；" +
+                        "若这张就是本学期课表，请到「课表设置」改正开学日期。"
+                    TodayEmptyContent(
+                        title = "当前课表不在本学期",
+                        body = body,
+                        actionLabel = "去课表页",
+                        onAction = onOpenWeek,
+                        onOpenInbox = onOpenInbox,
+                        onOpenRepair = onOpenDormRepair,
+                        repair = dormRepair,
+                    )
+                }
+
                 !state.inTerm -> TodayEmptyContent(
                     "尚未开学或未配置学期",
                     "先在「课表设置」里填好开学日期与周数，也能手动加课。",
@@ -935,15 +963,20 @@ private fun TodayCenteredShell(
 ) {
     // 顶部/底部的避让由外层刷新容器给（2026-09-23 起），这里不再吃 Scaffold 的 padding
     val clearance = LocalBottomBarClearance.current
-    Column(modifier = Modifier.fillMaxSize()) {
+    // 净空垫在整列底部，而不是只垫居中区：空态/加载态的贴底收件箱卡也在这列里，
+    // 只垫居中区时卡的最后一行会被悬浮胶囊压住（2026-11-05 用户报「界面被挤压」）。
+    // 两种写法下居中区的高度相同（都少掉 clearance 这一段），居中内容的位置不变。
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = clearance),
+    ) {
         // fillMaxWidth 必须带：Box 默认 wrap 内容、crossAxis 左对齐，
         // 少了它整个居中态贴左（旧版加载态左偏的根因）。
-        // 底部让开悬浮胶囊：dock 收进侧栏后，居中内容直接贴到窗口底（2026-10-20）
         Box(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth()
-                .padding(bottom = clearance),
+                .fillMaxWidth(),
             contentAlignment = Alignment.Center,
         ) {
             content()
