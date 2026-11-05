@@ -376,6 +376,92 @@ class KqcxAuthTest {
         assertNull(members[1].endAt)
     }
 
+    // ── 服务端订单历史（queryOrderList，2026-11-05 解包补出） ──
+
+    @Test
+    fun `订单列表解析与三种状态`() {
+        val json = """{"resultCode":1,"errorCode":0,"result":{"list":[
+            {"id":101,"orderNum":"KV20261105001","carNum":"100000669","deviceType":1,
+             "endDate":"2026-11-05 18:32:11","totalDate":"1250","payMoney":150,
+             "orderMoney":"200","dispatchMoney":0.0,"needPay":false},
+            {"id":102,"carNum":"100000670","endDate":"2026-11-04 09:00:00",
+             "totalDate":600,"payMoney":"350","needPay":true},
+            {"id":103,"carNum":"100000671","endDate":null,"totalDate":120}
+        ]}}"""
+        val orders = KqcxAuth.parseOrderList(json)
+        assertEquals(3, orders.size)
+        // 已完成：金额单位是分，数值类型宽容（字符串 / 小数都收）
+        assertEquals(150L, orders[0].payMoneyCents)
+        assertEquals(200L, orders[0].orderMoneyCents)
+        assertEquals(1250L, orders[0].totalSeconds)
+        assertEquals("已完成", orders[0].statusText)
+        assertEquals("电单车", orders[0].deviceLabel)
+        // 有 endDate 且 needPay = 待支付
+        assertTrue(orders[1].unpaid)
+        assertEquals("待支付", orders[1].statusText)
+        // 没有 endDate = 进行中（官方列表页同判据）
+        assertTrue(orders[2].running)
+        assertEquals("进行中", orders[2].statusText)
+    }
+
+    @Test
+    fun `订单列表缺字段与脏行容错`() {
+        // 缺车号但订单号在：留下；两者都没有：跳过（脏行不占一屏空格子）
+        val json = """{"resultCode":1,"errorCode":0,"result":{"list":[
+            {"orderNum":"KV1","payMoney":100},
+            {"deviceType":1,"payMoney":100},
+            null
+        ]}}"""
+        val orders = KqcxAuth.parseOrderList(json)
+        assertEquals(1, orders.size)
+        assertNull(orders[0].carNum)
+        // 缺结束时间按进行中处理，不猜
+        assertTrue(orders[0].running)
+        // 金额缺失是 null，不编 0 元
+        assertNull(
+            KqcxAuth.parseOrderList(
+                """{"resultCode":1,"errorCode":0,"result":{"list":[{"carNum":"1"}]}}""",
+            ).single().payMoneyCents,
+        )
+    }
+
+    @Test
+    fun `订单有没有花钱按实付判断`() {
+        // 卡券覆盖的 0 元单：原价 0.8 元、实付 0 → 不算花钱（与超时费口径一致）
+        val free = KqcxAuth.parseOrderList(
+            """{"resultCode":1,"errorCode":0,"result":{"list":[
+                {"orderNum":"A","endDate":"2026-11-01 10:00:00","orderMoney":80,"payMoney":0}
+            ]}}""",
+        ).single()
+        assertFalse(free.hasFee)
+
+        val paid = KqcxAuth.parseOrderList(
+            """{"resultCode":1,"errorCode":0,"result":{"list":[
+                {"orderNum":"B","endDate":"2026-11-01 10:00:00","orderMoney":80,"payMoney":80}
+            ]}}""",
+        ).single()
+        assertTrue(paid.hasFee)
+
+        // 进行中：金额还没结算（缺失），筛选「有费用」时不该出现
+        val running = KqcxAuth.parseOrderList(
+            """{"resultCode":1,"errorCode":0,"result":{"list":[{"orderNum":"C"}]}}""",
+        ).single()
+        assertFalse(running.hasFee)
+    }
+
+    @Test
+    fun `订单列表空与业务错误`() {        assertTrue(KqcxAuth.parseOrderList("""{"resultCode":1,"errorCode":0,"result":null}""").isEmpty())
+        assertTrue(
+            KqcxAuth.parseOrderList("""{"resultCode":1,"errorCode":0,"result":{"list":null}}""").isEmpty(),
+        )
+        try {
+            KqcxAuth.parseOrderList("""{"resultCode":0,"errorCode":20002,"resultMsg":"登录已失效"}""")
+            throw AssertionError("应当抛业务错误")
+        } catch (e: KvcBusinessError) {
+            assertEquals(20002, e.errorCode)
+        }
+    }
+
     @Test
     fun `parseSuccess 只认信封成功`() {
         KqcxAuth.parseSuccess("""{"resultCode":1,"errorCode":0,"result":null,"resultMsg":"ok"}""")

@@ -1,34 +1,35 @@
 package edu.jxslu.schedule.ui.ebike
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,57 +39,67 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.SubpageActivity
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.domain.EbikeCardExpiry
 import edu.jxslu.schedule.domain.EbikeCardSavings
+import edu.jxslu.schedule.domain.EbikeRideStats
 import edu.jxslu.schedule.domain.KqcxAuth
-import edu.jxslu.schedule.domain.RideRecord
 import edu.jxslu.schedule.domain.capabilities
-import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
-import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.ui.common.SettingItem
+import edu.jxslu.schedule.ui.common.PageScaffoldColumn
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
+import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.postNotice
-import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ScooterElectric
+import me.rerere.hugeicons.stroke.ChevronRight
+import me.rerere.hugeicons.stroke.History
+import me.rerere.hugeicons.stroke.InformationCircle
+import me.rerere.hugeicons.stroke.Refresh
+import me.rerere.hugeicons.stroke.UserAccount
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import java.time.Instant
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * 快趣账号页（DESIGN §4.32；**2026-09-29 起只管账号与本机记录**）。
+ * 快趣账号页（DESIGN §4.32；**2026-11-05 改版**，效果稿 `docs/kvcx-account-redesign.html`）。
  *
- * 骑行状态并进了快趣出行页（`RideScreen`）的骑行态面板，
- * 使用方式切换收进了「快趣出行设置」弹层——本页只留登录 / 账号 / 本机骑行记录，
- * 与出码页（工作台）不再有重复区块。
+ * 三段结构（原先是七块各自带一段说明，读起来像文档）：
+ * 1. **身份卡**：账号掩码 + 「已登录」+ 凭证去向一句话。原「打开快趣出行」按钮已删
+ *    （用户 2026-11-05 口径：本页只管账号，去向在侧栏与快趣出行页，不该在这儿再开一个口）；
+ * 2. **快趣资产**：三列指标（骑行卡剩余 / 已用额度 / 余额）+ 到期警示 + 两条小结
+ *    （骑行卡已省、超时费累计）+ 一句注记。会员折扣不显示（学校用不到）；
+ * 3. **骑行记录**：服务端「历史订单」入口 + 本机记录（默认收起，点开看最近 8 条）。
+ * 页尾只剩「退出登录」（带确认）与一行免责。
  *
- * 两态：未登录 = 手机号 + 密码表单（失败保留输入、Snackbar 提示）；
- * 已登录 = 账号掩码 + 退出登录。「打开快趣出行」进快趣出行页（两档共用那一个页面）。
+ * **超时费累计**（2026-11-05 用户要求）：口径在 [EbikeRideStats]——次数数订单、单元数
+ * 15 分钟；数据靠全量扫描服务端订单（[KvcxViewModel.refreshStats]），**只由「统计」按钮触发**，
+ * 进页不发请求。
  *
- * **免责边界**：开锁 / 临时锁车 / 还车在工作台逐次确认后执行；支付与免押授权不做
- * ——页尾一行常驻说明。
+ * **免责边界**：开锁 / 临时锁车 / 还车在工作台逐次确认后执行；支付与免押授权不做。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,7 +109,6 @@ fun KvcxScreen(
     val context = LocalContext.current
     val viewModel: KvcxViewModel = viewModel(factory = KvcxViewModel.factory(context))
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val records by viewModel.rideRecords.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     // 使用方式（DESIGN §3.9 / §4.32）：初值阻塞读一次，页面不该先按另一档画一帧
@@ -108,9 +118,8 @@ fun KvcxScreen(
     )
     // 能力矩阵（DESIGN §3.9）：本页的账号 / 记录属于 App 内用车那一档
     val appRideEnabled = useMode.capabilities().inAppRide
-    // 骑行卡节省（2026-10-24）：以开卡额度与服务端剩余次数推算已用次数——**没有可参与
-    // 推算的卡**（无可用卡 / 只有无限次数卡 / 次数缺失）返回 null，区块不显示。
-    // 资产查询失败同样不显示，宁缺勿错。
+    // 骑行卡节省与已用额度（2026-10-24 / 2026-11-05）：额度 − 服务端剩余次数；
+    // 没有可参与推算的卡（无可用卡 / 只有无限次数卡 / 次数缺失）返回 null，指标位显示「—」。
     val cardSavings = state.assets?.let { assets ->
         EbikeCardSavings.computeFromCoupons(assets.coupons, System.currentTimeMillis())
     }
@@ -130,57 +139,39 @@ fun KvcxScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("快趣账号") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
+    PageScaffoldColumn(title = "快趣账号", onBack = onBack, snackbar = snackbar) {
+        when {
+            // 兜底：本页入口在「小程序方式」下是隐藏的（校园服务里那一行按模式显隐），
+            // 正常进不来。真进来了也不该给一个死胡同，所以说清去哪儿切
+            !appRideEnabled -> InlineNoticeRow(
+                message = "当前是「微信小程序」使用方式：本页的账号与本机记录都已收起，" +
+                    "开车与还车在微信小程序里完成。要切换使用方式，请到快趣出行页标题栏的" +
+                    "「使用方式」入口。",
+                tone = NoticeTone.Info,
             )
-        },
-        snackbarHost = {
-            AppSnackbarHost(state = snackbar)
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (appRideEnabled) {
-                if (state.loggedIn) {
-                    AccountSection(state, viewModel)
-                    // 快趣资产（2026-09-30）：余额 / 卡券 / 会员卡，只读
-                    AssetsSection(state = state, onRefresh = viewModel::refreshAssets)
-                    // 骑行卡节省（2026-10-24）：有可参与推算的卡才显示（判据见 cardSavings）
-                    cardSavings?.let { savings -> CardSavingsSection(result = savings) }
-                } else {
-                    LoginSection(state, viewModel)
-                }
-                // 本机记录与登录态无关：退出登录也照样看得到自己的骑行史
-                RideHistorySection(records = records, onClear = viewModel::clearRecords)
-            } else {
-                // 兜底：本页入口在「小程序方式」下是隐藏的（校园服务里那一行按模式显隐），
-                // 正常进不来。真进来了也不该给一个死胡同，所以说清去哪儿切
-                InlineNoticeRow(
-                    message = "当前是「微信小程序」使用方式：本页的账号与本机记录都已收起，" +
-                        "开车与还车在微信小程序里完成。要切换使用方式，请到快趣出行页标题栏的" +
-                        "「使用方式」入口。",
-                    tone = NoticeTone.Info,
+
+            state.loggedIn -> {
+                AccountHeroCard(mobile = state.accountMobile)
+                AssetsSection(
+                    state = state,
+                    savings = cardSavings,
+                    onRefreshAssets = viewModel::refreshAll,
                 )
+                OrdersSection(
+                    onOpenOrders = { SubpageActivity.start(context, SubpageScreen.KVCX_ORDERS) },
+                )
+                LogoutRow(onLogout = viewModel::logout)
             }
-            // 边界说明只留一行（此前整段免责区与出码页重复，2026-09-29 收敛）
-            FooterDisclaimer(
-                body = "**非官方账号页**：开锁 / 锁车 / 还车逐次确认；" +
-                    "**计费与善后以快趣为准**，不提供支付与免押授权。",
-            )
+
+            else -> {
+                LoginSection(state, viewModel)
+            }
         }
+        // 边界说明只留一行（此前整段免责区与出码页重复，2026-09-29 收敛）
+        FooterDisclaimer(
+            body = "**非官方账号页**：开锁 / 锁车 / 还车逐次确认；" +
+                "**计费与善后以快趣为准**，不提供支付与免押授权。",
+        )
     }
 
     // 骑行卡券临近到期（前一天）的提醒：查资产时算出，关掉即落「已提醒」键（同一张卡只弹一次）
@@ -188,6 +179,591 @@ fun KvcxScreen(
         CardExpiryDialog(coupons = coupons, onDismiss = viewModel::dismissCardExpiry)
     }
 }
+
+// ── 身份卡 ──
+
+/**
+ * 身份卡（2026-11-05 改版）：头像 + 手机号掩码 + 「已登录」+ 凭证去向。
+ *
+ * 原先是「账号」区标题 + 副标题 + SettingItem + 一行「打开快趣出行」按钮 + 「退出登录」，
+ * 一段话里塞了三个层级；现在只留身份本身，退出登录挪到页尾。
+ */
+@Composable
+private fun AccountHeroCard(mobile: String) {
+    AppCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    HugeIcons.UserAccount,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = maskMobile(mobile),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    SignedInPill()
+                }
+                Text(
+                    text = "凭证仅存本机 · 不进云备份",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+/** 手机号掩码：11 位取前 3 后 4，其它形态原样（不编数字）。 */
+private fun maskMobile(mobile: String): String {
+    val trimmed = mobile.trim()
+    return if (trimmed.length == 11) {
+        "${trimmed.take(3)}****${trimmed.takeLast(4)}"
+    } else {
+        trimmed.ifBlank { "已登录" }
+    }
+}
+
+@Composable
+private fun SignedInPill() {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    ) {
+        Text(
+            text = "已登录",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+// ── 快趣资产（2026-09-30 新增，2026-11-05 改版） ──
+
+/**
+ * 「快趣资产」：三列指标 + 到期警示 + 两条小结 + 一句注记。
+ *
+ * 充值、退押、买卡都走微信收银台（App 不做支付，DESIGN §4.32 红线），所以这里只有"看"。
+ * 进页自动查一次，失败保留已有内容、只在区块内给一行说明（不打扰：资产不是本页的主任务）。
+ *
+ * **指标口径**（2026-11-05 用户口径）：
+ * - 骑行卡 = 可用卡的剩余次数合计（无限次数卡直接写「无限」）；
+ * - 已用额度 = [EbikeCardSavings] 的 `usedRides`（额度 − 剩余次数，服务端计数），
+ *   **取代原「会员卡 X 折」**——学校用不到会员，用户要求换成已用次数；
+ * - 余额 = 充值 + 赠送（官方钱包页同口径）。
+ *
+ * **超时费累计**：口径在 [EbikeRideStats]（次数数订单、单元数 15 分钟），数据由「统计」
+ * 按钮触发全量扫描；行内显示进度，点开看明细。
+ */
+@Composable
+private fun AssetsSection(
+    state: KvcxUiState,
+    savings: EbikeCardSavings.Result?,
+    onRefreshAssets: () -> Unit,
+) {
+    var showStatsDetail by remember { mutableStateOf(false) }
+    var showSavingsDetail by remember { mutableStateOf(false) }
+    val assets = state.assets
+    val now = System.currentTimeMillis()
+    AppCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("快趣资产", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = "只读展示；充值、退押、买卡在快趣小程序完成。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            if (state.assetsLoading) {
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                }
+            } else {
+                IconButton(onClick = onRefreshAssets) {
+                    Icon(
+                        HugeIcons.Refresh,
+                        contentDescription = "刷新资产",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+        if (assets == null) {
+            Text(
+                text = if (state.assetsLoading) "正在查询资产…" else "资产查询失败，点右上角刷新再试一次。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+            )
+        } else {
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MetricCell(
+                    label = "骑行卡",
+                    value = remainingValue(assets),
+                    // 余额降到这行小字（2026-11-05 用户要求）：三列留给「还剩多少次 / 用了多少 / 什么时候到期」
+                    caption = if (assets.balance == null) "余额查询失败" else "余额 ${balanceValue(assets)}",
+                    modifier = Modifier.weight(1f),
+                )
+                MetricCell(
+                    label = "已用额度",
+                    value = savings?.let { "${it.usedRides} 次" } ?: "—",
+                    // 无限次数卡没有「260 次」基准，不参与推算——写「无限次数卡」而不是「未开卡」
+                    caption = when {
+                        savings != null -> "共 ${savings.quotaTotal} 次"
+                        assets.coupons.any { it.unlimited } -> "无限次数卡"
+                        else -> "未开卡"
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                MetricCell(
+                    label = "到期",
+                    value = expiryValue(assets),
+                    caption = expiryCaption(assets, now),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            cardWarning(assets, now)?.let { warning ->
+                Text(
+                    text = warning,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            savings?.let { result ->
+                SumRow(
+                    label = "骑行卡已省",
+                    value = EbikeRideStats.moneyText(result.savedCents),
+                    // 口径说明收进感叹号弹窗（2026-11-05 用户要求）：一行里塞不下换算方式
+                    onInfo = { showSavingsDetail = true },
+                )
+            }
+            StatsSumRow(
+                state = state,
+                onClick = { if (state.stats != null) showStatsDetail = true },
+            )
+        }
+    }
+    if (showStatsDetail) {
+        val summary = state.stats
+        val from = state.statsFrom
+        val to = state.statsTo
+        if (summary != null && from != null && to != null) {
+            StatsDetailDialog(
+                summary = summary,
+                from = from,
+                to = to,
+                months = state.statsMonths,
+                coverage = state.statsCoverage,
+                scanLine = EbikeRideStats.scanLine(
+                    scannedMonths = state.statsScannedMonths,
+                    fetchedRows = state.statsFetchedRows,
+                    uniqueOrders = state.statsUniqueOrders,
+                ),
+                onDismiss = { showStatsDetail = false },
+            )
+        }
+    }
+    if (showSavingsDetail && savings != null) {
+        SavingsDetailDialog(result = savings, onDismiss = { showSavingsDetail = false })
+    }
+}
+
+/**
+ * 一列指标（2026-11-05 改版）：小标签 + 数值 + 一行说明，三列并排。
+ * 标签给「这一列是什么」（骑行卡 / 已用额度 / 余额），说明给「数字怎么来的」；
+ * 数值用 titleLarge，与说明拉开层级（效果稿里 19px vs 10.5px）。
+ */
+@Composable
+private fun MetricCell(
+    label: String,
+    value: String,
+    caption: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 1.dp),
+        )
+        Text(
+            text = caption,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 1.dp),
+        )
+    }
+}
+
+/** 骑行卡剩余次数：无限次数卡写「无限」，没有可用卡写「—」（不编 0）。 */
+private fun remainingValue(assets: KqcxAuth.Assets): String {
+    if (assets.coupons.any { it.unlimited }) return "无限"
+    val remaining = assets.coupons.sumOf { it.remainFrequency ?: 0L }
+    val usable = assets.coupons.any { it.remainFrequency != null }
+    return if (usable) "$remaining 次" else "—"
+}
+
+/**
+ * 到期列（2026-11-05 用户要求：余额那列换成到期日，显示到具体时间）。
+ *
+ * 数值只放 `MM-dd`——三列并排时 `titleLarge` 塞不下「2026-12-31」；时分放到下面那行小字里
+ * （[expiryCaption]），跨年再补年份。取**最近一张可用卡**的到期时刻，多张卡时以最早的为准。
+ */
+private fun expiryValue(assets: KqcxAuth.Assets): String {
+    val endAt = nearestCardEndAt(assets) ?: return "—"
+    return MONTH_DAY_FORMAT.format(Instant.ofEpochMilli(endAt).atZone(ZoneId.systemDefault()))
+}
+
+/** 到期列的说明：`23:59 到期`（跨年补 `2027 年`）；没有可用卡写「无可用卡」。 */
+private fun expiryCaption(assets: KqcxAuth.Assets, now: Long): String {
+    val endAt = nearestCardEndAt(assets) ?: return "无可用卡"
+    val zoned = Instant.ofEpochMilli(endAt).atZone(ZoneId.systemDefault())
+    val time = TIME_OF_DAY_FORMAT.format(zoned)
+    val currentYear = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).year
+    return if (zoned.year != currentYear) "${zoned.year} 年 $time 到期" else "$time 到期"
+}
+
+/** 最近一张**可用**卡（有次数）的到期时刻；无限次数卡没有到期日时返回 null。 */
+private fun nearestCardEndAt(assets: KqcxAuth.Assets): Long? =
+    assets.coupons
+        .filter { it.remainFrequency != null }
+        .mapNotNull { EbikeCardExpiry.parseEndAt(it.endAt) }
+        .minOrNull()
+
+/** 余额 = 充值 + 赠送（官方钱包页同口径）；两项都缺写「—」。 */
+private fun balanceValue(assets: KqcxAuth.Assets): String {
+    val balance = assets.balance ?: return "—"
+    if (balance.rechargeCents == null && balance.giftCents == null) return "—"
+    val total = (balance.rechargeCents ?: 0L) + (balance.giftCents ?: 0L)
+    return EbikeRideStats.moneyText(total)
+}
+
+/** 到期警示：已过期 / 3 天内到期才出一行（与卡券列表同一个窗口口径）。 */
+private fun cardWarning(assets: KqcxAuth.Assets, now: Long): String? {
+    val expired = assets.coupons.firstOrNull { coupon ->
+        EbikeCardExpiry.parseEndAt(coupon.endAt)?.let { it <= now } == true
+    }
+    if (expired != null) {
+        return "${expired.deviceLabel}骑行卡已过期；续费请到快趣小程序"
+    }
+    val soon = assets.coupons.firstOrNull { coupon ->
+        val endAt = EbikeCardExpiry.parseEndAt(coupon.endAt)
+        endAt != null && endAt - now <= CARD_EXPIRY_SOON_MS
+    } ?: return null
+    val endAt = EbikeCardExpiry.parseEndAt(soon.endAt) ?: return null
+    return "${soon.deviceLabel}骑行卡 ${EbikeCardExpiry.remainingText(endAt, now)}；到期后按快趣规则计费"
+}
+
+/**
+ * 小结一行：左标签、右金额、最右一个「口径说明」感叹号（2026-11-05 用户要求）。
+ *
+ * 原先这里是一行灰色小字（「估算 · 以快趣为准」），换算方式根本写不下；改成图标点开弹窗后，
+ * 主行只留标签与金额，要看细节的点图标。
+ */
+@Composable
+private fun SumRow(label: String, value: String, onInfo: (() -> Unit)? = null) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        if (onInfo != null) {
+            IconButton(onClick = onInfo, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    HugeIcons.InformationCircle,
+                    contentDescription = "$label 的算法说明",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 「骑行卡已省」的算法说明（2026-11-05 用户要求：注释改成感叹号，点开看具体换算）。
+ *
+ * 数字来自 [EbikeCardSavings]：开卡 260 次额度、每次最多省 ¥0.80、开卡 ¥18.80。
+ * 这只是估算——真实扣费在快趣那边，所以最后一句必须写清「以快趣为准」。
+ */
+@Composable
+private fun SavingsDetailDialog(result: EbikeCardSavings.Result, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("骑行卡已省怎么算") },
+        text = {
+            DialogWindowFadeEffect()
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "按开卡额度 ${EbikeCardSavings.CARD_QUOTA} 次、每次最多省 " +
+                        "${EbikeRideStats.moneyText(EbikeCardSavings.PER_RIDE_CENTS)} 估算，不是快趣给的账单。",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = "已用 ${result.usedRides} 次 × " +
+                        "${EbikeRideStats.moneyText(EbikeCardSavings.PER_RIDE_CENTS)} = " +
+                        EbikeRideStats.moneyText(result.savedCents),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = "开卡成本 ${EbikeRideStats.moneyText(EbikeCardSavings.CARD_PRICE_CENTS)} → " +
+                        "净省 ${EbikeRideStats.moneyText(result.netCents)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (result.netCents < 0) {
+                    Text(
+                        text = "还差 ${result.ridesToBreakEven} 次回本（每次按省 " +
+                            "${EbikeRideStats.moneyText(EbikeCardSavings.PER_RIDE_CENTS)} 算）。",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Text(
+                    text = "只算骑行卡覆盖的订单；没开卡时按 15 分钟 0.80 元起扣的部分不计入。以快趣为准。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("知道了") }
+        },
+    )
+}
+
+/**
+ * 「超时费累计」一行（2026-11-05 用户要求：进页自动增量重算，去掉「重算」按钮）。
+ *
+ * 数据每次进页自动补：先用本地缓存出数（不联网），再增量拉最近两个月后重算；
+ * 缓存为空时自动全量扫一次。所以这里**没有按钮**——有结果时整行可点开明细（右侧箭头提示可点），
+ * 统计中只把进度写在副行里。
+ */
+@Composable
+private fun StatsSumRow(
+    state: KvcxUiState,
+    onClick: () -> Unit,
+) {
+    val summary = state.stats
+    val statsError = state.statsError
+    val caption = when {
+        state.statsLoading -> "正在同步…已查 ${state.statsScannedMonths} 个月"
+        statsError != null && summary == null -> statsError
+        summary != null -> buildString {
+            append(EbikeRideStats.caption(summary))
+            // 缓存可能只覆盖最近两个月（进页增量刷新），把起点写出来，别让部分数据看着像全量
+            state.statsFrom?.let { append(" · 自 $it") }
+        }
+        else -> "正在同步…"
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (summary != null) Modifier.clickable { onClick() } else Modifier)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("超时费累计", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = caption,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 1.dp),
+            )
+        }
+        Text(
+            text = summary?.let { EbikeRideStats.moneyText(it.overtimeCents) } ?: "—",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (summary != null) {
+            Icon(
+                HugeIcons.ChevronRight,
+                contentDescription = "查看超时费明细",
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                modifier = Modifier
+                    .padding(start = 2.dp)
+                    .size(14.dp),
+            )
+        }
+    }
+}
+
+/** 超时费明细弹窗：口径逐行写清（次数数订单、单元数 15 分钟、只含骑行费）+ 按月分布 + 扫描诊断行。 */
+@Composable
+private fun StatsDetailDialog(
+    summary: EbikeRideStats.Summary,
+    from: YearMonth,
+    to: YearMonth,
+    months: List<String>,
+    coverage: String?,
+    scanLine: String?,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("超时费累计") },
+        text = {
+            // 过渡效果必须落在弹窗窗口自己的组合里（内容槽第一行），放外面取到的是页面窗口
+            DialogWindowFadeEffect()
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                EbikeRideStats.detailLines(summary, from.toString(), to.toString()).forEach { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
+                // 覆盖月份 + 月均：把「¥1245」换算成「每月 53 单 / ¥44」，和记忆对得上才算核实
+                coverage?.let { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
+                // 按月拆开（2026-11-05 用户要求「核实一下」）：总数对不上时，先看是哪个月离谱
+                if (months.isNotEmpty()) {
+                    Text(
+                        text = "按月（最近 ${months.size} 个月）",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
+                    )
+                    months.forEach { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(bottom = 2.dp),
+                        )
+                    }
+                }
+                scanLine?.let { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("知道了") }
+        },
+    )
+}
+
+// ── 骑行记录（服务端订单） ──
+
+/**
+ * 「骑行记录」：只留服务端历史订单的入口。
+ *
+ * 2026-11-05 用户要求删掉本机记录（「把多余的本机记录删掉吧」）——服务端订单已经
+ * 覆盖全部骑行，本机那份只记 App 内开的车，重复且容易和账单对不上。数据层
+ * （`ride_records` 表 / `RideRecordStore`）保留：自动还车的未结清对账还在用它。
+ */
+@Composable
+private fun OrdersSection(onOpenOrders: () -> Unit) {
+    SettingsSection(
+        title = "骑行记录",
+        subtitle = "服务端账单，按月份查询。",
+    ) {
+        SettingItem(
+            title = "历史订单",
+            subtitle = "电单车 / 单车分档，按月份查询",
+            icon = HugeIcons.History,
+            onClick = onOpenOrders,
+        )
+    }
+}
+
+/** 「临近到期」的提示窗口：3 天（与卡券提醒的 1 天窗口不同：这里只是列表里的一句话）。 */
+private const val CARD_EXPIRY_SOON_MS = 3L * 24 * 60 * 60 * 1000
+
+private val MONTH_DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd", Locale.US)
+
+/** 到期时刻只显示到分：服务端给到秒，秒对用户没有意义，还会把三列挤爆。 */
+private val TIME_OF_DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
+
+// ── 页尾：退出登录 ──
+
+/** 页尾退出登录（2026-11-05 从账号卡里挪下来）：低频破坏性动作，单独一行 + 二次确认。 */
+@Composable
+private fun LogoutRow(onLogout: () -> Unit) {
+    var confirm by remember { mutableStateOf(false) }
+    TextButton(
+        onClick = { confirm = true },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("退出登录", color = MaterialTheme.colorScheme.error)
+    }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("退出登录？") },
+            text = {
+                DialogWindowFadeEffect()
+                Text("退出后本机凭证会被清除，再进本页需要重新输入手机号与密码；本机骑行记录不受影响。")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirm = false
+                    onLogout()
+                }) {
+                    Text("退出", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirm = false }) { Text("取消") }
+            },
+        )
+    }
+}
+
+// ── 骑行卡到期提醒弹窗 ──
 
 /**
  * 「骑行卡即将到期」提醒弹窗（DESIGN §4.32，2026-10-14）：资产查询发现卡券落在
@@ -231,319 +807,12 @@ private fun CardExpiryDialog(coupons: List<KqcxAuth.AssetCoupon>, onDismiss: () 
     )
 }
 
-// ── 本机骑行记录 ──
-
-/**
- * 「骑行卡节省」（2026-10-24 用户要求，同日改服务端口径）：开卡一次给 260 次
- * 前 15 分钟免费额度，额度与资产接口剩余次数之差 = 已用次数，每单按省 ¥0.8 计、
- * 扣开卡 ¥18.8 为净省。口径全在 [EbikeCardSavings]（纯函数 + 单测），这里只排版；
- * 不依赖本机骑行记录（开卡前的旧订单、微信里骑的都天然算对），**不新增任何请求**。
- * **估算不是账单**，副标题写明。显示条件（有可参与推算的卡）由调用方把关（见 [KvcxScreen]）。
- */
-@Composable
-private fun CardSavingsSection(result: EbikeCardSavings.Result) {
-    SettingsSection(
-        title = "骑行卡节省",
-        subtitle = "按开卡 ${EbikeCardSavings.CARD_QUOTA} 次额度 × 每单省 ¥0.8、开卡 ¥18.8 估算，以快趣为准。",
-    ) {
-        Text(
-            text = EbikeCardSavings.summaryText(result),
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(vertical = 4.dp),
-        )
-    }
-}
-
-/**
- * 「最近骑行」（DESIGN §3.9，2026-09-28）：只记**本机用车**这条链路（起点 / 终点 /
- * 车号 / 费用都齐的那条），「点扫一扫 → 在微信里骑」只有猜测值，不进统计。
- */
-@Composable
-private fun RideHistorySection(records: List<RideRecord>, onClear: () -> Unit) {
-    var confirmClear by remember { mutableStateOf(false) }
-    SettingsSection(
-        title = "最近骑行",
-        subtitle = "本机记录，只记在 App 里开的车；保留最近 ${RideRecord.LIMIT} 次。",
-    ) {
-        if (records.isEmpty()) {
-            Text(
-                text = "还没有记录。在 App 里开锁骑一次，这里就会留一条。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-            return@SettingsSection
-        }
-        records.take(RideRecord.SHOW_LIMIT).forEach { record ->
-            RideRecordRow(record)
-        }
-        if (records.size > RideRecord.SHOW_LIMIT) {
-            Text(
-                text = "只显示最近 ${RideRecord.SHOW_LIMIT} 次",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
-        TextButton(onClick = { confirmClear = true }) {
-            Text("清空本机记录", color = MaterialTheme.colorScheme.error)
-        }
-    }
-    if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text("清空本机记录？") },
-            text = {
-                // 过渡落在弹窗窗口自己的组合里（内容槽第一行）；放 AlertDialog 外面取到的是
-                // 页面窗口、挂不上本应用样式（等于没调用，见 ui-common.md）
-                DialogWindowFadeEffect()
-                Text("只清本机这份骑行史，快趣侧的订单与账单不受影响。")
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmClear = false
-                    onClear()
-                }) {
-                    Text("清空", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmClear = false }) { Text("取消") }
-            },
-        )
-    }
-}
-
-@Composable
-private fun RideRecordRow(record: RideRecord) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "车 ${record.carNum}",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = RECORD_TIME_FORMAT.format(
-                    Instant.ofEpochMilli(record.endAt).atZone(ZoneId.systemDefault()),
-                ),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
-        }
-        Text(
-            text = buildString {
-                append(RideRecord.durationText(record.durationSeconds))
-                append(" · ")
-                append(record.feeCents?.let { "¥%.2f".format(it / 100.0) } ?: "费用未记录")
-                append(if (record.settled) " · 已结清" else " · 未结清")
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = if (record.settled) {
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-            } else {
-                MaterialTheme.semanticColors.warning
-            },
-        )
-    }
-}
-
-private val RECORD_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.US)
-
-// ── 快趣资产（2026-09-30，只读） ──
-
-/**
- * 「快趣资产」：余额 / 卡券 / 会员卡的**只读**展示（DESIGN §4.32）。
- *
- * 充值、退押、买卡都走微信收银台（App 不做支付，DESIGN §4.32 红线），所以这里只有"看"——
- * 区标题下一行就把出路说清，别让人在这张卡里找充值按钮。进页自动查一次，失败保留
- * 已有内容、只给一行说明与「刷新」出路（不打扰：资产不是本页的主任务）。
- *
- * **主次（2026-10-22 用户口径）**：骑行卡的**剩余次数与有效期**是主角（次数 titleLarge
- * + Bold、有效期 bodyLarge + SemiBold）；充值 / 赠送余额退成一行 bodySmall 的次要信息。
- * 顺序也照这个主次排（卡券 → 会员 → 余额），别再让余额大字压在上面。
- */
-@Composable
-private fun AssetsSection(state: KvcxUiState, onRefresh: () -> Unit) {
-    SettingsSection(
-        title = "快趣资产",
-        subtitle = "只读展示；充值、退押、买卡在快趣官方渠道（微信小程序）完成。",
-    ) {
-        when {
-            state.assetsLoading && state.assets == null -> LoadingHint("正在查询资产…")
-
-            state.assets == null -> Text(
-                text = "资产查询失败，点「刷新」再试一次。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-
-            else -> {
-                val assets = state.assets
-                if (assets.coupons.isEmpty()) {
-                    Text(
-                        text = "当前没有骑行卡；开锁骑行会直接按快趣规则计费。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(vertical = 6.dp),
-                    )
-                } else {
-                    assets.coupons.forEach { coupon -> AssetCouponRow(coupon) }
-                }
-                assets.members.forEach { member -> AssetMemberRow(member) }
-                // 余额退为次要信息：一行小字，不与骑行卡抢主次
-                assets.balance?.displayText?.let { balance ->
-                    Text(
-                        text = "余额 · $balance",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-            }
-        }
-        TextButton(onClick = onRefresh, enabled = !state.assetsLoading) {
-            Text(if (state.assetsLoading) "查询中…" else "刷新")
-        }
-    }
-}
-
-/** 「临近到期」的提示窗口：3 天。只在卡片列表里做颜色与文案提示，不弹窗。 */
-private const val CARD_EXPIRY_SOON_MS = 3L * 24 * 60 * 60 * 1000
-
-/**
- * 一张骑行卡券（2026-10-22 主次调整）：**剩余次数**用 titleLarge + Bold 当主角；
- * **有效期**升到 bodyLarge + SemiBold（过期 / 3 天内到期再给错误 / 警告色）；
- * 免费时长是补充说明，留在 labelSmall。次数未知时照 [KqcxAuth.AssetCoupon.titleText]
- * 的口径（「骑行卡券」），不编数字。
- */
-@Composable
-private fun AssetCouponRow(coupon: KqcxAuth.AssetCoupon) {
-    val now = System.currentTimeMillis()
-    val endAt = remember(coupon.endAt) { EbikeCardExpiry.parseEndAt(coupon.endAt) }
-    val expired = endAt != null && endAt <= now
-    val expiringSoon = endAt != null && !expired && endAt - now <= CARD_EXPIRY_SOON_MS
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = coupon.titleText,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = coupon.deviceLabel,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        coupon.expiryText?.let { expiry ->
-            Text(
-                text = buildString {
-                    append(expiry)
-                    when {
-                        expired -> append(" · 已过期")
-                        endAt != null && expiringSoon ->
-                            append(" · ").append(EbikeCardExpiry.remainingText(endAt, now))
-                    }
-                },
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = when {
-                    expired -> MaterialTheme.colorScheme.error
-                    expiringSoon -> MaterialTheme.semanticColors.warning
-                    else -> MaterialTheme.colorScheme.onSurface
-                },
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-        coupon.freeTimeText?.let { free ->
-            Text(
-                text = free,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-    }
-}
-
-/** 一张会员卡：折扣 + 有效期。 */
-@Composable
-private fun AssetMemberRow(member: KqcxAuth.AssetMember) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-    ) {
-        Text(
-            text = listOfNotNull("会员卡", member.discountText?.let { "$it 优惠" }).joinToString(" · "),
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-        )
-        member.endAt?.trim()?.takeIf { it.isNotEmpty() }?.let { end ->
-            Text(
-                text = "有效期至 ${end.split(" ").first()}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-    }
-}
-
-// ── 已登录：账号 ──
-
-/**
- * 账号区（2026-10-07 排版统一）：身份行（SettingItem）+ 动作行。
- * 原先是身份行下面全宽堆两颗 OutlinedButton——「打开快趣出行」是主去向、
- * 「退出登录」是低频破坏性动作，两者并列等重不合理。现在主去向独占一行
- * OutlinedButton，退出收进右侧的 error 色文字按钮。
- */
-@Composable
-private fun AccountSection(state: KvcxUiState, viewModel: KvcxViewModel) {
-    val context = LocalContext.current
-    SettingsSection(title = "账号", subtitle = "凭证存于本机加密存储，token 只在内存；不进云备份。") {
-        SettingItem(
-            title = state.accountMobile.ifBlank { "已登录" },
-            subtitle = "快趣出行账号",
-            icon = HugeIcons.ScooterElectric,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedButton(
-                onClick = { SubpageActivity.start(context, SubpageScreen.RIDE) },
-                modifier = Modifier.weight(1f).height(42.dp),
-            ) {
-                Text("打开快趣出行")
-            }
-            TextButton(
-                onClick = { viewModel.logout() },
-                modifier = Modifier.padding(start = 4.dp),
-            ) {
-                Text("退出登录", color = MaterialTheme.colorScheme.error)
-            }
-        }
-    }
-}
-
 // ── 未登录：表单 ──
 
 @Composable
 private fun LoginSection(state: KvcxUiState, viewModel: KvcxViewModel) {
     var showPassword by remember { mutableStateOf(false) }
+    var showForgot by remember { mutableStateOf(false) }
     // 记住登录（2026-10-21 用户拍板：默认开）：默认把凭证加密存在本机，token 失效时静默重登
     var remember by remember { mutableStateOf(true) }
     // 卡片化（2026-09-29 统一风格）：本页其余区块都是 SettingsSection，登录表单裸在页面
@@ -610,13 +879,24 @@ private fun LoginSection(state: KvcxUiState, viewModel: KvcxViewModel) {
         // "找回"流程也没有客服通道，所以必须把去哪儿改写清楚。两个落点从解包产物核对过：
         // 小程序登录页的「忘记密码」（手机号 + 短信验证码重设，`pages/login/forget`），
         // 登录后「设置 → 修改密码」（只填新密码，`pages/setting/modifypassword`）。
-        Text(
-            text = "忘记或不知道密码？在微信里打开「快趣出行」小程序：登录页点「忘记密码」，" +
-                "用手机号 + 短信验证码重设；登录后在「设置 → 修改密码」也能改。" +
-                "密码默认加密保存在本机（可关闭「记住登录」）；不进云备份，请妥善保管。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            modifier = Modifier.padding(top = 10.dp),
+        // 2026-11-05：从一段 100+ 字的正文收进弹窗，表单本身只留一颗文字按钮。
+        TextButton(onClick = { showForgot = true }) { Text("忘记密码？") }
+    }
+    if (showForgot) {
+        AlertDialog(
+            onDismissRequest = { showForgot = false },
+            title = { Text("忘记或不知道密码") },
+            text = {
+                DialogWindowFadeEffect()
+                Text(
+                    "在微信里打开「快趣出行」小程序：登录页点「忘记密码」，用手机号 + 短信验证码重设；" +
+                        "登录后在「设置 → 修改密码」也能改。\n\n" +
+                        "密码默认加密保存在本机（可关闭「记住登录」）；不进云备份，请妥善保管。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showForgot = false }) { Text("知道了") }
+            },
         )
     }
 }

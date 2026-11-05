@@ -68,18 +68,5 @@ object EbikeCardSavings {
         }
         return Result(usedRides.toInt(), quotaTotal, savedCents, netCents, toBreakEven)
     }
-
-    /** 节省统计的一句话正文（唯一出处）；估算口径的说明归区块副标题。 */
-    fun summaryText(result: Result): String = when {
-        result.usedRides <= 0 ->
-            "本卡 ${result.quotaTotal} 次免费额度还没有用过；按每单省 ¥0.8、开卡 ¥18.8 估算。"
-        result.netCents >= 0 ->
-            "本卡已用 ${result.usedRides} 次（额度 ${result.quotaTotal} 次），" +
-                "共省 ${money(result.savedCents)}；扣除开卡 ¥18.8，已净省 ${money(result.netCents)}。"
-        else ->
-            "本卡已用 ${result.usedRides} 次（额度 ${result.quotaTotal} 次），" +
-                "共省 ${money(result.savedCents)}；扣除开卡 ¥18.8，还差 ${result.ridesToBreakEven} 次回本。"
-    }
-
-    private fun money(cents: Long): String = "¥%.2f".format(cents / 100.0)
 }
+

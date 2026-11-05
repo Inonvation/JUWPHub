@@ -88,21 +88,4 @@ class EbikeCardSavingsTest {
         assertEquals(0, weird.usedRides)
         assertEquals(0L, weird.savedCents)
     }
-
-    @Test
-    fun `文案区分回本前后与未使用`() {
-        val saved = EbikeCardSavings.summaryText(
-            EbikeCardSavings.computeFromCoupons(listOf(coupon(235L)), now)!!,
-        )
-        assertTrue(saved.contains("已用 25 次"))
-        assertTrue(saved.contains("已净省"))
-        val notYet = EbikeCardSavings.summaryText(
-            EbikeCardSavings.computeFromCoupons(listOf(coupon(255L)), now)!!,
-        )
-        assertTrue(notYet.contains("还差 19 次回本"))
-        val fresh = EbikeCardSavings.summaryText(
-            EbikeCardSavings.computeFromCoupons(listOf(coupon(260L)), now)!!,
-        )
-        assertTrue(fresh.contains("还没有用过"))
-    }
 }

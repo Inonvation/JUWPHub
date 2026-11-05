@@ -57,6 +57,12 @@ class KqcxAuthClient private constructor(private val http: OkHttpClient) {
         private const val ENDPOINT_UNPAY = "$BASE/v1.0.0/queryUnPayOrder"
 
         /**
+         * 服务端订单历史（`queryOrderList`，2026-11-05 从解包产物补出）：官方「历史订单」页
+         * `pages/order` 用它按「年 + 月 + 车型」翻订单。只读接口。
+         */
+        private const val ENDPOINT_ORDER_LIST = "$BASE/v2.0.0/queryOrderList"
+
+        /**
          * 服务区 / 还车点 / 禁停区图层（`queryZoneList`，2026-09-28 从解包产物里找到的）：
          * 官方还车点页 `pages/epark/index` 用它画多边形与还车点标记。只读接口。
          */
@@ -206,6 +212,29 @@ class KqcxAuthClient private constructor(private val http: OkHttpClient) {
     /** 未支付订单查询（只读）。 */
     suspend fun unpayJson(token: String): String = withContext(Dispatchers.IO) {
         execute(authed(ENDPOINT_UNPAY, token).post(FormBody.Builder().build()).build(), "欠费查询")
+    }
+
+    /**
+     * 服务端订单历史（只读）。参数逐字对齐官方「历史订单」页：
+     * `{page, rows, orderYear, orderMonth, deviceType}`——**按年 + 月 + 车型查**，
+     * 不是一次给全部；`deviceType` 1 = 电单车 / 2 = 单车，月份是不补零的数字。
+     */
+    suspend fun orderListJson(
+        token: String,
+        page: Int,
+        rows: Int,
+        year: Int,
+        month: Int,
+        deviceType: Int,
+    ): String = withContext(Dispatchers.IO) {
+        val body = FormBody.Builder()
+            .add("page", page.toString())
+            .add("rows", rows.toString())
+            .add("orderYear", year.toString())
+            .add("orderMonth", month.toString())
+            .add("deviceType", deviceType.toString())
+            .build()
+        execute(authed(ENDPOINT_ORDER_LIST, token).post(body).build(), "订单查询")
     }
 
     /**

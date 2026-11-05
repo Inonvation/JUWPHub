@@ -28,8 +28,9 @@ import edu.jxslu.schedule.domain.TimetablePrefs
         InboxMessageEntity::class,
         DateOverrideEntity::class,
         CurriculumCourseEntity::class,
+        KqcxOrderEntity::class,
     ],
-    version = 20,
+    version = 21,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -50,6 +51,7 @@ abstract class JuwDatabase : RoomDatabase() {
     abstract fun inboxDao(): InboxDao
     abstract fun dateOverrideDao(): DateOverrideDao
     abstract fun curriculumDao(): CurriculumDao
+    abstract fun kqcxOrderDao(): KqcxOrderDao
 
     companion object {
 
@@ -615,6 +617,33 @@ abstract class JuwDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v20 → v21（2026-11-05）：新表 `kqcx_orders`（快趣服务端订单缓存，
+         * 超时费统计在本地算，见 `data/local/KqcxOrderEntity.kt`）。非 destructive。
+         *
+         * 只有 `key` / `syncedAt` 非空，其余可空列**实体没有 Kotlin 默认值** →
+         * 建表照写裸 `TEXT` / `INTEGER`，别顺手加 NOT NULL/DEFAULT（迁移校验会崩）。
+         * 实体没有 @Index，迁移也不建索引。
+         */
+        private val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS kqcx_orders (" +
+                        "key TEXT NOT NULL PRIMARY KEY, " +
+                        "orderNum TEXT, " +
+                        "carNum TEXT, " +
+                        "deviceType INTEGER, " +
+                        "endAt TEXT, " +
+                        "totalSeconds INTEGER, " +
+                        "payMoneyCents INTEGER, " +
+                        "orderMoneyCents INTEGER, " +
+                        "dispatchMoneyCents INTEGER, " +
+                        "needPay INTEGER, " +
+                        "syncedAt INTEGER NOT NULL)",
+                )
+            }
+        }
+
         @Volatile
         private var instance: JuwDatabase? = null
 
@@ -645,6 +674,7 @@ abstract class JuwDatabase : RoomDatabase() {
                         MIGRATION_17_18,
                         MIGRATION_18_19,
                         MIGRATION_19_20,
+                        MIGRATION_20_21,
                     )
                     .build()
                     .also { instance = it }

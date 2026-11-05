@@ -1,4 +1,4 @@
-﻿# JUWPHub · Agent 工作规范
+# JUWPHub · Agent 工作规范
 
 本文件给 AI Agent / 结对工具读。人看 `README.md` 与 `DESIGN.md`。
 
@@ -90,7 +90,7 @@ Get-ChildItem -Recurse -Include *.md,*.kt | Select-String -Pattern '<旧说法>'
 | SDK 档位 | compileSdk **36** / targetSdk **36**（Android 16）。免费倒计时通知的「灵动岛」用的是系统标准 Live Updates，`setRequestPromotedOngoing` 要 compileSdk 36；卡片头部秒数用系统 chronometer，芯片仍用 `setShortCriticalText`（HyperOS 3 不显示芯片 chronometer）；本机已装 android-36 + build-tools 36.0.0 |
 | AndroidX core | **1.17.0**（两个 Live Updates compat API 从 1.17 起）。**别升到 1.18+**：那要 compileSdk 36.1 |
 | Room | **2.7.1**（2.6 + Kotlin 2.1 会 KSP `unexpected jvm signature V`） |
-| Room DB | **v20**。表：`courses`（含 `kind` / `remark` / `timetableId`）、`time_slots`、`semester_config`、`timetables`（v14 起 `term` 列记数据学期，是详情查教材的钥匙）、`scores`、`scholar_groups` / `scholar_courses`（学业完成情况，v13）、`ykt_turnovers`（v15 起 `fromAccount` / `accType` 记交易账户，消费流水「充值到哪」的钥匙）、`notes`、`homework`、`power_readings`（含 `roomId` 数字 id 与 `roomName` 房号显示名，两者别混用）、`textbooks`（教材，v14，挂 courseName 带 term）、`ride_records`（本机骑行记录，v16，只记本机用车那条链路）、`course_selections`（选课记录，v17，按学期替换，DESIGN §4.35）、`inbox_messages`（收件箱，v18，§4.38）、`date_overrides`（日期覆盖：调休 / 停课，v19，§4.40）、`curriculum_courses`（培养方案课程设置，v20，§4.41）。迁移逐级 `ALTER TABLE` / `CREATE TABLE`，**禁止**改 destructive；实体 `@Index` 必须与迁移 `CREATE INDEX` 对齐，漏声明会迁移校验崩溃；**实体带 Kotlin 默认值的列，迁移建表必须写 `DEFAULT`**（v7→v8 remark、v11→v12 roomName、v13→v14 教材展示列同坑；v19 的 `note` 特意不给 Kotlin 默认值来绕开这条） |
+| Room DB | **v21**。表：`courses`（含 `kind` / `remark` / `timetableId`）、`time_slots`、`semester_config`、`timetables`（v14 起 `term` 列记数据学期，是详情查教材的钥匙）、`scores`、`scholar_groups` / `scholar_courses`（学业完成情况，v13）、`ykt_turnovers`（v15 起 `fromAccount` / `accType` 记交易账户，消费流水「充值到哪」的钥匙）、`notes`、`homework`、`power_readings`（含 `roomId` 数字 id 与 `roomName` 房号显示名，两者别混用）、`textbooks`（教材，v14，挂 courseName 带 term）、`ride_records`（本机骑行记录，v16，只记本机用车那条链路；2026-11-05 起账号页不再展示，自动还车对账仍在用）、`course_selections`（选课记录，v17，按学期替换，DESIGN §4.35）、`inbox_messages`（收件箱，v18，§4.38）、`date_overrides`（日期覆盖：调休 / 停课，v19，§4.40）、`curriculum_courses`（培养方案课程设置，v20，§4.41）、`kqcx_orders`（快趣服务端订单缓存，v21，主键是业务键、不是自增 id，§4.32）。迁移逐级 `ALTER TABLE` / `CREATE TABLE`，**禁止**改 destructive；实体 `@Index` 必须与迁移 `CREATE INDEX` 对齐，漏声明会迁移校验崩溃；**实体带 Kotlin 默认值的列，迁移建表必须写 `DEFAULT`**（v7→v8 remark、v11→v12 roomName、v13→v14 教材展示列同坑；v19 的 `note` 特意不给 Kotlin 默认值来绕开这条） |
 | 作息表 | **11 小节**（每节 40 分钟，大节内 5 分钟、大节之间 20 分钟换教室），见 DESIGN §3.5 |
 | 课表网格 | 行号 = **小节号 1–11**（不是大节号）；`Course.startSection/endSection` 也是小节号 |
 | HugeIcons | `com.github.rikkahub:hugeicons-compose:1.4`（**JitPack**，**`isTransitive = false`**）。**不要**写 `me.rerere:hugeicons-compose:1.0.0`（Maven Central 不存在）；不要打开传递依赖（只用它的图标 AAR，打开会把它那一套 compose / core 版本带进来，与项目的版本边界打架） |
@@ -270,7 +270,7 @@ MainActivity
 
 domain/       纯 JVM 逻辑：课程/作息/学期/成绩/考试/调课差异/笔记作业/单车/水控/AI prompt/
               问渠规则/天气/百宝箱/报修/选课（按主题分文件，单测在 app/src/test）
-data/local    Room v20（表清单见「工程实况」；迁移只加不删，实体索引必须与迁移对齐）
+data/local    Room v21（表清单见「工程实况」；迁移只加不删，实体索引必须与迁移对齐）
 data/repo     ScheduleRepository（备份模型在 ScheduleBackup）+ 各业务 Repository / Sync
 data/prefs    DataStore 显示偏好（DisplayPrefsStore + 按功能拆出的扩展文件）
 data/jw       强智教务：URL / 课表 / 考试 / 成绩 / 学业 / 培养方案 / 教材 / 选课 / 日历 / 评教

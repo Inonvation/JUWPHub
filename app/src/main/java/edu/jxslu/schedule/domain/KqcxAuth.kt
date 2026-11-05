@@ -430,6 +430,91 @@ object KqcxAuth {
     /** 官方「无限次数卡」的次数阈值（卡券详情页 `remainFrequency > 1e5`）。 */
     private const val UNLIMITED_FREQUENCY_THRESHOLD = 100_000L
 
+    // ---------- 服务端订单历史 ----------
+
+    /**
+     * 服务端订单（`/v2.0.0/queryOrderList` 的 `list` 项，2026-11-05）。
+     *
+     * 字段口径来自小程序「历史订单」页（`pages/order`）与订单详情页（`pages/order/detail`）：
+     * `endDate`（空 = 进行中）、`totalDate`（已骑秒数）、`payMoney`（**分**，本单实付 / 应付）、
+     * `orderMoney`（**分**，原价）、`dispatchMoney`（**分**，调度费）、`needPay`（仍待支付）、
+     * `orderNum`（订单号）、`deviceType`（1 = 电单车 / 2 = 单车）。
+     *
+     * 状态判据逐字对齐官方列表页：`endDate` 空 → 进行中；有 `endDate` 且 `needPay` →
+     * 待支付；其余已完成。**这不是「最终账单」接口**，金额以快趣为准。
+     */
+    data class OrderItem(
+        val id: Long?,
+        val orderNum: String?,
+        val carNum: String?,
+        val deviceType: Int?,
+        /** 结束时间（服务端原样字符串，如 `2026-11-05 18:32:11`）；进行中为空。 */
+        val endAt: String?,
+        /** 骑行时长（秒）。 */
+        val totalSeconds: Long?,
+        /** 实付 / 应付金额（**分**）。 */
+        val payMoneyCents: Long?,
+        /** 原价（**分**）。 */
+        val orderMoneyCents: Long?,
+        /** 调度费（**分**）；0 或缺失 = 没有调度费。 */
+        val dispatchMoneyCents: Long?,
+        val needPay: Boolean?,
+    ) {
+        val running: Boolean get() = endAt.isNullOrBlank()
+
+        val unpaid: Boolean get() = !running && needPay == true
+
+        /** 状态文案（官方列表页三种）。 */
+        val statusText: String
+            get() = when {
+                running -> "进行中"
+                unpaid -> "待支付"
+                else -> "已完成"
+            }
+
+        /** 车型标签：官方按 `deviceType` 分电单车 / 单车。 */
+        val deviceLabel: String
+            get() = if (deviceType == 2) "单车" else "电单车"
+
+        /**
+         * 这一单有没有花钱（实付 > 0）。
+         *
+         * 历史订单页的「仅显示有费用」用它（2026-11-05 用户要求）：卡券覆盖的 0 元单、进行中的单
+         * 都不该混在账单里。**判实付不判原价**——原价 0.8 但卡抵扣后实付 0 的单不算花钱
+         * （与超时费口径 `EbikeRideStats.timeFeeCents` 同一条道理）。
+         */
+        val hasFee: Boolean get() = (payMoneyCents ?: 0L) > 0L
+    }
+
+    /**
+     * 解析 `queryOrderList` 响应：`result.list[]`。
+     *
+     * 列表项至少要有车号或订单号才留下——脏行（整个对象缺标识）不占一屏空格子；
+     * 金额 / 时长缺失按 null 透传，由界面决定说不说（不编 0 元）。
+     */
+    fun parseOrderList(jsonText: String): List<OrderItem> {
+        val env = parseEnvelope(jsonText)
+        val list = (env.result as? JsonObject)?.get("list") as? JsonArray ?: return emptyList()
+        return list.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val carNum = obj.text("carNum")
+            val orderNum = obj.text("orderNum")
+            if (carNum == null && orderNum == null) return@mapNotNull null
+            OrderItem(
+                id = obj.long("id"),
+                orderNum = orderNum,
+                carNum = carNum,
+                deviceType = obj.int("deviceType"),
+                endAt = obj.text("endDate"),
+                totalSeconds = obj.long("totalDate"),
+                payMoneyCents = obj.long("payMoney"),
+                orderMoneyCents = obj.long("orderMoney"),
+                dispatchMoneyCents = obj.long("dispatchMoney"),
+                needPay = obj.bool("needPay"),
+            )
+        }
+    }
+
     // ---------- 错误码文案 ----------
 
     /**

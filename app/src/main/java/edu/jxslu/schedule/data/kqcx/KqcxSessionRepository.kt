@@ -11,11 +11,13 @@ import edu.jxslu.schedule.domain.KvcxZones
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.IOException
+import java.time.YearMonth
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -398,8 +400,11 @@ class KqcxSessionRepository(
     }
 
     /**
-     * 账户资产（快趣账号页「快趣资产」区，只读）：余额 / 卡券 / 会员卡，三个接口**并行**拉。
+     * 账户资产（快趣账号页「快趣资产」区，只读）：余额 / 卡券，两个接口**并行**拉。
      * 单个接口失败不影响其它块（余额给 null、列表给空）；登录缺失 / 失效照常抛错。
+     *
+     * **不再拉会员卡**（2026-11-05 减少请求）：账号页的会员行早已删除（学校用不到），
+     * `Assets.members` 只参与「三块全空」判断——少一个请求，那个判断还更准。
      */
     suspend fun queryAssets(): KqcxAuth.Assets {
         ensureSession()
@@ -412,15 +417,129 @@ class KqcxSessionRepository(
                 runCatching { KqcxAuth.parseCoupons(client.userCouponJson(current)) }
                     .getOrDefault(emptyList())
             }
-            val members = async {
-                runCatching { KqcxAuth.parseMembers(client.userMemberJson(current)) }
-                    .getOrDefault(emptyList())
-            }
-            KqcxAuth.Assets(balance = balance.await(), coupons = coupons.await(), members = members.await())
+            KqcxAuth.Assets(balance = balance.await(), coupons = coupons.await(), members = emptyList())
         }
     }
 
     // ---------- 内部 ----------
+
+    /**
+     * 服务端订单历史（`queryOrderList`，2026-11-05，只读）：官方「历史订单」页同款，
+     * **按「年 + 月 + 车型」查**，一次一个月、最多 [ORDER_PAGE_ROWS] 条——
+     * 「全部历史」要靠调用方逐月翻，没有一次给全的接口。
+     *
+     * 疑似 token 失效时重登一次、重试一次（与 [queryUnderway] 同口径；这个读接口
+     * 在小程序里也走同一个 token，没有额外凭证要求）。
+     */
+    suspend fun queryOrderHistory(
+        year: Int,
+        month: Int,
+        deviceType: Int,
+        page: Int = 1,
+        rows: Int = ORDER_PAGE_ROWS,
+    ): List<KqcxAuth.OrderItem> {
+        ensureSession()
+        return try {
+            requestOrderHistory(year, month, deviceType, page, rows)
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            if (!isTokenError(error)) throw error
+            if (!ensureRelogin()) throw error
+            requestOrderHistory(year, month, deviceType, page, rows)
+        }
+    }
+
+    private suspend fun requestOrderHistory(
+        year: Int,
+        month: Int,
+        deviceType: Int,
+        page: Int,
+        rows: Int,
+    ): List<KqcxAuth.OrderItem> = server {
+        KqcxAuth.parseOrderList(
+            client.orderListJson(requireToken(), page, rows, year, month, deviceType),
+        )
+    }
+
+    /**
+     * 全量订单扫描（2026-11-05，只读）：把 [queryOrderHistory] 按月逐月跑一遍，
+     * 供账号页算「超时费累计」。
+     *
+     * - **从当月往前翻**，连续 [ORDER_SCAN_EMPTY_MONTHS] 个月一条订单都没有就停：
+     *   逐月到底要 2017-01 起 119 个月 × 2 车型 = 238 次请求，而实际骑过车的月份是连着的；
+     *   早停让常见情况落到 20–40 次。代价是「停了一年多又接着骑」时区间会偏短，
+     *   所以返回值带 [OrderHistoryScan.from]，**界面必须把统计区间写出来**。
+     * - 每月两个车型并行发（同月互不依赖），月份之间串行——不做大并发去压第三方接口。
+     * - 每月最多 [ORDER_PAGE_ROWS] 条（官方历史订单页同样不翻页）：单月超 100 单只算前 100。
+     * - **按订单去重**（`id` / 订单号）：同一笔订单可能被多个月份重复返回——2026-11-05 实测
+     *   不去重时金额与次数被放大到上千（服务端对年月的过滤没有官方页面看起来那么严）。
+     *   去重后**一个新订单都没多出来的月份**才算"空月"，早停据此判断。
+     * - token 失效由 [queryOrderHistory] 内部重登重试；整段扫描失败直接抛出。
+     *
+     * [onProgress] 每查完一个月回调一次（累计已查月数），供界面显示进度。
+     */
+    suspend fun scanOrderHistory(
+        until: YearMonth = YearMonth.now(),
+        since: YearMonth = YearMonth.of(2017, 1),
+        maxEmptyMonths: Int = ORDER_SCAN_EMPTY_MONTHS,
+        onProgress: (scannedMonths: Int) -> Unit = {},
+    ): OrderHistoryScan {
+        ensureSession()
+        val orders = mutableListOf<KqcxAuth.OrderItem>()
+        val seen = HashSet<String>()
+        // 车型裁剪（2026-11-05 减少请求）：查了 [ORDER_SCAN_TYPE_PRUNE_MONTHS] 个月还一条都没
+        // 出过的车型不再查——只骑一种车的用户，全量扫描的请求数直接减半。至少留一种车型，
+        // 否则两个都空时请求数会变成 0 却永远走不到早停。
+        val activeTypes = mutableListOf(DEVICE_EBIKE, DEVICE_BIKE)
+        val typeHits = mutableMapOf(DEVICE_EBIKE to 0, DEVICE_BIKE to 0)
+        var fetchedRows = 0
+        var emptyStreak = 0
+        var scanned = 0
+        var month = until
+        var earliestWithOrders: YearMonth? = null
+        while (month >= since) {
+            val batches = coroutineScope {
+                activeTypes.toList()
+                    .map { type ->
+                        async { type to queryOrderHistory(month.year, month.monthValue, type) }
+                    }
+                    .awaitAll()
+            }
+            val batch = batches.flatMap { it.second }
+            for ((type, items) in batches) typeHits[type] = (typeHits[type] ?: 0) + items.size
+            scanned++
+            onProgress(scanned)
+            fetchedRows += batch.size
+            var added = 0
+            for (item in batch) {
+                // 去重键与缓存表同口径（id → 订单号 → 车号+还车时刻）：只有车号的脏行也要能去重
+                val key = item.id?.let { "id:$it" }
+                    ?: item.orderNum?.let { "num:$it" }
+                    ?: item.carNum?.let { "car:$it:${item.endAt.orEmpty()}" }
+                if (key != null && !seen.add(key)) continue
+                orders += item
+                added++
+            }
+            if (added == 0) {
+                emptyStreak++
+                if (emptyStreak >= maxEmptyMonths) break
+            } else {
+                emptyStreak = 0
+                earliestWithOrders = month
+            }
+            if (scanned >= ORDER_SCAN_TYPE_PRUNE_MONTHS && activeTypes.size > 1) {
+                activeTypes.removeAll { type -> (typeHits[type] ?: 0) == 0 }
+            }
+            month = month.minusMonths(1)
+        }
+        return OrderHistoryScan(
+            orders = orders,
+            from = earliestWithOrders ?: until,
+            to = until,
+            scannedMonths = scanned,
+            fetchedRows = fetchedRows,
+        )
+    }
 
     private suspend fun queryWithCurrentToken(): KqcxAuth.Ride? {
         val current = token ?: throw IllegalStateException("快趣会话不存在")
@@ -583,5 +702,34 @@ class KqcxSessionRepository(
 
         /** 还车后扣款确认的轮询间隔。 */
         const val SETTLE_POLL_INTERVAL_MS = 2_500L
+
+        /** 服务端订单历史的每页条数（官方历史订单页 `rows: 100` 同口径）。 */
+        const val ORDER_PAGE_ROWS = 100
+
+        /** 全量扫描的早停阈值：连续这么多个月没有订单就不再往前翻。 */
+        const val ORDER_SCAN_EMPTY_MONTHS = 12
+
+        /** 全量扫描的车型裁剪阈值：查满这么多个月还一条都没出过的车型，之后不再查。 */
+        const val ORDER_SCAN_TYPE_PRUNE_MONTHS = 12
+
+        /** 车型（官方 `deviceType`）：1 = 电单车、2 = 单车。 */
+        const val DEVICE_EBIKE = 1
+        const val DEVICE_BIKE = 2
     }
 }
+
+/**
+ * 全量订单扫描的结果（[KqcxSessionRepository.scanOrderHistory]）：
+ * [orders] 是**去重后**的订单，[from] ~ [to] 是**实际覆盖**的月份区间。
+ * 早停时 [from] 会晚于 2017-01，界面必须把区间写出来，别让用户以为这是全部历史。
+ *
+ * [fetchedRows] / [scannedMonths] 是诊断口径：拉回多少条、查了几个月，
+ * 与 [orders] 的差就是被服务端重复返回的量（明细弹窗里写出来，便于判断数据可信度）。
+ */
+data class OrderHistoryScan(
+    val orders: List<KqcxAuth.OrderItem>,
+    val from: YearMonth,
+    val to: YearMonth,
+    val scannedMonths: Int = 0,
+    val fetchedRows: Int = 0,
+)

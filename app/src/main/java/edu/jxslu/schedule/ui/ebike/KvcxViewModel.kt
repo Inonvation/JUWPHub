@@ -5,29 +5,30 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.data.kqcx.KqcxOrderCache
 import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.RideRecordStore
 import edu.jxslu.schedule.domain.EbikeCardExpiry
+import edu.jxslu.schedule.domain.EbikeRideStats
 import edu.jxslu.schedule.domain.KqcxAuth
-import edu.jxslu.schedule.domain.RideRecord
+import edu.jxslu.schedule.domain.KqcxRefreshPolicy
 import edu.jxslu.schedule.domain.KvcBusinessError
 import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.ui.common.NoticeTone
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
+import java.time.YearMonth
 
 /** 一次性提示事件（对齐 WaterViewModel 模式：缓冲 Channel，页面负责收集）。 */
 sealed interface KvcxEvent {
@@ -46,7 +47,7 @@ data class KvcxUiState(
     /** null = 已查询且无骑行在案；查询失败沿用上次结果不动它。 */
     val ride: KqcxAuth.Ride? = null,
     /**
-     * 快趣资产（2026-09-30，只读）：余额 / 卡券 / 会员卡。进页拉一次 + 手动刷新；
+     * 快趣资产（2026-09-30，只读）：余额 / 卡券。进页拉一次 + 手动刷新；
      * null = 还没查到过（查询失败沿用 null，页面给"再试一次"的出路）。
      */
     val assets: KqcxAuth.Assets? = null,
@@ -58,6 +59,25 @@ data class KvcxUiState(
      * 到期提醒。查资产时算出（未提醒过且在到期前一天窗口内），页面关掉时落「已提醒」键。
      */
     val cardExpiry: List<KqcxAuth.AssetCoupon>? = null,
+    /**
+     * 超时费汇总（2026-11-05）：进页自动算——缓存有数就直接出，缓存空才全量扫一次
+     * （常见 20–40 次请求），之后每次进页只增量补最近两月。null = 还没算出过。
+     */
+    val stats: EbikeRideStats.Summary? = null,
+    /** 统计覆盖的月份区间（早停时起点晚于 2017-01，界面要写出来）。 */
+    val statsFrom: YearMonth? = null,
+    val statsTo: YearMonth? = null,
+    val statsLoading: Boolean = false,
+    /** 统计进度：已查月数（界面显示「已查 N 个月」）。 */
+    val statsScannedMonths: Int = 0,
+    /** 诊断：这次拉回多少条原始记录、去重后多少条（差值 = 服务端重复返回的量）。 */
+    val statsFetchedRows: Int = 0,
+    val statsUniqueOrders: Int = 0,
+    /** 按月分布（`2026-11 · 12 次 · ¥9.60`，最新在前，最多 6 行）：明细弹窗的「核实」用。 */
+    val statsMonths: List<String> = emptyList(),
+    /** 覆盖月份与月均（`覆盖 28 个月：月均 53.0 次超时、约 ¥44.49`）：把总数换算成每月量级。 */
+    val statsCoverage: String? = null,
+    val statsError: String? = null,
 )
 
 class KvcxViewModel(
@@ -69,6 +89,8 @@ class KvcxViewModel(
      * 后台栈里的本页实例还会去打扰第三方接口。
      */
     private val prefs: DisplayPrefsStore,
+    /** 服务端订单缓存（2026-11-05）：统计在本地算，网络只负责增量刷新。 */
+    private val orderCache: KqcxOrderCache,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -85,21 +107,6 @@ class KvcxViewModel(
     /** 骑行查询序号：外部结束订单 / 新查询发起时 +1，晚到的旧包直接丢弃。 */
     private var rideQuerySeq = 0L
 
-    /**
-     * 本机骑行记录（DESIGN §3.9「最近骑行」）：最近的在前。
-     * 页面不可见时不订阅（WhileSubscribed），退出登录也照样显示——它是本机数据。
-     */
-    val rideRecords: StateFlow<List<RideRecord>> = records.observeAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** 清空本机骑行记录（纯本地数据，清前由页面确认）。 */
-    fun clearRecords() {
-        viewModelScope.launch {
-            runCatching { records.clear() }
-            notice("已清空本机骑行记录", NoticeTone.Info)
-        }
-    }
-
     private fun notice(text: String, tone: NoticeTone = NoticeTone.Info) =
         _events.trySend(KvcxEvent.Notice(text, tone))
 
@@ -110,6 +117,8 @@ class KvcxViewModel(
                 rideQuerySeq++
                 _uiState.update { it.copy(ride = null, querying = false) }
                 if (text.isNotBlank()) notice(text, NoticeTone.Success)
+                // 刚还完车：立刻增量拉订单并重算超时费，不能等 30 分钟节流过期
+                syncStats(force = true)
             }
         }
         // 登录态跨窗口共享（hub 与本页各持一份 VM）：以仓库那条流为准
@@ -132,6 +141,8 @@ class KvcxViewModel(
                 refreshRide()
                 refreshAssets()
                 recheckUnsettledRecords()
+                // 超时费：缓存有数就立刻出、没有就全量补一次，之后每次进页只走增量
+                syncStats()
             }
         }
         // 自动还车兜底：进账号页也做一次对账（闹钟丢了补跑 / 退出登录、切方式后撤销），
@@ -173,6 +184,7 @@ class KvcxViewModel(
                 refreshRide()
                 refreshAssets()
                 recheckUnsettledRecords()
+                viewModelScope.launch { syncStats() }
                 // 登录成功后按设置重排自动还车（登录前它不会排）
                 EbikeAutoReturnReminder.reconcile(Graph.appContext)
             }
@@ -189,6 +201,8 @@ class KvcxViewModel(
         viewModelScope.launch {
             EbikeAutoReturnReminder.reconcile(Graph.appContext)
         }
+        // 订单缓存属于这个手机号，退出即清（换账号不能串号）
+        viewModelScope.launch { runCatching { orderCache.clear() } }
         // 仓库流会回灌归零；这里不重复改 uiState
     }
 
@@ -216,7 +230,8 @@ class KvcxViewModel(
     // ── 快趣资产（2026-09-30，只读） ──
 
     /**
-     * 查一次账户资产（余额 / 卡券 / 会员卡）：进页、登录成功、手动刷新各一次。
+     * 查一次账户资产（余额 / 卡券）：进页、登录成功、手动刷新各一次。
+     * 会员卡接口已停拉（会员行已删除，2026-11-05 减少请求），见 [KqcxSessionRepository.queryAssets]。
      * **失败沿用上次结果**：资产是展示性数据，查不到不该把用户已看到的清成空白；
      * 三块全空才算"颗粒无收"，页面给重试出路。失败不打扰（不弹提示，区块内给一行说明）。
      */
@@ -268,6 +283,102 @@ class KvcxViewModel(
         }
     }
 
+    // ── 超时费汇总（2026-11-05） ──
+
+    /** 手点资产区右上角刷新：资产重拉 + 统计强制同步（订单也绕过节流）。 */
+    fun refreshAll() {
+        refreshAssets()
+        viewModelScope.launch { syncStats(force = true) }
+    }
+
+    /**
+     * 统计的唯一入口（进页 / 登录成功 / 手点刷新 / 还车结束都走它）。
+     *
+     * 先读缓存出数（不联网）→ 缓存空就全量扫一次，否则增量拉最近两月 → 再出数。
+     * 全量扫描 20–40 次请求，只发生在缓存为空（首次进页 / 刚登录 / 刚清过）时；
+     * 常规进页最多 4 次请求，且受 30 分钟节流（[KqcxRefreshPolicy]）约束。
+     */
+    private suspend fun syncStats(force: Boolean = false) {
+        if (!session.loggedIn.value || !accountMode()) return
+        recomputeStats()
+        if (runCatching { orderCache.count() }.getOrDefault(0) == 0) {
+            scanAllOrders()
+        } else if (refreshRecentOrders(force)) {
+            recomputeStats()
+        }
+    }
+
+    /** 全量扫描（缓存空时自动跑）：结果整批落缓存，统计仍从缓存算。失败保留上次结果，只出提示。 */
+    private suspend fun scanAllOrders() {
+        if (_uiState.value.statsLoading) return
+        _uiState.update { it.copy(statsLoading = true, statsScannedMonths = 0, statsError = null) }
+        runCatching {
+            session.scanOrderHistory(
+                onProgress = { months ->
+                    _uiState.update { s -> if (s.statsLoading) s.copy(statsScannedMonths = months) else s }
+                },
+            )
+        }
+            .onSuccess { scan ->
+                runCatching { orderCache.store(scan.orders) }
+                recomputeStats()
+                _uiState.update {
+                    it.copy(
+                        statsLoading = false,
+                        statsScannedMonths = scan.scannedMonths,
+                        statsFetchedRows = scan.fetchedRows,
+                        statsFrom = it.statsFrom ?: scan.from,
+                        statsTo = it.statsTo ?: scan.to,
+                    )
+                }
+            }
+            .onFailure {
+                _uiState.update { s -> s.copy(statsLoading = false, statsError = queryErrorText(it)) }
+                notice(queryErrorText(it), NoticeTone.Error)
+            }
+    }
+
+    /** 读缓存本地算一遍（不联网）；缓存空则保持现状（首次进页由 [scanAllOrders] 补）。 */
+    private suspend fun recomputeStats() {
+        val orders = runCatching { orderCache.load() }.getOrNull().orEmpty()
+        if (orders.isEmpty()) return
+        val range = EbikeRideStats.monthRange(orders)
+        _uiState.update {
+            it.copy(
+                stats = EbikeRideStats.summarize(orders),
+                statsFrom = range?.first?.let(YearMonth::parse) ?: it.statsFrom,
+                statsTo = range?.second?.let(YearMonth::parse) ?: it.statsTo,
+                statsUniqueOrders = orders.size,
+                statsMonths = EbikeRideStats.monthlyLines(orders),
+                statsCoverage = EbikeRideStats.coverageLine(orders),
+            )
+        }
+    }
+
+    /** 增量刷新最近两个月（≤4 请求）；返回是否写进了新数据（节流命中或全失败 = false）。 */
+    private suspend fun refreshRecentOrders(force: Boolean = false): Boolean {
+        if (!session.loggedIn.value || !accountMode()) return false
+        // 节流：缓存半小时内刚写过就不再发请求；force 用于手点刷新与「刚还完车」
+        val lastSync = runCatching { orderCache.lastSyncedAt() }.getOrNull()
+        if (!force && KqcxRefreshPolicy.isFresh(lastSync, System.currentTimeMillis())) return false
+        val thisMonth = YearMonth.now()
+        val fetched = buildList {
+            for (month in listOf(thisMonth, thisMonth.minusMonths(1))) {
+                for (device in intArrayOf(
+                    KvcxOrdersViewModel.DEVICE_EBIKE,
+                    KvcxOrdersViewModel.DEVICE_BIKE,
+                )) {
+                    addAll(
+                        runCatching {
+                            session.queryOrderHistory(month.year, month.monthValue, device)
+                        }.getOrDefault(emptyList()),
+                    )
+                }
+            }
+        }
+        if (fetched.isEmpty()) return false
+        return runCatching { orderCache.store(fetched) }.getOrDefault(0) > 0
+    }
     // ── 结清复查（2026-09-30） ──
 
     /**
@@ -322,6 +433,7 @@ class KvcxViewModel(
                         session = Graph.kqcx(context.applicationContext),
                         records = Graph.rideRecordStore(context.applicationContext),
                         prefs = Graph.displayPrefs(context.applicationContext),
+                        orderCache = Graph.kqcxOrderCache(context.applicationContext),
                     ) as T
             }
     }

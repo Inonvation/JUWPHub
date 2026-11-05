@@ -28,6 +28,7 @@ import edu.jxslu.schedule.ui.campus.DormRepairScreen
 import edu.jxslu.schedule.ui.campus.PayCodeScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
+import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
 import edu.jxslu.schedule.ui.ebike.RideScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
@@ -178,6 +179,8 @@ enum class SubpageScreen {
     HOMEWORK_TODO,
     /** 我的 → 校园服务 → 快趣账号（登录 · 骑行状态只读查询，DESIGN §4.32） */
     KVCX,
+    /** 快趣账号 → 历史订单（服务端 `queryOrderList`，按月份 + 车型查，DESIGN §4.32，2026-11-05） */
+    KVCX_ORDERS,
     /** 我的 → 校园服务 → 校历（仓库镜像 + 内置兜底，DESIGN §4.34） */
     CAMPUS_CALENDAR,
     /**
@@ -327,6 +330,7 @@ class SubpageActivity : ComponentActivity() {
             SubpageScreen.COURSE_TWEAK -> CourseTweakScreen(onBack = onBack)
             SubpageScreen.WATER -> WaterScreen(onBack = onBack, autoStart = autoStart)
             SubpageScreen.KVCX -> KvcxScreen(onBack = onBack)
+            SubpageScreen.KVCX_ORDERS -> KvcxOrdersScreen(onBack = onBack)
             SubpageScreen.CAMPUS_CALENDAR -> CampusCalendarScreen(onBack = onBack)
             // 宿舍报修进度（DESIGN §4.49）：focusItemId = 学工记录 id；收件箱通知按下标定位
             SubpageScreen.DORM_REPAIR -> DormRepairScreen(
