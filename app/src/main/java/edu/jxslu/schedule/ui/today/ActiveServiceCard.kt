@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
@@ -166,7 +165,7 @@ internal fun ActiveServiceCard(
     /** U净 行整行落点（U净 页：订单英雄卡 / 扫码）。 */
     onOpenUjing: () -> Unit,
     /**
-     * U净 取衣提醒行尾「已取走」：清掉已完成订单快照（并撤完成闹钟，调用侧做）。
+     * U净 取衣提醒行尾「我已取走」：清掉已完成订单快照（并撤完成闹钟，调用侧做）。
      * 只有这个动作（或 U净 页的「知道了」）能收掉提醒，不设时间上限。
      */
     onUjingDismiss: () -> Unit,
@@ -182,7 +181,7 @@ internal fun ActiveServiceCard(
     val qzxyVisible = qzxyWatering != null
     val ujingLive = ujingOrder?.takeIf { !it.isTerminal }
     // 已完成（50）的订单不随行退场（2026-10-29 用户要求：洗完忘了拿）：快照落盘，
-    // 一直留到用户点行尾「已取走」（或 U净 页「知道了」）。取消 / 超时 / 启动失败不留。
+    // 一直留到用户点行尾「我已取走」（或 U净 页「知道了」）。取消 / 超时 / 启动失败不留。
     val ujingDone = ujingOrder?.takeIf { UjingState.isWashDone(it.status) }
     val ujingRow = ujingLive != null || ujingDone != null
     // 秒级走时按行隔离（2026-10-22）：此前 `now` 读在卡顶层，免费计时 / 开水期间整卡
@@ -623,16 +622,13 @@ private fun AnimatedContentTransitionScope<*>.rowSwapSpec(): ContentTransform =
     )
 
 /** 品牌图标：与侧栏同款位图，24dp。**必须用 `Image`**——`Icon(painter)` 会把位图整体
- *  染成 LocalContentColor（真机上呈黑色块），侧栏同款位图就是用 `Image` 渲染的。
- *  [alpha] < 1 用于完成态去强调（用户口径「置灰」）：保留品牌色形，只淡出。 */
+ *  染成 LocalContentColor（真机上呈黑色块），侧栏同款位图就是用 `Image` 渲染的。 */
 @Composable
-private fun BrandIcon(resId: Int, alpha: Float = 1f) {
+private fun BrandIcon(resId: Int) {
     androidx.compose.foundation.Image(
         painter = androidx.compose.ui.res.painterResource(resId),
         contentDescription = null,
-        modifier = Modifier
-            .size(24.dp)
-            .graphicsLayer { this.alpha = alpha },
+        modifier = Modifier.size(24.dp),
     )
 }
 
@@ -654,9 +650,9 @@ private fun BrandIcon(resId: Int, alpha: Float = 1f) {
  * [progress] = 行底的时长进度条（0..1，可为 null = 不画）：快趣免费窗口倒计时 / 超时增长，
  * 开水、趣智、U净 的进行中时长。`progressError` 时走 error 色（超时）。
  *
- * [muted] = 完成态整行去强调（2026-10-29 用户口径「都置灰」）：品牌图标淡出、标题 / 副行 /
- * 状态词统一走 onSurface 低透明度。只给**已完成但还需用户处理**的行用（U净 取衣提醒）——
- * 进行中的行别用，那会让状态看起来是失效的。
+ * [dotColor] = 不呼吸时那枚静态点的颜色（默认 `outlineVariant`，语气降下来）。
+ * U净 取衣提醒传 `semanticColors.warning`：「已结束但还要用户处理」需要一个注意力信号，
+ * 而呼吸点只属于进行中，不能借用。
  */
 @Composable
 private fun ActiveRow(
@@ -667,11 +663,11 @@ private fun ActiveRow(
     onClick: (() -> Unit)? = null,
     onClickLabel: String? = null,
     pulsing: Boolean = true,
+    dotColor: Color? = null,
     status: String? = null,
     statusColor: Color? = null,
     progress: Float? = null,
     progressError: Boolean = false,
-    muted: Boolean = false,
 ) {
     val haptics = rememberAppHaptics()
     val scheme = MaterialTheme.colorScheme
@@ -730,15 +726,16 @@ private fun ActiveRow(
                 BreathingDot()
                 Spacer(Modifier.width(8.dp))
             } else {
-                // 占位同尺寸的静态点（secondaryContainer 弱色）：布局不跳，语气降下来
+                // 占位同尺寸的静态点（默认弱色）：布局不跳，语气降下来；
+                // 取衣提醒这类「待处理」传 dotColor 换个语气色
                 Box(
                     modifier = Modifier
                         .size(8.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant, CircleShape),
+                        .background(dotColor ?: MaterialTheme.colorScheme.outlineVariant, CircleShape),
                 )
                 Spacer(Modifier.width(8.dp))
             }
-            BrandIcon(brandRes, alpha = if (muted) 0.5f else 1f)
+            BrandIcon(brandRes)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 // 标题与状态词按**基线**对齐（2026-10-31）：两者字号不同（bodyMedium /
@@ -749,11 +746,7 @@ private fun ActiveRow(
                         text = title,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (muted) {
-                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         // 标题先让位：状态词是固定宽度的短标签，不能被长标题挤成省略号
@@ -766,11 +759,7 @@ private fun ActiveRow(
                         Text(
                             text = status,
                             style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                            color = statusColor ?: if (muted) {
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                            } else {
-                                MaterialTheme.colorScheme.primary
-                            },
+                            color = statusColor ?: MaterialTheme.colorScheme.primary,
                             maxLines = 1,
                             modifier = Modifier.alignByBaseline(),
                         )
@@ -779,7 +768,7 @@ private fun ActiveRow(
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (muted) 0.45f else 0.55f),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1258,12 +1247,14 @@ private fun UjingActiveRow(order: UjingOrderSnapshot, onOpen: () -> Unit) {
 }
 
 /**
- * U净 取衣提醒行（2026-10-29 用户要求）：订单已完成（50）后不再随行退场，一直留到
- * 用户点行尾「已取走」（或去 U净 页点「知道了」），避免洗完忘了拿。
+ * U净 取衣提醒行（2026-10-29 用户要求；2026-11-05 用户反馈「整行置灰像已经取走了」重做）：
+ * 订单已完成（50）后不再随行退场，一直留到用户点行尾「我已取走」（或去 U净 页点「知道了」），
+ * 避免洗完忘了拿。
  *
- * **整行置灰**（同日用户口径「都置灰吧」）：完成态不该和进行中的服务抢视觉权重——
- * 图标淡出、标题 / 副行走低透明度、「已取走」用灰底灰字（仍可点）。圆点不呼吸，
- * 与趣智「待核对」同一语气；文案区分烘干机。行本体仍进 U净 页，收提醒只走行尾动作。
+ * **不置灰**：置灰的完成态与「已取走」并列，读起来像一件已经收摊的事——而这行恰恰是
+ * 还没取走的待办。现在给正常文字权重 + `warning` 色静态点与「待取衣」状态词（已结束、
+ * 等用户处理），行尾用实心主色「我已取走」把动作说清楚；圆点仍不呼吸——呼吸只属于进行中。
+ * 文案区分烘干机。行本体仍进 U净 页，收提醒只走行尾动作。
  */
 @Composable
 private fun UjingDoneRow(
@@ -1275,8 +1266,10 @@ private fun UjingDoneRow(
     ActiveRow(
         brandRes = edu.jxslu.schedule.R.drawable.ic_brand_ujing,
         title = "U净 · " + UjingState.washDoneTitle(order.dryer),
+        status = "待取衣",
+        statusColor = MaterialTheme.semanticColors.warning,
         pulsing = false,
-        muted = true,
+        dotColor = MaterialTheme.semanticColors.warning,
         // 提醒语放最前：设备名较长时单行省略会先吃掉尾巴，别把「记得去拿」截掉
         subtitle = "记得去拿衣物 · 「" +
             order.deviceName.ifBlank { UjingState.deviceFallback(order.dryer) } + "」",
@@ -1284,8 +1277,7 @@ private fun UjingDoneRow(
         onClickLabel = "查看洗衣订单",
         trailing = {
             ActionChip(
-                label = "已取走",
-                muted = true,
+                label = "我已取走",
                 onClick = {
                     haptics.tap()
                     onDismiss()
@@ -1301,9 +1293,6 @@ private fun UjingDoneRow(
  * [busy] = 动作正在跑：文字前加一枚 12dp 转圈（2026-10-29）。按钮同时置灰，
  * 「点上了、在等结果」和「按钮点不动」才分得开；转圈取 `LocalContentColor`，
  * 跟着禁用态一起变淡，不另调一套颜色。
- *
- * [muted] = 完成态去强调的灰底灰字（2026-10-29 用户口径「都置灰」）：**仍可点**，
- * 只把视觉权重降下来；别和 [enabled] = false 混用——那是真的不可点。
  */
 @Composable
 private fun ActionChip(
@@ -1312,7 +1301,6 @@ private fun ActionChip(
     enabled: Boolean = true,
     filled: Boolean = true,
     busy: Boolean = false,
-    muted: Boolean = false,
 ) {
     val shape = CircleShape
     val content: @Composable () -> Unit = {
@@ -1334,15 +1322,6 @@ private fun ActionChip(
             enabled = enabled,
             modifier = Modifier.height(32.dp),
             shape = shape,
-            colors = if (muted) {
-                ButtonDefaults.buttonColors(
-                    // 灰底灰字但 content 比禁用态（38%）更实：看得出还能点
-                    containerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                    contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
-            } else {
-                ButtonDefaults.buttonColors()
-            },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
             content = { content() },
         )
@@ -1352,13 +1331,6 @@ private fun ActionChip(
             enabled = enabled,
             modifier = Modifier.height(32.dp),
             shape = shape,
-            colors = if (muted) {
-                ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
-            } else {
-                ButtonDefaults.outlinedButtonColors()
-            },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
             content = { content() },
         )

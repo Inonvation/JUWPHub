@@ -772,7 +772,7 @@ fun TodayScreen(
                     onWaterEnd = { waterViewModel?.endSession() },
                     onQzxyStop = { qzxyViewModel?.stopWater() },
                     onOpenUjing = onOpenUjing,
-                    // 取衣提醒行尾「已取走」：与 U净 页「知道了」同一语义——清快照 + 撤完成闹钟
+                    // 取衣提醒行尾「我已取走」：与 U净 页「知道了」同一语义——清快照 + 撤完成闹钟
                     onUjingDismiss = {
                         ujingRepo.dismissOrder()
                         UjingDoneReminder.cancel(context)
@@ -1032,7 +1032,7 @@ private fun TodayContent(
     onOpenWater: () -> Unit = {},
     onOpenQzxy: () -> Unit = {},
     onOpenUjing: () -> Unit = {},
-    /** U净 取衣提醒行尾「已取走」：清掉已完成订单快照（调用侧同时撤完成闹钟）。 */
+    /** U净 取衣提醒行尾「我已取走」：清掉已完成订单快照（调用侧同时撤完成闹钟）。 */
     onUjingDismiss: () -> Unit = {},
     /** 小程序免费计时行的「结束计时」意图（确认弹窗在 TodayScreen 层）。 */
     onEndFreeRide: () -> Unit = {},

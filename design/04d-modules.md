@@ -474,10 +474,11 @@ UI 按服务端 `options` 全量渲染（**不写死 10/20/30/40**），差价�
 `UjingApi` 的 `dryTime` 改为按调用方 `isDryer` 判定后非空即发。微信支付**不接**：官方 appId
 `wx32b6b6e1d84c8dac` 绑定官方包名 / 签名，第三方无法复用；只保留支付宝。
 
-**2026-10-29 今日页取衣提醒**：`UjingOrderSnapshot` 增 `dryer`（下单时判定、刷新原样保留，
+**2026-10-29 今日页取衣提醒（2026-11-05 改视觉）**：`UjingOrderSnapshot` 增 `dryer`（下单时判定、刷新原样保留，
 旧快照 false）。完成（50）的终结快照不再只服务于订单卡——今日页服务卡的 U净 行据此常驻
-「衣物已洗完 / 已烘干 · 记得去拿衣物」，行尾「已取走」调 `dismissOrder()` 并撤完成闹钟；
-取消 / 超时 / 启动失败不留。判据与文案单一来源 `UjingState.isWashDone / washDoneTitle /
+「衣物已洗完 / 已烘干 · 记得去拿衣物」+ 状态词「待取衣」，行尾「我已取走」调 `dismissOrder()` 并撤完成闹钟；
+取消 / 超时 / 启动失败不留。**不整行置灰**（2026-11-05 用户反馈：灰卡片 + 灰按钮像衣服已取走）：
+正常文字权重 + `warning` 静态点 + 实心主色动作钮。判据与文案单一来源 `UjingState.isWashDone / washDoneTitle /
 deviceFallback`（UI 不另写 if）。
 
 ---

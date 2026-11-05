@@ -392,7 +392,7 @@ class UjingRepository(
             createdAt = current?.createdAt ?: 0L,
             durationSeconds = current?.durationSeconds ?: 0,
         )
-        // 请求期间用户可能已点「知道了 / 已取走」清掉快照，或已下了新单：旧请求的结果
+        // 请求期间用户可能已点「知道了 / 我已取走」清掉快照，或已下了新单：旧请求的结果
         // 不能把已收掉的订单写回来（会复活取衣提醒 / 顶掉新单）。历史账单照常更新。
         if (orderStore.current()?.orderId == orderId) {
             orderStore.save(snapshot)
