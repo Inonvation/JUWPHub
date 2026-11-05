@@ -286,6 +286,17 @@ class UjingViewModel(
     // ── 空闲看板 ──
 
     /**
+     * 下拉刷新（2026-11-05，用户要求 U净 也支持）：看板与在案订单一起重拉。
+     *
+     * 没有在案订单时 [refreshOrder] 自己早退，不会白发请求；看板那套取消 / 代次语义
+     * 原样复用 [refreshBoard]，这里不另起一条刷新链。
+     */
+    fun refreshAll() {
+        refreshBoard()
+        refreshOrder(silent = true)
+    }
+
+    /**
      * 拉取全部收藏店的空闲数据（2026-10-22 定稿）：`devices/reserve` 在本校被服务端
      * 关闭（回 1614「暂不支持预约，请扫码洗衣」），改走 `stores/near?keyword=<店名>`
      * 的 `storeInfo[]`——一店一条，按店名精确命中，不受附近列表截断影响。

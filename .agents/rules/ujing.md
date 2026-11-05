@@ -14,14 +14,28 @@
 
 ## 页面结构与交接（2026-10-16 重排，动 U净 页面前重读）
 
-- 主页（UJING）排版：**在案订单（唯一一张状态英雄卡）> 扫码 > 看板 > 账号与记录**，
-  层级靠视觉而不是顺序表达（卡规格见 `.agents/rules/ui-common.md`，动效口径同文件）。
-  历史账单与账号合并成一张卡（`RecordsSection`），页尾带 `FooterDisclaimer`。
-  扫码区只管「扫没扫成」（按钮内识别中 / 失败行 / 「继续上次识别」/ 空态引导），
-  **不再内联展示设备卡与档位**——那是下单页的事。
+- 主页（UJING）排版（**2026-11-05 改版**，与快趣账号页 / 趣智 / 胖乖同一骨架，
+  骨架件在 `ui/common/AccountCards.kt`）：`PageScaffoldColumn("U净")` → 身份卡
+  （`AccountHeroCard`：WashingMachine / 手机号掩码 /「已登录」/ 凭证口径；本页无充值，
+  **不挂 action**）→ 三列指标（空闲洗衣机 / 空闲烘干机 / 收藏洗衣房数，**全页唯一刷新口
+  在本卡右上角**）→ 在案订单（**唯一一张 `StatusHeroCard`**：设备行 → 状态行 → 一枚
+  48dp 全宽主按钮）→ 扫码主操作卡（设备行显示上次识别机型/店名 → 状态行 → 48dp 主按钮）
+  → 记录（最近 3 笔账单平铺 + `AppCardDivider` +「查看全部」）→ 收藏洗衣房看板
+  （行尾删除 / 底部添加）→ 页尾退出（二次确认保留）+ `FooterDisclaimer`。
+  2026-10-16 那版「在案订单 > 扫码 > 看板 > 账号与记录」已作废：账号与记录卡整张删除
+  （手机号进身份卡、退出下放页尾），看板卡底部的刷新按钮删除（与指标卡重复），
+  扫码空态与登录卡的百字长句各压到一句。
 - 看板行的空闲数放大走主色，取数口是 `UjingState.BoardLine.freeCountText`
-  （`primaryText` 由它拼出，**别在 UI 里再拼一份「N/M」**）；首拉骨架的判据是
-  `boardRefreshing && board.isEmpty() && houses.isNotEmpty()`，不新增 ViewModel 状态。
+  （`primaryText` 由它拼出，**别在 UI 里再拼一份「N/M」**）；三列指标的两个空闲数直接
+  求和 `board[].line.free` / `board[].dryerLine.free`，别在 UI 里另算一套。
+  首拉骨架的判据是 `boardRefreshing && board.isEmpty() && houses.isNotEmpty()`，
+  不新增 ViewModel 状态。
+- **下拉刷新**（2026-11-05）：`PageScaffoldColumn` 新增可选 `refreshing` / `onRefresh`
+  （传了才包 `PullToRefreshBox`），U净 用 `refreshing = loggedIn && boardRefreshing`、
+  `onRefresh = { haptics.tap(); viewModel.refreshAll() }`。`refreshAll()` = `refreshBoard()`
+  + `refreshOrder(silent = true)`（没有在案订单时后者自己早退，不会白发请求）。
+  未登录不接下拉：没有可刷的数据，只会空转。看板卡右上角的刷新图标保留（它是"刷新看板"
+  这一个动作，与整页下拉不冲突）。
 - 扫码成功 → `UjingDraftStore.open`（Graph 单例，**进程内**）→ `openOrder` 事件 →
   `SubpageActivity.start(UJING_ORDER)`。下单页读草稿渲染：档位单选（AppCard 高亮即
   选中）+ 水温 / 投放 chips + 贴底动作条 + 确认弹层；「去支付」= `submit` 交回选择 +

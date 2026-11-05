@@ -22,35 +22,28 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,25 +64,32 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.data.ujing.UjingDraftStore
+import edu.jxslu.schedule.data.ujing.UjingHistoryEntry
 import edu.jxslu.schedule.data.ujing.UjingHouse
 import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
-import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.domain.QzxyPhoneMask
 import edu.jxslu.schedule.domain.UjingState
+import edu.jxslu.schedule.ui.common.AccountHeroCard
+import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.AppPermissions
-import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.HeroTone
-import edu.jxslu.schedule.ui.common.emphasizedText
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
+import edu.jxslu.schedule.ui.common.MetricCell
+import edu.jxslu.schedule.ui.common.MetricsRow
 import edu.jxslu.schedule.ui.common.NoticeTone
+import edu.jxslu.schedule.ui.common.PageScaffoldColumn
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
 import edu.jxslu.schedule.ui.common.SkeletonBox
 import edu.jxslu.schedule.ui.common.StaggeredReveal
 import edu.jxslu.schedule.ui.common.StatusHeroCard
+import edu.jxslu.schedule.ui.common.emphasizedText
 import edu.jxslu.schedule.ui.common.heroToneAccent
 import edu.jxslu.schedule.ui.common.lineHeightDp
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
@@ -97,16 +98,20 @@ import edu.jxslu.schedule.ui.ebike.BikeLocator
 import edu.jxslu.schedule.ui.ebike.EbikeScanActivity
 import edu.jxslu.schedule.ui.ebike.LocateResult
 import edu.jxslu.schedule.ui.ebike.showNotice
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.ceil
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AlertCircle
 import me.rerere.hugeicons.stroke.Delete02
+import me.rerere.hugeicons.stroke.Plus
 import me.rerere.hugeicons.stroke.QrCodeScan
-import me.rerere.hugeicons.stroke.ReceiptText
+import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.hugeicons.stroke.WashingMachine
-import kotlin.math.ceil
 
 /** 订单进行中且页面可见时的轮询间隔（与 ViewModel 口径一致，只在 UI 侧用）。 */
 private const val ORDER_POLL_INTERVAL_MILLIS = 15_000L
@@ -114,6 +119,9 @@ private const val ORDER_POLL_INTERVAL_MILLIS = 15_000L
 /** 页面区块的出现 / 退出过渡时长（全页统一，别在各处各写一个数）。 */
 private const val SectionEnterMillis = 220
 private const val SectionExitMillis = 160
+
+/** 记录卡默认展示的账单条数（更早的走「查看全部」进历史账单页）。 */
+private const val RecentRecordCount = 3
 
 /** 使用须知正文（DESIGN §4.37）：三条事实告知；归属声明由页尾单独承担，避免重复。 */
 private val NoticeItems = listOf(
@@ -128,20 +136,27 @@ private const val FooterDisclaimerText =
     "**第三方非官方功能**：与美的集团、无锡小净及相关运营方均无关联。"
 
 /**
- * U净 洗衣房主页（DESIGN §3.23 / §4.37）。
+ * U净 洗衣房主页（DESIGN §3.23 / §4.37；**2026-11-05 改版**）。
  *
- * 登录（手机号 + 短信验证码）→ 订单英雄卡（下单 / 支付宝支付 / 倒计时 / 取消 / 云端启动）→
- * 扫码入口（识别成功即开草稿并跳 [UjingOrderScreen]，选档 / 投放都在那一页）→
- * 收藏洗衣房空闲看板 → 账号与记录（历史账单入口 [UjingHistoryScreen] + 退出登录）。
+ * 骨架与「快趣账号 / 趣智校园 / 胖乖生活」四个账号页一致，从上到下：
  *
- * 层级靠**视觉**而不是顺序表达（2026-10-16 重排）：在案订单是唯一一张
- * [StatusHeroCard]（实心 tonal 底、大剩余时间），扫码是主操作按钮，看板与账号收成
- * 普通设置卡。登录态切换、订单卡出现/终结、看板首拉都有过渡，不做硬切。
+ * 1. **身份卡** [AccountHeroCard]：手机号掩码 + 「已登录」+ 凭证去向。本页没有充值这类
+ *    外部动作，所以不挂 action（原「账号与记录」卡里的手机号行已收进这里）。
+ * 2. **三列指标**：空闲洗衣机 / 空闲烘干机 / 收藏洗衣房（口径见 [BoardTotals]），
+ *    右上角是全页唯一的刷新口（原来在「看板」卡底部）。
+ * 3. **在案订单**：仍是唯一一张 [StatusHeroCard]（2026-10-16 口径不变），
+ *    设备行 → 状态行（+ 剩余时间 / 进度）→ 主按钮，终结态由「知道了」收起。
+ * 4. **扫码**：主操作卡，设备行（上次识别的设备）→ 状态行 → 48dp 主按钮。
+ * 5. **记录**：最近 [RecentRecordCount] 笔账单 + 「查看全部」→ 历史账单页。
+ * 6. **设置**：收藏洗衣房看板（行尾删除 / 底部添加）。
+ * 7. **页尾**：退出登录（保留二次确认）+ [FooterDisclaimer]。
+ *
+ * **业务口径一字未改**：写操作零自动重试、订单 15 秒轮询（离开页面即停）、
+ * 完成提醒闹钟、扫码跳独立下单页、会话过期不自动重登——这次只换排版与文案层级。
  *
  * 洗涤中订单由 [edu.jxslu.schedule.ui.reminder.UjingDoneReminder] 在到点时发系统通知
  * （渠道：洗衣完成提醒）。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UjingScreen(
     onBack: () -> Unit = {},
@@ -179,11 +194,14 @@ fun UjingScreen(
     // 上次在别处判定登录过期：进页说一句为什么退回登录表单（只提示一次）
     SessionExpiredNotice(SessionService.Ujing, state.loggedIn, snackbar)
     var houseToRemove by remember { mutableStateOf<UjingHouse?>(null) }
-    var confirmLogout by remember { mutableStateOf(false) }
     var confirmCancelOrder by remember { mutableStateOf(false) }
-    // 扫码草稿（「继续上次识别」行用）；下单页关掉后仍留着，直到下单受理或重扫覆盖
+    // 扫码草稿（设备行「上次识别的设备」用）；下单页关掉后仍留着，直到下单受理或重扫覆盖
     val draftStore = remember { Graph.ujingDraft(context) }
-    val hasDraft by draftStore.draft.collectAsStateWithLifecycle()
+    val draft by draftStore.draft.collectAsStateWithLifecycle()
+    // 记录卡直接订阅账单仓：与 ViewModel 的 historyCount、历史账单页同一个实例（Graph 单例），
+    // 只读、不参与下单链，也就不必为「最近三笔」再往 ViewModel 加状态。
+    val historyStore = remember { Graph.ujingHistory(context) }
+    val history by historyStore.state.collectAsStateWithLifecycle()
 
     // 一次性提示（登录成功、会话过期、看板错误等）
     LaunchedEffect(Unit) {
@@ -266,174 +284,242 @@ fun UjingScreen(
     LaunchedEffect(liveOrder) { if (liveOrder != null) lastOrder = liveOrder }
     val heroOrder = liveOrder ?: lastOrder
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("U净") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-            )
+    PageScaffoldColumn(
+        title = "U净",
+        onBack = onBack,
+        snackbar = snackbar,
+        // 下拉刷新（2026-11-05）：登录后才接——未登录时没有可刷的数据，下拉只会空转
+        refreshing = state.loggedIn && state.boardRefreshing,
+        onRefresh = if (state.loggedIn) {
+            {
+                haptics.tap()
+                viewModel.refreshAll()
+            }
+        } else {
+            null
         },
-        snackbarHost = { AppSnackbarHost(state = snackbar) },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            // 登录态切换走尺寸 + 淡入淡出过渡（两态高度差很大，硬切会「跳」一截）
-            AnimatedContent(
-                targetState = state.loggedIn,
-                transitionSpec = {
-                    fadeIn(tween(SectionEnterMillis, easing = FastOutSlowInEasing)) togetherWith
-                        fadeOut(tween(SectionExitMillis))
-                },
-                label = "ujingAuth",
-            ) { loggedIn ->
-                if (!loggedIn) {
-                    LoginSection(state = state, viewModel = viewModel)
-                } else {
-                    // 层级口径（2026-10-16 重排）：在案订单（英雄卡）> 扫码（主操作）>
-                    // 看板 > 账号与记录。账号收底，不再单独占一张卡。
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        AnimatedVisibility(
-                            visible = liveOrder != null,
-                            enter = fadeIn(tween(SectionEnterMillis)) +
-                                expandVertically(
-                                    tween(SectionEnterMillis, easing = FastOutSlowInEasing),
-                                    expandFrom = Alignment.Top,
-                                ),
-                            exit = fadeOut(tween(SectionExitMillis)) +
-                                shrinkVertically(
-                                    tween(SectionExitMillis),
-                                    shrinkTowards = Alignment.Top,
-                                ),
-                        ) {
-                            heroOrder?.let { order ->
-                                OrderHero(
-                                    order = order,
-                                    // 支付 SDK 阻塞期间（paying）同样禁动作：收银台在那边，这里点取消
-                                    // 会和支付结果赛跑（busy 只覆盖请求本身，支付窗口是另一段）
-                                    busy = state.orderBusy || state.paying,
-                                    onRefresh = { viewModel.refreshOrder() },
-                                    onRetryPay = viewModel::retryPay,
-                                    onCancel = { confirmCancelOrder = true },
-                                    onStart = viewModel::startOrder,
-                                    onDismiss = viewModel::dismissOrder,
-                                )
-                            }
-                        }
-                        // 常驻的两块错峰落位（订单卡由 AnimatedVisibility 管，别叠加）
-                        StaggeredReveal(index = 0) {
-                            ScanSection(
-                                state = state,
-                                hasDraft = hasDraft != null,
-                                onScan = startScan,
-                                onOpenOrder = onOpenOrder,
+    ) {
+        // 登录态切换走尺寸 + 淡入淡出过渡（两态高度差很大，硬切会「跳」一截）
+        AnimatedContent(
+            targetState = state.loggedIn,
+            transitionSpec = {
+                fadeIn(tween(SectionEnterMillis, easing = FastOutSlowInEasing)) togetherWith
+                    fadeOut(tween(SectionExitMillis))
+            },
+            label = "ujingAuth",
+        ) { loggedIn ->
+            if (!loggedIn) {
+                LoginSection(state = state, viewModel = viewModel)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // ① 身份卡
+                    AccountHeroCard(
+                        icon = HugeIcons.WashingMachine,
+                        title = QzxyPhoneMask.mask(state.mobile),
+                        subtitle = "凭证仅存本机 · 不进云备份",
+                        pill = "已登录",
+                    )
+                    // ② 三列指标（空闲看板合计）
+                    MetricsSection(
+                        state = state,
+                        onRefresh = {
+                            haptics.tap()
+                            viewModel.refreshBoard()
+                        },
+                    )
+                    // ③ 在案订单（唯一一张英雄卡；出现 / 退场各有过渡）
+                    AnimatedVisibility(
+                        visible = liveOrder != null,
+                        enter = fadeIn(tween(SectionEnterMillis)) +
+                            expandVertically(
+                                tween(SectionEnterMillis, easing = FastOutSlowInEasing),
+                                expandFrom = Alignment.Top,
+                            ),
+                        exit = fadeOut(tween(SectionExitMillis)) +
+                            shrinkVertically(
+                                tween(SectionExitMillis),
+                                shrinkTowards = Alignment.Top,
+                            ),
+                    ) {
+                        heroOrder?.let { order ->
+                            OrderHero(
+                                order = order,
+                                // 支付 SDK 阻塞期间（paying）同样禁动作：收银台在那边，这里点取消
+                                // 会和支付结果赛跑（busy 只覆盖请求本身，支付窗口是另一段）
+                                busy = state.orderBusy || state.paying,
+                                onRefresh = { viewModel.refreshOrder() },
+                                onRetryPay = viewModel::retryPay,
+                                onCancel = { confirmCancelOrder = true },
+                                onStart = viewModel::startOrder,
+                                onDismiss = viewModel::dismissOrder,
                             )
                         }
-                        StaggeredReveal(index = 1) {
-                            BoardSection(
-                                state = state,
-                                onAdd = requestNearby,
-                                onRefresh = {
-                                    haptics.tap()
-                                    viewModel.refreshBoard()
-                                },
-                                onRemove = { houseToRemove = it },
-                            )
-                        }
-                        RecordsSection(
-                            mobile = state.mobile,
-                            historyCount = state.historyCount,
-                            onOpenHistory = onOpenHistory,
-                            onLogout = { confirmLogout = true },
+                    }
+                    // ④ 主操作：扫码（常驻区块错峰落位；订单卡由 AnimatedVisibility 管，别叠加）
+                    StaggeredReveal(index = 0) {
+                        ScanSection(
+                            state = state,
+                            draft = draft,
+                            onScan = startScan,
+                            onOpenOrder = onOpenOrder,
+                        )
+                    }
+                    // ⑤ 记录
+                    StaggeredReveal(index = 1) {
+                        RecordsSection(entries = history, onOpenAll = onOpenHistory)
+                    }
+                    // ⑥ 设置：收藏洗衣房看板
+                    StaggeredReveal(index = 2) {
+                        BoardSection(
+                            state = state,
+                            onAdd = requestNearby,
+                            onRemove = { houseToRemove = it },
                         )
                     }
                 }
             }
-            FooterDisclaimer(FooterDisclaimerText)
         }
+        // 页尾：退出登录只在已登录时给（未登录时它没有意义）
+        if (state.loggedIn) {
+            LogoutRow(onLogout = viewModel::logout)
+        }
+        FooterDisclaimer(FooterDisclaimerText)
+    }
 
-        // ── 弹层与对话框 ──
-        if (state.pickerOpen) {
-            HousePickerSheet(state = state, viewModel = viewModel)
+    // ── 弹层与对话框 ──
+    if (state.pickerOpen) {
+        HousePickerSheet(state = state, viewModel = viewModel)
+    }
+    state.order?.let { order ->
+        if (confirmCancelOrder) {
+            AlertDialog(
+                onDismissRequest = { confirmCancelOrder = false },
+                title = { Text("取消订单") },
+                text = {
+                    // 弹窗进出场动画必须挂在本弹窗窗口上：调用点要落在内容槽第一行，
+                    // 写在 AlertDialog 外面拿到的是页面窗口（死代码，见 DialogWindowFadeEffect）
+                    DialogWindowFadeEffect()
+                    Text("取消「${order.modelName}」并释放机器？未支付订单取消不产生费用。")
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            confirmCancelOrder = false
+                            viewModel.cancelOrder()
+                        },
+                    ) { Text("取消订单") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmCancelOrder = false }) { Text("保留") }
+                },
+            )
         }
-        state.order?.let { order ->
-            if (confirmCancelOrder) {
-                AlertDialog(
-                    onDismissRequest = { confirmCancelOrder = false },
-                    title = { Text("取消订单") },
-                    text = {
-                        // 弹窗进出场动画必须挂在本弹窗窗口上：调用点要落在内容槽第一行，
-                        // 写在 AlertDialog 外面拿到的是页面窗口（死代码，见 DialogWindowFadeEffect）
-                        DialogWindowFadeEffect()
-                        Text("取消「${order.modelName}」并释放机器？未支付订单取消不产生费用。")
+    }
+    houseToRemove?.let { house ->
+        AlertDialog(
+            onDismissRequest = { houseToRemove = null },
+            title = { Text("删除洗衣房") },
+            text = {
+                DialogWindowFadeEffect()
+                Text("从看板中删除「${house.name}」？不会影响 U净 账号里的任何数据。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.removeHouse(house)
+                        houseToRemove = null
                     },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                confirmCancelOrder = false
-                                viewModel.cancelOrder()
-                            },
-                        ) { Text("取消订单") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { confirmCancelOrder = false }) { Text("保留") }
-                    },
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { houseToRemove = null }) { Text("取消") }
+            },
+        )
+    }
+    if (state.noticeVisible) {
+        UjingNoticeDialog(onConfirm = viewModel::onNoticeConfirmed)
+    }
+}
+
+// ── 三列指标（空闲看板合计） ──
+
+/**
+ * 看板合计：洗衣机 / 烘干机各一行（[total] == 0 = 没有这类设备，或还没拉到数据）。
+ *
+ * 只做求和：一家店的聚合仍由 `UjingState.boardLine` / `dryerLine` 给（口径唯一），
+ * 这里跨店相加只是为了在指标位上说一句「收藏的店现在有多少台空着」。
+ */
+private data class BoardTotals(val free: Int, val total: Int) {
+    /** 主数值：有数据写「N 台」，没有就不编数字。 */
+    val valueText: String get() = if (total > 0) "$free 台" else "—"
+
+    /** 说明行：数字从哪来（共几台 / 为什么没有）。 */
+    val captionText: String get() = if (total > 0) "共 $total 台" else "暂无数据"
+}
+
+/** 跨店求和：只累加「有这类设备」的行（null 表示该店没有这类设备）。 */
+private fun boardTotals(rows: List<UjingBoardRow>, dryer: Boolean): BoardTotals {
+    val lines = rows.mapNotNull { if (dryer) it.dryerLine else it.line }
+    return BoardTotals(free = lines.sumOf { it.free }, total = lines.sumOf { it.total })
+}
+
+/**
+ * 三列指标卡（2026-11-05 改版）：空闲洗衣机 / 空闲烘干机 / 收藏洗衣房。
+ *
+ * 原来「洗衣房空闲」是一张纵向列表卡，每店两行设备，数字埋在小字里；现在把合计提到
+ * 页面顶部（[MetricCell] 版式与快趣账号页同款），逐店明细留给下面的「收藏洗衣房」卡。
+ * 刷新口从看板卡底部挪到本卡右上角——两处都放会变成两个入口。
+ */
+@Composable
+private fun MetricsSection(state: UjingUiState, onRefresh: () -> Unit) {
+    val washer = boardTotals(state.board, dryer = false)
+    val dryer = boardTotals(state.board, dryer = true)
+    AppCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("空闲看板", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "收藏店合计 · 约 30 秒滞后",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(top = 2.dp),
                 )
             }
+            // 忙碌时固定 48dp 占位（只换内容不缩宽），与快趣账号页的刷新口同一写法
+            if (state.boardRefreshing) {
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                }
+            } else {
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        HugeIcons.Refresh,
+                        contentDescription = "刷新空闲数",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
         }
-        houseToRemove?.let { house ->
-            AlertDialog(
-                onDismissRequest = { houseToRemove = null },
-                title = { Text("删除洗衣房") },
-                text = {
-                    DialogWindowFadeEffect()
-                    Text("从看板中删除「${house.name}」？不会影响 U净 账号里的任何数据。")
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            viewModel.removeHouse(house)
-                            houseToRemove = null
-                        },
-                    ) { Text("删除") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { houseToRemove = null }) { Text("取消") }
-                },
+        MetricsRow(Modifier.padding(top = 10.dp)) {
+            MetricCell(
+                label = "空闲洗衣机",
+                value = washer.valueText,
+                caption = washer.captionText,
+                modifier = Modifier.weight(1f),
             )
-        }
-        if (confirmLogout) {
-            AlertDialog(
-                onDismissRequest = { confirmLogout = false },
-                title = { Text("退出登录") },
-                text = {
-                    DialogWindowFadeEffect()
-                    Text("退出后需要重新用短信验证码登录。确定退出？")
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            confirmLogout = false
-                            viewModel.logout()
-                        },
-                    ) { Text("退出") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { confirmLogout = false }) { Text("取消") }
-                },
+            MetricCell(
+                label = "空闲烘干机",
+                value = dryer.valueText,
+                caption = dryer.captionText,
+                modifier = Modifier.weight(1f),
             )
-        }
-        if (state.noticeVisible) {
-            UjingNoticeDialog(onConfirm = viewModel::onNoticeConfirmed)
+            MetricCell(
+                label = "洗衣房",
+                value = "${state.houses.size} 家",
+                caption = "本机收藏",
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
@@ -505,10 +591,9 @@ private fun LoginSection(state: UjingUiState, viewModel: UjingViewModel) {
             ) {
                 Text(if (state.loggingIn) "登录中…" else "登录")
             }
+            // 凭证口径收成一句（原为两行长句，身份卡副标题已承担「不进云备份」）
             Text(
-                emphasizedText(
-                    "登录凭据**只存本机**加密存储，**不经过开发者服务器**；只保存登录状态，不保存密码。",
-                ),
+                emphasizedText("登录凭据**只存本机**加密存储，**不保存密码**。"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
             )
@@ -516,51 +601,96 @@ private fun LoginSection(state: UjingUiState, viewModel: UjingViewModel) {
     }
 }
 
-// ── 账号与记录 ──
+// ── 记录（历史账单） ──
 
+/**
+ * 账单记录（2026-11-05 改版）：最近 [RecentRecordCount] 笔 + 「查看全部」。
+ *
+ * 数据源与历史账单页同一个仓（[Graph.ujingHistory]，本机留痕、新的在前）；服务端账单
+ * 接口没有协议样本，**别猜端点**（口径见 `.agents/rules/ujing.md`）。
+ * 行式平铺 + [AppCardDivider]：卡里不再套卡（ui-common「卡片里放列表用平铺行」）。
+ */
 @Composable
-private fun RecordsSection(
-    mobile: String,
-    historyCount: Int,
-    onOpenHistory: () -> Unit,
-    onLogout: () -> Unit,
-) {
-    SettingsSection(
-        title = "账号与记录",
-        subtitle = "账单只存本机 · 会话过期才需重登",
-    ) {
-        SettingItem(
-            title = "历史账单",
-            subtitle = if (historyCount > 0) "共 $historyCount 笔 · 点看明细" else "还没有账单",
-            icon = HugeIcons.ReceiptText,
-            onClick = onOpenHistory,
+private fun RecordsSection(entries: List<UjingHistoryEntry>, onOpenAll: () -> Unit) {
+    val recent = entries.take(RecentRecordCount)
+    AppCard {
+        Text("账单记录", style = MaterialTheme.typography.bodyLarge)
+        Text(
+            if (entries.isEmpty()) "扫码下单后自动记一笔" else "本机留痕 · 共 ${entries.size} 笔",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            modifier = Modifier.padding(top = 2.dp),
         )
-        SettingItem(
-            title = QzxyPhoneMask.mask(mobile),
-            subtitle = "手机号账号 · 凭据存于本机（加密）",
-            icon = HugeIcons.WashingMachine,
-            value = "退出",
-            onClick = onLogout,
-        )
+        if (recent.isNotEmpty()) {
+            recent.forEachIndexed { index, entry ->
+                if (index > 0) AppCardDivider()
+                RecordRow(entry)
+            }
+            AppCardDivider()
+            TextButton(onClick = onOpenAll, modifier = Modifier.fillMaxWidth()) {
+                Text("查看全部")
+            }
+        }
     }
 }
 
-// ── 空闲看板 ──
+/** 一笔账单：设备 · 模式 / 时间 · 状态 / 金额（与历史账单页同一套字段与文案）。 */
+@Composable
+private fun RecordRow(entry: UjingHistoryEntry) {
+    val timeText = remember(entry.displayAt) {
+        SimpleDateFormat("M月d日 HH:mm", Locale.CHINESE).format(Date(entry.displayAt))
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                buildString {
+                    append(entry.deviceName.ifBlank { "洗衣机" })
+                    if (entry.modelName.isNotBlank()) append(" · ").append(entry.modelName)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "$timeText · ${UjingState.statusText(entry.status)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 1.dp),
+            )
+        }
+        if (entry.priceFen > 0) {
+            Text(
+                "¥${UjingState.fen2yuan(entry.priceFen)}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+// ── 设置：收藏洗衣房 ──
 
 @Composable
 private fun BoardSection(
     state: UjingUiState,
     onAdd: () -> Unit,
-    onRefresh: () -> Unit,
     onRemove: (UjingHouse) -> Unit,
 ) {
     SettingsSection(
-        title = "洗衣房空闲",
-        subtitle = "云端数据 · 约 30 秒滞后",
+        title = "收藏洗衣房",
+        subtitle = "行尾可删除，底部可添加",
     ) {
         if (state.houses.isEmpty()) {
             Text(
-                "还没有收藏洗衣房。添加宿舍楼里的洗衣房后，这里会显示洗衣机空闲数量。",
+                "还没有收藏洗衣房，点下面「添加洗衣房」。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 modifier = Modifier.padding(vertical = 4.dp),
@@ -584,25 +714,9 @@ private fun BoardSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(onClick = onAdd) {
+                Icon(HugeIcons.Plus, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
                 Text(if (state.houses.isEmpty()) "添加洗衣房" else "添加")
-            }
-            if (state.houses.isNotEmpty()) {
-                TextButton(
-                    onClick = onRefresh,
-                    enabled = !state.boardRefreshing,
-                    // 固定最小宽度：行内 spinner 不再把按钮撑宽、把这一行带得抖一下
-                    modifier = Modifier.widthIn(min = 88.dp),
-                ) {
-                    if (state.boardRefreshing) {
-                        CircularProgressIndicator(
-                            Modifier.size(14.dp),
-                            strokeWidth = 2.dp,
-                            color = LocalContentColor.current,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    Text("刷新")
-                }
             }
         }
     }
@@ -716,55 +830,69 @@ private fun BoardSubtitle(text: String, highlight: Boolean) {
     )
 }
 
-// ── 扫码识别 ──
+// ── 扫码识别（主操作） ──
 
 /**
- * 扫码入口。主页只管「扫没扫成」：识别成功即跳独立下单页（[UjingOrderScreen]），
- * 档位 / 水温 / 投放的选择都不在这页；识别过但没下完单的，草稿还在，
- * 给一行「继续上次识别」就近接回。
+ * 扫码入口（主操作卡）：**设备行 → 状态行 → 主按钮**（2026-11-05 改版）。
  *
- * 识别中的反馈落在按钮自己身上（按钮常显、就地变 loading）——另起一行状态会把
+ * 主页只管「扫没扫成」：识别成功即跳独立下单页（[UjingOrderScreen]），档位 / 水温 / 投放
+ * 的选择都不在这页。识别过但没下完单的，草稿还在——设备行直接显示那台设备并给「接着选」，
+ * 不再另起一行「继续上次识别的设备」（原来那行把同一件事说了两遍）。
+ *
+ * 识别中的反馈落在主按钮自己身上（按钮常显、就地变 loading），另起一行状态会把
  * 下方内容顶动一下，而那正是「跳变」的来源。
  */
 @Composable
 private fun ScanSection(
     state: UjingUiState,
-    hasDraft: Boolean,
+    draft: UjingDraftStore.Draft?,
     onScan: () -> Unit,
     onOpenOrder: () -> Unit,
 ) {
     val parsing = state.scan is UjingScanState.Parsing
     val failed = state.scan as? UjingScanState.Failed
-    SettingsSection(
-        title = "扫码下单",
-        subtitle = "对准机身二维码即可",
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
-                onClick = onScan,
-                enabled = !parsing,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                if (parsing) {
-                    CircularProgressIndicator(
-                        Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = LocalContentColor.current,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("正在识别设备…")
-                } else {
-                    Icon(HugeIcons.QrCodeScan, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("扫码识别洗衣机")
-                }
+    AppCard {
+        // 设备行：上次识别到的那台（草稿还在），否则就是「未识别」
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    draft?.program?.deviceTypeName?.takeIf { it.isNotBlank() } ?: "未识别设备",
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    draft?.let { draft ->
+                        draft.program.storeName.takeIf { it.isNotBlank() } ?: "上次识别 · 待选档位"
+                    } ?: "扫机身码识别设备",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
-            // 状态行常驻组合、按状态淡入淡出，切换不跳变
-            AnimatedVisibility(visible = failed != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
+            if (draft != null && !parsing) {
+                TextButton(onClick = onOpenOrder) { Text("接着选") }
+            }
+        }
+        AppCardDivider(Modifier.padding(vertical = 10.dp))
+        // 状态行：识别中 / 失败 / 空闲引导，常驻一行（切换只换内容，不新增块）
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            when {
+                parsing -> {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Text(
+                        "正在识别设备…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+
+                failed != null -> {
                     Icon(
                         HugeIcons.AlertCircle,
                         contentDescription = null,
@@ -772,27 +900,34 @@ private fun ScanSection(
                         modifier = Modifier.size(16.dp),
                     )
                     Text(
-                        failed?.message.orEmpty(),
+                        failed.message,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-            }
-            AnimatedVisibility(visible = !parsing && failed == null && hasDraft) {
-                SettingItem(
-                    title = "继续上次识别的设备",
-                    subtitle = "档位与投放还没定，点这里接着选",
-                    onClick = onOpenOrder,
-                )
-            }
-            AnimatedVisibility(visible = !parsing && failed == null && !hasDraft) {
-                // 空态给一句引导，别让首屏只剩一枚孤零零的按钮
-                Text(
-                    "扫机身码识别设备，选好档位确认后直接下单，支付那一步会拉起支付宝。",
+
+                else -> Text(
+                    "对准机身二维码即可",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 )
             }
+        }
+        // 主按钮：高 48dp、整行宽。识别中的反馈交给上面那行状态（常驻槽位），
+        // 按钮自己只置灰——两处都写「正在识别」等于同一句话说两遍
+        Button(
+            onClick = onScan,
+            enabled = !parsing,
+            modifier = Modifier
+                .padding(top = 12.dp)
+                .fillMaxWidth()
+                .height(48.dp),
+        ) {
+            Icon(HugeIcons.QrCodeScan, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("扫码识别洗衣机")
         }
     }
 }
@@ -800,12 +935,16 @@ private fun ScanSection(
 // ── 订单英雄卡 ──
 
 /**
- * 在案订单：唯一一张 [StatusHeroCard]。状态 + 大剩余时间 + 进度条 + 动作行。
+ * 在案订单：唯一一张 [StatusHeroCard]。**设备行 → 状态行 → 主按钮**（2026-11-05 改版），
+ * 状态行右侧是大剩余时间，下面依次是进度条、支付窗口提示、主按钮、次动作行。
  *
  * 倒计时以快照时刻本地换算（不每秒请求），服务端轮询由页面的 15 秒 `LaunchedEffect` 负责。
  * 两条本地换算（都不发请求）：
  * - 洗涤中（status 40）：进度 = 1 − 剩余/总时长（总时长取下单时所选模式，旧快照没有就不显）；
  * - 未支付：机器独占窗口 = 下单时刻 + 2 分钟（协议口径），窗口用尽提示刷新确认。
+ *
+ * 主按钮按状态只出一枚（去支付 / 启动 / 知道了）——三者互斥，原来横排三枚按钮时
+ * 用户要在一排里找「哪个才是现在该点的」。
  *
  * 倒计时文字**不做 crossfade**（每秒都在变，动画会一直闪）；变化感交给进度条：
  * 进度值走 400ms 过渡，每秒更新接续平滑，观感是连续推进。
@@ -851,16 +990,34 @@ private fun OrderHero(
         else -> HeroTone.Neutral
     }
     val accent = heroToneAccent(tone)
-    // 右侧大数值：洗涤中给剩余时间，未支付给支付窗口倒计时（最要紧的那个数）
+    // 状态行右侧大数值：洗涤中给剩余时间，未支付给支付窗口倒计时（最要紧的那个数）
     val metric = when {
         running && order.remainSeconds > 0 -> UjingState.remainText(remainSeconds) to accent
         payWindowRemain > 0 -> UjingState.remainText(payWindowRemain) to MaterialTheme.colorScheme.error
         else -> null
     }
+    val primaryModifier = Modifier
+        .padding(top = 12.dp)
+        .fillMaxWidth()
+        .height(48.dp)
     StatusHeroCard(tone = tone) {
+        // 设备行
+        Text(
+            buildString {
+                append(order.deviceName.ifBlank { "洗衣机" })
+                append(" · ").append(order.modelName.ifBlank { "洗衣模式" })
+                if (order.priceFen > 0) {
+                    append(" · ¥").append(UjingState.fen2yuan(order.priceFen))
+                }
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        )
+        // 状态行
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 2.dp),
         ) {
             Box(
                 modifier = Modifier
@@ -878,18 +1035,6 @@ private fun OrderHero(
                 Text(text, style = MaterialTheme.typography.titleLarge, color = color)
             }
         }
-        Text(
-            buildString {
-                append(order.deviceName.ifBlank { "洗衣机" })
-                append(" · ").append(order.modelName.ifBlank { "洗衣模式" })
-                if (order.priceFen > 0) {
-                    append(" · ¥").append(UjingState.fen2yuan(order.priceFen))
-                }
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            modifier = Modifier.padding(top = 2.dp),
-        )
         if (running && order.durationSeconds > 0) {
             val target = (
                 1f - remainSeconds.coerceAtLeast(0).toFloat() / order.durationSeconds
@@ -921,49 +1066,57 @@ private fun OrderHero(
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
-        // 动作行：按状态给按钮（不摆点不了的按钮骗人）
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(top = 10.dp),
-        ) {
-            if (terminal) {
-                TextButton(onClick = onDismiss) { Text("知道了") }
-            } else {
+        // 主按钮：按状态只出一枚（不摆点不了的按钮骗人）
+        when {
+            terminal -> Button(onClick = onDismiss, modifier = primaryModifier) { Text("知道了") }
+
+            !order.paid -> Button(
+                onClick = onRetryPay,
+                enabled = !busy,
+                modifier = primaryModifier,
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(
+                        Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = LocalContentColor.current,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text("去支付")
+            }
+
+            UjingState.canStart(order.status) -> Button(
+                onClick = onStart,
+                enabled = !busy,
+                modifier = primaryModifier,
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(
+                        Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = LocalContentColor.current,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text("启动")
+            }
+        }
+        // 次动作行（洗涤中只有刷新；未支付可取消；终结态只留主按钮「知道了」）
+        if (!terminal) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(top = 2.dp),
+            ) {
                 if (!order.paid && UjingState.canCancel(order.status)) {
                     TextButton(onClick = onCancel, enabled = !busy) { Text("取消订单") }
-                }
-                if (!order.paid) {
-                    Button(onClick = onRetryPay, enabled = !busy) {
-                        if (busy) {
-                            CircularProgressIndicator(
-                                Modifier.size(14.dp),
-                                strokeWidth = 2.dp,
-                                color = LocalContentColor.current,
-                            )
-                            Spacer(Modifier.width(6.dp))
-                        }
-                        Text("去支付")
-                    }
-                }
-                if (UjingState.canStart(order.status)) {
-                    Button(onClick = onStart, enabled = !busy) {
-                        if (busy) {
-                            CircularProgressIndicator(
-                                Modifier.size(14.dp),
-                                strokeWidth = 2.dp,
-                                color = LocalContentColor.current,
-                            )
-                            Spacer(Modifier.width(6.dp))
-                        }
-                        Text("启动")
-                    }
                 }
                 TextButton(onClick = onRefresh, enabled = !busy) { Text("刷新") }
             }
         }
         if (UjingState.canStart(order.status)) {
             Text(
-                "蓝牙机型需站在机器旁（约 10 米内）再点启动；2G / NB / 4G 机型可直接远程启动。",
+                "蓝牙机型需靠近机器（10 米内）再启动。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 modifier = Modifier.padding(top = 6.dp),
@@ -1008,6 +1161,42 @@ internal fun UjingOrderStatusLine(order: UjingOrderSnapshot, modifier: Modifier 
     }
 }
 
+// ── 页尾：退出登录 ──
+
+/**
+ * 页尾退出登录（2026-11-05 从「账号与记录」卡里挪下来）：低频破坏性动作，
+ * 单独一行 + 二次确认（确认文案与原实现一致，行为不变）。
+ */
+@Composable
+private fun LogoutRow(onLogout: () -> Unit) {
+    var confirm by remember { mutableStateOf(false) }
+    TextButton(
+        onClick = { confirm = true },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("退出登录", color = MaterialTheme.colorScheme.error)
+    }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("退出登录") },
+            text = {
+                DialogWindowFadeEffect()
+                Text("退出后需要重新用短信验证码登录。确定退出？")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirm = false
+                    onLogout()
+                }) { Text("退出") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirm = false }) { Text("取消") }
+            },
+        )
+    }
+}
+
 // ── 附近洗衣房弹层 ──
 
 @Composable
@@ -1036,12 +1225,14 @@ private fun HousePickerSheet(state: UjingUiState, viewModel: UjingViewModel) {
                 Spacer(Modifier.width(10.dp))
                 Text("正在获取附近洗衣房…")
             }
+
             state.pickerStores.isEmpty() -> Text(
                 "附近没有找到洗衣房。到校后重试，或检查定位权限。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 modifier = Modifier.padding(20.dp),
             )
+
             else -> Column(
                 modifier = Modifier
                     .heightIn(max = 420.dp)

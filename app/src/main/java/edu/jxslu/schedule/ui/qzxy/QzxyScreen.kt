@@ -53,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -71,33 +72,45 @@ import edu.jxslu.schedule.data.qzxy.QzxyBoundDevice
 import edu.jxslu.schedule.data.qzxy.QzxyDeviceInfo
 import edu.jxslu.schedule.data.qzxy.QzxyScannedDevice
 import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.domain.entrySummary
 import edu.jxslu.schedule.domain.QzxyWatering
 import edu.jxslu.schedule.domain.QzxyWateringFormat
 import edu.jxslu.schedule.domain.QzxyPhoneMask
+import edu.jxslu.schedule.ui.common.AccountHeroCard
 import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
+import edu.jxslu.schedule.ui.common.HeroActionButton
+import edu.jxslu.schedule.ui.common.MetricCell
+import edu.jxslu.schedule.ui.common.MetricsRow
 import edu.jxslu.schedule.ui.common.NoticeTone
+import edu.jxslu.schedule.SubpageActivity
+import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
+import edu.jxslu.schedule.ui.common.SettingsDivider
+import edu.jxslu.schedule.ui.common.SettingsNote
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import androidx.compose.runtime.rememberCoroutineScope
 import edu.jxslu.schedule.ui.common.showNotice
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ChevronLeft
+import me.rerere.hugeicons.stroke.ChevronRight
 import me.rerere.hugeicons.stroke.Droplet
 import me.rerere.hugeicons.stroke.InformationCircle
-import me.rerere.hugeicons.stroke.Logout04
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.WalletAdd01
 import java.math.BigDecimal
+import java.time.YearMonth
 
 /**
  * 趣智校园开热水页（DESIGN §3.18）。
@@ -140,6 +153,8 @@ fun QzxyScreen(
     val haptics = rememberAppHaptics()
     var showDeviceSheet by remember { mutableStateOf(false) }
     var confirmLogout by remember { mutableStateOf(false) }
+    // 充值会跳出本应用、且充错账户退不回来：先在弹窗里说清账号口径，确认后才跳转
+    var confirmRecharge by remember { mutableStateOf(false) }
     // 发起过充值才在下次 ON_RESUME 刷余额：页面里还有权限弹窗等其他 resume 路径，
     // 无条件刷新会多打两轮请求（见下面的生命周期观察者）
     var awaitingRecharge by remember { mutableStateOf(false) }
@@ -252,13 +267,8 @@ fun QzxyScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
-                actions = {
-                    if (state.loggedIn) {
-                        IconButton(onClick = { confirmLogout = true }) {
-                            Icon(HugeIcons.Logout04, contentDescription = "退出登录")
-                        }
-                    }
-                },
+                // 退出登录已挪到页尾（2026-11-05 改版）：同一个危险动作不再出现两次
+                actions = {},
             )
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
@@ -266,9 +276,13 @@ fun QzxyScreen(
         // 下拉刷新：与消费流水页 / 缴费账单页同一套 PullToRefreshBox（DESIGN §3.18）。
         // padding 收在刷新容器上而不是列表上：Scaffold 的内容从 (0,0) 铺满整屏、顶栏压在
         // 它上面，指示器挂在容器顶边时整条滑入轨迹都在顶栏后面，得拖过阈值一大截才露出半圈。
+        // 指示器驻留口径见 ui/common/RefreshHold.kt（2026-11-05）：点亮只认 onRefresh，
+        // busy 只续命——直接接 state.refreshingBalance 会让「秒失败 / 逐请求抖动」漏成抽搐回弹。
+        val refreshHold = rememberRefreshHold(busy = state.refreshingBalance)
         PullToRefreshBox(
-            isRefreshing = state.refreshingBalance,
+            isRefreshing = refreshHold.isRefreshing,
             onRefresh = {
+                refreshHold.begin()
                 haptics.tap()
                 viewModel.refreshAccount()
             },
@@ -288,17 +302,29 @@ fun QzxyScreen(
                     // 登出或会话失效时水可能还在流、预扣还挂着，这条提醒不能跟着登录态一起消失
                     state.watering?.let { UnsettledNotice(it, viewModel) }
                 } else {
-                    AccountRow(state, viewModel, onRecharge = openRecharge)
-                    DeviceCard(state = state, onPick = { showDeviceSheet = true })
+                    QzxyHeroCard(
+                        state = state,
+                        onTogglePhone = viewModel::toggleShowPhone,
+                        onRecharge = { confirmRecharge = true },
+                    )
+                    BalanceSection(state = state)
                     StatusCard(
                         state = state,
                         viewModel = viewModel,
                         onOpenDiagnostics = onOpenDiagnostics,
+                        onPickDevice = { showDeviceSheet = true },
                     )
-                    BillSection(state, viewModel)
-                    DiagnosticEntry(onOpen = { onOpenDiagnostics(state.selected?.address) })
+                    BillsEntrySection(state = state)
                 }
-                WateringSettingSection(state = state, viewModel = viewModel)
+                PreferencesSection(
+                    state = state,
+                    viewModel = viewModel,
+                    onOpenDiagnostics = { onOpenDiagnostics(state.selected?.address) },
+                )
+                FooterActions(
+                    loggedIn = state.loggedIn,
+                    onLogout = { confirmLogout = true },
+                )
                 Disclaimer()
             }
         }
@@ -335,6 +361,42 @@ fun QzxyScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmLogout = false }) { Text("取消") }
+            },
+        )
+    }
+
+    // 充值前确认（2026-11-05）：钱进的是支付宝里的小程序账户，本应用只负责跳过去。
+    // 原来这段口径写成卡片底下的小字，没人看；改成跳转前的确认弹窗，确认了才离开应用。
+    if (confirmRecharge) {
+        AlertDialog(
+            onDismissRequest = { confirmRecharge = false },
+            title = { Text("前往支付宝充值？") },
+            text = {
+                Column {
+                    DialogWindowFadeEffect()
+                    Text("将跳到支付宝的「趣智校园」小程序，钱进你在趣智的账户。")
+                    Text(
+                        "先核对支付宝登录的手机号与本应用登录的一致，充错账户退不回来。",
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Text(
+                        "充值与退款由学校运营方负责，与本应用无关；由此造成的损失开发者不承担责任。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmRecharge = false
+                        openRecharge()
+                    },
+                ) { Text("去充值") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRecharge = false }) { Text("取消") }
             },
         )
     }
@@ -479,93 +541,97 @@ private fun UnsettledNotice(watering: QzxyWatering, viewModel: QzxyViewModel) {
 // ── 账号与设备 ──
 
 /**
- * 账户卡片：余额 + 账户 + 刷新 + 充值。
+ * 身份卡（2026-11-05 改版）：学校名 + 手机号（默认遮蔽，点眼睛展开）+ 「已登录」+ 充值。
  *
- * 充值做成带图标的实心按钮而不是文字按钮：它要跳到另一个应用里完成付款，
- * 点不着或看不出来都会让人以为功能没做。卡片底下那行写清钱进哪个账户、谁负责退款，
- * 与支付宝页面上显示的商户对得上。
+ * 原先是「余额与充值」一张卡里塞余额大字、账号行、充值按钮，余额与账号抢同一个位置；
+ * 现在身份归身份、数字归三列指标（[BalanceSection]），充值仍是卡片底部的主动作。
+ * 充值会跳出本应用，点之前先过一道确认（见 `QzxyScreen` 里的 `confirmRecharge`）。
  */
 @Composable
-private fun AccountRow(
+private fun QzxyHeroCard(
     state: QzxyUiState,
-    viewModel: QzxyViewModel,
+    onTogglePhone: () -> Unit,
     onRecharge: () -> Unit,
 ) {
-    val primary = MaterialTheme.colorScheme.primary
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    val accountLine = buildString {
-        append(state.schoolName.ifBlank { "水控账户" })
-        if (state.accountPhone.isNotBlank()) {
-            append(" · ")
-            append(
-                if (state.showPhone) {
-                    state.accountPhone
-                } else {
-                    QzxyPhoneMask.mask(state.accountPhone)
-                },
-            )
-        }
+    val hasPhone = state.accountPhone.isNotBlank()
+    val eye: (@Composable () -> Unit)? = if (hasPhone) {
+        { PhoneEye(shown = state.showPhone, onToggle = onTogglePhone) }
+    } else {
+        null
     }
-    SettingsSection(title = "余额与充值") {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                HugeIcons.Droplet,
-                contentDescription = null,
-                tint = primary,
-                modifier = Modifier.size(22.dp),
+    AccountHeroCard(
+        icon = HugeIcons.Droplet,
+        title = state.schoolName.ifBlank { "趣智校园" },
+        subtitle = buildString {
+            if (hasPhone) {
+                append(if (state.showPhone) state.accountPhone else QzxyPhoneMask.mask(state.accountPhone))
+                append(" · ")
+            }
+            append("会话仅存本机")
+        },
+        pill = "已登录",
+        trailing = eye,
+        action = {
+            HeroActionButton(
+                text = "充值到趣智账户",
+                icon = HugeIcons.WalletAdd01,
+                onClick = onRecharge,
             )
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = when {
-                        state.balance != null -> "¥${state.balance?.text}"
-                        state.balanceLoaded -> "余额暂不可用"
-                        else -> "余额读取中…"
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                // 手机号默认遮蔽，点眼睛才展开：页面会被截图、会被旁人瞥见，
-                // 与「我的」页学号同一个口径
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = accountLine,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = onSurface.copy(alpha = 0.55f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    if (state.accountPhone.isNotBlank()) {
-                        Icon(
-                            imageVector = if (state.showPhone) HugeIcons.ViewOff else HugeIcons.View,
-                            contentDescription = if (state.showPhone) "隐藏手机号" else "显示手机号",
-                            tint = onSurface.copy(alpha = 0.5f),
-                            modifier = Modifier
-                                .padding(start = 6.dp)
-                                .size(16.dp)
-                                .clickable { viewModel.toggleShowPhone() },
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.width(10.dp))
-            FilledTonalButton(onClick = onRecharge) {
-                Icon(
-                    HugeIcons.WalletAdd01,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text("充值")
-            }
+        },
+    )
+}
+
+/** 手机号显隐的眼睛：页面会被截图、会被旁人瞥见，默认遮蔽（与「我的」页学号同口径）。 */
+@Composable
+private fun PhoneEye(shown: Boolean, onToggle: () -> Unit) {
+    Icon(
+        imageVector = if (shown) HugeIcons.ViewOff else HugeIcons.View,
+        contentDescription = if (shown) "隐藏手机号" else "显示手机号",
+        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+        modifier = Modifier
+            .padding(start = 6.dp)
+            .size(16.dp)
+            .clickable { onToggle() },
+    )
+}
+
+/**
+ * 余额与账单三列（2026-11-05）：余额 / 账单合计 / 账单笔数。
+ *
+ * 合计只把服务端这一页账单的金额相加，不做本地推算——预扣与实扣是两笔账，
+ * 口径只有一个来源才不会再错（同 [BillSection] 的 KDoc）。
+ */
+@Composable
+private fun BalanceSection(state: QzxyUiState) {
+    val total = state.bills
+        .mapNotNull { bill -> bill.consumeMoney?.trim()?.toBigDecimalOrNull() }
+        .fold(BigDecimal.ZERO, BigDecimal::add)
+    val balanceText = when {
+        state.balance != null -> "¥${state.balance?.text}"
+        state.balanceLoaded -> "—"
+        else -> "…"
+    }
+    SettingsSection(title = "余额与账单") {
+        MetricsRow(Modifier.padding(top = 6.dp)) {
+            MetricCell(
+                label = "余额",
+                value = balanceText,
+                caption = "趣智账户",
+                modifier = Modifier.weight(1f),
+            )
+            MetricCell(
+                label = "账单合计",
+                value = if (state.billLoaded) "¥%.2f".format(total) else "—",
+                caption = state.billMonth.ifBlank { "—" },
+                modifier = Modifier.weight(1f),
+            )
+            MetricCell(
+                label = "账单笔数",
+                value = if (state.billLoaded) "${state.bills.size} 笔" else "—",
+                caption = "热水消费",
+                modifier = Modifier.weight(1f),
+            )
         }
-        Text(
-            text = "点「充值」跳到支付宝小程序付款，钱进上面这个账户；充值与退款由学校运营方负责。",
-            style = MaterialTheme.typography.bodySmall,
-            color = onSurface.copy(alpha = 0.5f),
-            modifier = Modifier.padding(top = 8.dp),
-        )
     }
 }
 
@@ -577,7 +643,7 @@ private fun AccountRow(
  * 结算核对按记账里的地址走（不是按选中），换设备不受它挡。
  */
 @Composable
-private fun DeviceCard(state: QzxyUiState, onPick: () -> Unit) {
+private fun DeviceRowItem(state: QzxyUiState, onPick: () -> Unit) {
     val primary = MaterialTheme.colorScheme.primary
     val onSurface = MaterialTheme.colorScheme.onSurface
     val watering = state.watering
@@ -602,10 +668,13 @@ private fun DeviceCard(state: QzxyUiState, onPick: () -> Unit) {
     // 进行中不许换：换设备会走 preconnect，它会把正在用的那条链路关掉重建，
     // 把开阀/结算打断在半路——而那时服务端可能已经下过单、扣过预扣
     val canPick = !wateringActive && state.flow !is QzxyFlowState.Working
-    AppCardRow(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = if (canPick) onPick else null,
-        onClickLabel = "选择热水器",
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(enabled = canPick, onClickLabel = "选择热水器") { onPick() }
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             HugeIcons.Droplet,
@@ -632,9 +701,9 @@ private fun DeviceCard(state: QzxyUiState, onPick: () -> Unit) {
         }
         Spacer(Modifier.width(4.dp))
         Text(
-            text = "更换 ›",
+            text = if (canPick) "更换 ›" else "用水中",
             style = MaterialTheme.typography.bodySmall,
-            color = if (watering == null) primary else onSurface.copy(alpha = 0.35f),
+            color = if (canPick) primary else onSurface.copy(alpha = 0.35f),
             maxLines = 1,
         )
     }
@@ -643,7 +712,11 @@ private fun DeviceCard(state: QzxyUiState, onPick: () -> Unit) {
 // ── 状态卡 ──
 
 /**
- * 主状态卡：一个时刻只给一个主动作。
+ * 主操作卡「开热水」：设备 → 状态 → 一个主动作。
+ *
+ * 2026-11-05 起设备行并进本卡顶部（原先是独立一张卡）：换设备、看状态、点按钮
+ * 是同一个动作的三步，拆成两张卡要来回翻。固定副标题也去掉了——标题 + 固定副标题
+ * + 动态状态三行小字叠在一起，按钮被挤到看不见；计费口径降为卡底一条注记。
  *
  * 分支顺序即优先级——进行中的流程盖过一切（此时点别的按钮没有意义），
  * 结算结果盖过用水中（结算完 store 已经清了，这一条只是防竞态），
@@ -654,22 +727,21 @@ private fun StatusCard(
     state: QzxyUiState,
     viewModel: QzxyViewModel,
     onOpenDiagnostics: (String?) -> Unit,
+    onPickDevice: () -> Unit,
 ) {
     var failureDetail by remember { mutableStateOf<QzxyFlowState.Failed?>(null) }
     val flow = state.flow
-    SettingsSection(
-        title = "开热水",
-        // 副标题固定，动态状态说明放进内容区跟着一起做高度动画：副标题文字长短不一时
-        // 会在换行与不换行之间跳，那是另一处高度抖动
-        subtitle = "出水按实际用量计费，结束后从趣智校园账户扣",
-    ) {
+    SettingsSection(title = "开热水") {
+        DeviceRowItem(state = state, onPick = onPickDevice)
+        SettingsDivider(Modifier.padding(top = 2.dp))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 // 待机态两行、用水中六行，高度差一百多 dp。给个下限兜住最短的两个状态，
                 // 再让内容淡入淡出、高度平滑过渡（AnimatedContent 自带尺寸动画）。
                 // 之前是硬切，点「开始用水」时整页会往上顶一截。
-                .heightIn(min = 112.dp),
+                .heightIn(min = 104.dp)
+                .padding(top = 8.dp),
         ) {
             Text(
                 text = statusSubtitle(state),
@@ -714,6 +786,7 @@ private fun StatusCard(
                 }
             }
         }
+        SettingsNote("出水按实际用量计费，结束后从账户扣")
     }
     failureDetail?.let { failure ->
         FailedDetailDialog(
@@ -1215,171 +1288,75 @@ private fun DeviceRow(
 // ── 账单与页尾 ──
 
 /**
- * 消费记录（DESIGN §4.30）：按月拉趣智校园账单。
+ * 消费记录入口卡（2026-11-05 用户要求：消费记录做成入口卡片，明细单独一页）。
  *
- * 金额只认服务端账单（`order/query/account/bill/list`），不做本地推算——预扣与实扣
- * 是两笔账，之前把预扣当实扣读过一次，口径只有一个来源才不会再错。合计只是把
- * 服务端这一页返回的金额相加，不参与任何计费判断。
+ * 原来这一整块就摆在趣智页里：月份左右箭头 + 默认 5 笔 + 「展开全部 N 笔」。一个月
+ * 二三十笔很常见，展开后主页被拉长两三屏，真正的主动作「开热水」被挤下去。
+ * 现在只留一行摘要（本月笔数与合计），点进去是独立页 `QZXY_BILLS`，那边支持
+ * 今日 / 本周 / 本月 / 全部四个时段与按日分组。
+ *
+ * 摘要只统计**本月**：入口卡这里没有时段概念，说「本月」才不会让人以为那是全部；
+ * 数字仍然只来自服务端账单（`order/query/account/bill/list`），本地不推算。
  */
 @Composable
-private fun BillSection(state: QzxyUiState, viewModel: QzxyViewModel) {
-    // 一个月二三十笔很常见，全展开会把页面拉得很长，默认只给最近几笔
-    var expanded by remember { mutableStateOf(false) }
-    SettingsSection(
-        title = "消费记录",
-        subtitle = "按月查热水消费，金额与官方账单同源。",
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = { viewModel.shiftBillMonth(-1) }) { Text("上月") }
-            Text(
-                text = state.billMonth.ifBlank { "—" },
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = { viewModel.shiftBillMonth(1) }) { Text("下月") }
-        }
-        when {
-            state.loadingBills -> Text(
-                "读取中…",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                modifier = Modifier.padding(top = 4.dp),
-            )
-
-            !state.billLoaded -> Unit
-
-            state.bills.isEmpty() -> Text(
-                "这个月没有消费记录",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                modifier = Modifier.padding(top = 4.dp),
-            )
-
-            else -> {
-                val total = state.bills
-                    .mapNotNull { bill -> bill.consumeMoney?.trim()?.toBigDecimalOrNull() }
-                    .fold(BigDecimal.ZERO, BigDecimal::add)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    Text(
-                        text = "¥%.2f".format(total),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "本月合计 · ${state.bills.size} 笔",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                        modifier = Modifier.padding(bottom = 2.dp),
-                    )
-                }
-                val visible = if (expanded) state.bills else state.bills.take(BILL_PREVIEW_COUNT)
-                visible.forEach { bill ->
-                    Column(Modifier.padding(top = 10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = bill.description ?: bill.deviceDescription ?: "热水消费",
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                text = "¥${bill.consumeMoney ?: "-"}",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                        Text(
-                            bill.consumeDate.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                        )
-                    }
-                }
-                if (state.bills.size > BILL_PREVIEW_COUNT) {
-                    TextButton(
-                        onClick = { expanded = !expanded },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            if (expanded) {
-                                "收起"
-                            } else {
-                                "展开全部 ${state.bills.size} 笔"
-                            },
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** 账单默认展开几笔，其余收在「展开全部」后面。 */
-private const val BILL_PREVIEW_COUNT = 5
-
-/** 诊断入口：日常用不到，收成一行放在账单下面。 */
-@Composable
-private fun DiagnosticEntry(onOpen: () -> Unit) {
-    AppCardRow(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onOpen,
-        onClickLabel = "打开诊断与调试",
-    ) {
-        Icon(
-            HugeIcons.InformationCircle,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = "诊断与调试",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "设备现场、服务表、试签名、调试日志",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            )
-        }
-        Text(
-            text = "›",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+private fun BillsEntrySection(state: QzxyUiState) {
+    val context = LocalContext.current
+    SettingsSection(title = "消费记录") {
+        SettingItem(
+            title = "账单明细",
+            subtitle = "今日 / 本周 / 本月 / 全部 · 按日分组",
+            value = if (state.billLoaded) entrySummary(state.bills) else null,
+            onClick = { SubpageActivity.start(context, SubpageScreen.QZXY_BILLS) },
         )
     }
 }
 
 /**
- * 设备关停后自动结算的开关（DESIGN §4.30，2026-10-11 起可关，默认开）。
+ * 设置卡（2026-11-05 合并）：自动结算开关 + 诊断入口。
  *
- * 页尾、登录与未登录两态都显示：这是行为偏好，不是账号状态，提前关也该能关。
- * 关掉后的变化全在对账链路（[WateringReconcileEffect]）：读到「消费完成，待采集」
- * 不再自动发起结算，待核对口径由状态卡常驻提示，结算手动点「结算核对」。
+ * 原来两件事各占一张卡（「用水」整卡一个开关、「诊断与调试」整卡一行），
+ * 合起来只是两条设置项，却把消费记录挤下去两屏。
+ *
+ * 自动结算（DESIGN §4.30，2026-10-11 起可关，默认开）：关掉后的变化全在对账链路
+ * （[WateringReconcileEffect]）——读到「消费完成，待采集」不再自动发起结算。
+ * 登录与未登录两态都显示：这是行为偏好，不是账号状态，提前关也该能关。
  */
 @Composable
-private fun WateringSettingSection(state: QzxyUiState, viewModel: QzxyViewModel) {
-    SettingsSection(title = "用水") {
+private fun PreferencesSection(
+    state: QzxyUiState,
+    viewModel: QzxyViewModel,
+    onOpenDiagnostics: () -> Unit,
+) {
+    SettingsSection(title = "设置") {
         SettingSwitchRow(
             title = "设备关停后自动结算",
-            subtitle = "页面可见时读到「消费完成，待采集」会自动结算并记账；关掉后要你手动结算",
+            subtitle = "页面可见时自动结算并记账；关掉后要你手动结算",
             checked = state.autoSettleEnabled,
             onCheckedChange = viewModel::setAutoSettleEnabled,
+        )
+        SettingItem(
+            title = "诊断与调试",
+            subtitle = "设备现场 · 服务表 · 调试日志",
+            icon = HugeIcons.InformationCircle,
+            onClick = onOpenDiagnostics,
+        )
+    }
+}
+
+/** 页尾退出（二次确认在宿主里）：登录态才出现，未登录时不留一个点了没反应的入口。 */
+@Composable
+private fun FooterActions(loggedIn: Boolean, onLogout: () -> Unit) {
+    if (!loggedIn) return
+    TextButton(
+        onClick = onLogout,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+    ) {
+        Text(
+            text = "退出登录",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
         )
     }
 }

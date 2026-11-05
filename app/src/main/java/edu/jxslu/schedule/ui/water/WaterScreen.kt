@@ -48,6 +48,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -75,20 +76,26 @@ import edu.jxslu.schedule.domain.calculateActualCost
 import edu.jxslu.schedule.domain.cashPaidAmount
 import edu.jxslu.schedule.domain.ticketPaidAmount
 import edu.jxslu.schedule.ui.common.AppCardRow
+import edu.jxslu.schedule.ui.common.AccountHeroCard
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
+import edu.jxslu.schedule.ui.common.HeroActionButton
+import edu.jxslu.schedule.ui.common.MetricCell
+import edu.jxslu.schedule.ui.common.MetricsRow
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.copyPlainText
 import edu.jxslu.schedule.ui.common.SettingChoiceRow
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
+import edu.jxslu.schedule.ui.common.SettingsDivider
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WaterUnlockButton
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.me.MeViewModel
 import java.math.BigDecimal
@@ -102,7 +109,6 @@ import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Droplet
 import me.rerere.hugeicons.stroke.GlassWater
 import me.rerere.hugeicons.stroke.History
-import me.rerere.hugeicons.stroke.Logout04
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.Wallet01
@@ -112,14 +118,13 @@ private val DATE_FORMAT = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
 
 /**
  * 胖乖生活页（DESIGN §3.4 / §4.16，页内核心动作是开水）。
- * 交互：未登录 → 登录卡（验证码 / Token 两种）；已登录 → 余额行、设备选择、
- * 大按钮开水、状态原地切换（Idle/进行中/成功/失败）、订单快照列表。
- * 风格克制：无大圆角卡片、无 elevation，错误一行主因 + 详情弹窗。
  *
- * 2026-09-20 起「开水设置」子页并入本页尾部（`WaterSettingsSection`，登录与
- * 未登录两态共用）：**显示开水卡片**开关 + **点击方式**（单击/双击）。
- * 「我的」侧入口名 2026-09-20 起为「胖乖生活」，2026-09-26 去掉「一键开水」后缀，
- * 与页标题、账号卡三格统一；不再有独立设置页。
+ * 2026-11-05 改版（与快趣 / 趣智同一骨架）：身份卡 → 账户资产三列 → 开水（设备 + 状态 +
+ * 一个主动作）→ 用水记录 → 签到与偏好 → 页尾。原先 7 块等权卡片并列、余额挤在一行
+ * titleMedium 里；「开水卡设置 · 点击方式」整节删除，开水按钮固定单击。
+ *
+ * 交互：未登录 → 登录卡（验证码 / Token 两种）；已登录 → 余额、设备、开水、
+ * 状态原地切换（Idle/进行中/成功/失败）、订单快照。错误一行主因 + 详情弹窗。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -145,6 +150,8 @@ fun WaterScreen(
     var showDeviceSheet by remember { mutableStateOf(false) }
     var detailItem by remember { mutableStateOf<Any?>(null) }
     var confirmLogout by remember { mutableStateOf(false) }
+    // 充值会跳出本应用、且充错账户退不回来：先在弹窗里说清账号口径，确认后才跳转
+    var confirmRecharge by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -235,11 +242,10 @@ fun WaterScreen(
                 },
                 actions = {
                     if (state.loggedIn) {
+                        // 退出登录已挪到页尾（2026-11-05 改版）：顶栏只留复制 Token 这个
+                        // 排障入口，避免同一个危险动作在页面上出现两次
                         IconButton(onClick = copyToken) {
                             Icon(HugeIcons.Copy01, contentDescription = "复制 Token")
-                        }
-                        IconButton(onClick = { confirmLogout = true }) {
-                            Icon(HugeIcons.Logout04, contentDescription = "退出登录")
                         }
                     }
                 },
@@ -257,11 +263,6 @@ fun WaterScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 LoginSection(state = state, viewModel = viewModel)
-                WaterSettingsSection(
-                    prefs = prefsState.displayPrefs,
-                    onSetRequireDoubleClick = prefsViewModel::setWaterRequireDoubleClick,
-                    onToggleHaptics = { haptics.toggle() },
-                )
                 Disclaimer()
             }
         } else {
@@ -269,9 +270,13 @@ fun WaterScreen(
             // 余额行的刷新按钮随之删除）。padding 收在刷新容器上而不是列表上：Scaffold 的
             // 内容从 (0,0) 铺满整屏、顶栏压在它上面，指示器挂在容器顶边时整条滑入轨迹
             // 都在顶栏后面，得拖过阈值一大截才露出半圈。
+            // 指示器驻留口径见 ui/common/RefreshHold.kt（2026-11-05）：点亮只认 onRefresh，
+            // busy 只续命——直接接 state.refreshing 会让「秒失败 / 逐请求抖动」漏成抽搐回弹。
+            val refreshHold = rememberRefreshHold(busy = state.refreshing)
             PullToRefreshBox(
-                isRefreshing = state.refreshing,
+                isRefreshing = refreshHold.isRefreshing,
                 onRefresh = {
+                    refreshHold.begin()
                     haptics.tap()
                     viewModel.refresh()
                 },
@@ -286,64 +291,23 @@ fun WaterScreen(
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    BalanceRow(
+                    QiekjHeroCard(
                         state = state,
-                        onRecharge = openRecharge,
-                        onToggleShowPhone = { viewModel.toggleShowPhone() },
+                        onTogglePhone = { viewModel.toggleShowPhone() },
+                        onRecharge = { confirmRecharge = true },
                     )
 
-                    DailySignInSection(
-                        state = state,
-                        autoSignIn = prefsState.displayPrefs.qiekjAutoSignIn,
-                        onRun = { viewModel.runDailySignIn() },
-                        onSetAutoSignIn = prefsViewModel::setQiekjAutoSignIn,
-                    )
+                    AccountMetricsSection(state = state)
 
-                    // 设备行（与趣智页同构：一行 AppCardRow，右侧「更换 ›」）
-                    DeviceRow(
+                    UnlockCard(
                         state = state,
-                        onPick = { showDeviceSheet = true },
-                    )
-
-                    UnlockStatusArea(
-                        state = state,
+                        onPickDevice = { showDeviceSheet = true },
                         onToggleUsePoints = { viewModel.toggleUsePoints() },
                         onShowDetail = { detailItem = it },
+                        onUnlock = { viewModel.unlock() },
+                        onEndSession = { viewModel.endSession() },
+                        onDismissFlow = { viewModel.dismissFlow() },
                     )
-
-                    when (val flow = state.flow) {
-                        is UnlockFlowState.Idle -> WaterUnlockButton(
-                            enabled = state.selectedDevice != null,
-                            onUnlock = { viewModel.unlock() },
-                            fillMaxWidth = true,
-                            height = 48.dp,
-                        )
-                        // 出水满 5 秒，「开水进行中…」原地换成「结束用水」（动作位共用组件）
-                        is UnlockFlowState.PreChecking -> WaterWorkingAction(
-                            canEndSession = false,
-                            onEndSession = { viewModel.endSession() },
-                        )
-                        is UnlockFlowState.Working -> WaterWorkingAction(
-                            canEndSession = flow.elapsedSeconds >= WaterViewModel.END_SESSION_MIN_SECONDS,
-                            onEndSession = { viewModel.endSession() },
-                            stopping = flow.stopping,
-                        )
-                        is UnlockFlowState.Success -> OutlinedButton(
-                            onClick = { viewModel.dismissFlow() },
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                        ) { Text("完成") }
-                        is UnlockFlowState.Failed -> Row(modifier = Modifier.fillMaxWidth()) {
-                            Button(
-                                onClick = { viewModel.unlock() },
-                                modifier = Modifier.weight(1f).height(48.dp),
-                            ) { Text("重试") }
-                            Spacer(Modifier.width(8.dp))
-                            OutlinedButton(
-                                onClick = { viewModel.dismissFlow() },
-                                modifier = Modifier.height(48.dp),
-                            ) { Text("关闭") }
-                        }
-                    }
 
                     OrderSection(
                         orders = state.orderHistory,
@@ -355,11 +319,14 @@ fun WaterScreen(
                         onClickServer = { viewModel.openServerOrder(it) },
                     )
 
-                    WaterSettingsSection(
-                        prefs = prefsState.displayPrefs,
-                        onSetRequireDoubleClick = prefsViewModel::setWaterRequireDoubleClick,
-                        onToggleHaptics = { haptics.toggle() },
+                    SignInSection(
+                        state = state,
+                        autoSignIn = prefsState.displayPrefs.qiekjAutoSignIn,
+                        onRun = { viewModel.runDailySignIn() },
+                        onSetAutoSignIn = prefsViewModel::setQiekjAutoSignIn,
                     )
+
+                    FooterActions(onLogout = { confirmLogout = true })
                     Disclaimer()
                 }
             }
@@ -412,6 +379,42 @@ fun WaterScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmLogout = false }) { Text("取消") }
+            },
+        )
+    }
+
+    // 充值前确认（2026-11-05）：钱进的是支付宝里的小程序账户，本应用只负责跳过去。
+    // 原来这段口径写成卡片底下的小字，没人看；改成跳转前的确认弹窗，确认了才离开应用。
+    if (confirmRecharge) {
+        AlertDialog(
+            onDismissRequest = { confirmRecharge = false },
+            title = { Text("前往支付宝充值？") },
+            text = {
+                Column {
+                    DialogWindowFadeEffect()
+                    Text("将跳到支付宝的「胖乖生活」小程序，钱进你在胖乖的账户。")
+                    Text(
+                        "小程序按支付宝的登录态进账号：先核对它的手机号与本页登录的一致，充错账户退不回来。",
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Text(
+                        "充值与退款由胖乖官方负责，与本应用无关；由此造成的损失开发者不承担责任。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmRecharge = false
+                        openRecharge()
+                    },
+                ) { Text("去充值") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRecharge = false }) { Text("取消") }
             },
         )
     }
@@ -501,30 +504,24 @@ private fun LoginSection(state: WaterUiState, viewModel: WaterViewModel) {
 }
 
 /**
- * 开水设置区（原「开水设置」子页主体，2026-09-20 并入本页，DESIGN §3.4）。
- * 放在页面尾部，登录与未登录两态共用。今日页不再展示开水卡片，生活服务统一
- * 从左侧栏进入；本区只留行为项。
+ * 页尾退出（二次确认在宿主里）。
+ *
+ * 2026-11-05：原来的「开水卡设置 · 点击方式」整节删除（用户要求）——整节只有一个
+ * 单击/双击选择，且只对页内大按钮生效。开水按钮现在固定单击，与今日页余额面板同口径；
+ * `DisplayPrefs.waterRequireDoubleClick` 字段保留（老备份里可能带着它），但本页不再读写。
  */
 @Composable
-private fun WaterSettingsSection(
-    prefs: DisplayPrefs,
-    onSetRequireDoubleClick: (Boolean) -> Unit,
-    onToggleHaptics: () -> Unit,
-) {
-    SettingsSection(
-        title = "开水卡设置",
-        subtitle = "本节只管理开水卡行为。",
+private fun FooterActions(onLogout: () -> Unit) {
+    TextButton(
+        onClick = onLogout,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
     ) {
-        SettingChoiceRow(
-            title = "点击方式",
-            subtitle = "双击确认防误触，对上方「开水」大按钮生效（今日页余额面板固定单击）",
-            icon = HugeIcons.GlassWater,
-            options = listOf("单击", "双击"),
-            selectedIndex = if (prefs.waterRequireDoubleClick) 1 else 0,
-            onSelect = { index ->
-                onToggleHaptics()
-                onSetRequireDoubleClick(index == 1)
-            },
+        Text(
+            text = "退出登录",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
         )
     }
 }
@@ -540,148 +537,163 @@ private fun Disclaimer() {
 // ── 已登录内容 ──
 
 /**
- * 余额与充值卡（2026-10-07 卡片化，与趣智页 AccountRow 同构）：余额 + 登录手机号
- * （遮蔽 + 眼睛）+ 充值按钮 + 说明文，全部收进一张 SettingsSection。
- * 原先这几样裸在页面背景上，与全 App 的卡片语言脱节。
+ * 身份卡（2026-11-05 改版）：登录手机号 + 「已登录」+ Token 去向 + 充值。
+ *
+ * 原先是「余额与充值」一张卡里塞「小票 ¥x · 积分 y」一行大字、手机号、充值按钮，
+ * 数字与账号抢同一个位置；现在身份归身份、数字归三列指标（[AccountMetricsSection]）。
  */
 @Composable
-private fun BalanceRow(state: WaterUiState, onRecharge: () -> Unit, onToggleShowPhone: () -> Unit) {
-    val balance = state.balance
-    SettingsSection(title = "余额与充值") {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                HugeIcons.Wallet01,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(22.dp),
+private fun QiekjHeroCard(
+    state: WaterUiState,
+    onTogglePhone: () -> Unit,
+    onRecharge: () -> Unit,
+) {
+    val hasPhone = state.accountPhone.isNotBlank()
+    val eye: (@Composable () -> Unit)? = if (hasPhone) {
+        { PhoneEye(shown = state.showPhone, onToggle = onTogglePhone) }
+    } else {
+        null
+    }
+    AccountHeroCard(
+        icon = HugeIcons.Wallet01,
+        title = if (hasPhone) {
+            if (state.showPhone) state.accountPhone else QzxyPhoneMask.mask(state.accountPhone)
+        } else {
+            "胖乖生活"
+        },
+        subtitle = "Token 仅存本机 · 不进云备份",
+        pill = "已登录",
+        trailing = eye,
+        action = {
+            HeroActionButton(
+                text = "充值到胖乖账户",
+                icon = HugeIcons.WalletAdd01,
+                onClick = onRecharge,
             )
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = "小票 ¥${balance?.ticketText ?: "-"} · 积分 ${balance?.pointsText ?: "-"}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                // 登录手机号默认遮蔽，点眼睛才展开：页面会被截图、会被旁人瞥见，
-                // 与趣智账号行 / 「我的」页学号同一个口径（QzxyPhoneMask 是通用遮蔽工具）
-                if (state.accountPhone.isNotBlank()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "登录手机号 " +
-                                if (state.showPhone) state.accountPhone else QzxyPhoneMask.mask(state.accountPhone),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        Icon(
-                            imageVector = if (state.showPhone) HugeIcons.ViewOff else HugeIcons.View,
-                            contentDescription = if (state.showPhone) "隐藏手机号" else "显示手机号",
-                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                            modifier = Modifier
-                                .padding(start = 6.dp)
-                                .size(16.dp)
-                                .clickable { onToggleShowPhone() },
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.width(10.dp))
-            FilledTonalButton(onClick = onRecharge) {
-                Icon(
-                    HugeIcons.WalletAdd01,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text("充值")
-            }
+        },
+    )
+}
+
+/** 手机号显隐的眼睛（与趣智页同款）：页面会被截图、会被旁人瞥见，默认遮蔽。 */
+@Composable
+private fun PhoneEye(shown: Boolean, onToggle: () -> Unit) {
+    Icon(
+        imageVector = if (shown) HugeIcons.ViewOff else HugeIcons.View,
+        contentDescription = if (shown) "隐藏手机号" else "显示手机号",
+        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+        modifier = Modifier
+            .padding(start = 6.dp)
+            .size(16.dp)
+            .clickable { onToggle() },
+    )
+}
+
+/**
+ * 账户资产三列（2026-11-05）：小票 / 积分 / 本月用水。
+ *
+ * 三个数字都在手上：小票与积分来自余额接口，本月用水是本地快照里当月已完成的单数
+ * （只数本月、只数完成态；快照最多 20 笔，跨月多到 20 笔以上时会少算——这也是它写在
+ * 说明行「本地记录」里的原因，服务端全量在「历史订单」弹层里）。
+ */
+@Composable
+private fun AccountMetricsSection(state: WaterUiState) {
+    val balance = state.balance
+    val monthStart = remember {
+        java.time.LocalDate.now().withDayOfMonth(1).atStartOfDay(java.time.ZoneId.systemDefault())
+            .toInstant().toEpochMilli()
+    }
+    val monthlyOrders = state.orderHistory.count { it.completedAt >= monthStart }
+    SettingsSection(title = "账户资产") {
+        MetricsRow(Modifier.padding(top = 6.dp)) {
+            MetricCell(
+                label = "小票",
+                value = balance?.ticketText?.let { "¥$it" } ?: "—",
+                caption = "可开水的余额",
+                modifier = Modifier.weight(1f),
+            )
+            MetricCell(
+                label = "积分",
+                value = balance?.pointsText ?: "—",
+                caption = "可抵水费",
+                modifier = Modifier.weight(1f),
+            )
+            MetricCell(
+                label = "本月用水",
+                value = "$monthlyOrders 次",
+                caption = "本地记录",
+                modifier = Modifier.weight(1f),
+            )
         }
-        Text(
-            text = "点「充值」跳到支付宝的胖乖生活小程序，钱进胖乖账户；充值与退款由胖乖官方负责。" +
-                "小程序按支付宝的登录态进账号，充值前先核对它与本 App 登录的手机号一致，避免充错账户。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-            modifier = Modifier.padding(top = 8.dp),
-        )
     }
 }
 
 /**
- * 每日签到卡（2026-10-23）：只做签到，不碰任务/领奖。
+ * 签到与偏好（2026-11-05 收成一张卡）：签到降级为一行（状态 + 「签到」按钮），
+ * 自动签到开关紧随其后。
  *
- * 「打开软件自动签到」默认关闭；开启后只在每天首次前台检查一次，已签到就不再请求。
- * 手动按钮与自动签到共用仓库的同一条签到链路，结果留在页面上。
+ * 原先是整卡：标题 + 副标题 + 结果行 + 44dp 大按钮 + 开关 + 免责句，一天只用一次的动作
+ * 占掉三分之一屏，把真正的主动作「开水」挤到第三屏。
+ *
+ * 只做签到，不碰任务/领奖（2026-10-23 用户授权范围）；「打开软件自动签到」默认关闭，
+ * 开启后只在每天首次前台检查一次，已签到就不再请求。手动按钮与自动签到共用同一条链路。
  */
 @Composable
-private fun DailySignInSection(
+private fun SignInSection(
     state: WaterUiState,
     autoSignIn: Boolean,
     onRun: () -> Unit,
     onSetAutoSignIn: (Boolean) -> Unit,
 ) {
-    SettingsSection(
-        title = "每日签到",
-        subtitle = "每天签到一次；打开软件自动签到默认关闭。",
-    ) {
-        state.signInResult?.let { result ->
-            Text(result.signInText, style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.height(10.dp))
-        }
-        state.signInError?.let { error ->
-            Text(
-                error,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-            Spacer(Modifier.height(10.dp))
-        }
-        Button(
-            onClick = onRun,
-            enabled = !state.signInRunning,
-            modifier = Modifier.fillMaxWidth().height(44.dp),
+    SettingsSection(title = "签到与偏好") {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (state.signInRunning) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary,
+            Column(Modifier.weight(1f)) {
+                Text("每日签到", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = state.signInError
+                        ?: state.signInResult?.signInText
+                        ?: "每天一次，积分可在开水时抵扣",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (state.signInError != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                    },
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.width(8.dp))
-                Text("正在签到…")
-            } else {
-                Text("签到一次")
+            }
+            Spacer(Modifier.width(10.dp))
+            TextButton(onClick = onRun, enabled = !state.signInRunning) {
+                Text(if (state.signInRunning) "签到中…" else "签到")
             }
         }
+        SettingsDivider()
         SettingSwitchRow(
             title = "打开软件自动签到",
-            subtitle = "默认关闭；每天首次打开 App 时检查一次，已签到就不再请求",
+            subtitle = "每天首次打开时检查一次，已签到不再请求",
             checked = autoSignIn,
             onCheckedChange = onSetAutoSignIn,
-        )
-        Text(
-            "不会绕过广告、验证码、付费或风控；平台规则与账号风险自担。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            modifier = Modifier.padding(top = 8.dp),
         )
     }
 }
 
 /**
- * 设备行（2026-10-07 与趣智页同构）：AppCardRow + 图标 + 设备名 + 「更换 ›」。
- * 原先是裸 Row + 分割线；用水中 / 流程进行中不可换（趣智同一条纪律）。
+ * 设备行（2026-11-05 并进「开水」卡）：图标 + 设备名 + 「切换 ›」。
+ * 用水中 / 流程进行中不可换（与趣智同一条纪律：换设备会打断正在跑的那条链路）。
  */
 @Composable
-private fun DeviceRow(state: WaterUiState, onPick: () -> Unit) {
+private fun DeviceRowItem(state: WaterUiState, onPick: () -> Unit) {
     val canPick = state.flow is UnlockFlowState.Idle && state.devices.isNotEmpty()
-    AppCardRow(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = if (canPick) onPick else null,
-        onClickLabel = "更换开水设备",
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(enabled = canPick, onClickLabel = "切换开水设备") { onPick() }
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             HugeIcons.Droplet,
@@ -702,7 +714,7 @@ private fun DeviceRow(state: WaterUiState, onPick: () -> Unit) {
             Text(
                 text = when {
                     state.flow !is UnlockFlowState.Idle -> "正在处理，等这一步跑完再换"
-                    state.selectedDevice != null -> "已选中 · 点右侧可换"
+                    state.selectedDevice != null -> "历史设备 · 点右侧切换"
                     else -> "还没选设备，点右侧挑一台"
                 },
                 style = MaterialTheme.typography.bodySmall,
@@ -716,12 +728,89 @@ private fun DeviceRow(state: WaterUiState, onPick: () -> Unit) {
             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
         } else {
             Text(
-                text = "更换 ›",
+                text = if (canPick) "切换 ›" else "处理中",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (canPick) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                 maxLines = 1,
             )
+        }
+    }
+}
+
+/**
+ * 主操作卡「开水」：设备 → 状态 → 一个主动作。
+ *
+ * 2026-11-05 起设备行并进本卡（原先独立一张卡），按钮固定单击
+ * （用户要求；原「开水卡设置 · 点击方式」整节已删）。动作位随状态原地切换：
+ * 待机「开水」→ 进行中「结束用水」→ 完成「完成」→ 失败「重试 / 关闭」。
+ */
+@Composable
+private fun UnlockCard(
+    state: WaterUiState,
+    onPickDevice: () -> Unit,
+    onToggleUsePoints: () -> Unit,
+    onShowDetail: (Any) -> Unit,
+    onUnlock: () -> Unit,
+    onEndSession: () -> Unit,
+    onDismissFlow: () -> Unit,
+) {
+    SettingsSection(title = "开水") {
+        DeviceRowItem(state = state, onPick = onPickDevice)
+        SettingsDivider(Modifier.padding(top = 2.dp))
+        Column(Modifier.padding(top = 6.dp)) {
+            UnlockStatusArea(
+                state = state,
+                onToggleUsePoints = onToggleUsePoints,
+                onShowDetail = onShowDetail,
+            )
+        }
+        when (val flow = state.flow) {
+            is UnlockFlowState.Idle -> WaterUnlockButton(
+                enabled = state.selectedDevice != null,
+                onUnlock = onUnlock,
+                // 单击：与今日页余额面板同口径（2026-11-05 用户要求）
+                requireDoubleClick = false,
+                fillMaxWidth = true,
+                height = 48.dp,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            // 出水满 5 秒，「开水进行中…」原地换成「结束用水」（动作位共用组件）
+            is UnlockFlowState.PreChecking -> WaterWorkingAction(
+                canEndSession = false,
+                onEndSession = onEndSession,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            is UnlockFlowState.Working -> WaterWorkingAction(
+                canEndSession = flow.elapsedSeconds >= WaterViewModel.END_SESSION_MIN_SECONDS,
+                onEndSession = onEndSession,
+                stopping = flow.stopping,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            is UnlockFlowState.Success -> OutlinedButton(
+                onClick = onDismissFlow,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .height(48.dp),
+            ) { Text("完成") }
+            is UnlockFlowState.Failed -> Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+            ) {
+                Button(
+                    onClick = onUnlock,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
+                ) { Text("重试") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = onDismissFlow,
+                    modifier = Modifier.height(48.dp),
+                ) { Text("关闭") }
+            }
         }
     }
 }
@@ -879,10 +968,20 @@ private fun DeviceSheet(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
         ) {
             Text("选择开水设备", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            // 2026-11-05：用户问「能不能扫码换饮水机」，核实结论是不能——胖乖服务端没有
+            // 绑定/更换端点（设备只来自 `goods/latestUsed` 这条纯读），所以这里必须说清
+            // 「列表是官方历史记录」，否则用户会以为是本 App 的绑定列表、找不到「加一台」。
+            Text(
+                "列表来自官方胖乖生活的历史设备：需要先在官方 App / 小程序扫码用过这台饮水机，" +
+                    "它才会出现在这里；本应用不支持添加或绑定新设备。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            )
             Spacer(Modifier.height(12.dp))
             if (devices.isEmpty()) {
                 Text(
-                    "暂无设备，请确认已在胖乖生活用过饮水机后下拉刷新",
+                    "暂无设备。请先用官方胖乖生活扫码开一次水，再回本页下拉刷新。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 )

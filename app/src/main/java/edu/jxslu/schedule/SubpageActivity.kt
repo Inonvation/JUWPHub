@@ -51,6 +51,7 @@ import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.score.ScoreSettingsScreen
 import edu.jxslu.schedule.ui.score.TranscriptHistoryScreen
 import edu.jxslu.schedule.ui.qzxy.QzxyScreen
+import edu.jxslu.schedule.ui.qzxy.QzxyBillScreen
 import edu.jxslu.schedule.ui.qzxy.QzxyDebugScreen
 import edu.jxslu.schedule.ui.scholar.ScholarScreen
 import edu.jxslu.schedule.ui.selection.SelectionCenterScreen
@@ -93,6 +94,8 @@ enum class SubpageScreen {
     QZXY,
     /** 趣智校园 → 诊断与调试（DESIGN §3.18；设备现场 · 服务表 · 试签名 · 日志） */
     QZXY_DEBUG,
+    /** 趣智校园 → 消费记录（按时段筛 · 按日分组，2026-11-05，DESIGN §4.30） */
+    QZXY_BILLS,
     /** 设置 → 桌面与日历 → 桌面小组件（DESIGN §3.6） */
     WIDGET_SETTINGS,
     /** 设置 → 桌面与日历 → 日历同步（提醒时长 · 一键删除，DESIGN §4.12） */
@@ -372,6 +375,8 @@ class SubpageActivity : ComponentActivity() {
                 focusAddress = focusItemId,
                 onBack = onBack,
             )
+            // 趣智消费记录（2026-11-05）：从趣智页入口卡进来，页面自带 VM（按月拉 + 本地按时段筛）
+            SubpageScreen.QZXY_BILLS -> QzxyBillScreen(onBack = onBack)
             SubpageScreen.WIDGET_SETTINGS -> WidgetSettingsScreen(onBack = onBack)
             SubpageScreen.CALENDAR_SETTINGS -> CalendarSettingsScreen(onBack = onBack)
             SubpageScreen.REMINDER_SETTINGS -> ReminderSettingsScreen(onBack = onBack)

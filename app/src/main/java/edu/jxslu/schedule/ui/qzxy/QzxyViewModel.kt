@@ -2228,18 +2228,13 @@ class QzxyViewModel(
      *
      * 已经有数据或正在拉就不重复请求：页面每次重建都会调它，不去重的话
      * 「进页 → 退出 → 再进」就是一次月账单请求，纯浪费。
+     *
+     * 2026-11-05 起主页只留入口摘要（「本月 N 笔 · ¥X」），翻月份 / 时段筛选都在
+     * 独立页 `QzxyBillScreen` 里做（它有自己的 VM 与多月加载），这里不再需要翻月。
      */
     fun loadBillsOnce() {
         if (_uiState.value.billLoaded || _uiState.value.loadingBills) return
         loadBills()
-    }
-
-    /** 翻月份：-1 上一月，+1 下一月。 */
-    fun shiftBillMonth(delta: Long) {
-        val base = _uiState.value.billMonth.ifBlank { currentMonth() }
-        val next = runCatching { YearMonth.parse(base).plusMonths(delta).toString() }.getOrNull()
-            ?: return
-        loadBills(next)
     }
 
     /** 开关开着才记。内容够定位问题即可，不写流水账。 */

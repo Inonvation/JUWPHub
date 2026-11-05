@@ -411,7 +411,7 @@ Channel：`android_app`
 | 发验证码 | `common/sms/sendCode` | `phone`, `template=reg` |
 | 登录/注册 | `user/reg` | `channel`, `phone`, `verify` → 返回 token |
 | 余额 | `user/balance` | 需 token |
-| 历史设备 | `goods/latestUsed` | `categoryCode=5`（饮水类，以实测为准） |
+| 历史设备 | `goods/latestUsed` | `categoryCode=5`（饮水类，以实测为准）；**只读**——平台没有绑定/更换端点，本应用只能在这份历史里切换（2026-11-05 核实，见 `.agents/rules/life-power.md`） |
 | SKU | `goods/normal/skus` | `goodsId` |
 | 设备详情 | `goods/normal/details` | 含 imei 等 |
 | 风控检查 | `userIntegral/checkUserIsRisk` | |

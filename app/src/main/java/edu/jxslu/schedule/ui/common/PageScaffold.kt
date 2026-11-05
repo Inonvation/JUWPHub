@@ -28,6 +28,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -233,6 +234,10 @@ fun PageScaffold(
  * 但内容是可滚动的 [Column] 而不是列表。
  *
  * 用于设置类页面（一行行 [SettingItem] 堆起来、不需要 lazy）。列表用 [PageScaffold]。
+ *
+ * 下拉刷新（2026-11-05 新增，U净 首先用上）：传了 [onRefresh] 才包一层
+ * [PullToRefreshBox]——不传的页面一个像素都不变。刷新指示器挂在内容容器顶边
+ * （与胖乖 / 趣智 / 消费流水页同一口径），`isRefreshing` 由调用方的状态给。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -243,6 +248,8 @@ fun PageScaffoldColumn(
     modifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
+    refreshing: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Scaffold(
@@ -264,14 +271,26 @@ fun PageScaffoldColumn(
         snackbarHost = { AppSnackbarHost(snackbar) },
         floatingActionButton = floatingActionButton,
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(PageDefaults.ContentPadding),
-            verticalArrangement = Arrangement.spacedBy(PageDefaults.CardSpacing),
-            content = content,
-        )
+        val column: @Composable (Modifier) -> Unit = { inner ->
+            Column(
+                modifier = inner
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(PageDefaults.ContentPadding),
+                verticalArrangement = Arrangement.spacedBy(PageDefaults.CardSpacing),
+                content = content,
+            )
+        }
+        if (onRefresh == null) {
+            column(Modifier.padding(padding))
+        } else {
+            PullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = onRefresh,
+                modifier = Modifier.fillMaxSize().padding(padding),
+            ) {
+                column(Modifier)
+            }
+        }
     }
 }

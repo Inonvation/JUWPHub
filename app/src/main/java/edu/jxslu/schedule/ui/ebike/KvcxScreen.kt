@@ -58,10 +58,12 @@ import edu.jxslu.schedule.domain.EbikeCardSavings
 import edu.jxslu.schedule.domain.EbikeRideStats
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.capabilities
+import edu.jxslu.schedule.ui.common.AccountHeroCard
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
+import edu.jxslu.schedule.ui.common.MetricCell
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.PageScaffoldColumn
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
@@ -151,7 +153,7 @@ fun KvcxScreen(
             )
 
             state.loggedIn -> {
-                AccountHeroCard(mobile = state.accountMobile)
+                KvcxIdentityCard(mobile = state.accountMobile)
                 AssetsSection(
                     state = state,
                     savings = cardSavings,
@@ -185,49 +187,16 @@ fun KvcxScreen(
 /**
  * 身份卡（2026-11-05 改版）：头像 + 手机号掩码 + 「已登录」+ 凭证去向。
  *
- * 原先是「账号」区标题 + 副标题 + SettingItem + 一行「打开快趣出行」按钮 + 「退出登录」，
- * 一段话里塞了三个层级；现在只留身份本身，退出登录挪到页尾。
+ * 版式已抽到 [AccountHeroCard]（趣智 / 胖乖 / U净 同款）；这里只给快趣自己的三行字。
  */
 @Composable
-private fun AccountHeroCard(mobile: String) {
-    AppCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    HugeIcons.UserAccount,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = maskMobile(mobile),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    SignedInPill()
-                }
-                Text(
-                    text = "凭证仅存本机 · 不进云备份",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
-    }
+private fun KvcxIdentityCard(mobile: String) {
+    AccountHeroCard(
+        icon = HugeIcons.UserAccount,
+        title = maskMobile(mobile),
+        subtitle = "凭证仅存本机 · 不进云备份",
+        pill = "已登录",
+    )
 }
 
 /** 手机号掩码：11 位取前 3 后 4，其它形态原样（不编数字）。 */
@@ -237,22 +206,6 @@ private fun maskMobile(mobile: String): String {
         "${trimmed.take(3)}****${trimmed.takeLast(4)}"
     } else {
         trimmed.ifBlank { "已登录" }
-    }
-}
-
-@Composable
-private fun SignedInPill() {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-    ) {
-        Text(
-            text = "已登录",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
     }
 }
 
@@ -394,40 +347,8 @@ private fun AssetsSection(
 
 /**
  * 一列指标（2026-11-05 改版）：小标签 + 数值 + 一行说明，三列并排。
- * 标签给「这一列是什么」（骑行卡 / 已用额度 / 余额），说明给「数字怎么来的」；
- * 数值用 titleLarge，与说明拉开层级（效果稿里 19px vs 10.5px）。
+ * 版式已抽到 [MetricCell]（`ui/common/AccountCards.kt`），趣智 / 胖乖 / U净 同款。
  */
-@Composable
-private fun MetricCell(
-    label: String,
-    value: String,
-    caption: String,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 1.dp),
-        )
-        Text(
-            text = caption,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 1.dp),
-        )
-    }
-}
 
 /** 骑行卡剩余次数：无限次数卡写「无限」，没有可用卡写「—」（不编 0）。 */
 private fun remainingValue(assets: KqcxAuth.Assets): String {
