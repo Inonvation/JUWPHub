@@ -124,16 +124,15 @@
   **二级页返回仍然既不预览也不跟手**。同机对照课表页显示设置面板（`DisplaySettingsOverlay`
   用 `PredictiveBackHandler`）跟手正常 —— 说明系统**会送 `OnBackProgressed`，只是自己不做
   跨窗口动画**。所以不要再指望 ROM 实现窗口级跟手。
-- **二级页的跟手改成 App 自己驱动**：`ui/common/PredictiveBackExit.kt` 的
-  `PredictiveBackExitHost` 用同一份手势进度驱动整页平移/缩放/淡出，顶栏返回与手势提交走
-  同一个出口（动画播完才 `finish()`）。窗口关闭侧必须同时静止
-  （`enablePredictiveBackTransitions(selfDrivenClose = true)`），否则窗口会再滑一次、
-  与页面动画叠成「抖一下」。**≤33 不接管**：那里 `PredictiveBackHandler` 只在松手时补发
-  一个 progress=1 的事件，照这套驱动会瞬间跳位，所以低版本整段退回窗口动画（旧口径）。
-  **代价**：注册 `PredictiveBackHandler` 会关掉系统的跨窗口预览；页面在独立窗口里看不到
-  下面那一页，所以落点是 `surface` 底色（铺在宿主里，防深色主题透出浅色窗口背景）。
-  已接入：`SubpageActivity`（35+ 页）。未接入：Settings / JwImport / Transcript / XgForm /
-  PowerBankPay —— 它们仍是窗口动画，接法是同一套，等 SubpageActivity 真机验过再铺开。
+- **二级页的跟手试过 App 自驱，当天回退（2026-11-06）**：`PredictiveBackExitHost` 曾用同一份
+  手势进度驱动整页平移（0.28）/缩放/淡出，窗口关闭侧同步静止避免叠两次动画。真机反馈是
+  「只往右挪了一点、左边空着」+ 掉帧。**根因是架构性的，不是参数没调好**：二级页在独立的
+  **不透明窗口**里，看不到下面那一页，平移只能读成「错位」；整屏 `alpha` 又强制每帧离屏合成。
+  **已回退**：`ui/common/PredictiveBackExit.kt` 删除，`SubpageActivity` 与 `WindowTransitions`
+  回到纯窗口动画（`slide_out_right`），`enablePredictiveBackTransitions` 恢复无参签名。
+  要真跟手只有两条路，都不便宜：窗口 `windowIsTranslucent`（每帧离屏合成，WebView / 输入法 /
+  状态栏都要重验），或把二级页并进 MainActivity 的 NavHost（72 个 `SubpageScreen` 分支 +
+  9 个 Activity 的返回栈重写）。**再动之前先定这两条之一，别重复做自驱平移。**
 - **不动的那一侧要给 `R.anim.stay_still`，不能传 0**（2026-09-26 修）：0 = 「这一侧没有
   动画资源」；静止动画是 0→0 位移，观感与传 0 一致。
 - **App 接管了返回的页面没有系统跟手预览**：AndroidX activity 1.9.3 在 API 34+ 会把

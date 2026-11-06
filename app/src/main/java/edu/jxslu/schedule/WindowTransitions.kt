@@ -22,7 +22,7 @@ import android.os.Build
  * App 没适配预测性返回，把手势预览整个关掉。2026-09-23 在 Redmi K70（Android 16）上对比过：
  * 手势滑到一半只有边缘指示条、没有任何预览，松手才切页。
  */
-internal fun Activity.enablePredictiveBackTransitions(selfDrivenClose: Boolean = false) {
+internal fun Activity.enablePredictiveBackTransitions() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
         // 打开：新窗口从右缘推入，主窗口原地不动
         overrideActivityTransition(
@@ -30,14 +30,11 @@ internal fun Activity.enablePredictiveBackTransitions(selfDrivenClose: Boolean =
             R.anim.slide_in_right,
             R.anim.stay_still,
         )
-        // 关闭：被露出的主窗口原地不动，本窗口向右滑出。
-        // selfDrivenClose = true 时关闭侧也静止——退场动画由页面自己按手势进度播
-        // （ui/common/PredictiveBackExit.kt），窗口再播一遍会叠成「抖一下」。
-        // **≤33 不走这套**：那里没有手势进度，页面不接管，仍用 slide_out_right 的窗口动画。
+        // 关闭：被露出的主窗口原地不动，本窗口向右滑出
         overrideActivityTransition(
             Activity.OVERRIDE_TRANSITION_CLOSE,
             R.anim.stay_still,
-            if (selfDrivenClose) R.anim.stay_still else R.anim.slide_out_right,
+            R.anim.slide_out_right,
         )
     }
 }
@@ -84,10 +81,8 @@ internal fun Context.startActivityOutsideApp(intent: Intent) {
             startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     } catch (e: Exception) {
-        // 没真离开（未装微信 / 目标解析失败）：立刻还原，别让本页返回动画一直哑着。
-        // 关闭侧同样要还原成「静止」——SubpageActivity 的退场由页面自己播
-        // （PredictiveBackExitHost），传默认值会把 CLOSE 改回 slide_out_right、叠成两次动画。
-        subpage?.enablePredictiveBackTransitions(selfDrivenClose = true)
+        // 没真离开（未装微信 / 目标解析失败）：立刻还原，别让本页返回动画一直哑着
+        subpage?.enablePredictiveBackTransitions()
         throw e
     }
 }
