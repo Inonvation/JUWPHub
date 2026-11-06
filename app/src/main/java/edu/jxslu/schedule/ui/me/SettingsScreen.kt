@@ -177,7 +177,7 @@ fun SettingsScreen(
                 )
                 SettingItem(
                     title = "AI 调课",
-                    subtitle = "粘贴调课通知，由 AI 给出改动建议 · 服务配置在页内 · 需自备 API Key",
+                    subtitle = "适合国庆等大规模调课，需自备 API Key",
                     icon = HugeIcons.AiBrain01,
                     onClick = { onOpen(SubpageScreen.AI_SCHEDULE) },
                 )
