@@ -9,6 +9,10 @@ import kotlinx.serialization.builtins.ListSerializer
  * 为什么不进 Room：订单快照是胖乖模块私有的追加型小数据（上限 50 条），无查询/关联需求，
  * SharedPreferences + JSON 与参考实现一致且足够；接口侧没有可靠的订单列表端点，
  * 快照是订单历史的唯一来源，随 token 清理而清空。
+ *
+ * 与 `data/local/JsonFileStore` 的差异（2026-11-06 审计 C2 收尾）：介质是 SharedPreferences
+ * 里的一段 kotlinx JSON 文本，而且**没有内存真值**——没有 StateFlow 镜像、每次 `list()`
+ * 现读现解码，套共享实现只会多一层没有收益的间接。
  */
 class QiekjOrderHistoryStore(context: Context) {
     private val prefs = context.getSharedPreferences("qiekj_order_history", Context.MODE_PRIVATE)

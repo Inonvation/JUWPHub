@@ -16,6 +16,10 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * 存普通 `SharedPreferences` 不上加密，与 [QzxyDeviceStore] 同口径：开阀时间与设备名
  * 不是凭证，凭证仍在 `secure_qzxy` 里。
+ *
+ * 与 `data/local/JsonFileStore` 的差异（2026-11-06 审计 C2 收尾）：这里存的是
+ * **SharedPreferences 的四个原始键**，连 JSON 都不是（`QzxyWatering` 也没有序列化形态），
+ * 没有「整份 JSON」可以交给共享实现。
  */
 class QzxyWateringStore(context: Context) {
 

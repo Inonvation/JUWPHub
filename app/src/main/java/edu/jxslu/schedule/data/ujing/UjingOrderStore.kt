@@ -19,6 +19,10 @@ import org.json.JSONObject
  * 与机器绑定，必须跨进程存活。
  *
  * 不加密：订单号 / 状态 / 机器名不是凭证（凭证在 `secure_ujing`）。
+ *
+ * 与 `data/local/JsonFileStore` 的差异（2026-11-06 审计 C2 收尾）：介质是
+ * **SharedPreferences + `org.json` 手写编解码**（`UjingOrderSnapshot` 也不是
+ * `@Serializable`），换过去等于换介质 + 换格式，在案订单会丢，所以保留原实现。
  */
 class UjingOrderStore(context: Context) {
     private val prefs = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)

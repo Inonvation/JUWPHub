@@ -19,6 +19,10 @@ import org.json.JSONObject
  * 选型与 `UjingOrderStore` / `UjingHouseStore` 同一理由：普通 prefs 存 JSON 数组
  * （最多 [CAP] 条，新的在前），外挂一条进程内可订阅的流给两个页面（主页入口行的
  * 笔数、历史账单页的列表）。不加密：订单号 / 状态 / 金额不是凭证（凭证在 `secure_ujing`）。
+ *
+ * 与 `data/local/JsonFileStore` 的差异（2026-11-06 审计 C2 收尾）：这里的介质是
+ * **SharedPreferences + `org.json` 手写编解码**，不是 `filesDir` 里的 kotlinx JSON——
+ * 换共享实现等于既换介质又换格式，老用户账单会全丢，所以保留原实现。
  */
 class UjingHistoryStore(context: Context) {
     private val prefs = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
