@@ -368,6 +368,11 @@ class LifeViewModel(
      * 两个入口都允许：正常等待步（[PowerRechargeUi.Step.BankPay]），以及**下单成功但
      * 收银台没打开**的金额步（`orderId` 已在、`error` 在）——后者是 2026-11-06 补的：
      * 平台慢响应超时后不该再下一单，同一单可以反复取新的收银台会话。
+     *
+     * **先确认这笔单还活着**（2026-11-06 真机踩到）：平台对已失效的单照样回一条链接，
+     * 但收银台页面只会一直转圈（它把失败吞成「加载中」，见 `PowerBankPayScreen`）。
+     * 单子没了（被清理 / 已付 / 过期）就照原金额重下一单，别拿死单去开页面——
+     * 用户看到的现象就是「点重新打开，又一直转圈」。
      */
     fun reopenBankCashier() {
         val credentials = credentialStore.read() ?: return
@@ -381,7 +386,35 @@ class LifeViewModel(
         val session = flowSession
         _powerRecharge.update { it.copy(busy = true, error = null, bankNote = null) }
         viewModelScope.launch {
-            openBankCashier(credentials.username, credentials.password, orderId, session)
+            val alive = try {
+                powerRepo.pendingOrderIds(credentials.username, credentials.password)
+                    .any { it == orderId }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 查不到就不挡路：照老路径重开，页面打不开时错误文案照常显示
+                true
+            }
+            if (!isCurrentSession(session)) return@launch
+            if (alive) {
+                openBankCashier(credentials.username, credentials.password, orderId, session)
+                return@launch
+            }
+            val amount = state.amountYuan
+            if (amount.isNullOrBlank()) {
+                _powerRecharge.update {
+                    it.copy(
+                        step = PowerRechargeUi.Step.Amount,
+                        orderId = null,
+                        cashierUrl = null,
+                        busy = false,
+                        error = "这笔订单已经失效，请重新输入金额下单",
+                    )
+                }
+            } else {
+                // 旧单已失效：同金额重下一单（新单、新收银台会话），用户不用重填金额
+                placePowerOrder(amount)
+            }
         }
     }
 

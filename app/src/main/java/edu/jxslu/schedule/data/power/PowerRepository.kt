@@ -287,19 +287,34 @@ class PowerRepository(
      */
     suspend fun cancelAllPendingOrders(username: String, password: String): Int =
         withToken(username, password) { token ->
-            val listRaw = client.get("/charge/order/personal_data", token, mapOf("paystatus" to "0"))
-            val ids = PowerModels.parsePendingOrderIds(expectOk(listRaw, "取未支付订单"))
-            ids.count { orderId ->
-                runCatching {
-                    val delRaw = client.postJson(
-                        "/charge/order/deleteOrder",
-                        token,
-                        buildJsonObject { put("orderid", JsonPrimitive(orderId)) },
-                    )
-                    PowerModels.codeOf(delRaw.text) == 200
-                }.getOrDefault(false)
+            pendingOrderIdsWith(token).count { orderId ->
+                runCatching { deleteOrderWith(token, orderId) }.getOrDefault(false)
             }
         }
+
+    /**
+     * 列未支付订单号（2026-11-06，「重新打开支付页」前的那道存在性判断）。
+     *
+     * 为什么必须查：平台对**已经失效**的单（被清掉的旧单、已付的单）照样回一条收银台链接，
+     * 但收银台页面自己只会一直转圈——它把失败全吞成「加载中」（见 `PowerBankPayScreen`）。
+     * 所以重开之前先确认这笔单还在未支付列表里；不在就照原金额重下一单。
+     */
+    suspend fun pendingOrderIds(username: String, password: String): List<String> =
+        withToken(username, password) { token -> pendingOrderIdsWith(token) }
+
+    private suspend fun pendingOrderIdsWith(token: String): List<String> {
+        val listRaw = client.get("/charge/order/personal_data", token, mapOf("paystatus" to "0"))
+        return PowerModels.parsePendingOrderIds(expectOk(listRaw, "取未支付订单"))
+    }
+
+    private suspend fun deleteOrderWith(token: String, orderId: String): Boolean {
+        val delRaw = client.postJson(
+            "/charge/order/deleteOrder",
+            token,
+            buildJsonObject { put("orderid", JsonPrimitive(orderId)) },
+        )
+        return PowerModels.codeOf(delRaw.text) == 200
+    }
 
     /**
      * 支付页第一步（DESIGN §4.24「聚合收银台」，2026-09-28 实测打通；

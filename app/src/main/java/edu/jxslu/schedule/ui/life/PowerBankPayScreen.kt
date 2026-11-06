@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -170,10 +172,12 @@ fun PowerBankPayScreen(
                                     override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                                         progress = 0
                                         failed = false
+                                        Log.i(PAY_LOG, "start ${logUrlOf(url)}")
                                     }
 
                                     override fun onPageFinished(view: WebView?, url: String?) {
                                         progress = 100
+                                        Log.i(PAY_LOG, "finish ${logUrlOf(url)}")
                                         // 布局 reflow 兜底：页面在视口未稳定时完成布局会按错误宽度
                                         // 定格（2026-09-28 真机实测：首屏被裁掉左右两边，刷新一下就好，
                                         // 与教务导入页那条 MIUI/WebView 顽疾同源）。等布局稳定后强制
@@ -189,14 +193,40 @@ fun PowerBankPayScreen(
                                         request: WebResourceRequest?,
                                         error: WebResourceError?,
                                     ) {
+                                        Log.e(
+                                            PAY_LOG,
+                                            "error main=${request?.isForMainFrame} code=${error?.errorCode} " +
+                                                "${error?.description} ${logUrlOf(request?.url?.toString())}",
+                                        )
                                         // 只有主框架失败才算「打不开」：子资源（图片/统计脚本）
                                         // 失败不该把整页盖成错误浮层
                                         if (request?.isForMainFrame == true) failed = true
+                                    }
+
+                                    override fun onReceivedHttpError(
+                                        view: WebView?,
+                                        request: WebResourceRequest?,
+                                        errorResponse: android.webkit.WebResourceResponse?,
+                                    ) {
+                                        Log.e(
+                                            PAY_LOG,
+                                            "http ${errorResponse?.statusCode} " +
+                                                logUrlOf(request?.url?.toString()),
+                                        )
                                     }
                                 }
                                 webChromeClient = object : WebChromeClient() {
                                     override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                         progress = newProgress
+                                    }
+
+                                    override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                                        Log.i(
+                                            PAY_LOG,
+                                            "console ${message.messageLevel()} ${message.message()} " +
+                                                "@${logUrlOf(message.sourceId())}:${message.lineNumber()}",
+                                        )
+                                        return true
                                     }
                                 }
                                 loadUrl(url)
@@ -350,7 +380,11 @@ internal class CashierBridge(private val webView: WebView) {
     fun SynJSNative(payload: String?) = openAbc(payload)
 
     private fun openAbc(payload: String?) {
-        val target = PowerPayModels.abcCashierUrlFromBridge(payload) ?: return
+        val target = PowerPayModels.abcCashierUrlFromBridge(payload) ?: run {
+            Log.w(PAY_LOG, "bridge payload 无法解析（len=${payload?.length ?: 0}）")
+            return
+        }
+        Log.i(PAY_LOG, "bridge → ${Uri.parse(target).host}")
         webView.post { runCatching { webView.loadUrl(target) } }
         Unit
     }
@@ -366,3 +400,12 @@ private fun WebView.installCashierBridge() {
 private const val BANK_UA =
     "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
         "Chrome/120.0.0.0 Mobile Safari/537.36"
+
+/**
+ * 排查日志标签（2026-11-06）：「选农行一直转圈」这类问题只能从页面侧取证——
+ * 收银台自己的错误处理会把失败吞成「加载中」，网络面板里看不出所以然。
+ * 只打 URL 的 path（query 里有 ticket / token，一律不落日志）。
+ */
+private const val PAY_LOG = "PowerPayWeb"
+
+private fun logUrlOf(url: String?): String = url?.substringBefore('?') ?: "null"

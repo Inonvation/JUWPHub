@@ -352,7 +352,12 @@ POST https://charge.juwp.edu.cn/blade-pay/pay          # 注意路径在根域�
    **R8 必须 keep 这个类**（`app/proguard-rules.pro`），否则只有 release 包卡在「加载中」。
    另一条排错口径：农行下单走 `POST /payment/orders/{transactionId}/gatewayPay`，
    而 `/payment/orders/{tx}` 只服务带 `payAcctId` 的渠道（打错会 403，看起来像权限问题）。
-5. **慢响应与重试**（2026-11-06）：`paystep=2` 生成收银台会话会慢到 20s 以上（PC 端同请求
+5. **重开支付页要确认订单有效**（2026-11-06）：收银台链接对失效单照样可取，但页面里
+   查不到这笔单（只剩标题、空白、一直转圈）。所以「重新打开支付页」先查未支付列表，
+   单子没了就按原金额重下一单（`LifeViewModel.reopenBankCashier` + `PowerRepository.pendingOrderIds`）。
+   页面侧排错看 `adb logcat -s PowerPayWeb`：控制台消息、主框架 `start/finish`、HTTP 错误、
+   原生桥命中都打在这里（URL 只打 path，ticket 不落日志）。
+6. **慢响应与重试**（2026-11-06）：`paystep=2` 生成收银台会话会慢到 20s 以上（PC 端同请求
    1.5s、平台网关上限 60s），共享 OkHttp 的 20s 读超时会把它误报成「网络不给力」。
    `PowerClient.create` 单独放宽到读 45s / 写 30s / 总 60s；若仍失败，`openBankCashier`
    保留已建的订单号，金额步给「重新打开支付页」——同一单再取一条会话，不重复下单。
