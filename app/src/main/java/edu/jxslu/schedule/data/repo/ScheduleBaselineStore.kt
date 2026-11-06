@@ -1,11 +1,9 @@
 package edu.jxslu.schedule.data.repo
 
 import android.content.Context
+import edu.jxslu.schedule.data.local.JsonFileStore
 import edu.jxslu.schedule.domain.ScheduleCourseRow
-import java.io.File
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 /**
  * 课表基线快照（DESIGN §4.17，2026-10-04 重立）：「上次与教务达成一致时的课表状态」，
@@ -22,9 +20,6 @@ import kotlinx.serialization.json.Json
  */
 class ScheduleBaselineStore(context: Context) {
 
-    private val file = File(context.filesDir, SNAPSHOT_FILE)
-    private val json = Json { ignoreUnknownKeys = true }
-
     @Serializable
     data class Snapshot(
         /** 基线归属的课表。调课检查只对「当前活跃课表」做，id 不匹配 = 首跑。 */
@@ -35,14 +30,19 @@ class ScheduleBaselineStore(context: Context) {
         val savedAt: Long = 0,
     )
 
-    fun load(): Snapshot = runCatching {
-        json.decodeFromString<Snapshot>(file.readText())
-    }.getOrDefault(Snapshot())
+    /**
+     * 落盘交给共享实现（2026-11-06 审计 C2）。**用同步版**：`load`/`save` 是同步 API，
+     * 调用点分布在 `ScheduleRepository` 的多个 suspend 函数与导入链路里，改成 suspend 会连带
+     * 改一串调用点；同步版不加锁——本类合并前也没有互斥（写入点各自在事务提交之后）。
+     * **文件名不能改**（`schedule_baseline.json`）：改名等于用户丢掉基线，下次检查按首跑重建、
+     * 静默吞掉一轮「教务改了什么」。
+     */
+    private val store = JsonFileStore(context, SNAPSHOT_FILE, Snapshot.serializer())
+
+    fun load(): Snapshot = store.readBlocking() ?: Snapshot()
 
     fun save(snapshot: Snapshot) {
-        runCatching {
-            file.writeText(json.encodeToString(snapshot))
-        }
+        store.writeBlocking(snapshot)
     }
 
     companion object {

@@ -1,18 +1,14 @@
 package edu.jxslu.schedule.data.kqcx
 
 import android.content.Context
+import edu.jxslu.schedule.data.local.JsonFileStore
 import edu.jxslu.schedule.domain.GcjPoint
 import edu.jxslu.schedule.domain.KvcxParkSpot
 import edu.jxslu.schedule.domain.KvcxZones
 import edu.jxslu.schedule.domain.ZoneCache
 import edu.jxslu.schedule.domain.ZoneCacheEntry
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
 
 /**
@@ -22,7 +18,7 @@ import java.io.File
  * 冷启动进地图、或拖回缓存覆盖的片区时先用它把图层顶起来，命中新鲜缓存连请求都不发
  * （判定全在 domain 层，本类只负责读写）。
  *
- * 读写都在 IO 线程（本类自己调度）；两端 runCatching——缓存坏了等于没有缓存，不影响主链路。
+ * 读写都在 IO 线程（[JsonFileStore] 自己调度）；读写都不抛——缓存坏了等于没有缓存，不影响主链路。
  * **只存公开的图层数据**：不含 token、不含账号信息（与本地快照类缓存同一纪律）。
  *
  * 文件可注入（主构造收 [File]）：缓存文件格式是隐式契约，用临时文件往返一遍钉在单测里，
@@ -32,77 +28,64 @@ class ZoneCacheStore(private val file: File) {
 
     constructor(context: Context) : this(File(context.filesDir, CACHE_FILE))
 
-    private val json = Json { ignoreUnknownKeys = true }
-    /** 一份进程内互斥就够：地图页只有一个 VM 会写；`EbikeMapCache` 的删除是单向的。 */
-    private val mutex = Mutex()
+    /**
+     * 落盘交给共享实现（2026-11-06 审计 C2）：读不到/坏了回空、写失败不抛、临时文件原子替换，
+     * 与另外四份同构快照共用一处；这里只剩「域对象 ↔ 可序列化影子」的映射。
+     *
+     * 串行化由它内部的 Mutex 提供（合并前是本类自己那把，语义不变）：地图页只有一个 VM 会写，
+     * `EbikeMapCache` 的删除是单向的。**文件名不能改**——改名等于用户丢掉已有的图层缓存。
+     */
+    private val store = JsonFileStore(file, ListSerializer(EntryRow.serializer()))
 
     /** 全部缓存条目（读不到/坏了回空表，调用方当"没有缓存"处理）。 */
-    suspend fun load(): List<ZoneCacheEntry> = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            runCatching { decode(file.readText()) }.getOrDefault(emptyList())
-        }
-    }
+    suspend fun load(): List<ZoneCacheEntry> = store.read().orEmpty().map(::toDomain)
 
     /** 覆盖写整份缓存（条数由 [ZoneCache.put] 控制在小表，整写比增量稳）。 */
     suspend fun save(entries: List<ZoneCacheEntry>) {
-        val text = encode(entries) ?: return
-        withContext(Dispatchers.IO) {
-            mutex.withLock { runCatching { file.writeText(text) } }
-        }
+        store.write(entries.map(::toRow))
     }
 
     /** 当前占用字节。**调用方负责 IO 线程**（`EbikeMapCache` 统计时用）。 */
-    fun bytes(): Long = file.length()
+    fun bytes(): Long = store.bytes()
 
     /** 删除缓存文件（「清除地图缓存」用）。缓存删掉即失效，不需要额外状态。 */
-    fun delete() {
-        runCatching { file.delete() }
-    }
+    fun delete() = store.delete()
 
     // ---------- 序列化影子（本体不是 @Serializable，字段一一对应；与本地快照类缓存同手法） ----------
 
-    private fun decode(text: String): List<ZoneCacheEntry> =
-        json.decodeFromString<List<EntryRow>>(text).map { row ->
-            ZoneCacheEntry(
-                lat = row.lat,
-                lng = row.lng,
-                fetchedAt = row.fetchedAt,
-                zones = KvcxZones(
-                    parkSpots = row.spots.map { spot ->
-                        KvcxParkSpot(
-                            lat = spot.lat,
-                            lng = spot.lng,
-                            outline = spot.outline.map { GcjPoint(it.lat, it.lng) },
-                            name = spot.name,
-                        )
-                    },
-                    nogoZones = row.nogo.map { outline -> outline.map { GcjPoint(it.lat, it.lng) } },
-                ),
-            )
-        }
-
-    private fun encode(entries: List<ZoneCacheEntry>): String? = runCatching {
-        json.encodeToString(
-            entries.map { entry ->
-                EntryRow(
-                    lat = entry.lat,
-                    lng = entry.lng,
-                    fetchedAt = entry.fetchedAt,
-                    spots = entry.zones.parkSpots.map { spot ->
-                        SpotRow(
-                            lat = spot.lat,
-                            lng = spot.lng,
-                            outline = spot.outline.map { PointRow(it.lat, it.lng) },
-                            name = spot.name,
-                        )
-                    },
-                    nogo = entry.zones.nogoZones.map { outline ->
-                        outline.map { PointRow(it.lat, it.lng) }
-                    },
+    private fun toDomain(row: EntryRow): ZoneCacheEntry = ZoneCacheEntry(
+        lat = row.lat,
+        lng = row.lng,
+        fetchedAt = row.fetchedAt,
+        zones = KvcxZones(
+            parkSpots = row.spots.map { spot ->
+                KvcxParkSpot(
+                    lat = spot.lat,
+                    lng = spot.lng,
+                    outline = spot.outline.map { GcjPoint(it.lat, it.lng) },
+                    name = spot.name,
                 )
             },
-        )
-    }.getOrNull()
+            nogoZones = row.nogo.map { outline -> outline.map { GcjPoint(it.lat, it.lng) } },
+        ),
+    )
+
+    private fun toRow(entry: ZoneCacheEntry): EntryRow = EntryRow(
+        lat = entry.lat,
+        lng = entry.lng,
+        fetchedAt = entry.fetchedAt,
+        spots = entry.zones.parkSpots.map { spot ->
+            SpotRow(
+                lat = spot.lat,
+                lng = spot.lng,
+                outline = spot.outline.map { PointRow(it.lat, it.lng) },
+                name = spot.name,
+            )
+        },
+        nogo = entry.zones.nogoZones.map { outline ->
+            outline.map { PointRow(it.lat, it.lng) }
+        },
+    )
 
     @Serializable
     private data class EntryRow(

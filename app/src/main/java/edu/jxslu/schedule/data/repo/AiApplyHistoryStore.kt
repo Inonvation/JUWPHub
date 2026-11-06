@@ -1,21 +1,19 @@
 package edu.jxslu.schedule.data.repo
 
 import android.content.Context
-import android.util.Log
+import edu.jxslu.schedule.data.local.MirroredJsonStore
 import edu.jxslu.schedule.domain.AppliedEntry
 import edu.jxslu.schedule.domain.ScheduleCourseRow
 import edu.jxslu.schedule.domain.ScheduleDiff
 import java.io.File
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+
+/** 落盘文件名与日志 tag：基类构造参数里要用，所以放在文件级（不进 companion）。 */
+private const val HISTORY_FILE = "ai_apply_history.json"
+private const val TAG = "AiApplyHistory"
 
 /**
  * 课表改动的应用留痕（DESIGN §4.39 / §4.17，2026-10-07；2026-11-03 起收录两路写入口）：
@@ -41,17 +39,16 @@ import kotlinx.serialization.json.Json
  *
  * 记录里的 [AiApplyRecord.entries] 用 [ScheduleCourseRow]（带 id 与自定义时间）存档，
  * 反序列化后能原样重建 `AppliedEntry` 走同一条撤销事务。
+ *
+ * 骨架（内存 StateFlow 是真值 + 整份落盘镜像）已收进 `data/local/MirroredJsonStore`，
+ * 本类只剩留痕语义与纯逻辑；落盘失败留痕的 tag 也从构造参数传过去。
  */
-class AiApplyHistoryStore(context: Context) {
-
-    private val file = File(context.filesDir, HISTORY_FILE)
-
-    /** 写入串行化：主页与「调课记录」页是两个窗口，并发写不能互相覆盖。 */
-    private val writeLock = Mutex()
-
-    // 初始读是一次性小文件（同 ScheduleBaselineStore / UjingHistoryStore 的构造口径）
-    private val _state = MutableStateFlow(load())
-    val state: StateFlow<List<AiApplyRecord>> = _state.asStateFlow()
+class AiApplyHistoryStore(context: Context) : MirroredJsonStore<List<AiApplyRecord>>(
+    file = File(context.filesDir, HISTORY_FILE),
+    serializer = ListSerializer(AiApplyRecord.serializer()),
+    empty = emptyList(),
+    tag = TAG,
+) {
 
     /**
      * 记一条应用（新记录在顶）。写盘落 IO 线程。
@@ -61,44 +58,24 @@ class AiApplyHistoryStore(context: Context) {
      * 用户以为没生效、再点一次，结果是**日期覆盖重复插入**（同一个 override 落两行，
      * 撤销时按 id 只撤得掉一条）。
      *
-     * 所以写盘失败只在内存里记着 + `Log.w` 留痕（见 [write]），不向上传播；
-     * 也别「顺手」把它改成会抛的实现（例如直接 `file.writeText`）。
+     * 所以写盘失败只在内存里记着 + `Log.w` 留痕（落盘那半在基类 `MirroredJsonStore`，
+     * tag 由构造参数传进来），不向上传播；也别「顺手」把它改成会抛的实现。
      */
     suspend fun append(record: AiApplyRecord) {
-        write { upsertInto(it, record) }
+        mutate { upsertInto(it, record) }
     }
 
     /** 标记一条记录已撤销（撤销动作完成后调用；找不到是空操作）。写盘落 IO 线程。 */
     suspend fun markUndone(id: Long) {
-        write { markUndoneIn(it, id) }
+        mutate { markUndoneIn(it, id) }
     }
 
     /** 按 id 找一条（会话里的回执要核对它的撤销状态）。 */
-    fun find(id: Long): AiApplyRecord? = _state.value.firstOrNull { it.id == id }
-
-    private suspend fun write(transform: (List<AiApplyRecord>) -> List<AiApplyRecord>) {
-        writeLock.withLock {
-            val list = transform(_state.value)
-            _state.value = list
-            withContext(Dispatchers.IO) {
-                runCatching { file.writeText(encode(list)) }
-                    // 写盘失败不打断用户操作（内存里仍然可见），但必须留痕可查——
-                    // 否则「重启后记录消失」会变成无头案
-                    .onFailure { Log.w(TAG, "留痕写盘失败：${it.message}") }
-            }
-        }
-    }
-
-    private fun load(): List<AiApplyRecord> =
-        runCatching { decode(file.readText()) }.getOrDefault(emptyList())
+    fun find(id: Long): AiApplyRecord? = state.value.firstOrNull { it.id == id }
 
     companion object {
-        private const val TAG = "AiApplyHistory"
-
         /** 留痕上限：50 条（与 U净 历史账单同量级），超出截掉最老的。 */
         const val CAP = 50
-
-        private const val HISTORY_FILE = "ai_apply_history.json"
 
         private val json = Json { ignoreUnknownKeys = true }
 

@@ -264,4 +264,49 @@ class BackupValidationTest {
             ) is BackupCheck.Error,
         )
     }
+
+    // ---- 备份版本号（2026-11-06 审计 B3）----
+
+    /**
+     * 旧备份（没有 `version` 键）必须照常解析并降级成当前版本号。
+     * 老文件缺键不能让解码或校验出问题——这是「不拿 version 拒绝」的另一半保障。
+     */
+    @Test
+    fun legacyBackupWithoutVersionStillParses() {
+        val legacy = """
+            {
+              "courses": [
+                {"name": "高等数学", "day": 1, "startSection": 1, "endSection": 2, "weeks": [1, 2]}
+              ],
+              "term": "2026-2027-1"
+            }
+        """.trimIndent()
+        val export = CourseJsonFormat.decodeFromString(CourseExport.serializer(), legacy)
+        assertEquals("老文件没有 version 键 → 按当前版本", 1, export.version)
+        val check = validateBackup(export)
+        assertTrue("老文件必须能通过校验：$check", check is BackupCheck.Ok)
+    }
+
+    /**
+     * 导出必须把 `version` 真写进文件：靠的是 `CourseJsonFormat.encodeDefaults = true`。
+     * 谁把那个开关关掉、或把字段标成 `@Transient`，这个用例当场红——否则「识别用版本号」
+     * 会永远读不到，而且是静默的。
+     */
+    @Test
+    fun exportWritesVersionOne() {
+        val text = CourseJsonFormat.encodeToString(CourseExport.serializer(), valid())
+        assertTrue("导出的 JSON 里必须有 version：$text", text.contains("\"version\": 1"))
+        assertEquals(1, CourseJsonFormat.decodeFromString(CourseExport.serializer(), text).version)
+    }
+
+    /**
+     * 来自更新版本的备份**不许**被判废（B3 的核心决定：只识别、不拒绝）。
+     * 拒绝会把「用户只是用了新版导出的备份」变成「导入失败，什么也没恢复」，
+     * 比「少恢复几段、界面照常可用」糟得多。
+     */
+    @Test
+    fun futureVersionIsNotRejected() {
+        val check = validateBackup(valid().copy(version = 99))
+        assertTrue("更新版本的备份也要放行：$check", check is BackupCheck.Ok)
+    }
 }

@@ -1,20 +1,16 @@
 package edu.jxslu.schedule.data.repo
 
 import android.content.Context
-import android.util.Log
+import edu.jxslu.schedule.data.local.MirroredJsonStore
 import java.io.File
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+
+/** 落盘文件名与日志 tag：基类构造参数里要用，所以放在文件级（不进 companion）。 */
+private const val QUEUE_FILE = "quiet_hours_queue.json"
+private const val TAG = "QuietHoursQueue"
 
 /**
  * 一条被免扰时段拦下的通知的**落点描述符**（可序列化）。
@@ -99,28 +95,28 @@ data class PendingNotification(
  * 选型与 `AiApplyHistoryStore` / `ScheduleBaselineStore` 同口径：这层是通知的
  * 「待办暂存」，与业务表无外键关系，文件坏了按空处理（丢的是待补发通知，不是数据）。
  * 写入串行化用 Mutex——拦截可能来自多个 Worker/Receiver 上下文。
+ *
+ * 骨架（内存 StateFlow 是真值 + 整份落盘镜像）已收进 `data/local/MirroredJsonStore`，
+ * 本类只剩队列语义（幂等键、上限、补发计划）。
  */
-class QuietHoursQueue(file: File) {
+class QuietHoursQueue(file: File) : MirroredJsonStore<List<PendingNotification>>(
+    file = file,
+    serializer = ListSerializer(PendingNotification.serializer()),
+    empty = emptyList(),
+    tag = TAG,
+) {
 
     constructor(context: Context) : this(File(context.filesDir, QUEUE_FILE))
 
-    private val file: File = file
-
-    private val writeLock = Mutex()
-
-    // 构造时一次性小文件读（同 AiApplyHistoryStore 口径）
-    private val _state = MutableStateFlow(load())
-    val state: StateFlow<List<PendingNotification>> = _state.asStateFlow()
-
     /** 入队 / 替换（同幂等键覆盖，新条目在顶）。写盘落 IO。返回入队后的全表。 */
     suspend fun enqueue(entry: PendingNotification): List<PendingNotification> {
-        write { upsertInto(it, entry) }
-        return _state.value
+        mutate { upsertInto(it, entry) }
+        return state.value
     }
 
     /** 全表替换（补发完成后按 flushPlan 写回剩余条目）。 */
     suspend fun replaceAll(entries: List<PendingNotification>) {
-        write { entries }
+        mutate { entries }
     }
 
     /**
@@ -130,7 +126,7 @@ class QuietHoursQueue(file: File) {
      */
     suspend fun removeAllKeys(keys: Set<String>): Int {
         var removed = 0
-        write { list ->
+        mutate { list ->
             val (drop, keep) = list.partition { it.key() in keys }
             removed = drop.size
             keep
@@ -138,24 +134,7 @@ class QuietHoursQueue(file: File) {
         return removed
     }
 
-    private suspend fun write(transform: (List<PendingNotification>) -> List<PendingNotification>) {
-        writeLock.withLock {
-            val list = transform(_state.value)
-            _state.value = list
-            withContext(Dispatchers.IO) {
-                runCatching { file.writeText(encode(list)) }
-                    // 写盘失败不打断链路（内存里仍正确），但必须留痕可查
-                    .onFailure { Log.w(TAG, "免扰队列写盘失败：${it.message}") }
-            }
-        }
-    }
-
-    private fun load(): List<PendingNotification> =
-        runCatching { decode(file.readText()) }.getOrDefault(emptyList())
-
     companion object {
-        private const val TAG = "QuietHoursQueue"
-
         /** 队列上限：拦截场景一天撑死几十条周期核对，30 足够，超出截最老。 */
         const val CAP = 30
 
@@ -164,8 +143,6 @@ class QuietHoursQueue(file: File) {
          * （「10 分钟后上课」在早上 7 点补发是误导），静默丢弃。
          */
         const val EVENT_EXPIRY_MS = 10 * 60 * 1000L
-
-        private const val QUEUE_FILE = "quiet_hours_queue.json"
 
         private val json = Json { ignoreUnknownKeys = true }
 
