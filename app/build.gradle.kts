@@ -94,6 +94,13 @@ android {
     }
 }
 
+// Room schema 导出目录（2026-11-06）：`exportSchema = true` 后 KSP 把每一版的 schema JSON
+// 写到这里并入库。作用是把「实体改了但忘写迁移」变成一次可见的 schema diff ——
+// Room 自己的运行时校验只在**升级设备**上跑，开发机全新安装永远不报。
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.10.00")
     implementation(composeBom)

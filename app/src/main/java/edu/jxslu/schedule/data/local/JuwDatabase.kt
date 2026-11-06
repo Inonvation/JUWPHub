@@ -4,10 +4,18 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import edu.jxslu.schedule.domain.TimetablePrefs
+
+/**
+ * 当前 schema 版本，唯一出处：`@Database(version = …)` 与迁移链测试共用。
+ *
+ * 加表/加列时必须同时做三件事：① 实体改字段；② 加一条 `MIGRATION_(N)_(N+1)` 并加进
+ * [JuwDatabase.ALL_MIGRATIONS]；③ 把这里 +1。`JuwMigrationChainTest` 会挡住「只改版本不写迁移」——
+ * 那种错在开发机的全新安装上永远不报，只在**升级设备**上开库即崩。
+ */
+internal const val DB_VERSION = 21
 
 @Database(
     entities = [
@@ -30,10 +38,11 @@ import edu.jxslu.schedule.domain.TimetablePrefs
         CurriculumCourseEntity::class,
         KqcxOrderEntity::class,
     ],
-    version = 21,
-    exportSchema = false,
+    version = DB_VERSION,
+    // 2026-11-06 起导出 schema（app/schemas/）并入库：Room 的运行时校验只在升级设备上跑，
+    // 导出后「实体改了忘写迁移」会在 code review 里以 schema diff 的形式暴露。
+    exportSchema = true,
 )
-@TypeConverters(Converters::class)
 abstract class JuwDatabase : RoomDatabase() {
     abstract fun timetableDao(): TimetableDao
     abstract fun courseDao(): CourseDao
@@ -647,6 +656,34 @@ abstract class JuwDatabase : RoomDatabase() {
         @Volatile
         private var instance: JuwDatabase? = null
 
+        /**
+         * 迁移链的**唯一清单**：`addMigrations` 与 `JuwMigrationChainTest` 共用。
+         * 新增迁移必须加进这里（测试会核对「1..DB_VERSION 逐级且不重复」），
+         * 否则升级设备会在开库时崩在 `Migration didn't properly handle`。
+         */
+        internal val ALL_MIGRATIONS: List<Migration> = listOf(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+            MIGRATION_6_7,
+            MIGRATION_7_8,
+            MIGRATION_8_9,
+            MIGRATION_9_10,
+            MIGRATION_10_11,
+            MIGRATION_11_12,
+            MIGRATION_12_13,
+            MIGRATION_13_14,
+            MIGRATION_14_15,
+            MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
+            MIGRATION_20_21,
+        )
+
         fun get(context: Context): JuwDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -654,28 +691,7 @@ abstract class JuwDatabase : RoomDatabase() {
                     JuwDatabase::class.java,
                     "juw_schedule.db",
                 )
-                    .addMigrations(
-                        MIGRATION_1_2,
-                        MIGRATION_2_3,
-                        MIGRATION_3_4,
-                        MIGRATION_4_5,
-                        MIGRATION_5_6,
-                        MIGRATION_6_7,
-                        MIGRATION_7_8,
-                        MIGRATION_8_9,
-                        MIGRATION_9_10,
-                        MIGRATION_10_11,
-                        MIGRATION_11_12,
-                        MIGRATION_12_13,
-                        MIGRATION_13_14,
-                        MIGRATION_14_15,
-                        MIGRATION_15_16,
-                        MIGRATION_16_17,
-                        MIGRATION_17_18,
-                        MIGRATION_18_19,
-                        MIGRATION_19_20,
-                        MIGRATION_20_21,
-                    )
+                    .addMigrations(*ALL_MIGRATIONS.toTypedArray())
                     .build()
                     .also { instance = it }
             }
