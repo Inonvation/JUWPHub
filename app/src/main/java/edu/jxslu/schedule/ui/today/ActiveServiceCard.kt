@@ -6,9 +6,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -51,10 +49,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSession
 import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
 import edu.jxslu.schedule.domain.EbikeFreeRide
@@ -63,16 +64,17 @@ import edu.jxslu.schedule.domain.QzxyWatering
 import edu.jxslu.schedule.domain.QzxyWateringFormat
 import edu.jxslu.schedule.domain.UjingState
 import edu.jxslu.schedule.ui.common.AppCard
-import edu.jxslu.schedule.ui.common.AppCardDefaults
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.BreathingDot
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberResumedNow
 import edu.jxslu.schedule.ui.ebike.KvcxAction
 import edu.jxslu.schedule.ui.ebike.KvcxReturnSummary
 import edu.jxslu.schedule.ui.ebike.KvcxRideState
 import edu.jxslu.schedule.ui.ebike.unlockCooldownSecondsLeft
 import edu.jxslu.schedule.ui.qzxy.isQzxyWateringExpired
 import edu.jxslu.schedule.ui.qzxy.rememberQzxyWateringClock
+import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.delay
 import me.rerere.hugeicons.HugeIcons
@@ -371,7 +373,7 @@ private fun FreeRideSlot(
     onEndTimer: () -> Unit,
     onExpired: () -> Unit,
 ) {
-    val now by rememberLiveSecond(startAtMillis) { EbikeFreeRide.isActive(startAtMillis, it) }
+    val now by rememberResumedSecondWhile(startAtMillis) { EbikeFreeRide.isActive(startAtMillis, it) }
     val active = EbikeFreeRide.isActive(startAtMillis, now)
     LaunchedEffect(active) { if (!active) onExpired() }
     AnimatedVisibility(visible = active, enter = EnterRow, exit = ExitRow) {
@@ -401,7 +403,7 @@ private fun WaterSlot(
     onOpen: () -> Unit,
     onExpired: () -> Unit,
 ) {
-    val now by rememberLiveSecond(session?.startedAtMillis) { at ->
+    val now by rememberResumedSecondWhile(session?.startedAtMillis) { at ->
         session != null && !session.isStale(at)
     }
     val active = session != null && !session.isStale(now)
@@ -433,18 +435,42 @@ private fun WaterSlot(
 }
 
 /**
- * 每秒一拍，**只在 [stillActive] 为 true 时走**：到点落一次最终值后停表，不空转。
+ * 每秒一拍，**只在 RESUMED 且 [stillActive] 为 true 时走**。
+ *
+ * 两道闸门都不能少：
+ * - **RESUMED**（[repeatOnLifecycle]）：`delay` 走的是 Dispatcher 定时器，**不随窗口 STOP 暂停**。
+ *   此前这里只有「组合离开才停」，而服务卡在退后台时组合还活着——一次 1 小时的趣智记账
+ *   就是 3600 次进程唤醒 + 3600 次快照写，U净 洗烘同理。灭屏/退后台立刻停、回前台立刻续。
+ * - **[stillActive]**：到点落一次最终值后停表，别让一行静态文案继续每秒重组。
  * key 变化时先落当前值（`produceState` 的 initialValue 只在首次组合生效，重启必须显式赋值）。
+ *
+ * **为什么不直接用 `ui/common` 的 [rememberResumedNow]**：那个 API 只有 RESUMED 闸门、
+ * 没有「条件到点停表」的入参，而这四行各有自己的终止条件（免费窗口到期 / 会话过期 /
+ * 转「待核对」/ 订单不再洗涤中）。给它加入参就得改公共件（本轮不动公共件），
+ * 所以这里保留一个**带闸门**的私有版本；公共件那份仍是「无条件走表」场景的唯一实现。
+ *
+ * **key 必须带上状态位**（如 `startedAtMillis to pending`）：状态翻面时 produceState 重启，
+ * 否则闭包里捕获的是旧 [stillActive]，行会一直空转。
  */
 @Composable
-private fun rememberLiveSecond(key: Any?, stillActive: (Long) -> Boolean): State<Long> =
-    produceState(initialValue = System.currentTimeMillis(), key1 = key) {
+private fun rememberResumedSecondWhile(
+    key: Any?,
+    stillActive: (Long) -> Boolean,
+): State<Long> {
+    val owner = LocalLifecycleOwner.current
+    return produceState(initialValue = System.currentTimeMillis(), key, owner) {
         value = System.currentTimeMillis()
-        while (stillActive(value)) {
-            delay(1_000)
+        if (!stillActive(value)) return@produceState
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            // 回前台先补一拍：定格在退后台那一刻的值会让「已用时」少算一段
             value = System.currentTimeMillis()
+            while (stillActive(value)) {
+                delay(1_000)
+                value = System.currentTimeMillis()
+            }
         }
     }
+}
 
 /**
  * 完成态停留时长（2026-10-31 用户口径 8 秒）：1.4 秒只够看见，来不及看清结果，
@@ -597,11 +623,17 @@ private fun AnimatedDivider(visible: Boolean) {
     }
 }
 
-/** 行的进出场规格（ui-common 动效口径：进 220ms / 退 160ms，顶部展开收拢）。 */
-private val EnterRow = fadeIn(tween(220)) +
-    expandVertically(tween(220, easing = FastOutSlowInEasing), expandFrom = Alignment.Top)
-private val ExitRow = fadeOut(tween(160)) +
-    shrinkVertically(tween(160), shrinkTowards = Alignment.Top)
+/**
+ * 行的进出场规格（[Motion] 口径：进 reveal 220ms / 退 state 180ms，顶部展开收拢）。
+ *
+ * 曲线也跟着档位走了（[Motion.reveal] 是 decelerate、[Motion.state] 是 standard）：
+ * 原来这里写的是 `FastOutSlowInEasing`，与全 App 其余 200ms 级动画不同曲线——这正是
+ * 2026-11-06 归并要清掉的东西。**别为了「和以前一模一样」在这里另写 easing**。
+ */
+private val EnterRow = fadeIn(Motion.reveal()) +
+    expandVertically(Motion.reveal(), expandFrom = Alignment.Top)
+private val ExitRow = fadeOut(Motion.state()) +
+    shrinkVertically(Motion.state(), shrinkTowards = Alignment.Top)
 
 /**
  * 进行中 ⇄ 完成态的就地切换（2026-10-31）：内容交叉淡入 + 容器高度 200ms 收平。
@@ -615,9 +647,11 @@ private val ExitRow = fadeOut(tween(160)) +
  * 的接收者作用域里调用，所以做成扩展函数而不是顶层 `ContentTransform` 常量。
  */
 private fun AnimatedContentTransitionScope<*>.rowSwapSpec(): ContentTransform =
-    (fadeIn(tween(180)) togetherWith fadeOut(tween(120))).using(
+    (fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap())).using(
         SizeTransform(clip = true) { _, _ ->
-            tween<IntSize>(200, easing = FastOutSlowInEasing)
+            // 高度补间与淡入淡出同档（state 180）：两态差 11dp，比内容淡出更慢会看到「文字
+            // 已经换完、卡片下沿还在缩」
+            Motion.state<IntSize>()
         },
     )
 
@@ -680,14 +714,14 @@ private fun ActiveRow(
     )
     val containerColor by animateColorAsState(
         targetValue = if (pressed) scheme.primary.copy(alpha = 0.05f) else Color.Transparent,
-        animationSpec = tween(AppCardDefaults.HighlightTransitionMillis),
+        animationSpec = Motion.state(),
         label = "serviceRowContainer",
     )
-    // 进度值 400ms 补间（ui-common 高频数值口径）：计时每秒更新一次，条形平滑推进，
-    // 不做数字 crossfade；行切换时 progress 变 null，进度条随容器高度一起收掉。
+    // 进度条补间（[Motion.page] 口径）：计时每秒更新一次，条形平滑推进，不做数字 crossfade；
+    // 行切换时 progress 变 null，进度条随容器高度一起收掉。
     val animatedProgress by animateFloatAsState(
         targetValue = (progress ?: 0f).coerceIn(0f, 1f),
-        animationSpec = tween(400),
+        animationSpec = Motion.page(),
         label = "serviceRowProgress",
     )
     Column(
@@ -815,7 +849,9 @@ private fun KvcxActiveRow(
     onOpen: () -> Unit,
 ) {
     val haptics = rememberAppHaptics()
-    val now by rememberResumedSecond(key = ride.carNum to state.fetchedAt)
+    // 骑行行没有「到点停表」的语义：只要这行在组合里就要逐秒刷新（免费窗口倒计时 / 超时分钟数 /
+    // 动作已等秒数 / 开锁冷却），故直接走公共件 `rememberResumedNow`（RESUMED 才走）。
+    val now by rememberResumedNow(1_000L, key = ride.carNum to state.fetchedAt)
     val elapsed = rideElapsedSecondsShared(ride, state.fetchedAt, now)
     val locked = ride.locked == true
     val pending = state.unlockPending || state.lockPending
@@ -1114,19 +1150,9 @@ private fun QzxyActiveRow(
 ) {
     val haptics = rememberAppHaptics()
     val pending = deviceEnded || isQzxyWateringExpired(watering.startedAtMillis)
-    // 只在「用水中」走秒：转「待核对」后停表，别让一行静态文案继续每秒重组
-    val now by produceState(
-        initialValue = System.currentTimeMillis(),
-        key1 = watering.startedAtMillis,
-        key2 = pending,
-    ) {
-        value = System.currentTimeMillis()
-        if (pending) return@produceState
-        while (true) {
-            delay(1_000)
-            value = System.currentTimeMillis()
-        }
-    }
+    // 只在「用水中」走秒：转「待核对」后停表，别让一行静态文案继续每秒重组。
+    // key 带上 [pending]：状态翻面时重启走表协程，旧闭包里的 `!pending` 不会继续跑。
+    val now by rememberResumedSecondWhile(watering.startedAtMillis to pending) { !pending }
     ActiveRow(
         brandRes = edu.jxslu.schedule.R.drawable.ic_brand_qzxy,
         title = when {
@@ -1203,16 +1229,8 @@ private fun QzxyDoneRow(watering: QzxyWatering?, onOpen: () -> Unit) {
 @Composable
 private fun UjingActiveRow(order: UjingOrderSnapshot, onOpen: () -> Unit) {
     val running = order.status == "40"
-    val now by produceState(
-        initialValue = System.currentTimeMillis(),
-        key1 = order.snapshotAt,
-        key2 = running,
-    ) {
-        while (running) {
-            value = System.currentTimeMillis()
-            delay(1_000)
-        }
-    }
+    // 只在洗涤中走秒；key 带 [running]，订单转完成态时重启协程直接停表
+    val now by rememberResumedSecondWhile(order.snapshotAt to running) { running }
     val liveRemain = if (running) {
         UjingState.liveRemainSeconds(order.status, order.remainSeconds, order.snapshotAt, now)
     } else {
@@ -1337,17 +1355,8 @@ private fun ActionChip(
     }
 }
 
-// ── 秒级走时的小工具（本文件内共用，避免各页已实现的 internal 直接跨包引用）──
-
-/** 每秒一拍（RESUMED 才走）：key 变化时立即重置。 */
-@Composable
-private fun rememberResumedSecond(key: Any?): State<Long> =
-    produceState(initialValue = System.currentTimeMillis(), key1 = key) {
-        while (true) {
-            value = System.currentTimeMillis()
-            delay(1_000)
-        }
-    }
+// ── 秒级走时：公共件 `rememberResumedNow` 管「无条件走表」，本文件的
+//    `rememberResumedSecondWhile` 管「带终止条件的走表」，两者都受 RESUMED 闸门约束 ──
 
 /** 骑行时长本地走时：与 `KvcxRideController.rideElapsedSeconds` 同一口径（不跨包引 internal）。 */
 private fun rideElapsedSecondsShared(ride: KqcxAuth.Ride, fetchedAt: Long, now: Long): Long? {

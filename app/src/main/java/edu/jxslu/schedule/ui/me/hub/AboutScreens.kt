@@ -73,9 +73,7 @@ import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.ebike.EbikeMapCache
 import edu.jxslu.schedule.ui.me.WidgetCapabilities
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Agreement01
 import me.rerere.hugeicons.stroke.Alert02
@@ -109,9 +107,11 @@ fun AboutUpdateScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val repo = remember { Graph.repository(context) }
-    val autoUpdateCheck by remember { repo.autoUpdateCheckEnabled }.collectAsStateWithLifecycle(
-        initialValue = remember { runBlocking { repo.autoUpdateCheckEnabled.first() } },
-    )
+    // 可空初值 = 「还没读到」：**不要**在组合期 runBlocking 读 DataStore（2026-11-06 审计 §3.7）。
+    // 也不给 Boolean 默认值当首帧——那会让开过自动检查的用户先看到开关是关的、再跳成开，
+    // 正是当初加 runBlocking 要躲的那一下；现在改成「没读到就整行不渲染」，永不显示错值。
+    val autoUpdateCheck by remember { repo.autoUpdateCheckEnabled }
+        .collectAsStateWithLifecycle(initialValue = null)
     var showLicenses by remember { mutableStateOf(false) }
     val showNotice: (String) -> Unit = { message ->
         scope.launch {
@@ -192,15 +192,19 @@ fun AboutUpdateScreen(
                         if (updateAvailable != null) showUpdateDialog = true else checkForUpdate()
                     },
                 )
-                SettingSwitchRow(
-                    title = "自动检查更新",
-                    subtitle = "启动时静默检查新版本；发现更新弹窗提醒，可忽略此版本",
-                    checked = autoUpdateCheck,
-                    onCheckedChange = { value ->
-                        scope.launch { repo.setAutoUpdateCheckEnabled(value) }
-                    },
-                    icon = HugeIcons.SystemUpdate01,
-                )
+                // 首帧未就绪（null）时这一行不渲染：宁可少一行一帧，也不让开关先显示错的
+                // 状态再跳（见上方 autoUpdateCheck 的注释）。
+                autoUpdateCheck?.let { checked ->
+                    SettingSwitchRow(
+                        title = "自动检查更新",
+                        subtitle = "启动时静默检查新版本；发现更新弹窗提醒，可忽略此版本",
+                        checked = checked,
+                        onCheckedChange = { value ->
+                            scope.launch { repo.setAutoUpdateCheckEnabled(value) }
+                        },
+                        icon = HugeIcons.SystemUpdate01,
+                    )
+                }
             }
 
             SettingsSection(title = "开源") {

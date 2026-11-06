@@ -135,6 +135,7 @@ import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.emphasizedText
 import edu.jxslu.schedule.ui.jwvw.JwImportResultBus
+import edu.jxslu.schedule.ui.theme.rememberAnimationsEnabled
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -177,6 +178,18 @@ private const val TOTAL_STEPS = 5
 
 /** 验证成功后「对勾停留」再自动进下一步的时长。 */
 private const val SUCCESS_HOLD_MS = 900L
+
+// ---------------------------------------------------------------------------
+// 动效时长口径：**本文件不套 `ui/theme/Motion.kt` 的四档**（2026-11-06）。
+//
+// 理由：引导是一次性的**编排动画**——切屏 320ms、卡片入场 280ms、对勾描边 1100ms、
+// 呼吸 1500ms、涟漪 2600ms 这些数是按「这一步要让人看懂什么」逐段设计的，不是
+// 「状态切换 / 内容出现」那种可归类的通用过渡；硬压到 90/180/220/280 会把对勾描边
+// 压成 280ms（看不清画了什么）、把呼吸压成 220ms（像抽搐）。
+//
+// 所以 `tween(数字)` 在本文件里是**允许**的例外。全项目验收命令要排除本目录
+// （`.agents/rules/ui-common.md` 的动效口径一节写了）。新增页面/组件仍应走 Motion 四档。
+// ---------------------------------------------------------------------------
 
 /** 切屏转场与交错入场的强调缓动（快出缓入，落点稳）。 */
 private val EmphasizedEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
@@ -1136,15 +1149,21 @@ private fun WelcomeHero() {
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            val breath by rememberInfiniteTransition(label = "breath").animateFloat(
-                initialValue = 1f,
-                targetValue = 1.05f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1500, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "breathScale",
-            )
+            // 系统「关闭动画」时不起循环：值恒为 1f，元素仍在，只是不再呼吸
+            val breath = if (rememberAnimationsEnabled()) {
+                rememberInfiniteTransition(label = "breath")
+                    .animateFloat(
+                        initialValue = 1f,
+                        targetValue = 1.05f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1500, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse,
+                        ),
+                        label = "breathScale",
+                    ).value
+            } else {
+                1f
+            }
             Box(
                 Modifier
                     .size(86.dp)
@@ -1186,6 +1205,19 @@ private fun WelcomeHero() {
 /** 一圈向外扩散淡出的涟漪，[startDelay] 错开相位。 */
 @Composable
 private fun RippleRing(startDelay: Int, color: Color, modifier: Modifier = Modifier) {
+    // 系统「关闭动画」时不跑无限循环：画一圈静止的淡环，保留视觉层次但不闪
+    if (!rememberAnimationsEnabled()) {
+        Canvas(modifier) {
+            val r = size.minDimension / 2f
+            drawCircle(
+                color = color,
+                radius = r * 0.95f,
+                alpha = 0.14f,
+                style = Stroke(width = 1.5.dp.toPx()),
+            )
+        }
+        return
+    }
     val transition = rememberInfiniteTransition(label = "ripple")
     val progress by transition.animateFloat(
         initialValue = 0f,

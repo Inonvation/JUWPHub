@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.ui.common
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.theme.Motion
 
 /**
  * 二级页几何口径的唯一出处（2026-10-18 新增）。
@@ -136,12 +138,14 @@ fun RowScope.PageRefreshAction(
 /**
  * 列表型二级页骨架：顶栏 + 提示宿主 + [LazyColumn]（统一边距与间距）+ 加载/空态。
  *
- * 三件事由骨架保证，调用方不需要再写：
+ * 四件事由骨架保证，调用方不需要再写：
  * 1. **提示宿主**是 [AppSnackbarHost]（不是裸 `SnackbarHost`——那会让浅色主题下出现
  *    近黑浮条、且没有语气图标）；
  * 2. **加载 > 空态 > 内容**的判定顺序，且 `loading` 与 `empty` 都在视口内居中
  *    （原来"学业/培养方案"首帧是一屏纯空白、"实习基地"是裸转圈）；
- * 3. 顶栏标题带 `Ellipsis`，长标题不会把右侧动作区挤没。
+ * 3. 顶栏标题带 `Ellipsis`，长标题不会把右侧动作区挤没；
+ * 4. **骨架 → 内容交叉淡入**（`Motion.reveal()`）。此前是硬切：一屏骨架"啪"地变成列表，
+ *    读起来像页面闪了一下。只淡这一段——空态是硬切（理由见下方实现处的注释）。
  *
  * 用法：
  * ```
@@ -199,31 +203,52 @@ fun PageScaffold(
         snackbarHost = { AppSnackbarHost(snackbar) },
         floatingActionButton = floatingActionButton,
     ) { padding ->
-        LazyColumn(
-            state = state,
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = contentPadding,
-            verticalArrangement = Arrangement.spacedBy(spacing),
-        ) {
-            when {
-                loading -> item {
-                    // 真空居中：fillParentMaxSize 取的是「视口 − contentPadding」，
-                    // 所以加载态与空态都在用户能看见的那块区域正中，不是页面正中
-                    Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+        // 骨架 → 内容交叉淡入（2026-11-06）。
+        //
+        // 为什么**只淡 loading ↔ content、不淡空态**：空态的文案随调用方状态变化
+        // （`empty = if (rows.isEmpty()) PageEmpty(…) else null`），把它也放进
+        // `Crossfade` 就得把 `PageEmpty` 当 targetState 带着走——退场那一帧调用方的
+        // `empty` 可能已经是 null，读它就是空指针；而拿它当状态又会让每次重组都新建
+        // 一个对象、把动画反复重启。空态本来也没有"骨架→内容"的语义，硬切即可。
+        //
+        // 判定顺序保持原样（loading 优先于 empty）：首帧两个条件可能同时成立，
+        // 先给"正在读取"才是对的。
+        if (!loading && empty != null) {
+            Box(
+                Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {
+                EmptyHint(
+                    title = empty.title,
+                    body = empty.body,
+                    actionLabel = empty.actionLabel,
+                    onAction = empty.onAction,
+                )
+            }
+        } else {
+            // `Crossfade` 只做透明度：它把两屏叠在同一处、取较大者作为自身尺寸，两屏都是
+            // `fillMaxSize` 所以尺寸恒定，不会出现"内容高度跳一下"的布局动画（那正是
+            // `AnimatedContent` 默认 `SizeTransform` 会干的事，这里不用它）。
+            Crossfade(
+                targetState = loading,
+                modifier = Modifier.fillMaxSize().padding(padding),
+                animationSpec = Motion.reveal(),
+                label = "pageLoading",
+            ) { isLoading ->
+                if (isLoading) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         LoadingHint(loadingText)
                     }
-                }
-                empty != null -> item {
-                    Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
-                        EmptyHint(
-                            title = empty.title,
-                            body = empty.body,
-                            actionLabel = empty.actionLabel,
-                            onAction = empty.onAction,
-                        )
+                } else {
+                    LazyColumn(
+                        state = state,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = contentPadding,
+                        verticalArrangement = Arrangement.spacedBy(spacing),
+                    ) {
+                        content()
                     }
                 }
-                else -> content()
             }
         }
     }

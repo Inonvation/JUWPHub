@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.common
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -16,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 
 /**
@@ -64,7 +64,7 @@ fun StatusHeroCard(
 ) {
     val container by animateColorAsState(
         targetValue = heroToneContainer(tone),
-        animationSpec = tween(durationMillis = ToneTransitionMillis),
+        animationSpec = Motion.reveal(),
         label = "heroContainer",
     )
     Column(
@@ -76,9 +76,6 @@ fun StatusHeroCard(
         content = content,
     )
 }
-
-/** 语气过渡时长（与全 App 其它状态过渡同档）。 */
-private const val ToneTransitionMillis = 220
 
 /** 语气强调色：状态点 / 状态字 / 大数值都从这里取，别再各写一份 `when`。 */
 @Composable

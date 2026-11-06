@@ -6,13 +6,11 @@ import androidx.compose.animation.AnimatedContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -159,6 +157,7 @@ import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.water.WaterEvent
 import edu.jxslu.schedule.ui.water.WaterUiState
 import edu.jxslu.schedule.ui.water.WaterViewModel
+import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
@@ -623,12 +622,12 @@ fun TodayScreen(
                                 transitionSpec = {
                                     if (initialState == null) {
                                         // 入场：淡入 + 轻微上浮
-                                        (fadeIn(tween(400)) +
-                                            slideInVertically(tween(400)) { it / 3 }) togetherWith
-                                            fadeOut(tween(150))
+                                        (fadeIn(Motion.page()) +
+                                            slideInVertically(Motion.page()) { it / 3 }) togetherWith
+                                            fadeOut(Motion.state())
                                     } else {
                                         // 轮换：交叉淡入淡出
-                                        fadeIn(tween(400)) togetherWith fadeOut(tween(400))
+                                        fadeIn(Motion.page()) togetherWith fadeOut(Motion.page())
                                     }
                                 },
                                 contentAlignment = Alignment.CenterStart,
@@ -1264,31 +1263,35 @@ private fun TodayCourseCard(
             done -> onSurface.copy(alpha = 0.04f)
             else -> accent.copy(alpha = 0.16f)
         },
-        animationSpec = tween(340),
+        animationSpec = Motion.page(),
         label = "todayCourseBg",
     )
     // 已上完：整卡内容淡出（底色另算）
     val faded by animateFloatAsState(
         targetValue = if (done) 0.55f else 1f,
-        animationSpec = tween(340),
+        animationSpec = Motion.page(),
         label = "todayCourseFaded",
     )
     // 左缘主色竖条：仅焦点态显示，走透明度过渡（避免切换时竖条突然出现 / 消失）
     val barAlpha by animateFloatAsState(
         targetValue = if (focused) 1f else 0f,
-        animationSpec = tween(340),
+        animationSpec = Motion.page(),
         label = "todayCourseBar",
     )
     // 左列（节次 + 时间）：焦点态宽度收成 0、内容淡出。宽度按实测的最宽节次标签取齐，
     // 不写死——写死时「3-4 节」右侧会空出一大截（2026-10-13 真机反馈）
+    //
+    // **这条仍是布局动画**（`animateDpAsState` 逐帧改左列宽、每一帧都要重新测量这张卡）：
+    // 2026-11-06 只把时长归并到 [Motion.page]，没有顺手换成 `graphicsLayer` 缩放——那会把
+    // 「文字换行位置随宽度走」变成「整块被拉伸」，是观感重构，得单独排、单独验。
     val leftWidth by animateDpAsState(
         targetValue = if (focused) 0.dp else sectionColumnWidth,
-        animationSpec = tween(340),
+        animationSpec = Motion.page(),
         label = "todayCourseLeftWidth",
     )
     val leftAlpha by animateFloatAsState(
         targetValue = if (focused) 0f else 1f,
-        animationSpec = tween(220),
+        animationSpec = Motion.reveal(),
         label = "todayCourseLeftAlpha",
     )
     val textbook = textbookTitlesLine(textbookTitle.orEmpty())
@@ -1368,8 +1371,8 @@ private fun TodayCourseCard(
             // 状态行（仅焦点态）：正在上课 / 下一节 + 倒计时
             AnimatedVisibility(
                 visible = focused,
-                enter = expandVertically(tween(300)) + fadeIn(tween(300)),
-                exit = shrinkVertically(tween(260)) + fadeOut(tween(160)),
+                enter = expandVertically(Motion.page()) + fadeIn(Motion.page()),
+                exit = shrinkVertically(Motion.pageExit()) + fadeOut(Motion.state()),
             ) {
                 Row(
                     modifier = Modifier
@@ -1449,8 +1452,8 @@ private fun TodayCourseCard(
             // 进度条（仅正在上）
             AnimatedVisibility(
                 visible = ongoing && progress != null,
-                enter = expandVertically(tween(300)) + fadeIn(tween(300)),
-                exit = shrinkVertically(tween(260)) + fadeOut(tween(160)),
+                enter = expandVertically(Motion.page()) + fadeIn(Motion.page()),
+                exit = shrinkVertically(Motion.pageExit()) + fadeOut(Motion.state()),
             ) {
                 Column {
                     Spacer(Modifier.height(8.dp))

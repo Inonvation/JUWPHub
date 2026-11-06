@@ -188,8 +188,14 @@ fun KvcxOrdersScreen(onBack: () -> Unit = {}) {
                                 InlineNoticeRow(message = message, tone = NoticeTone.Error)
                             }
                         }
-                        items(visible) { order ->
-                            OrderCard(order = order, onClick = { detail = order })
+                        // 稳定 key + animateItem：切「仅显示有费用」时被滤掉的卡片淡出、留下的补位，
+                        // 不再整列硬跳；换月份时也是整批淡入淡出（与订单页自身的 Crossfade 同族）
+                        items(visible, key = { it.listKey }) { order ->
+                            OrderCard(
+                                order = order,
+                                onClick = { detail = order },
+                                modifier = Modifier.animateItem(),
+                            )
                         }
                         item {
                             FooterDisclaimer(
@@ -279,9 +285,23 @@ private fun DeviceTabs(deviceType: Int, onSelect: (Int) -> Unit) {
     }
 }
 
+/**
+ * 列表项的稳定 key。
+ *
+ * 为什么不能只写 `id.toString()`：`id` 是 `Long?`，缺了就是 `"null"`——一列里多行共用同一个 key
+ * 会让 LazyColumn 直接抛「Key was already used」。这里按「服务端 id → 订单号 → 车号@结束时刻」
+ * 逐级退：`KqcxAuth` 解析阶段已经把「车号和订单号都为空」的行 mapNotNull 掉了，所以退到底也不会是空串。
+ */
+private val KqcxAuth.OrderItem.listKey: String
+    get() = id?.toString() ?: orderNum ?: "${carNum}@${endAt}"
+
 @Composable
-private fun OrderCard(order: KqcxAuth.OrderItem, onClick: () -> Unit) {
-    AppCard(onClick = onClick) {
+private fun OrderCard(
+    order: KqcxAuth.OrderItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AppCard(modifier = modifier, onClick = onClick) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(

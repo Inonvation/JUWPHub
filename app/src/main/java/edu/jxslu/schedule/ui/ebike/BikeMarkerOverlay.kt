@@ -576,6 +576,7 @@ internal class BikeMarkerOverlay(private val density: Float) : Overlay() {
         canvas.save()
         // Canvas.rotate 的角度基准是「3 点钟方向为 0、顺时针为正」，而这里的三角形
         // 直接按屏幕坐标画成「尖端朝上」，旋转 heading 即可对齐罗盘方位。
+        // 例外：跟手——罗盘朝向每帧跟着传感器走，不套 Motion 的四档（套了就是"手机转了箭头还在追"）
         canvas.rotate(heading, x, y)
         val tip = USER_ARROW_TIP_RADIUS_DP * density
         val base = USER_ARROW_BASE_RADIUS_DP * density

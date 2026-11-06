@@ -1,8 +1,6 @@
 package edu.jxslu.schedule.ui.common
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -48,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.ShortcutItem
 import edu.jxslu.schedule.domain.ShortcutSettings
+import edu.jxslu.schedule.ui.theme.Motion
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ChevronDown
@@ -55,10 +54,6 @@ import me.rerere.hugeicons.stroke.ChevronUp
 import me.rerere.hugeicons.stroke.Edit02
 import me.rerere.hugeicons.stroke.Link01
 import me.rerere.hugeicons.stroke.PackageSearch01
-
-/** 「其他」分类展开 / 收起动效：与项目区块口径一致（进 220ms、退 160ms）。 */
-private const val OTHER_ENTER_MILLIS = 220
-private const val OTHER_EXIT_MILLIS = 160
 
 /**
  * 取快递弹窗（从下弹出）：预设归「取快递」段、自定义归「其他」段，中间一条分割线；
@@ -137,14 +132,16 @@ fun ShortcutSheet(
             )
             AnimatedVisibility(
                 visible = otherExpanded,
-                enter = fadeIn(tween(OTHER_ENTER_MILLIS, easing = FastOutSlowInEasing)) +
+                // 进 reveal 档、退 state 档（2026-11-06 归并到 Motion）：展开要"长出来"，
+                // 收起要"立刻让位"，两者本来就不该同长。
+                enter = fadeIn(Motion.reveal()) +
                     expandVertically(
-                        animationSpec = tween(OTHER_ENTER_MILLIS, easing = FastOutSlowInEasing),
+                        animationSpec = Motion.reveal(),
                         expandFrom = Alignment.Top,
                     ),
-                exit = fadeOut(tween(OTHER_EXIT_MILLIS, easing = FastOutSlowInEasing)) +
+                exit = fadeOut(Motion.state()) +
                     shrinkVertically(
-                        animationSpec = tween(OTHER_EXIT_MILLIS, easing = FastOutSlowInEasing),
+                        animationSpec = Motion.state(),
                         shrinkTowards = Alignment.Top,
                     ),
             ) {

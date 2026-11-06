@@ -7,8 +7,6 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
@@ -32,6 +30,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -110,6 +109,7 @@ import edu.jxslu.schedule.ui.common.rememberResumedNow
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
+import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.delay
 import me.rerere.hugeicons.HugeIcons
@@ -341,12 +341,12 @@ internal fun RideActionArea(
             targetState = barKey,
             transitionSpec = {
                 val enter = slideInVertically(
-                    animationSpec = tween<IntOffset>(BAR_RISE_MS, easing = FastOutSlowInEasing),
-                ) { it } + fadeIn(animationSpec = tween(BAR_FADE_IN_MS))
-                val exit = fadeOut(animationSpec = tween(BAR_FADE_OUT_MS))
+                    animationSpec = Motion.reveal(),
+                ) { it } + fadeIn(animationSpec = Motion.reveal())
+                val exit = fadeOut(animationSpec = Motion.tap())
                 (enter togetherWith exit).using(
                     SizeTransform(clip = true) { _, _ ->
-                        tween<IntSize>(BAR_RISE_MS, easing = FastOutSlowInEasing)
+                        Motion.reveal()
                     },
                 )
             },
@@ -355,7 +355,7 @@ internal fun RideActionArea(
             contentAlignment = Alignment.BottomStart,
             modifier = Modifier.fillMaxWidth(),
         ) { key ->
-            // 退场那份还会继续组合一小段（[BAR_FADE_OUT_MS] 的原地淡出），而它读到的外层
+            // 退场那份还会继续组合一小段（[Motion.tapMillis] 的原地淡出），而它读到的外层
             // 参数在切换那一刻已被清空（还车后 `ride` 变 null、点「继续找车」时 `summary`
             // 变 null、结束计时时 `timerActive` 变 false）——直接画就是"内容先没了、区域
             // 再收回去"。所以：**当前档逐轮记账「最近一次实时值」，退场那份只读**（普通持有者，
@@ -435,23 +435,16 @@ internal fun RideActionArea(
     }
 }
 
-/**
- * 动作区上区升起 / 容器高度过渡的时长。**RideScreen 也用它**（冻结地图让位高度要等这么久）。
- */
-internal const val BAR_RISE_MS = 240
-
-/**
- * 上区之外那一套"升降"的退场时长（停车点卡展开收起、滚动落定的时间上限余量）。
- *
- * 2026-10-08 起上区自己的退场**不再用它**（改为 [BAR_FADE_OUT_MS] 原地淡出——用户口径
- * 「从右下角升起有点丑，直接上升就行」：进出两块反向滑动叠上容器长高，合成轨迹发斜）；
- * 它仍管列表侧的收起动画，数值与手感保持不变。
- */
-internal const val BAR_FALL_MS = 190
-
-/** 动作条状态之间做交叉淡入，别让内容"啪"地换一块。 */
-private const val BAR_FADE_IN_MS = 200
-private const val BAR_FADE_OUT_MS = 120
+// 本文件**不自留动画时长**，全部走 `ui/theme/Motion.kt` 的四档
+// （tapMillis 90 / stateMillis 180 / revealMillis 220 / pageMillis 280）。
+//
+// 原先这里养了五个自定值——BAR_RISE_MS=240、BAR_FALL_MS=190、BAR_FADE_IN_MS=200、
+// BAR_FADE_OUT_MS=120、RIDING_TONE_MS=200：同一页里「升起」240 而「颜色」200，与其它页面的
+// 150/180/250 又各说各话，用户感到的是整个 App 手感不统一，改口径也无处下手。2026-11-06 归并后：
+// 升起 / 展开 / 淡入 = Motion.reveal()，收起 / 颜色 = Motion.state()，淡出 = Motion.tap()。
+//
+// 为什么上区的退场是「原地淡出」而不是向下沉（2026-10-08 用户口径「从右下角升起有点丑，
+// 直接上升就行」）：进出两块反向滑动叠上容器同时长高，合成轨迹会发斜。这条不能改回升降。
 
 /**
  * 结算卡自动「继续找车」的停留时长（2026-10-31 用户口径 8 秒，与今日页完成态同档）。
@@ -471,14 +464,6 @@ internal fun settleContinueSecondsLeft(deadlineAt: Long, now: Long): Int {
     val remain = deadlineAt - now
     return if (remain <= 0L) 0 else ((remain + 999L) / 1_000L).toInt()
 }
-
-/**
- * 状态色（整卡底 / 描边 / 胶囊）渐变时长。
- *
- * 比动作区升降那 240ms 略短：颜色是"同一块地方换了个色"，不该看着比内容升降还慢；
- * 与面板内容 Crossfade（[BAR_FADE_IN_MS]）同档，全页的颜色过渡只有这一个节拍。
- */
-private const val RIDING_TONE_MS = 200
 
 private const val BAR_FINDING_PLAIN = "finding-plain"
 private const val BAR_FINDING_CODE = "finding-code"
@@ -501,7 +486,7 @@ private const val BUSY_LONG_WAIT_SECONDS = 20
  * 退场动画期间要用的「最近一次实时值」持有者（在 [RideActionArea] 里按 key 记）。
  *
  * **不是入场快照**：当前档（key == barKey）逐轮把实时值记账进来，退场那份（还会继续
- * 组合 [BAR_FADE_OUT_MS]，原地淡出）只读——切换那一刻外层参数已被清空，读到的就是最后
+ * 组合 [Motion.tapMillis]，原地淡出）只读——切换那一刻外层参数已被清空，读到的就是最后
  * 一帧的真实状态。普通持有者，不驱动重组。
  */
 private class RideUpperStash {
@@ -904,7 +889,7 @@ private fun RideUpperCard(
             // 一块常驻卡，淡底比纯描边更容易读成"一张卡"）
             else -> scheme.onSurface.copy(alpha = 0.03f)
         },
-        animationSpec = tween(RIDING_TONE_MS),
+        animationSpec = Motion.state(),
         label = "rideUpperCardBg",
     )
     val borderColor by animateColorAsState(
@@ -914,7 +899,7 @@ private fun RideUpperCard(
             RidingCardTone.Pending -> semantic.warning.copy(alpha = 0.22f)
             else -> scheme.outlineVariant
         },
-        animationSpec = tween(RIDING_TONE_MS),
+        animationSpec = Motion.state(),
         label = "rideUpperCardBorder",
     )
     Column(
@@ -1189,7 +1174,7 @@ private fun RideRidingUpper(
 /**
  * 骑行卡头行的**状态胶囊**（[RidingCardTone] 四态配色的唯一出处；点它 = 现查锁状态）。
  *
- * 底色 / 文字 / 圆点都走 `animateColorAsState`（[RIDING_TONE_MS]，与整卡那层同一个节拍），
+ * 底色 / 文字 / 圆点都走 `animateColorAsState`（[Motion.stateMillis]，与整卡那层同一个节拍），
  * 文案走一层 `AnimatedContent` 交叉淡入：解锁 ↔ 已锁 ↔ 悬置之间切换时胶囊是**渐变**过去的
  * （此前颜色与文案都是硬切，正好与整卡那层渐变并排，一个渐变一个跳，反而更显眼）。
  */
@@ -1209,7 +1194,7 @@ private fun RidingStateChip(
             RidingCardTone.Pending -> semantic.warning.copy(alpha = 0.18f)
             RidingCardTone.Unknown -> scheme.onSurface.copy(alpha = 0.06f)
         },
-        animationSpec = tween(RIDING_TONE_MS),
+        animationSpec = Motion.state(),
         label = "chipBg",
     )
     val foreground by animateColorAsState(
@@ -1219,7 +1204,7 @@ private fun RidingStateChip(
             RidingCardTone.Pending -> semantic.warning
             RidingCardTone.Unknown -> scheme.onSurface.copy(alpha = 0.6f)
         },
-        animationSpec = tween(RIDING_TONE_MS),
+        animationSpec = Motion.state(),
         label = "chipFg",
     )
     val dot by animateColorAsState(
@@ -1229,41 +1214,58 @@ private fun RidingStateChip(
             RidingCardTone.Pending -> semantic.warning
             RidingCardTone.Unknown -> scheme.onSurface.copy(alpha = 0.3f)
         },
-        animationSpec = tween(RIDING_TONE_MS),
+        animationSpec = Motion.state(),
         label = "chipDot",
     )
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(background)
-            .clickable(enabled = enabled, onClick = onClick)
-            // 竖向内边距 5dp（≈27dp 高）：胶囊要能被稳定点到，又不把整行撑高
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            // 命中区 40dp：胶囊的可见高度只有 ~27dp（竖向内边距 5dp），低于最小可点尺寸，
+            // 而它是这张卡上唯一能"现查锁状态"的入口。头行旁边的 [IconButtonSmall] 本来就是
+            // 40dp，所以撑到 40dp **不会**把这一行撑高（行高由 40dp 的图标按钮决定）。
+            // 不用 minimumInteractiveComponentSize()：那会给整行加 48dp 的布局高度。
+            //
+            // **heightIn 与 clickable 必须留在外层、clip/background 放内层**：三者排在同一
+            // 条链上时，被撑到 40dp 的是胶囊底色本身（~27dp → 40dp），可见胶囊变胖
+            // （2026-11-06 交叉复核）。拆成两层后可见高度不变、命中区仍是 40dp。
+            .heightIn(min = 40.dp)
+            .clickable(
+                enabled = enabled,
+                onClickLabel = "现查车辆锁状态",
+                onClick = onClick,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(dot),
-        )
-        Spacer(Modifier.width(6.dp))
-        AnimatedContent(
-            targetState = text,
-            transitionSpec = {
-                fadeIn(animationSpec = tween(BAR_FADE_IN_MS)) togetherWith
-                    fadeOut(animationSpec = tween(BAR_FADE_OUT_MS))
-            },
-            label = "chipText",
-        ) { current ->
-            Text(
-                text = current,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = foreground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                .clip(RoundedCornerShape(9.dp))
+                .background(background)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(dot),
             )
+            Spacer(Modifier.width(6.dp))
+            AnimatedContent(
+                targetState = text,
+                transitionSpec = {
+                    fadeIn(animationSpec = Motion.reveal()) togetherWith
+                        fadeOut(animationSpec = Motion.tap())
+                },
+                label = "chipText",
+            ) { current ->
+                Text(
+                    text = current,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = foreground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -1384,7 +1386,7 @@ internal fun RideBikePanel(
         // 「按车辆」模式没有停车点卡：记账里是上一批簇卡的偏移，滚过去只会跳错位置
         if (state.byBike) return@LaunchedEffect
         // **等这张卡的位置落定再滚**（判据见 [awaitSettledOffset]）：点地图上的数字时，
-        // 列表里上一张展开的卡正在收起（[BAR_FALL_MS] 的高度动画），目标卡还在往上走——
+        // 列表里上一张展开的卡正在收起（[Motion.stateMillis] 的高度动画），目标卡还在往上走——
         // 按当场记下的位置直接滚过去会**滚过头**，卡片落到视口上方，用户看到的是"列表滚了、
         // 要找的那张卡没了"（2026-10-01 真机报的「点了地图上的圆圈，有时候不会滚到对应卡片」）。
         // 旧版是 LazyColumn + `animateScrollToItem`，它内部会分趟逼近移动中的目标；换成手写
@@ -1405,7 +1407,7 @@ internal fun RideBikePanel(
         // 面板内容在「车辆列表 ↔ 还车点」之间换时淡入淡出：高度是定值，内容别硬切
         Crossfade(
             targetState = showSpots,
-            animationSpec = tween(BAR_FADE_IN_MS),
+            animationSpec = Motion.reveal(),
             label = "panelContent",
             modifier = Modifier
                 .fillMaxWidth()
@@ -1478,8 +1480,8 @@ internal fun RideBikePanel(
                     AnimatedContent(
                         targetState = state.loading,
                         transitionSpec = {
-                            fadeIn(animationSpec = tween(BAR_FADE_IN_MS)) togetherWith
-                                fadeOut(animationSpec = tween(BAR_FADE_OUT_MS))
+                            fadeIn(animationSpec = Motion.reveal()) togetherWith
+                                fadeOut(animationSpec = Motion.tap())
                         },
                         label = "refreshSlot",
                         modifier = Modifier.fillMaxSize(),
@@ -1567,7 +1569,7 @@ internal fun RideBikePanel(
                     // 整列硬换会"啪"一下，看不出是同一批车换了种排法
                     else -> Crossfade(
                         targetState = state.byBike,
-                        animationSpec = tween(BAR_FADE_IN_MS),
+                        animationSpec = Motion.reveal(),
                         label = "mapModeList",
                     ) { byBike ->
                         if (byBike) {
@@ -1647,7 +1649,7 @@ internal fun RideBikePanel(
 private const val FOCUS_SETTLE_FRAMES = 3
 
 /**
- * 等目标卡位置的**时间**上限（毫秒）：[BAR_FALL_MS] 的多倍余量。
+ * 等目标卡位置的**时间**上限（毫秒）：[Motion.stateMillis] 的多倍余量。
  *
  * 按时间封顶、**不按帧数**（2026-10-01 终审改）：帧数和刷新率挂钩，同样 20 帧在 60Hz 是
  * 333ms、在 120Hz 只有 167ms——后者会赶在收起动画（190ms）结束前启程，等于白等。真机
@@ -1662,7 +1664,7 @@ private const val FOCUS_SETTLE_MAX_MS = 300L
  * 当轮询：连续 [FOCUS_SETTLE_FRAMES] 帧没变 = 上一张卡的收起动画走完了。
  *
  * 为什么必须等：点地图上的数字会**同时**做两件事——展开目标卡、收起上一张展开的卡。
- * 后者的高度动画（[BAR_FALL_MS]）会把目标卡一路上推，当帧记下的位置是最"低"的那一份；
+ * 后者的高度动画（[Motion.stateMillis]）会把目标卡一路上推，当帧记下的位置是最"低"的那一份；
  * 拿它直接滚就是滚过头（卡片落到视口上方，用户以为"没滚到对应卡片"）。等到落定再滚，
  * 一次到位、不回头，也不用为此写死一个动画时长。
  *
@@ -1705,7 +1707,7 @@ private suspend fun awaitSettledOffset(key: String, offsets: Map<String, Int>): 
  * 回来的还是同一批停车点、只是距离数字变了，这时内容原地更新、不播过渡；换了一片区域
  * 或某处车没了/多出来才淡入淡出。
  *
- * 高度用 [SizeTransform] 收在同一节拍（[BAR_RISE_MS]，与动作区同一套缓动）——直接抽走
+ * 高度用 [SizeTransform] 收在同一节拍（[Motion.revealMillis]，与动作区同一套缓动）——直接抽走
  * 旧列表会让下方内容瞬移。新旧两份同时组合 200ms 左右，列表封顶 24 条，可以接受。
  */
 @Composable
@@ -1720,10 +1722,10 @@ private fun <T> AnimatedCardList(
         targetState = items,
         contentKey = { list -> list.map(itemKey) },
         transitionSpec = {
-            (fadeIn(animationSpec = tween(BAR_FADE_IN_MS)) togetherWith
-                fadeOut(animationSpec = tween(BAR_FALL_MS))).using(
+            (fadeIn(animationSpec = Motion.reveal()) togetherWith
+                fadeOut(animationSpec = Motion.tap())).using(
                 SizeTransform(clip = false) { _, _ ->
-                    tween<IntSize>(BAR_RISE_MS, easing = FastOutSlowInEasing)
+                    Motion.reveal()
                 },
             )
         },
@@ -1910,11 +1912,11 @@ private fun RideClusterCard(
                     )
                 }
                 // 箭头转到朝下表示展开，转场比直接换图标顺眼。
-                // 显式 tween + FastOutSlowInEasing（与同页其余过渡同族）——默认是 spring，
+                // 走 Motion.state()（与同页其余过渡同族）——默认是 spring，
                 // 在"展开/收起走高度动画"旁边会显得比内容先到、节奏脱节
                 val rotation by animateFloatAsState(
                     targetValue = if (expanded) 90f else 0f,
-                    animationSpec = tween(BAR_FALL_MS, easing = FastOutSlowInEasing),
+                    animationSpec = Motion.state(),
                     label = "clusterChevron",
                 )
                 Icon(
@@ -1927,18 +1929,18 @@ private fun RideClusterCard(
                 )
             }
             // 展开 / 收起走高度 + 淡入淡出（2026-10-01 用户口径「点击地点卡片展开收起时要有动画」）：
-            // 旧版是 `if (expanded)` 直接增删，一屏里内容瞬移；展开用 [BAR_RISE_MS]、
-            // 收起用 [BAR_FALL_MS]，与动作区那套窗口升降同一个手感
+            // 旧版是 `if (expanded)` 直接增删，一屏里内容瞬移；展开用 [Motion.revealMillis]、
+            // 收起用 [Motion.stateMillis]，与动作区那套窗口升降同一个手感
             AnimatedVisibility(
                 visible = expanded,
                 enter = expandVertically(
-                    animationSpec = tween(BAR_RISE_MS, easing = FastOutSlowInEasing),
+                    animationSpec = Motion.reveal(),
                     expandFrom = Alignment.Top,
-                ) + fadeIn(animationSpec = tween(BAR_FADE_IN_MS)),
+                ) + fadeIn(animationSpec = Motion.reveal()),
                 exit = shrinkVertically(
-                    animationSpec = tween(BAR_FALL_MS, easing = FastOutSlowInEasing),
+                    animationSpec = Motion.state(),
                     shrinkTowards = Alignment.Top,
-                ) + fadeOut(animationSpec = tween(BAR_FADE_OUT_MS)),
+                ) + fadeOut(animationSpec = Motion.tap()),
             ) {
                 Column {
                     cluster.bikes.forEach { bike ->
@@ -2184,16 +2186,16 @@ internal fun RideCarNumberSheet(
                 // 里面再放一枚同名按钮是重复。改了车号它自己回来，不必留常驻位。
                 AnimatedVisibility(
                     visible = !upToDate,
-                    // 高度过渡显式走 tween + FastOutSlowInEasing：默认 spring 与同处的
-                    // fadeIn/fadeOut（同族 tween）不同拍，一块里两种缓动最显眼
-                    enter = fadeIn(animationSpec = tween(BAR_FADE_IN_MS)) +
+                    // 高度与淡入淡出都走 Motion.reveal()（同一份 spec）：默认 spring 与同处的
+                    // fadeIn 不同拍，一块里两种缓动最显眼
+                    enter = fadeIn(animationSpec = Motion.reveal()) +
                         expandVertically(
-                            animationSpec = tween(BAR_RISE_MS, easing = FastOutSlowInEasing),
+                            animationSpec = Motion.reveal(),
                             expandFrom = Alignment.Top,
                         ),
-                    exit = fadeOut(animationSpec = tween(BAR_FADE_OUT_MS)) +
+                    exit = fadeOut(animationSpec = Motion.tap()) +
                         shrinkVertically(
-                            animationSpec = tween(BAR_FALL_MS, easing = FastOutSlowInEasing),
+                            animationSpec = Motion.state(),
                             shrinkTowards = Alignment.Top,
                         ),
                 ) {
@@ -2221,8 +2223,8 @@ internal fun RideCarNumberSheet(
                     // 对齐挂在 AnimatedVisibility 上（它才是 Column 的直接子节点）；
                     // 挂到里面的按钮上会落到 AnimatedVisibilityScope，位置就散了
                     modifier = Modifier.align(Alignment.End),
-                    enter = fadeIn(animationSpec = tween(BAR_FADE_IN_MS)),
-                    exit = fadeOut(animationSpec = tween(BAR_FADE_OUT_MS)),
+                    enter = fadeIn(animationSpec = Motion.reveal()),
+                    exit = fadeOut(animationSpec = Motion.tap()),
                 ) {
                     RideTextAction(
                         icon = HugeIcons.QrCode01,
@@ -2239,8 +2241,8 @@ internal fun RideCarNumberSheet(
             AnimatedContent(
                 targetState = ready,
                 transitionSpec = {
-                    fadeIn(animationSpec = tween(BAR_FADE_IN_MS)) togetherWith
-                        fadeOut(animationSpec = tween(BAR_FADE_OUT_MS))
+                    fadeIn(animationSpec = Motion.reveal()) togetherWith
+                        fadeOut(animationSpec = Motion.tap())
                 },
                 label = "qrPanel",
                 contentAlignment = Alignment.Center,
@@ -2289,8 +2291,8 @@ internal fun RideCarNumberSheet(
             }
             AnimatedVisibility(
                 visible = ready,
-                enter = fadeIn(animationSpec = tween(BAR_FADE_IN_MS)),
-                exit = fadeOut(animationSpec = tween(BAR_FADE_OUT_MS)),
+                enter = fadeIn(animationSpec = Motion.reveal()),
+                exit = fadeOut(animationSpec = Motion.tap()),
             ) {
                 Text(
                     text = "车 $qrCarNum",
@@ -2633,8 +2635,8 @@ private fun RideActionButton(
         AnimatedContent(
             targetState = text,
             transitionSpec = {
-                fadeIn(animationSpec = tween(BAR_FADE_IN_MS)) togetherWith
-                    fadeOut(animationSpec = tween(BAR_FADE_OUT_MS))
+                fadeIn(animationSpec = Motion.reveal()) togetherWith
+                    fadeOut(animationSpec = Motion.tap())
             },
             label = "actionLabel",
         ) { current ->
@@ -2856,7 +2858,7 @@ internal fun MapCircleButton(
     val scheme = MaterialTheme.colorScheme
     val background by animateColorAsState(
         targetValue = if (active) scheme.primaryContainer else scheme.surfaceContainerHigh,
-        animationSpec = tween(BAR_FADE_IN_MS),
+        animationSpec = Motion.state(),
         label = "mapCircleBg",
     )
     val borderColor by animateColorAsState(
@@ -2865,7 +2867,7 @@ internal fun MapCircleButton(
         } else {
             scheme.outlineVariant
         },
-        animationSpec = tween(BAR_FADE_IN_MS),
+        animationSpec = Motion.state(),
         label = "mapCircleBorder",
     )
     val iconTint by animateColorAsState(
@@ -2874,7 +2876,7 @@ internal fun MapCircleButton(
         } else {
             scheme.onSurface.copy(alpha = 0.75f)
         },
-        animationSpec = tween(BAR_FADE_IN_MS),
+        animationSpec = Motion.state(),
         label = "mapCircleTint",
     )
     Surface(

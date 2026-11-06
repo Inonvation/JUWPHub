@@ -2,7 +2,6 @@ package edu.jxslu.schedule.ui.common
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.theme.Motion
 
 /**
  * 今日页底部固定区「快速入口卡」的最小高度：两行文本（bodyMedium + bodySmall）+
@@ -57,9 +57,6 @@ object AppCardDefaults {
 
     /** 常态描边宽度（[HighlightedBorderWidth] 的起点，也是高亮过渡的另一端）。 */
     val NormalBorderWidth = 1.dp
-
-    /** 高亮态的过渡时长（与全 App 其它状态过渡同档）。 */
-    const val HighlightTransitionMillis = 180
 }
 
 /**
@@ -100,7 +97,7 @@ fun AppCard(
         } else {
             MaterialTheme.colorScheme.surface
         },
-        animationSpec = tween(durationMillis = AppCardDefaults.HighlightTransitionMillis),
+        animationSpec = Motion.state(),
         label = "appCardContainer",
     )
     val borderColor by animateColorAsState(
@@ -109,7 +106,7 @@ fun AppCard(
         } else {
             MaterialTheme.colorScheme.outlineVariant
         },
-        animationSpec = tween(durationMillis = AppCardDefaults.HighlightTransitionMillis),
+        animationSpec = Motion.state(),
         label = "appCardBorder",
     )
     val borderWidth by animateDpAsState(
@@ -118,7 +115,7 @@ fun AppCard(
         } else {
             AppCardDefaults.NormalBorderWidth
         },
-        animationSpec = tween(durationMillis = AppCardDefaults.HighlightTransitionMillis),
+        animationSpec = Motion.state(),
         label = "appCardBorderWidth",
     )
     Column(

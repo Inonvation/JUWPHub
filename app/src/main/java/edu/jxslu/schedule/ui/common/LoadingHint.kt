@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.common
 
 import androidx.compose.animation.core.EaseInOut
+import androidx.compose.animation.core.InfiniteTransition
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -19,12 +20,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.theme.rememberAnimationsEnabled
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Droplet
 
@@ -47,8 +49,21 @@ fun LoadingHint(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
 ) {
-    val transition = rememberInfiniteTransition(label = "loadingBreath")
-    val scale by transition.animateFloat(
+    // 系统「移除动画」开启时给静止态（水滴不呼吸）。
+    // `rememberInfiniteTransition` 不读 `ANIMATOR_DURATION_SCALE`，不短路的话用户明明
+    // 关掉了动画，屏幕上还有一滴水一直在呼吸，而且它每帧都在占帧回调。
+    // 只关无限动画、不关一次性过渡：加载态的存在感靠文案，不靠动效。
+    //
+    // 拿到的是 **State 而不是值**：下面 `graphicsLayer` 里再 `.value`，读发生在绘制阶段，
+    // 只失效绘制、不触发重组。改成在组合期读值会让整个 LoadingHint 每帧重组一次
+    // （原实现就是靠这一点省开销的，别退化）。
+    val transition: InfiniteTransition? =
+        if (rememberAnimationsEnabled()) {
+            rememberInfiniteTransition(label = "loadingBreath")
+        } else {
+            null
+        }
+    val scale: State<Float>? = transition?.animateFloat(
         initialValue = 1f,
         targetValue = 1.12f,
         animationSpec = infiniteRepeatable(
@@ -57,7 +72,7 @@ fun LoadingHint(
         ),
         label = "loadingScale",
     )
-    val alpha by transition.animateFloat(
+    val alpha: State<Float>? = transition?.animateFloat(
         initialValue = 0.72f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -76,9 +91,10 @@ fun LoadingHint(
                 modifier = Modifier
                     .size(34.dp)
                     .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        this.alpha = alpha
+                        val s = scale?.value ?: 1f
+                        scaleX = s
+                        scaleY = s
+                        this.alpha = alpha?.value ?: 1f
                     },
             )
             Spacer(Modifier.height(14.dp))

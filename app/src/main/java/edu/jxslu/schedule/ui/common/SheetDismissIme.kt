@@ -29,7 +29,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  *
  * ## 为什么不能并行收（2026-09-24 二次定位；第一版「并行」是错的）
  *
- * M3 `SheetState` 的退场是一条 `tween(300ms, FastOutSlowIn)`（`BottomSheetAnimationSpec`），
+ * M3 `SheetState` 的退场是一条 300ms 的 tween（`BottomSheetAnimationSpec`，曲线 FastOutSlowIn），
  * 而锚点 Expanded/Hidden 由**弹层容器高度**算出：容器的父 Box 是
  * `fillMaxSize().imePadding()`，键盘一收，容器高度就从 1604px 涨回 2400px。于是
  * `hide()` 与收键盘并行时：
@@ -155,7 +155,13 @@ fun rememberSheetDismisser(
     }
 }
 
-/** 键盘收起动画通常 250–350ms；只做兜底，正常路径在 inset 归零那一帧就往下走。 */
+/**
+ * 键盘收起动画通常 250–350ms；只做兜底，正常路径在 inset 归零那一帧就往下走。
+ *
+ * 例外：这不是动画时长，不进 `Motion` 的档位表。它是「等一个系统状态变化」的超时上限，
+ * 取 450ms 是为了比系统键盘收起（250–350ms）长出一截——压到 280/220 会让正常路径也
+ * 被超时打断，弹层在键盘还没收完时就滑走。
+ */
 private const val IME_COLLAPSE_TIMEOUT_MILLIS = 450L
 
 /**

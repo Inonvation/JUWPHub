@@ -1,8 +1,6 @@
 package edu.jxslu.schedule.ui.common
 
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
@@ -14,10 +12,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.theme.Motion
+import edu.jxslu.schedule.ui.theme.rememberAnimationsEnabled
 import kotlinx.coroutines.delay
-
-/** 错峰入场的单块时长（与 [StaggeredReveal] 同一处口径）。 */
-private const val RevealDurationMillis = 220
 
 /** 相邻两块之间的起跑间隔。 */
 private const val RevealStepMillis = 60L
@@ -44,13 +41,16 @@ fun StaggeredReveal(
     content: @Composable () -> Unit,
 ) {
     var shown by remember { mutableStateOf(false) }
+    // 系统「移除动画」开启时 `animateFloatAsState` 会直接跳到终值，但 `delay` 不会跟着变 0：
+    // 结果是内容按 60ms 一格「跳着冒出来」，比动画本身更像故障。所以延迟也一并短路。
+    val animationsEnabled = rememberAnimationsEnabled()
     LaunchedEffect(Unit) {
-        if (index > 0) delay(index * RevealStepMillis)
+        if (animationsEnabled && index > 0) delay(index * RevealStepMillis)
         shown = true
     }
     val progress by animateFloatAsState(
         targetValue = if (shown) 1f else 0f,
-        animationSpec = tween(durationMillis = RevealDurationMillis, easing = FastOutSlowInEasing),
+        animationSpec = Motion.reveal(),
         label = "staggeredReveal",
     )
     Box(

@@ -418,6 +418,9 @@ internal fun OsmMapView(
             }
             // 定位 / 点分组联动：保持用户当前缩放，别把他调好的视野拉回默认级别
             zoom == null -> mapView.controller.animateTo(target)
+            // 例外：400ms 是 osmdroid 相机动画自己的时长，不套 Compose 的 Motion 四档——
+            // 它跑在 View 层的动画线程上，且与下面的 MOVE_QUIET_MS 静默窗口绑定（静默窗口按
+            // "盖住动画本身 + 收尾几帧"算出来的）；改这里必须同步改 MOVE_QUIET_MS
             else -> mapView.controller.animateTo(target, zoom, 400L)
         }
         // 瞄准点**不清**：移动结束不等于事件结束，osmdroid 之后还会补一次滚动回调，

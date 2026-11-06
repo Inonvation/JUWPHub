@@ -17,7 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.theme.rememberAnimationsEnabled
 
 /**
  * 骨架占位块：淡色底上扫过一道高光的圆角块（shimmer 流光）。
@@ -46,16 +47,26 @@ fun SkeletonBox(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(6.dp),
 ) {
-    val transition = rememberInfiniteTransition(label = "skeletonShimmer")
-    val sweep by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "skeletonSweep",
-    )
+    // 系统「移除动画」开启时不铺流光：`rememberInfiniteTransition` 不读
+    // `ANIMATOR_DURATION_SCALE`，留着它用户关掉动画后仍有一道光在一屏占位块上来回扫。
+    // 静止态保留底色块——骨架交代的是"这里将来会有什么"，不靠动效。
+    //
+    // 拿的是 **State 而不是值**：下面 `drawBehind` 里再 `.value`，读发生在绘制阶段，
+    // 每帧只重绘、不重组（一屏十几个占位块同时扫也不额外花重组，这是原实现的关键性质）。
+    val sweep: State<Float>? =
+        if (rememberAnimationsEnabled()) {
+            rememberInfiniteTransition(label = "skeletonShimmer").animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 1200, easing = LinearEasing),
+                    repeatMode = RepeatMode.Restart,
+                ),
+                label = "skeletonSweep",
+            )
+        } else {
+            null
+        }
     val base = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
     val highlight = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.20f)
     Box(
@@ -63,10 +74,11 @@ fun SkeletonBox(
             .clip(shape)
             .background(base)
             .drawBehind {
+                val progress = sweep?.value ?: return@drawBehind
                 // 高光带从左画外扫到右画外：restart 的跳回落在画外，循环无缝。
                 // 带宽不小于 24dp——小到图标位（18dp）也有一次完整的光扫过
                 val band = maxOf(size.width * 0.6f, 24.dp.toPx())
-                val x = (size.width + band) * sweep - band
+                val x = (size.width + band) * progress - band
                 drawRect(
                     brush = Brush.linearGradient(
                         colors = listOf(Color.Transparent, highlight, Color.Transparent),
@@ -85,20 +97,26 @@ fun BreathingDot(
     color: Color = MaterialTheme.colorScheme.primary,
     size: Dp = 8.dp,
 ) {
-    val transition = rememberInfiniteTransition(label = "breathingDot")
-    val alpha by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.25f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "breathingDotAlpha",
-    )
+    // 同上：关掉动画时给常亮静止点（透明度 1），不留一条无限呼吸。
+    // 读 State 在绘制阶段完成，不触发重组。
+    val alpha: State<Float>? =
+        if (rememberAnimationsEnabled()) {
+            rememberInfiniteTransition(label = "breathingDot").animateFloat(
+                initialValue = 1f,
+                targetValue = 0.25f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+                label = "breathingDotAlpha",
+            )
+        } else {
+            null
+        }
     Box(
         modifier = modifier
             .size(size)
-            .graphicsLayer { this.alpha = alpha }
+            .graphicsLayer { this.alpha = alpha?.value ?: 1f }
             .background(color, CircleShape),
     )
 }

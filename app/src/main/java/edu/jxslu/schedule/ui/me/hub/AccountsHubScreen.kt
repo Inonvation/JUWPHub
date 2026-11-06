@@ -4,8 +4,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -69,13 +67,12 @@ import edu.jxslu.schedule.ui.common.StaggeredReveal
 import edu.jxslu.schedule.ui.common.emphasizedText
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberResumeTick
+import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AiBrain01
@@ -151,10 +148,13 @@ fun AccountsHubScreen(
     // 快趣账号入口只属于「账号登录」使用方式；小程序方式下仍保留一行（否则用户会以为漏了），
     // 状态显示「无需登录」，点行进骑行页切使用方式。
     val prefs = remember(context) { Graph.displayPrefs(context) }
-    val useMode by prefs.ebikeUseMode.collectAsStateWithLifecycle(
-        initialValue = remember { runBlocking { prefs.ebikeUseMode.first() } },
-    )
-    val kvcxAccountMode = useMode.capabilities().inAppRide
+    // 可空初值 = 「还没读到」：**不要**在组合期 runBlocking 读 DataStore（2026-11-06 审计 §3.7）。
+    // 也不拿 `EbikeUseMode.Default` 当首帧值——那会让「账号登录」用户先看到「无需登录」的
+    // 胶囊再跳一次，正是当初加阻塞读要躲的那一下。没读到就让快趣那一行整行不渲染。
+    // shortcut: 首帧这一帧里页头「已开启 N/7」会少算快趣一项；要连它也一起门闸得把整页
+    // 首帧化（另排期），代价大于收益——一帧的数字差肉眼不可读，错值的胶囊会被看到。
+    val useMode by prefs.ebikeUseMode.collectAsStateWithLifecycle(initialValue = null)
+    val kvcxAccountMode = useMode?.capabilities()?.inAppRide == true
 
     // 第三方会话「已过期」标记（2026-10-21）：在功能页消费前，这里先显示「已失效」。
     // 与 resumeTick / localTick 挂钩：从功能页回来（标记已被消费）时重读。
@@ -331,22 +331,25 @@ fun AccountsHubScreen(
                         state = ujingState,
                         onClick = onOpenUjing,
                     )
-                    AccountRow(
-                        title = "快趣出行",
-                        subtitle = if (kvcxAccountMode) {
-                            "扫码用车 · 骑行记录"
-                        } else {
-                            "当前为小程序方式 · 点此切换"
-                        },
-                        icon = HugeIcons.ScooterElectric,
-                        state = kvcxState,
-                        labels = if (kvcxAccountMode) {
-                            StatusLabels()
-                        } else {
-                            StatusLabels(login = "无需登录", loginMuted = true)
-                        },
-                        onClick = if (kvcxAccountMode) onOpenKvcx else onOpenRide,
-                    )
+                    // 使用方式还没读到（首帧）时整行不渲染，别先按默认方式画一个错的状态胶囊
+                    if (useMode != null) {
+                        AccountRow(
+                            title = "快趣出行",
+                            subtitle = if (kvcxAccountMode) {
+                                "扫码用车 · 骑行记录"
+                            } else {
+                                "当前为小程序方式 · 点此切换"
+                            },
+                            icon = HugeIcons.ScooterElectric,
+                            state = kvcxState,
+                            labels = if (kvcxAccountMode) {
+                                StatusLabels()
+                            } else {
+                                StatusLabels(login = "无需登录", loginMuted = true)
+                            },
+                            onClick = if (kvcxAccountMode) onOpenKvcx else onOpenRide,
+                        )
+                    }
                     AccountRow(
                         title = "问渠 · 志愿服务",
                         subtitle = "志愿工时 · 活动报名",
@@ -435,13 +438,14 @@ fun AccountsHubScreen(
     }
 }
 
-/** 顶部总览：已开启数 + 进度条。数字随登录态平滑变化，进度条 420ms 落位。 */
+/** 顶部总览：已开启数 + 进度条。数字随登录态平滑变化，进度条按页面档落位。 */
 @Composable
 private fun SummaryCard(enabled: Int, total: Int) {
     val target = if (total <= 0) 0f else enabled.toFloat() / total
     val progress = remember { Animatable(0f) }
     LaunchedEffect(target) {
-        progress.animateTo(target, tween(420, easing = FastOutSlowInEasing))
+        // 原 420ms：进页时从 0 填到 N/7，再随登录态变化重跑一次——一次可见变化，走页面档
+        progress.animateTo(target, Motion.page())
     }
     Column(
         modifier = Modifier
@@ -460,7 +464,7 @@ private fun SummaryCard(enabled: Int, total: Int) {
             AnimatedContent(
                 targetState = enabled,
                 transitionSpec = {
-                    fadeIn(tween(180)) togetherWith fadeOut(tween(120))
+                    fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap())
                 },
                 label = "enabledCount",
             ) { count ->
@@ -569,9 +573,9 @@ private fun StatusPill(state: LoginState, labels: StatusLabels = StatusLabels())
         }
         LoginState.Expired -> Quad(labels.expired, error, error.copy(alpha = 0.08f), error.copy(alpha = 0.35f))
     }
-    val fgColor by animateColorAsState(fg, tween(180), label = "pillFg")
-    val bgColor by animateColorAsState(bg, tween(180), label = "pillBg")
-    val borderColor by animateColorAsState(border, tween(180), label = "pillBorder")
+    val fgColor by animateColorAsState(fg, Motion.state(), label = "pillFg")
+    val bgColor by animateColorAsState(bg, Motion.state(), label = "pillBg")
+    val borderColor by animateColorAsState(border, Motion.state(), label = "pillBorder")
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
@@ -592,7 +596,7 @@ private fun StatusPill(state: LoginState, labels: StatusLabels = StatusLabels())
         AnimatedContent(
             targetState = text,
             transitionSpec = {
-                fadeIn(tween(160)) togetherWith fadeOut(tween(120))
+                fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap())
             },
             label = "pillText",
         ) { label ->

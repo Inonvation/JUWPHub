@@ -45,6 +45,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -603,7 +604,9 @@ private fun ShareBoard(
                             overrides = state.overrides,
                             isTodayWeek = week == state.todayWeek,
                             todayDay = todayDay,
-                            now = state.now,
+                            // 导出板不画时刻线（showNowLine = false），但入参类型是 State：
+                            // 传一个固定「现在」，板上的渲染与截图都不受 tick 影响
+                            now = rememberUpdatedState(state.now),
                             // 导出图里不画「非本周灰态」与当前时刻线：那是屏幕上的辅助信息，
                             // 一张要发出去的图只该有这一周的课
                             showNonCurrentWeek = false,
@@ -689,6 +692,12 @@ private fun BoardHeader(
 /**
  * 板内背景图：与课表页 [ScheduleBackgroundLayer] 同一套画法（Fill/Fit/Tile + 压暗），
  * 但不画顶部状态栏渐变——那层是给整屏页面托顶栏文字的，板里没有顶栏。
+ *
+ * **这里保留 `Image(alpha = opacity)`，与课表页不同**（2026-11-06）：课表页那张是常驻的
+ * 整屏图层，挂 alpha 会永久占一个离屏合成层，所以那边改成「不透明图 + 底色 scrim」；
+ * 板是**一次性快照**（截图前组合一次、`record` 进 graphicsLayer 就结束），没有逐帧成本，
+ * 且板的底色是 `surface`（课表页是 `background`），换算 scrim 要换颜色、换错就改变导出图观感。
+ * 收益为零、风险不为零，故不动。
  */
 @Composable
 private fun BoardBackground(

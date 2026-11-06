@@ -24,6 +24,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,7 @@ import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.Timetable
 import edu.jxslu.schedule.ui.common.courseColor
+import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.File02
@@ -51,6 +53,11 @@ import me.rerere.hugeicons.stroke.CalendarSync
  * 用户想改一个显示选项也得从周次弹层里翻。现在拆开：胶囊（周次区）→ 本弹层；
  * 眼睛图标 → 课表页内覆盖面板（WeekScreen.DisplaySettingsOverlay，复用 DisplaySettingsContent）。
  * 显示设置只有一个形态、一个入口（眼睛图标；「我的」侧跨 Tab 触发 2026-09-20 已删）。
+ *
+ * **四个出口都走 [rememberSheetDismisser]**（2026-11-06）：选周、回到本周、切换课表以前各自
+ * 先 `pickerOpen = false` 再做事，弹层是被从组合里瞬间抽掉的，退场动画根本来不及播——表现
+ * 是「点一下，面板'啪'地没了」。现在先 `hide()` 播完退场，再落状态、再执行动作（顺序由
+ * dismisser 保证）。调用方因此**不要再自己置 false**：那会让退场动画重新变成硬切。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,7 +78,9 @@ fun WeekPickerSheet(
     onSwitchTimetable: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val dismiss = rememberSheetDismisser(sheetState, onDismiss)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -86,7 +95,7 @@ fun WeekPickerSheet(
                 Text("选择周次", style = MaterialTheme.typography.titleLarge)
                 // 学期外没有「本周」，这条入口不出现（见 todayWeek 参数说明）
                 if (todayWeek != null) {
-                    TextButton(onClick = onBackToCurrentWeek) { Text("回到本周") }
+                    TextButton(onClick = { dismiss { onBackToCurrentWeek() } }) { Text("回到本周") }
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -95,7 +104,7 @@ fun WeekPickerSheet(
                 currentWeek = currentWeek,
                 todayWeek = todayWeek,
                 weeksWithCourses = weeksWithCourses,
-                onPick = onPickWeek,
+                onPick = { week -> dismiss { onPickWeek(week) } },
             )
             // 顶栏那个「课表名 ▾」在 62dp 顶栏里只能给到 32dp 命中区（2026-10-18）。
             // 这里补一个真正的 48dp 入口，用户不必瞄准顶栏那半行字。
@@ -107,7 +116,7 @@ fun WeekPickerSheet(
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClickLabel = "切换课表", onClick = onSwitchTimetable)
+                        .clickable(onClickLabel = "切换课表", onClick = { dismiss { onSwitchTimetable() } })
                         .padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -228,6 +237,8 @@ private fun WeekChip(
  *
  * 根因：此前三种导入散在三处（+ 图标只管加课、JSON 在「我的」页深处、教务导入靠空态提示），
  * 新用户拿到空课表找不到入口。收进一个弹层后，导入路径都在课表页顶栏一眼可见。
+ *
+ * 出口走 [rememberSheetDismisser]（与 [WeekPickerSheet] 同一口径）：先播退场再落状态。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -237,7 +248,9 @@ fun ImportEntrySheet(
     onJwImport: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val dismiss = rememberSheetDismisser(sheetState, onDismiss)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -254,19 +267,19 @@ fun ImportEntrySheet(
                 icon = { Icon(HugeIcons.Add01, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "手动添加课程",
                 subtitle = "在网格空白处新增或编辑单门课程",
-                onClick = onManualAdd,
+                onClick = { dismiss { onManualAdd() } },
             )
             ImportEntryRow(
                 icon = { Icon(HugeIcons.FileImport, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "导入 JSON 文件",
                 subtitle = "从导出的课表 JSON 恢复或合并",
-                onClick = onJsonImport,
+                onClick = { dismiss { onJsonImport() } },
             )
             ImportEntryRow(
                 icon = { Icon(HugeIcons.Import, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "从教务导入",
                 subtitle = "登录教务系统，解析学期理论 / 实验课表",
-                onClick = onJwImport,
+                onClick = { dismiss { onJwImport() } },
             )
         }
     }
@@ -276,6 +289,7 @@ fun ImportEntrySheet(
  * 课表页顶栏「分享」入口弹层（DESIGN §4.12）：日历同步 / CSV / JSON / 导出为图片。
  *
  * 形态与 [ImportEntrySheet] 一致（标题 + 四行入口）；具体动作在 WeekScreen 接线。
+ * 出口走 [rememberSheetDismisser]（与 [WeekPickerSheet] 同一口径）：先播退场再落状态。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -286,7 +300,9 @@ fun ShareEntrySheet(
     onShareImage: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val dismiss = rememberSheetDismisser(sheetState, onDismiss)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -303,25 +319,25 @@ fun ShareEntrySheet(
                 icon = { Icon(HugeIcons.CalendarSync, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "一键同步到手机日历",
                 subtitle = "写入系统日历并按设置提醒；重复同步自动去重",
-                onClick = onSyncCalendar,
+                onClick = { dismiss { onSyncCalendar() } },
             )
             ImportEntryRow(
                 icon = { Icon(HugeIcons.FileExport, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "导出为 CSV（日历格式）",
                 subtitle = "Google 日历可直接导入的通用格式",
-                onClick = onExportCsv,
+                onClick = { dismiss { onExportCsv() } },
             )
             ImportEntryRow(
                 icon = { Icon(HugeIcons.File02, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "导出为 JSON",
                 subtitle = "完整课表数据，可在其他设备导入 JUWPHub",
-                onClick = onExportJson,
+                onClick = { dismiss { onExportJson() } },
             )
             ImportEntryRow(
                 icon = { Icon(HugeIcons.ImageDownload, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "导出为图片",
                 subtitle = "生成一张只含本周课表的图，可保存到相册或直接分享",
-                onClick = onShareImage,
+                onClick = { dismiss { onShareImage() } },
             )
         }
     }
@@ -379,6 +395,7 @@ private fun ImportEntryRow(
  *
  * 单选即切换：courses / 作息 / 学期 / 显示偏好全部随当前课表换流，
  * 点选项后立刻关弹层让用户看到结果，不做「选中再确认」的多余一步。
+ * 出口走 [rememberSheetDismisser]（与 [WeekPickerSheet] 同一口径）：先播退场再落状态。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -389,7 +406,9 @@ fun TimetableSwitchSheet(
     onOpenManage: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val dismiss = rememberSheetDismisser(sheetState, onDismiss)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -403,13 +422,13 @@ fun TimetableSwitchSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onSelect(t.id) }
+                        .clickable { dismiss { onSelect(t.id) } }
                         .padding(vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     RadioButton(
                         selected = t.id == currentTimetableId,
-                        onClick = { onSelect(t.id) },
+                        onClick = { dismiss { onSelect(t.id) } },
                     )
                     Text(
                         t.name,
@@ -422,7 +441,7 @@ fun TimetableSwitchSheet(
             }
             Spacer(Modifier.height(4.dp))
             HorizontalDivider()
-            TextButton(onClick = onOpenManage) { Text("管理课表…") }
+            TextButton(onClick = { dismiss { onOpenManage() } }) { Text("管理课表…") }
         }
     }
 }

@@ -4,8 +4,6 @@ import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -93,6 +91,7 @@ import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -1500,15 +1499,15 @@ private fun KvcxConfirmDialog(
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
-                    // 说明行的显隐走显式 tween（页面动作区同族 FastOutSlowInEasing）：
-                    // AnimatedVisibility 的默认是 spring 参数，与同页动作区的曲线家族
+                    // 说明行的显隐走 Motion 四档（进场 reveal 220 / 退场 state 180）：
+                    // AnimatedVisibility 的默认是 spring 参数，与同页其余过渡的曲线家族
                     // 脱节；高度逐帧变化时弹窗窗口跟着走，节奏必须收得住
                     AnimatedVisibility(
                         visible = skipNextTime,
-                        enter = fadeIn(tween(200, easing = FastOutSlowInEasing)) +
-                            expandVertically(tween(200, easing = FastOutSlowInEasing)),
-                        exit = fadeOut(tween(150, easing = FastOutSlowInEasing)) +
-                            shrinkVertically(tween(150, easing = FastOutSlowInEasing)),
+                        enter = fadeIn(Motion.reveal()) +
+                            expandVertically(Motion.reveal()),
+                        exit = fadeOut(Motion.state()) +
+                            shrinkVertically(Motion.state()),
                     ) {
                         Text(
                             text = "关掉后点「开锁」就直接发指令并开始计费；" +

@@ -4,7 +4,6 @@ import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
@@ -48,6 +47,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
+import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -67,12 +67,6 @@ internal val PanelCollapseOverdrag = 64.dp
 
 /** 默认档：0.40（兼顾「看到身后课表」与内容可视面积）。 */
 internal const val PanelDefaultFraction = 0.40f
-
-/** 返回手势中途撤回时，面板位移弹回 0 的时长（毫秒）。 */
-private const val BackCancelReturnMillis = 180
-
-/** 返回手势提交后，面板走完剩下那段位移的时长（毫秒）；已跟到位的这一次动画几乎不占时间。 */
-private const val BackCommitMillis = 90
 
 /**
  * 吸附到最近档位（纯函数，JVM 可测）：返回锚点列表中与 [heightDp] 差值最小的一档。
@@ -155,10 +149,12 @@ internal fun DisplaySettingsOverlay(
     PredictiveBackHandler(enabled = true) { progressEvents ->
         try {
             progressEvents.collect { event -> backOffsetPx.snapTo(event.progress * panelHeightPx) }
-            backOffsetPx.animateTo(panelHeightPx, tween(BackCommitMillis))
+            // 提交：只剩收尾那一小段（多数情况已跟到位），用 tap 档，迟一点就像卡住
+            backOffsetPx.animateTo(panelHeightPx, Motion.tap())
             onDismiss()
         } catch (e: CancellationException) {
-            scope.launch { backOffsetPx.animateTo(0f, tween(BackCancelReturnMillis)) }
+            // 撤回：弹回原位是一次状态复位，用 state 档
+            scope.launch { backOffsetPx.animateTo(0f, Motion.state()) }
             throw e
         }
     }
@@ -191,8 +187,8 @@ internal fun DisplaySettingsOverlay(
             enter = slideInVertically(
                 // 从面板自身高度的 40% 滑入：能看出「从底部来」，又不拖沓
                 initialOffsetY = { it * 2 / 5 },
-                animationSpec = tween(220),
-            ) + fadeIn(tween(180)),
+                animationSpec = Motion.reveal(),
+            ) + fadeIn(Motion.state()),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             Card(

@@ -19,6 +19,24 @@ import edu.jxslu.schedule.Graph
  * 分散在各个调用点各自查开关会漏。所以统一在这里收口：
  * 组件只管调 [tap]/[toggle]，开关状态由 rememberAppHaptics 每次 recompose 时从仓库读，
  * 关闭时直接短路，不产生振动。
+ *
+ * ## 四档映射表（2026-11-06 补：此前只有"每档是什么"，没有"哪档用在哪"）
+ *
+ * | 档 | 用在哪 | 落地常量 |
+ * |----|--------|----------|
+ * | [tap] | 普通点击：列表行、卡片、图标按钮、课程块、底栏 tab | CONTEXT_CLICK |
+ * | [toggle] | 选中切换：开关、单选、筛选 chip、侧栏条目高亮 | CONTEXT_CLICK |
+ * | [success] | 动作成功：开锁成功、支付完成、提交成功这类"等了几秒终于成了" | CONFIRM（API 30+）/ CONTEXT_CLICK |
+ * | [tick] | 刻度感：滚轮停稳到新档位、周次切换 | CLOCK_TICK |
+ *
+ * 三条口径：
+ *
+ * 1. **失败不震**。触感是"操作被接受了"的确认，报错交给 Snackbar 和文案；失败还震一下，
+ *    用户会以为点上了，反而更困惑。
+ * 2. **同一次操作只震一次**。典型坑：`selectable`/`clickable` 里震一次、外层 `onSelect`
+ *    再震一次，手感就是双击。所以组件层给了触感，调用方就别再给（见 `AppCard` 的 KDoc）。
+ * 3. [tap] 与 [toggle] 现在落到**同一个**系统常量，区别只在语义位——留着两档是为了以后
+ *    真能分化时不用改 60+ 个调用点。别以为换了 [toggle] 手感会变，它不会。
  */
 class AppHaptics(private val view: View, private val enabled: () -> Boolean) {
 
@@ -31,7 +49,7 @@ class AppHaptics(private val view: View, private val enabled: () -> Boolean) {
         view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
     }
 
-    /** 状态切换（开关、选项选中），比 tap 略清脆。 */
+    /** 状态切换（开关、选项选中）。当前与 [tap] 同常量，见类 KDoc 第 3 条口径。 */
     fun toggle() {
         if (!enabled()) return
         // CONTEXT_CLICK：语义即「上下文点按」，API 23+，MIUI/HyperOS 上有明显但不重的反馈

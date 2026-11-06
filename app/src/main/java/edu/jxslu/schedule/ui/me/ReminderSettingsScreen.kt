@@ -224,21 +224,38 @@ class ReminderSettingsViewModel(
     private val repo: ScheduleRepository,
 ) : ViewModel() {
 
-    // 初值阻塞读真值：stateIn 初值若写 false/默认分钟，开过提醒的用户进页会先看到
-    // 关、真值到达后再跳开（MeViewModel 2026-09-28 同款反馈）。DataStore 读过一次后
-    // 常驻内存，这里只是再收一次缓存。
+    /**
+     * 首帧真值：**一次**阻塞读四个键（2026-11-06 审计 §3.7）。
+     *
+     * 为什么必须阻塞读：DataStore 的第一份数据必然晚于 UI 首帧，四个开关若用默认值作
+     * `stateIn` 初值，开过提醒的用户进页会先看到「关」再跳成「开」（2026-09-28 用户反馈）。
+     *
+     * 为什么只读一次：这四个键在**同一个** DataStore 文件里，拆成四条各读一次就是四个
+     * 阻塞点、四次串行排队（第一次之后才是缓存命中，但每个 `runBlocking` 的代价照付）。
+     * **不要拆回四条各自 `runBlocking`**（改之前就是这样），也**不要**换成默认值初值
+     * （那正是上面那条反馈）。
+     */
+    private val initial: ReminderPrefs = runBlocking {
+        ReminderPrefs(
+            enabled = repo.reminderEnabled.first(),
+            leadMinutes = repo.reminderLeadMinutes.first(),
+            homeworkEnabled = repo.homeworkReminderEnabled.first(),
+            strongVibration = repo.strongReminderVibration.first(),
+        )
+    }
+
     val enabled: StateFlow<Boolean> = repo.reminderEnabled
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            runBlocking { repo.reminderEnabled.first() },
+            initial.enabled,
         )
 
     val leadMinutes: StateFlow<Int> = repo.reminderLeadMinutes
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            runBlocking { repo.reminderLeadMinutes.first() },
+            initial.leadMinutes,
         )
 
     /** 作业截止提醒开关（DESIGN §3.11）。与上课提醒开关互相独立，默认关。 */
@@ -246,7 +263,7 @@ class ReminderSettingsViewModel(
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            runBlocking { repo.homeworkReminderEnabled.first() },
+            initial.homeworkEnabled,
         )
 
     /** 通知强提醒（2026-10-06）：提醒发出后额外直接震一次，可穿透免打扰。 */
@@ -254,7 +271,7 @@ class ReminderSettingsViewModel(
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            runBlocking { repo.strongReminderVibration.first() },
+            initial.strongVibration,
         )
 
     private val _message = MutableStateFlow<String?>(null)
@@ -290,3 +307,14 @@ class ReminderSettingsViewModel(
             ReminderSettingsViewModel(repo) as T
     }
 }
+
+/**
+ * 提醒页四个开关的首帧快照：由 [ReminderSettingsViewModel.initial] **一次**阻塞读出来。
+ * 只是给四个 `stateIn` 供初值，没有别的用处——别把它当成第二个状态源。
+ */
+private data class ReminderPrefs(
+    val enabled: Boolean,
+    val leadMinutes: Int,
+    val homeworkEnabled: Boolean,
+    val strongVibration: Boolean,
+)
