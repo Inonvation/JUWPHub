@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.ui.common
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -23,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,14 +40,18 @@ import androidx.compose.ui.unit.dp
  */
 
 /**
- * 身份卡：44dp 圆形图标底座 + 标题 + 可选「已登录」胶囊 + 一行说明 + 可选全宽动作按钮。
+ * 身份卡：44dp 品牌图标（头像）+ 标题 + 可选「已登录」胶囊 + 一行说明 + 可选全宽动作按钮。
+ *
+ * 头像用该服务的**官方图标位图**（`R.drawable.ic_brand_*`，与侧栏「江水生活」各行同一份），
+ * 不再叠圆形底座：位图自带底色与轮廓，套一层 tonal 圆底会变成「底里套底」。
+ * **必须用 `Image`**——`Icon(painter)` 会把位图整体染成 `LocalContentColor`（真机上呈黑色块）。
  *
  * 标题给账号标识（手机号掩码 / 学校名），说明给凭证口径（「Token 仅存本机」）；
  * [trailing] 放在说明行尾，用来挂「眼睛」这类就地切换显示的小按钮。
  */
 @Composable
 fun AccountHeroCard(
-    icon: ImageVector,
+    brandIcon: Int,
     title: String,
     subtitle: String,
     modifier: Modifier = Modifier,
@@ -58,20 +64,12 @@ fun AccountHeroCard(
 ) {
     AppCard(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
+            Image(
+                painter = painterResource(brandIcon),
+                contentDescription = null,
+                modifier = Modifier.size(44.dp),
+                contentScale = ContentScale.Fit,
+            )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -493,13 +493,16 @@ mPaaS（`ALIPUB080DFB9030956`）把小程序嵌在应用内跑，`assets/qzxy.pf
 同一改法（口径见 `.agents/rules/life-power.md`）。
 
 **页面骨架**（2026-11-05 改版，用户要求统一组件，与快趣账号页 / 胖乖生活页 / U净同一套）：
-`PageScaffoldColumn("趣智校园")` → 身份卡（`AccountHeroCard`：Droplet / 学校名 /
+`PageScaffoldColumn("趣智校园")` → 身份卡（`AccountHeroCard`：趣智品牌图标 / 学校名 /
 手机号掩码 +「会话仅存本机」/ 眼睛 / 「充值到趣智账户」）→「余额与账单」三列
 （`MetricsRow` + `MetricCell`：余额 / 账单合计 / 账单笔数）→「开热水」卡（设备行 +
 `SettingsDivider` + 状态区 + 动作位，三行小字合成一段状态说明）→ 账单列表（`YearMonth`
 左右箭头切月，右箭头以当月为上限）→「用水设置」（自动结算开关 + 诊断与调试）→
 页尾退出 → 免责。原先账号行、余额行、诊断入口各自成块，充值按钮压在数字同一行；
 公共件抽到 `ui/common/AccountCards.kt`。退出登录只在页尾出现一次（顶栏图标删除）。
+身份卡头像统一用该服务的**品牌图标**（`ic_brand_qzxy` / `ic_brand_pangguai` / `ic_brand_ujing` /
+`ic_brand_kqcx`，与侧栏「江水生活」各行同一份位图，2026-11-06 用户口径）——位图自带底色与
+轮廓，不叠圆形 tonal 底座；四个账号页（趣智 / 胖乖 / U净 / 快趣）同款。
 
 **消费记录独立成页**（2026-11-05，用户要求「做成入口卡片 + 参考一卡通账单按日周月」）：
 主页那张「消费记录」卡收成一行入口（`SettingItem`，右侧值 = `本月 N 笔 · ¥X`），

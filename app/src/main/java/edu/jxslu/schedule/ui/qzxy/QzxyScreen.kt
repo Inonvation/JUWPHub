@@ -67,6 +67,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.qzxy.QzxyBluetoothScanner
 import edu.jxslu.schedule.data.qzxy.QzxyBoundDevice
 import edu.jxslu.schedule.data.qzxy.QzxyDeviceInfo
@@ -560,7 +561,7 @@ private fun QzxyHeroCard(
         null
     }
     AccountHeroCard(
-        icon = HugeIcons.Droplet,
+        brandIcon = R.drawable.ic_brand_qzxy,
         title = state.schoolName.ifBlank { "趣智校园" },
         subtitle = buildString {
             if (hasPhone) {

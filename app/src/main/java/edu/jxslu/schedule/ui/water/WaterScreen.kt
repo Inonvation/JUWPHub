@@ -64,6 +64,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.prefs.DisplayPrefs
 import edu.jxslu.schedule.data.qiekj.DeviceItem
 import edu.jxslu.schedule.data.qiekj.OrderHistoryItem
@@ -111,7 +112,6 @@ import me.rerere.hugeicons.stroke.GlassWater
 import me.rerere.hugeicons.stroke.History
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
-import me.rerere.hugeicons.stroke.Wallet01
 import me.rerere.hugeicons.stroke.WalletAdd01
 
 private val DATE_FORMAT = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
@@ -555,7 +555,7 @@ private fun QiekjHeroCard(
         null
     }
     AccountHeroCard(
-        icon = HugeIcons.Wallet01,
+        brandIcon = R.drawable.ic_brand_pangguai,
         title = if (hasPhone) {
             if (state.showPhone) state.accountPhone else QzxyPhoneMask.mask(state.accountPhone)
         } else {

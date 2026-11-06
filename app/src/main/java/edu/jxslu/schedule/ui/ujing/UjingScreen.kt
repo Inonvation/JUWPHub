@@ -64,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.ujing.UjingDraftStore
 import edu.jxslu.schedule.data.ujing.UjingHistoryEntry
@@ -111,7 +112,6 @@ import me.rerere.hugeicons.stroke.Delete02
 import me.rerere.hugeicons.stroke.Plus
 import me.rerere.hugeicons.stroke.QrCodeScan
 import me.rerere.hugeicons.stroke.Refresh
-import me.rerere.hugeicons.stroke.WashingMachine
 
 /** 订单进行中且页面可见时的轮询间隔（与 ViewModel 口径一致，只在 UI 侧用）。 */
 private const val ORDER_POLL_INTERVAL_MILLIS = 15_000L
@@ -314,7 +314,7 @@ fun UjingScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // ① 身份卡
                     AccountHeroCard(
-                        icon = HugeIcons.WashingMachine,
+                        brandIcon = R.drawable.ic_brand_ujing,
                         title = QzxyPhoneMask.mask(state.mobile),
                         subtitle = "凭证仅存本机 · 不进云备份",
                         pill = "已登录",

@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.R
 import edu.jxslu.schedule.SubpageActivity
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.session.SessionService
@@ -77,7 +78,6 @@ import me.rerere.hugeicons.stroke.ChevronRight
 import me.rerere.hugeicons.stroke.History
 import me.rerere.hugeicons.stroke.InformationCircle
 import me.rerere.hugeicons.stroke.Refresh
-import me.rerere.hugeicons.stroke.UserAccount
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import java.time.Instant
@@ -192,7 +192,7 @@ fun KvcxScreen(
 @Composable
 private fun KvcxIdentityCard(mobile: String) {
     AccountHeroCard(
-        icon = HugeIcons.UserAccount,
+        brandIcon = R.drawable.ic_brand_kqcx,
         title = maskMobile(mobile),
         subtitle = "凭证仅存本机 · 不进云备份",
         pill = "已登录",
