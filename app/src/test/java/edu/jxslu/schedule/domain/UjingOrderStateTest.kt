@@ -152,4 +152,24 @@ class UjingOrderStateTest {
         assertEquals("洗衣机", UjingState.deviceFallback(dryer = false))
         assertEquals("烘干机", UjingState.deviceFallback(dryer = true))
     }
+
+    // ---- 完成通知发送判定（2026-11-06，修「衣服洗好了」反复弹） ----
+
+    @Test
+    fun doneNotificationOnlyOnFreshTransitWhileOnFile() {
+        // 常规完成：闹钟核对带着洗涤中快照查到 50，订单仍在案 → 发
+        assertTrue(UjingState.shouldNotifyWashDone("40", "50", stillOnFile = true))
+        // 重启丢闹钟的兜底：快照还停在 40（完成发生在关机期间）→ 冷启动核对发
+        assertTrue(UjingState.shouldNotifyWashDone("20", "50", stillOnFile = true))
+        assertTrue(UjingState.shouldNotifyWashDone(null, "50", stillOnFile = true))
+        // 快照已在案为 50：完成通知早已发过（或用户已在页面看到），
+        // 冷启动核对不重发——否则用户每开一次 App 就重弹一条
+        assertFalse(UjingState.shouldNotifyWashDone("50", "50", stillOnFile = true))
+        // 刷新期间用户已点「我已取走 / 知道了」（快照已清）或已下新单：不发，
+        // 回写守卫只挡快照复活，挡不住通知发送，这道闸必须在发送前
+        assertFalse(UjingState.shouldNotifyWashDone("40", "50", stillOnFile = false))
+        // 非完成态永远不发
+        assertFalse(UjingState.shouldNotifyWashDone("40", "40", stillOnFile = true))
+        assertFalse(UjingState.shouldNotifyWashDone("40", "60", stillOnFile = true))
+    }
 }

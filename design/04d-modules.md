@@ -409,8 +409,10 @@ ui/ujing/UjingOrderScreen        下单页：档位单选（AppCard 高亮即选
                                  贴底动作条（摘要 + 下单）· 确认弹层；确认 = submit + 关窗；
                                  草稿丢失（进程回收后重进）给一句话引导返回
 ui/ujing/UjingHistoryScreen      历史账单列表（最近落定排序 · 状态文案 · 金额）+ 清空（二次确认）
-ui/reminder/UjingDoneReminder    洗衣完成提醒：setAlarmClock 单点 + Worker 查单（50 → 发通知；
-                                 40 → 按新剩余重排；其余撤销），渠道 ujing_done，
+ui/reminder/UjingDoneReminder    洗衣完成提醒：setAlarmClock 单点 + Worker 查单（50 且本次核对
+                                 首次看到转入 → 发通知，快照已是 50 的重看不发；40 → 按新剩余
+                                 重排；其余撤销），渠道 ujing_done；用户确认取衣走 revoke
+                                 （撤闹钟 + 撤已发通知 + 撤免扰队列挂起条），
                                  Receiver/Worker 类名纪律与选课提醒同款
 ```
 

@@ -717,10 +717,10 @@ class UjingViewModel(
         }
     }
 
-    /** 终结态订单卡上的「知道了」：清掉在案快照。 */
+    /** 终结态订单卡上的「知道了」：清掉在案快照 + 收摊（撤闹钟 / 撤已发通知 / 撤免扰挂起条）。 */
     fun dismissOrder() {
         repo.dismissOrder()
-        UjingDoneReminder.cancel(appContext)
+        UjingDoneReminder.revoke(appContext)
         _uiState.update { it.copy(order = null) }
     }
 

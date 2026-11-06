@@ -130,6 +130,22 @@ object UjingState {
         afterStatus == "50" && beforeStatus != "50"
 
     /**
+     * 完成通知「衣服洗好了」是否该由这次核对发出（2026-11-06，修反复弹）。
+     * 两道闸：
+     * - **过渡闸**（[transitToWashDone]）：只有核对**亲眼看到转入 50** 才发——快照已在案为
+     *   50 说明通知早已发出（或用户已在今日页 / U净 页看到完成态），冷启动核对看到 50
+     *   就发的话，用户每开一次 App 都重弹一条；
+     * - **在案闸**（[stillOnFile]）：刷新期间用户可能已点「我已取走 / 知道了」（快照已清）
+     *   或已下新单——人已把衣服拿走还弹就是骚扰。回写守卫只挡快照复活，挡不住发送。
+     * 重启丢闹钟的兜底不受影响：关机期间完成的订单快照还停在非 50，冷启动核对照样补发。
+     */
+    fun shouldNotifyWashDone(
+        snapshotStatusBefore: String?,
+        refreshedStatus: String,
+        stillOnFile: Boolean,
+    ): Boolean = stillOnFile && transitToWashDone(snapshotStatusBefore, refreshedStatus)
+
+    /**
      * 订单已完成（50）：今日页的取衣提醒只认完成——取消 / 超时 / 启动失败（51/52/53/60）
      * 没有「衣服还在机器里」这回事，不留提醒。
      */

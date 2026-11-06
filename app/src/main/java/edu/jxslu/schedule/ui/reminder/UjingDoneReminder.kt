@@ -22,15 +22,20 @@ import edu.jxslu.schedule.SubpageRequest
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.repo.PendingLaunch
 import edu.jxslu.schedule.data.repo.PendingNotification
+import edu.jxslu.schedule.domain.UjingState
 import edu.jxslu.schedule.subpageLaunchIntent
 import edu.jxslu.schedule.ui.reminder.QuietHoursGate
+import kotlinx.coroutines.launch
 
 /**
  * 洗衣完成提醒（DESIGN §3.23 / §4.37 P4）：订单进入洗涤中（status 40）时按
  * 「快照时刻 + remainTime」排一枚 `setAlarmClock` 精确闹钟，到点查一次订单详情——
- * 已完成就发「衣服洗好了」，还在跑就按新剩余时间重排，别的状态（取消 / 超时）静默收摊。
+ * **本次核对亲眼看到转入 50** 才发「衣服洗好了」（快照已是 50 的重看不发，否则每开一次
+ * App 重弹一条），还在跑就按新剩余时间重排，别的状态（取消 / 超时）静默收摊。
+ * 用户确认取衣走 [revoke]（撤闹钟 + 撤已发通知 + 撤免扰挂起条），不设时间上限。
  *
  * 与选课提醒（`SelectionAlertReminder`）同构，但**简单一档**：没有周期核对与已发键——
+ * 「已发过」由在案快照自己记（快照不是 50 = 还没发过，见 `UjingState.shouldNotifyWashDone`），
  * 提醒点完全由在案订单推导，订单没了（取消 / 知道了 / 退出登录）闹钟就地撤销；
  * 页面开着时的 15 秒轮询会不断校准闹钟落点，页面不在也只是晚这一枚闹钟兜着。
  * **没有开机补排**：一单洗衣最长个把小时，重启丢一枚闹钟的代价远小于多一条常驻链路；
@@ -98,6 +103,33 @@ object UjingDoneReminder {
         }.onFailure { Log.w(TAG, "cancel failed", it) }
     }
 
+    /**
+     * 用户确认取衣（今日页「我已取走」/ U净 页「知道了」）后的收摊，比 [cancel] 多两步
+     * （2026-11-06，修「点了已取走还会弹」）：
+     * - 撤掉通知栏里已挂着的那条——autoCancel 只在点通知本身时清，从提醒行收摊它还杵在那；
+     * - 把免扰队列里被拦下的同一条删掉：完成提醒是事实型、队列条目不过期，人已把衣服
+     *   拿走，第二天免扰出口的补发就是假信息。队列写入走 Mutex + IO（拦截可能来自多个
+     *   上下文），扔 [Graph.appScope] 异步跑，失败只留痕；删完再撤一次已发通知，盖住
+     *   「撤通知与补发恰好赛跑」的缝。
+     */
+    fun revoke(context: Context) {
+        cancel(context)
+        runCatching {
+            NotificationManagerCompat.from(context).cancel(TAG, NOTIFICATION_ID)
+        }.onFailure { Log.w(TAG, "cancel posted notification failed", it) }
+        val appContext = context.applicationContext
+        Graph.appScope.launch {
+            runCatching {
+                Graph.quietHoursQueue(appContext).removeAllKeys(
+                    setOf(PendingNotification(tag = TAG, notificationId = NOTIFICATION_ID).key()),
+                )
+            }.onFailure { Log.w(TAG, "drop held quiet-hours entry failed", it) }
+            runCatching {
+                NotificationManagerCompat.from(appContext).cancel(TAG, NOTIFICATION_ID)
+            }.onFailure { Log.w(TAG, "cancel posted notification (retry) failed", it) }
+        }
+    }
+
     /** 一次性核对（闹钟落点）。 */
     fun enqueueCheck(context: Context) {
         val request = OneTimeWorkRequestBuilder<UjingDoneCheckWorker>().build()
@@ -123,27 +155,40 @@ object UjingDoneReminder {
             val refreshed = repo.refreshOrder(order.orderId)
             when {
                 // 免扰时段（DESIGN §3.7）：完成提醒是事实型（衣服不会因为睡觉洗完而
-                // 不算数），拦下入队待时段结束后补发
+                // 不算数），拦下入队待时段结束后补发。
+                // **只发一次**（2026-11-06 修反复弹）：shouldNotifyWashDone 两道闸——
+                // 过渡闸挡「快照已是 50 的冷启动核对重发」（每开一次 App 重弹一条）；
+                // 在案闸挡「刷新期间用户已点我已取走 / 知道了，请求返回照样发」。
                 refreshed.status == "50" -> {
-                    val held = QuietHoursGate.intercept(
-                        context,
-                        PendingNotification(
-                            tag = TAG,
-                            notificationId = NOTIFICATION_ID,
-                            channelId = CHANNEL_ID,
-                            category = NotificationCompat.CATEGORY_REMINDER,
-                            title = "衣服洗好了",
-                            text = completedText(refreshed.deviceName),
-                            enqueuedAt = System.currentTimeMillis(),
-                            launch = PendingLaunch(
-                                kind = PendingLaunch.Kind.SUBPAGE,
-                                requestCode = CONTENT_REQUEST_CODE,
-                                screen = SubpageScreen.UJING.name,
-                                clearTask = true,
+                    if (UjingState.shouldNotifyWashDone(
+                            order.status,
+                            refreshed.status,
+                            stillOnFile = repo.currentOrder()?.orderId == refreshed.orderId,
+                        )
+                    ) {
+                        val held = QuietHoursGate.intercept(
+                            context,
+                            PendingNotification(
+                                tag = TAG,
+                                notificationId = NOTIFICATION_ID,
+                                channelId = CHANNEL_ID,
+                                category = NotificationCompat.CATEGORY_REMINDER,
+                                title = "衣服洗好了",
+                                text = completedText(refreshed.deviceName),
+                                enqueuedAt = System.currentTimeMillis(),
+                                launch = PendingLaunch(
+                                    kind = PendingLaunch.Kind.SUBPAGE,
+                                    requestCode = CONTENT_REQUEST_CODE,
+                                    screen = SubpageScreen.UJING.name,
+                                    clearTask = true,
+                                ),
                             ),
-                        ),
-                    )
-                    if (!held) postNotification(context, refreshed.deviceName)
+                        )
+                        if (!held) postNotification(context, refreshed.deviceName)
+                    }
+                    // 订单已终结：顺手扫掉可能残留的完成闹钟（今日页对表看到 50 不走
+                    // ViewModel 的撤闹钟路径，这枚闹钟会一直挂着）
+                    cancel(context)
                 }
                 // 还在跑：按新剩余时间重排
                 refreshed.status == "40" && refreshed.remainSeconds > 0 ->

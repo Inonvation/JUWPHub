@@ -792,10 +792,11 @@ fun TodayScreen(
                     onWaterEnd = { waterViewModel?.endSession() },
                     onQzxyStop = { qzxyViewModel?.stopWater() },
                     onOpenUjing = onOpenUjing,
-                    // 取衣提醒行尾「我已取走」：与 U净 页「知道了」同一语义——清快照 + 撤完成闹钟
+                    // 取衣提醒行尾「我已取走」：与 U净 页「知道了」同一语义——清快照 +
+                    // 收摊（撤完成闹钟 / 撤已发通知 / 撤免扰队列挂起的那条）
                     onUjingDismiss = {
                         ujingRepo.dismissOrder()
-                        UjingDoneReminder.cancel(context)
+                        UjingDoneReminder.revoke(context)
                     },
                     // 小程序方式的免费计时（DataStore 落盘）：账号方式不传（骑行信息更全的那行优先）
                     freeRideStartAt = ebikeRideStartAt.takeIf { !kvcxInAppRide },
