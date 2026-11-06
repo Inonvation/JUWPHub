@@ -256,6 +256,9 @@ class PayCodeViewModel(
             accountFen = detail?.second ?: 0L,
         )
         _balance.value = snapshot
+        // 余额变了 = 刚发生过扣款/入账：补拉一页最新流水（2026-11-06）。付款码页的
+        // payWatch 紧随其后也会同步，但用户看完余额立刻退出时它未必跑完第一轮；同键幂等。
+        YktBalanceChangeSync.onBalanceObserved(appContext, snapshot.cardFen)
         // 桌面生活小组件（DESIGN §3.6 二条目改版）：余额数据已经在手上，顺手推一次
         // （零额外请求）
         runCatching {

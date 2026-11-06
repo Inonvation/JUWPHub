@@ -343,6 +343,9 @@ class CampusCardViewModel(
      */
     private fun applySnapshot(snapshot: PayCodeViewModel.BalanceSnapshot) {
         _balance.value = snapshot
+        // 余额变了 = 刚发生过扣款/入账：补拉一页最新流水，新消费随流水同步入收件箱
+        //（2026-11-06；挂点口径见 YktBalanceChangeSync 的 KDoc）
+        YktBalanceChangeSync.onBalanceObserved(appContext, snapshot.cardFen)
         viewModelScope.launch {
             runCatching { LifeWidgetSync.pushCampusBalance(appContext, snapshot.cardFen) }
         }

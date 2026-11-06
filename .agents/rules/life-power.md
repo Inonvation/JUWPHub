@@ -203,6 +203,14 @@
   `PayCodeResultBus` 交 `CampusPayResultDialogHost`（MainActivity 根层 + 校园卡设置页）。
 - **付款成功后余额自动刷新**：宿主收到消费时 `CampusBalanceSync.refreshAfterPayment`
   进程级单次强拉；各页 `CampusCardViewModel` 订阅 `revision` 用 `force = false` 重建。
+- **余额变化 → 补拉流水 → 收件箱跟上（2026-11-06）**：任何一条拿到正式卡余额的链路
+  （`CampusCardViewModel.applySnapshot` / `PayCodeViewModel.loadBalanceSnapshot` /
+  `BalanceAlertReminder.checkYkt` / `LifeWidgetSync.maybeFetchCampusBalance`）都调
+  `YktBalanceChangeSync.onBalanceObserved`：与落盘的上次值（`ykt_last_balance_fen`）不同
+  就补拉一页流水（`force = true`），新支出随同步回调入收件箱——食堂 POS 直刷之后不会再
+  出现「必须先打开账单页，收件箱那条才出来」。首次观察只建基线；判定在
+  `domain/YktBalanceChange`（单测钉住）。**别把这层判断塞进 `YktRepository.cards`**：
+  数据层取数不带副作用，挂点统一写在展示链路的余额落点。
 - **余额快照统一出口、连点去重与失败态**（2026-10-09）：`CampusCardViewModel` 的四类快照写入（进页与手动刷新 / 开启验证 / 到账判定 / 电子账户到账补刷）统一走 `applySnapshot()`——写 `_balance` 的同时顺手推桌面小组件（零额外请求；此前只有付款码页在推，充值到账 / 手动刷新要等 2 小时闸门才上小组件）。`CampusCardViewModel.refreshBalance` 与 `PayCodeViewModel.loadBalance` 有「取数中忽略重复触发」闸，连点不叠请求别删；付款码页余额行的「获取中 / 暂不可用」两态由 `PayCodeViewModel.balanceLoaded` 区分（失败转「余额暂不可用（点击重试）」，与设置页 2026-10-07 的口径对齐）。
 - **进页取数三路并发、登录只登一次（2026-09-30）**：充值前要等两条链（电费读数：登录→
   详情→读表；一卡通余额：键盘→OAuth→queryCard→scene=recharge）。收口三处：`refreshPower` 里电费流水与读数

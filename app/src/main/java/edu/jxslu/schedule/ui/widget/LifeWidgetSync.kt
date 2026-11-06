@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.ui.campus.YktBalanceChangeSync
 import kotlinx.coroutines.flow.first
 
 /**
@@ -143,6 +144,10 @@ internal object LifeWidgetSync {
      * 校园卡余额的后台取数：2 小时闸门 + 凭证 + 实例三重门。**失败不重试、不落时刻**
      * （闸门时间基点是「上次成功取数」，失败后下个 tick 仍会尝试，但没有重试风暴）。
      * 返回是否真的取到了。
+     *
+     * 取到之后顺手把余额交给 `YktBalanceChangeSync`（2026-11-06）：余额与上次不同就补拉
+     * 一页消费流水，新消费随流水同步入收件箱——后台 tick 也算一次余额观察点。这条附加
+     * 动作只在**余额真的变化**时发请求，且不改变本类「余额取数过闸门」的口径。
      */
     suspend fun maybeFetchCampusBalance(context: Context): Boolean {
         val appContext = context.applicationContext
@@ -158,7 +163,11 @@ internal object LifeWidgetSync {
         return runCatching {
             val cards = Graph.yktRepository(appContext).cards(credentials.username, credentials.password)
             if (cards.isEmpty()) return@runCatching false
-            pushCampusBalance(appContext, cards.sumOf { it.cardBalanceFen })
+            val cardFen = cards.sumOf { it.cardBalanceFen }
+            // 余额变了 = 期间发生过扣款/入账：补拉一页最新流水（消费入收件箱，2026-11-06）。
+            // 后台 tick 也会走到这里，收件箱因此不必等用户打开账单页。
+            YktBalanceChangeSync.onBalanceObserved(appContext, cardFen)
+            pushCampusBalance(appContext, cardFen)
             true
         }.getOrDefault(false)
     }

@@ -31,6 +31,7 @@ import edu.jxslu.schedule.domain.BalanceAlert
 import edu.jxslu.schedule.domain.BalanceAlertSource
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
+import edu.jxslu.schedule.ui.campus.YktBalanceChangeSync
 import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
@@ -307,6 +308,9 @@ object BalanceAlertReminder {
 
         if (cards.isEmpty()) return
         val cardFen = cards.sumOf { it.cardBalanceFen }
+        // 余额变了 = 期间发生过扣款/入账：补拉一页最新流水（消费入收件箱，2026-11-06）。
+        // 与下面推小组件同一份余额，零额外取数。
+        YktBalanceChangeSync.onBalanceObserved(context, cardFen)
         // 桌面生活小组件（DESIGN §3.6 二条目改版）：日检本来就取到了余额，顺手推一次
         // （零额外请求）
         runCatching { LifeWidgetSync.pushCampusBalance(context, cardFen) }

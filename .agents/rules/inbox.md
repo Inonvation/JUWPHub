@@ -60,6 +60,13 @@
   都已接上，**食堂 POS 直刷等非付款码消费随之覆盖**；守卫与过滤在
   `paymentInboxCandidates`（单测钉住：空库首同步不投——历史回灌不倾泻；只投支出——充值有
   `YKT_RECHARGE` 专门键，别重复入箱）。payWatch 命中处只发弹窗总线与振动，不再重复投递。
+  **余额变化是第四个触发源**（2026-11-06，`YktBalanceChangeSync`）：任何一条成功取到
+  正式卡余额的链路（`CampusCardViewModel.applySnapshot` / `PayCodeViewModel.loadBalanceSnapshot` /
+  `BalanceAlertReminder.checkYkt` / `LifeWidgetSync.maybeFetchCampusBalance`）把余额交给它，
+  与落盘的上次值（`ykt_last_balance_fen`）不同就补拉一页流水（`force = true`——余额变化
+  本身就是「有新数据」的证据，不吃 10 分钟闸门），新支出随同一条回调入箱。首次观察只建
+  基线不补拉；判定 `domain/YktBalanceChange`（单测钉住）。**别把这条判断塞进
+  `YktRepository.cards`**：数据层取数不带副作用，挂点统一写在余额落点。
   电费在 `LifeViewModel` 查单 `status==1` 两处
   （密码步 `confirmPowerPaid` + 农行 `checkBankPaid`，都在 `isCurrentSession` 之前——弹层关了
   不吞「钱已扣」；键 = 平台订单号）。
