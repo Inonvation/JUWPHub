@@ -77,6 +77,12 @@ fun QzxyEntrySheet(
     onClearDeviceRecord: () -> Unit,
     /** 清除别人的残留记录后立刻开阀（与趣智校园页失败卡的主按钮同一个动作）。 */
     onClearAndOpen: () -> Unit,
+    /** 开阀失败弹窗里的「重试（自动处理）」。 */
+    onRetryOpen: () -> Unit,
+    /** 自动处理没走通后的「手动清除设备记录」。 */
+    onClearFromRecovery: () -> Unit,
+    /** 关掉开阀失败弹窗（失败卡上的出口仍在）。 */
+    onDismissRecovery: () -> Unit,
     onDismissSettlement: () -> Unit,
     onOpenPage: () -> Unit,
     /** 失败详情里的「去诊断页」。参数是当前设备地址，诊断页据此选中同一台。 */
@@ -272,6 +278,21 @@ fun QzxyEntrySheet(
                 dismiss { onOpenDiagnostics(address) }
             },
             onDismiss = { failureDetail = null },
+        )
+    }
+
+    // 开阀失败的原因 + 自动重试（DESIGN §3.18）：与趣智校园页共用同一个 Composable，
+    // 状态在 ViewModel 里，两处同时只会有其中一处可见
+    state.recovery?.let { recovery ->
+        QzxyRecoveryDialog(
+            recovery = recovery,
+            onRetry = onRetryOpen,
+            onManualClear = onClearFromRecovery,
+            onOpenDiagnostics = {
+                val address = state.selected?.address ?: state.lastUsedDevice?.address
+                dismiss { onOpenDiagnostics(address) }
+            },
+            onDismiss = onDismissRecovery,
         )
     }
 }

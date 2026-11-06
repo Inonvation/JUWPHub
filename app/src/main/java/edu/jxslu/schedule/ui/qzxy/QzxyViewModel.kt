@@ -27,6 +27,7 @@ import edu.jxslu.schedule.data.session.SessionExpiryStore
 import edu.jxslu.schedule.domain.QzxyClData
 import edu.jxslu.schedule.domain.QzxyFrame
 import edu.jxslu.schedule.domain.QzxyProtocol
+import edu.jxslu.schedule.domain.QzxyRecovery
 import edu.jxslu.schedule.domain.QzxySessionLink
 import edu.jxslu.schedule.domain.QzxySign
 import edu.jxslu.schedule.domain.QzxyWatering
@@ -37,6 +38,7 @@ import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.widget.WaterWidgetSync
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -48,6 +50,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -150,6 +153,13 @@ data class QzxyUiState(
     val billLoaded: Boolean = false,
     // ── 流程 ──
     val flow: QzxyFlowState = QzxyFlowState.Idle,
+    /**
+     * 开阀失败后的自动修复弹窗（DESIGN §3.18，2026-11-06）。null = 不显示。
+     *
+     * 只在**开阀**失败时置位：结算 / 清除失败不弹——那两个动作的重试入口本来就在
+     * 失败卡上，再弹一层只会让用户先关窗再去点。
+     */
+    val recovery: QzxyRecoveryUi? = null,
     // ── 用水 ──
     /**
      * 进行中的用水（DESIGN §3.18）。非空 = 设备在放水，或上次开阀后一直没结算。
@@ -1023,158 +1033,201 @@ class QzxyViewModel(
             if (!beginFlow()) return@launch
             try {
                 _uiState.update { it.copy(timings = emptyList()) }
-
-                val cached = if (forceResend) {
-                    pendingOpenFor(device) ?: run {
-                        fail(
-                            "没有可重发的开阀数据",
-                            "服务端订单可能已经过期。重新点「开阀」会新建一单，先确认消费记录里没有这笔预扣",
-                        )
-                        return@launch
-                    }
-                } else {
-                    null
-                }
-
-                // 下单要用服务端登记的 MAC，缺了它订单会挂错设备、结算报「未找到订单」。
-                // 选中设备时已经查过，正常走到这里是空转。
-                if (cached == null && ensureServerDevice(device) == null) {
-                    fail(
-                        "拿不到设备登记信息",
-                        "下单要用服务端登记的 MAC，查不到就没法保证订单挂对设备。检查网络后重试",
-                    )
-                    return@launch
-                }
-
-                var lastOrder: QzxyRateOrderData? = null
-                val outcome = try {
-                    waterFlow(device).open(address = device.address) { state ->
-                        if (cached != null) {
-                            QzxyFrame.hexToBytes(cached.downDataHex)
-                                ?: throw QzxyApiException("缓存的 downData 无法解析")
-                        } else {
-                            val order = timed("下单") {
-                                repo.rateOrder(
-                                    buildOrderRequest(device, state),
-                                    signatureOverride = workingSignature,
-                                )
-                            }
-                            lastOrder = order
-                            val hex = order.downData
-                                ?: throw QzxyApiException("服务端返回的开阀数据不可解析（downData 为空）")
-                            val downData = QzxyFrame.hexToBytes(hex)
-                                ?: throw QzxyApiException("服务端返回的开阀数据不可解析（downData 为空）")
-                            pendingOpen = PendingOpen(
-                                address = device.address,
-                                downDataHex = hex,
-                                orderNo = order.orderNo,
-                                preDeductMoney = order.preDeductMoney,
-                                createdAtMillis = System.currentTimeMillis(),
-                            )
-                            downData
-                        }
-                    }
-                } catch (error: Throwable) {
-                    if (error is CancellationException) throw error
-                    fail(if (cached != null) "重发开阀数据失败" else "下单失败", error.message)
-                    return@launch
-                }
-
-                when (outcome) {
-                    is QzxyWaterFlow.Outcome.Opened -> {
-                        val order = lastOrder
-                        pendingOpen = null
-                        val downDataHex = order?.downData ?: cached?.downDataHex
-                        val preDeductMoney = order?.preDeductMoney ?: cached?.preDeductMoney
-                        _uiState.update {
-                            it.copy(
-                                lastDownDataHex = downDataHex,
-                                lastOrderDiagnostic = order?.let { orderDiagnosticOf(it) }
-                                    ?: cached?.let {
-                                        "重发 orderNo=${it.orderNo ?: "-"} preDeduct=${it.preDeductMoney ?: "-"}"
-                                    },
-                            )
-                        }
-                        log("开阀成功：downData ${outcome.downData.size} 字节，MTU ${link.negotiatedMtu}")
-                        log("下单响应：${orderDiagnosticOf(order) ?: "-"}")
-                        // 旧记账还挂着 = 上一笔没结清（或没走完对账）。覆盖前把钱的去向说清：
-                        // 消费记录是长期核对渠道，App 不重复造状态。
-                        if (wateringStore.watering.value != null) {
-                            notice(
-                                "上一笔用水的记录还没结清，已由本次覆盖。它的预扣由平台自动处理" +
-                                    "（一般次日）；消费记录里先显示 ¥0、退回后显示实际金额",
-                                NoticeTone.Warning,
-                            )
-                        }
-                        // 开阀成功 = 进入「用水中」：状态落到 store，页面与今日页卡片同时切换。
-                        // 不再给一句一次性成功文案——那一刻起用户要盯的是计时与结束按钮。
-                        wateringStore.begin(
-                            QzxyWatering(
-                                startedAtMillis = System.currentTimeMillis(),
-                                deviceAddress = device.address,
-                                deviceName = deviceDisplayName(device),
-                                preDeductMilli = preDeductMoney,
-                            ),
-                        )
-                        // 桌面趣智开水卡立刻切「用水中」（本地镜像，零网络）
-                        pushWaterWidget()
-                        _uiState.update { it.copy(flow = QzxyFlowState.Idle) }
-                        notice(
-                            "已开阀，服务端预扣 ${milliYuanText(preDeductMoney)}，用完点「结束用水」",
-                            NoticeTone.Success,
-                        )
-                        // 预扣已经发生，余额不刷新的话卡上还是开阀前的数
-                        refreshAccount()
-                    }
-
-                    is QzxyWaterFlow.Outcome.Blocked -> {
-                        // 状态 3（旧记录压着）是「不可开」里最常见的一种：设备还扣着上一条
-                        // 未结算记录。先分清这条记录是不是自己的：
-                        // - 自己的：主出口是结算，记录是重试结算的唯一凭证；
-                        // - 别人的/忘记关的：主出口直接「清除并继续开阀」，不再让用户
-                        //   先失败一次、再自己去找清除入口。
-                        val state3 = _uiState.value.deviceState?.deviceState ==
-                            QzxyProtocol.STATE_FINISHED_UNCOLLECTED
-                        val busy = outcome.kind == QzxyWaterFlow.BlockedKind.DeviceBusy
-                        val stale = state3 && busy
-                        val ours = wateringStore.watering.value?.deviceAddress
-                            ?.equals(device.address, ignoreCase = true) == true
-                        // 状态 3 挡着时，上一单的 downData 已经没有意义；留着它只会让
-                        // 下一次开阀误以为还能重发。清除后重新下单。
-                        if (stale && !ours) pendingOpen = null
-                        // 只有「这一轮真的建过单/正在重发」才给重发出口：
-                        // 读状态就超时的情况没有新订单，给「重发」会误导用户。
-                        val canResend = !stale &&
-                            (lastOrder != null || cached != null) &&
-                            pendingOpenFor(device) != null
-                        fail(
-                            reason = when {
-                                stale && !ours -> "设备上有上一位用户的未结算记录"
-                                canResend && outcome.kind == QzxyWaterFlow.BlockedKind.NoState ->
-                                    "开阀数据没有写进设备"
-                                else -> outcome.reason
-                            },
-                            detail = when {
-                                stale && !ours ->
-                                    "清除这条记录后才能继续开阀。清除只解设备，上一笔预扣由平台处理。"
-                                canResend && outcome.kind == QzxyWaterFlow.BlockedKind.NoState ->
-                                    QzxyWaterFlow.PRE_DEDUCT_DETAIL
-                                canResend -> "${outcome.detail}（已下单，可重发开阀数据，不必重新下单）"
-                                else -> outcome.detail
-                            },
-                            settleRecovery = stale && ours,
-                            clearRecovery = stale,
-                            clearThenOpen = stale && !ours,
-                            resendRecovery = canResend,
-                        )
-                    }
-
-                    is QzxyWaterFlow.Outcome.Settled -> error("open() 不会返回 Settled")
-                }
+                attemptOpenLocked(device, forceResend)?.let { publishOpenFailure(it) }
             } finally {
                 valveMutex.unlock()
             }
         }
+    }
+
+    /**
+     * 一次开阀尝试。**调用方必须已持有 [valveMutex]**。
+     *
+     * 返回 null = 成功（界面已经切到「用水中」）；非空 = 失败现场，由调用方决定
+     * 是直接报失败（正常开阀）还是继续自动修复（[runRecoveryLocked]）。
+     *
+     * 抽出来的唯一理由是自动重试要复用同一条链路：重发缓存的开阀数据、读状态、
+     * 清除/结算后重开，每一步都必须走这里，否则就会出现第二份「下单 + 写设备」实现。
+     */
+    private suspend fun attemptOpenLocked(
+        device: QzxyScannedDevice,
+        forceResend: Boolean,
+    ): QzxyOpenAttempt? {
+        val cached = if (forceResend) {
+            pendingOpenFor(device) ?: return QzxyOpenAttempt(
+                kind = QzxyRecovery.Failure.NO_PENDING,
+                failure = QzxyFlowState.Failed(
+                    reason = "没有可重发的开阀数据",
+                    detail = "服务端订单可能已经过期。重新点「开阀」会新建一单，先确认消费记录里没有这笔预扣",
+                ),
+            )
+        } else {
+            null
+        }
+
+        // 下单要用服务端登记的 MAC，缺了它订单会挂错设备、结算报「未找到订单」。
+        // 选中设备时已经查过，正常走到这里是空转。
+        if (cached == null && ensureServerDevice(device) == null) {
+            return QzxyOpenAttempt(
+                kind = QzxyRecovery.Failure.ORDER,
+                failure = QzxyFlowState.Failed(
+                    reason = "拿不到设备登记信息",
+                    detail = "下单要用服务端登记的 MAC，查不到就没法保证订单挂对设备。检查网络后重试",
+                ),
+            )
+        }
+
+        var lastOrder: QzxyRateOrderData? = null
+        val outcome = try {
+            waterFlow(device).open(address = device.address) { state ->
+                if (cached != null) {
+                    QzxyFrame.hexToBytes(cached.downDataHex)
+                        ?: throw QzxyApiException("缓存的 downData 无法解析")
+                } else {
+                    val order = timed("下单") {
+                        repo.rateOrder(
+                            buildOrderRequest(device, state),
+                            signatureOverride = workingSignature,
+                        )
+                    }
+                    lastOrder = order
+                    val hex = order.downData
+                        ?: throw QzxyApiException("服务端返回的开阀数据不可解析（downData 为空）")
+                    val downData = QzxyFrame.hexToBytes(hex)
+                        ?: throw QzxyApiException("服务端返回的开阀数据不可解析（downData 为空）")
+                    pendingOpen = PendingOpen(
+                        address = device.address,
+                        downDataHex = hex,
+                        orderNo = order.orderNo,
+                        preDeductMoney = order.preDeductMoney,
+                        createdAtMillis = System.currentTimeMillis(),
+                    )
+                    downData
+                }
+            }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            return QzxyOpenAttempt(
+                // 缓存在手 = 问题在蓝牙写入/解析这一侧；否则是 rateOrder 的 HTTP 侧
+                kind = if (cached != null) {
+                    QzxyRecovery.Failure.WRITE
+                } else {
+                    QzxyRecovery.Failure.ORDER
+                },
+                failure = QzxyFlowState.Failed(
+                    reason = if (cached != null) "重发开阀数据失败" else "下单失败",
+                    detail = error.message,
+                ),
+            )
+        }
+
+        when (outcome) {
+            is QzxyWaterFlow.Outcome.Opened -> {
+                val order = lastOrder
+                pendingOpen = null
+                val downDataHex = order?.downData ?: cached?.downDataHex
+                val preDeductMoney = order?.preDeductMoney ?: cached?.preDeductMoney
+                _uiState.update {
+                    it.copy(
+                        lastDownDataHex = downDataHex,
+                        lastOrderDiagnostic = order?.let { orderDiagnosticOf(it) }
+                            ?: cached?.let {
+                                "重发 orderNo=${it.orderNo ?: "-"} preDeduct=${it.preDeductMoney ?: "-"}"
+                            },
+                    )
+                }
+                log("开阀成功：downData ${outcome.downData.size} 字节，MTU ${link.negotiatedMtu}")
+                log("下单响应：${orderDiagnosticOf(order) ?: "-"}")
+                // 旧记账还挂着 = 上一笔没结清（或没走完对账）。覆盖前把钱的去向说清：
+                // 消费记录是长期核对渠道，App 不重复造状态。
+                if (wateringStore.watering.value != null) {
+                    notice(
+                        "上一笔用水的记录还没结清，已由本次覆盖。它的预扣由平台自动处理" +
+                            "（一般次日）；消费记录里先显示 ¥0、退回后显示实际金额",
+                        NoticeTone.Warning,
+                    )
+                }
+                // 开阀成功 = 进入「用水中」：状态落到 store，页面与今日页卡片同时切换。
+                // 不再给一句一次性成功文案——那一刻起用户要盯的是计时与结束按钮。
+                wateringStore.begin(
+                    QzxyWatering(
+                        startedAtMillis = System.currentTimeMillis(),
+                        deviceAddress = device.address,
+                        deviceName = deviceDisplayName(device),
+                        preDeductMilli = preDeductMoney,
+                    ),
+                )
+                // 桌面趣智开水卡立刻切「用水中」（本地镜像，零网络）
+                pushWaterWidget()
+                // 成功也收掉自动修复弹窗：重试走通时它就是最后一步。
+                // 上一次结算卡也要收：这次是**新的**一次用水，卡上该显示计时
+                _uiState.update {
+                    it.copy(flow = QzxyFlowState.Idle, recovery = null, lastSettlement = null)
+                }
+                notice(
+                    "已开阀，服务端预扣 ${milliYuanText(preDeductMoney)}，用完点「结束用水」",
+                    NoticeTone.Success,
+                )
+                // 预扣已经发生，余额不刷新的话卡上还是开阀前的数
+                refreshAccount()
+            }
+
+            is QzxyWaterFlow.Outcome.Blocked -> {
+                // 状态 3（旧记录压着）是「不可开」里最常见的一种：设备还扣着上一条
+                // 未结算记录。先分清这条记录是不是自己的：
+                // - 自己的：主出口是结算，记录是重试结算的唯一凭证；
+                // - 别人的/忘记关的：主出口直接「清除并继续开阀」，不再让用户
+                //   先失败一次、再自己去找清除入口。
+                val state3 = _uiState.value.deviceState?.deviceState ==
+                    QzxyProtocol.STATE_FINISHED_UNCOLLECTED
+                val busy = outcome.kind == QzxyWaterFlow.BlockedKind.DeviceBusy
+                val stale = state3 && busy
+                val ours = wateringStore.watering.value?.deviceAddress
+                    ?.equals(device.address, ignoreCase = true) == true
+                // 状态 3 挡着时，上一单的 downData 已经没有意义；留着它只会让
+                // 下一次开阀误以为还能重发。清除后重新下单。
+                if (stale && !ours) pendingOpen = null
+                // 只有「这一轮真的建过单/正在重发」才给重发出口：
+                // 读状态就超时的情况没有新订单，给「重发」会误导用户。
+                val canResend = !stale &&
+                    (lastOrder != null || cached != null) &&
+                    pendingOpenFor(device) != null
+                return QzxyOpenAttempt(
+                    // 状态 3 = 设备被记录压着；出水/结算中同样算「设备侧不可开」。
+                    // 重发失败单独一类：服务端已下单，只差蓝牙那一步
+                    kind = when {
+                        stale || busy -> QzxyRecovery.Failure.DEVICE_BUSY
+                        canResend && outcome.kind == QzxyWaterFlow.BlockedKind.NoState ->
+                            QzxyRecovery.Failure.WRITE
+                        else -> QzxyRecovery.Failure.LINK
+                    },
+                    failure = QzxyFlowState.Failed(
+                        reason = when {
+                            stale && !ours -> "设备上有上一位用户的未结算记录"
+                            canResend && outcome.kind == QzxyWaterFlow.BlockedKind.NoState ->
+                                "开阀数据没有写进设备"
+                            else -> outcome.reason
+                        },
+                        detail = when {
+                            stale && !ours ->
+                                "清除这条记录后才能继续开阀。清除只解设备，上一笔预扣由平台处理。"
+                            canResend && outcome.kind == QzxyWaterFlow.BlockedKind.NoState ->
+                                QzxyWaterFlow.PRE_DEDUCT_DETAIL
+                            canResend -> "${outcome.detail}（已下单，可重发开阀数据，不必重新下单）"
+                            else -> outcome.detail
+                        },
+                        settleRecovery = stale && ours,
+                        clearRecovery = stale,
+                        clearThenOpen = stale && !ours,
+                        resendRecovery = canResend,
+                    ),
+                )
+            }
+
+            is QzxyWaterFlow.Outcome.Settled -> error("open() 不会返回 Settled")
+        }
+        // 唯一走到这里的是 Opened：界面已经切到「用水中」
+        return null
     }
 
     /** 下单响应的现场摘要：只进诊断文本与调试日志，界面上不出现（语义未定论）。 */
@@ -1195,6 +1248,414 @@ class QzxyViewModel(
     }
 
     fun clearFlow() = _uiState.update { it.copy(flow = QzxyFlowState.Idle) }
+
+    // ── 开阀失败后的自动修复（DESIGN §3.18，2026-11-06） ──
+
+    /** 一次开阀尝试的失败现场：[kind] 决定弹窗文案与阶梯走向，[failure] 是失败卡那份。 */
+    private data class QzxyOpenAttempt(
+        val kind: QzxyRecovery.Failure,
+        val failure: QzxyFlowState.Failed,
+    )
+
+    /** 开阀失败落账：失败卡 + 自动修复弹窗（只有还值得重试的失败才弹）。 */
+    private fun publishOpenFailure(attempt: QzxyOpenAttempt) {
+        fail(attempt.failure)
+        if (!QzxyRecovery.retryable(attempt.kind)) return
+        _uiState.update {
+            it.copy(
+                recovery = QzxyRecoveryUi(
+                    failure = attempt.failure,
+                    kind = attempt.kind,
+                    causes = QzxyRecovery.causes(attempt.kind),
+                    // 点「重试」之前就把固定要做的事摆出来：用户知道这一下会动蓝牙，
+                    // 而不是点完看着一个转圈
+                    steps = listOf(
+                        QzxyRecoveryStepUi(QzxyRecovery.Step.RECONNECT),
+                        QzxyRecoveryStepUi(QzxyRecovery.Step.READ_STATE),
+                    ),
+                ),
+            )
+        }
+    }
+
+    /**
+     * 弹窗里的「重试（自动处理）」。
+     *
+     * 为什么值得自动跑：共享水表的失败要靠一串动作才自愈（重建链路 → 读状态 →
+     * 结算/清除 → 重发同一单），让用户按顺序自己点，任何一步顺序错了都会以为
+     * 「连不上」。这里用有界的阶梯替用户走一遍，仍不成再把手动出口交回去。
+     *
+     * 三条硬约束（用户 2026-11-06 拍板）：
+     * - 重试**不重复下单**：本地还有没写进设备的订单时只重发（`pendingOpen`）；
+     * - 自动清除只发生在用户点过这个按钮之后（弹窗里那条警示即授权）；
+     * - 结算/清除失败不进蓝牙阶梯，也不弹这个弹窗。
+     */
+    fun retryOpenAfterFailure() {
+        val recovery = _uiState.value.recovery ?: return
+        if (recovery.running) return
+        val device = currentOrLastDevice()
+        if (device == null) {
+            notice("先在趣智校园页选一台热水器", NoticeTone.Warning)
+            return
+        }
+        viewModelScope.launch {
+            if (!beginFlow()) return@launch
+            try {
+                runRecoveryLocked(device, recovery.kind)
+            } finally {
+                valveMutex.unlock()
+            }
+        }
+    }
+
+    /** 关掉自动修复弹窗。失败卡与它上面的出口都还在，用户随时可以手动再来。 */
+    fun dismissRecovery() = _uiState.update { it.copy(recovery = null) }
+
+    /** 弹窗兜底出口：手动清除设备记录（先收弹窗，再走原来的清除流程）。 */
+    fun clearFromRecovery() {
+        dismissRecovery()
+        clearDeviceRecord()
+    }
+
+    /**
+     * 自动修复阶梯的执行体。调用方必须已持有 [valveMutex]。
+     *
+     * 轮次与预算见 [QzxyRecovery]：最多两轮，整体 40 秒；每轮先重建链路，
+     * 再按设备状态分流（空闲→重发/下单，状态 3→自己的先结算，别人的先清除，
+     * 结算中/出水中→只等）。清除过一遍仍是状态 3 就停手——再清也不会变。
+     */
+    private suspend fun runRecoveryLocked(device: QzxyScannedDevice, kind: QzxyRecovery.Failure) {
+        val recovery = _uiState.value.recovery ?: return
+        val startedAt = SystemClock.elapsedRealtime()
+        var note: String? = null
+        var lastFailure: QzxyOpenAttempt? = null
+        var opened = false
+        _uiState.update {
+            it.copy(
+                recovery = recovery.copy(
+                    running = true,
+                    exhausted = false,
+                    note = null,
+                ),
+            )
+        }
+        try {
+            for (round in 1..QzxyRecovery.MAX_ROUNDS) {
+                if (SystemClock.elapsedRealtime() - startedAt > QzxyRecovery.BUDGET_MILLIS) {
+                    note = "已经自动处理到时间上限"
+                    break
+                }
+                _uiState.update { it.copy(recovery = it.recovery?.copy(round = round)) }
+
+                if (round > 1) {
+                    step("正在确认设备还在附近")
+                    markRecoveryStep(QzxyRecovery.Step.RESCAN, QzxyRecoveryStepStatus.RUNNING)
+                    // 先断开再扫：BLE 外设被连着就不再广播，不先让出会永远扫不到它
+                    closeLinkQuiet()
+                    val nearby = deviceSeenOrUnknown(device)
+                    markRecoveryStep(
+                        QzxyRecovery.Step.RESCAN,
+                        if (nearby) QzxyRecoveryStepStatus.DONE else QzxyRecoveryStepStatus.FAILED,
+                    )
+                    if (!nearby) {
+                        note = "附近没扫到这台水表：可能被另一台手机连着，或者人已经走远"
+                        break
+                    }
+                }
+
+                step("正在重新连接设备")
+                markRecoveryStep(QzxyRecovery.Step.RECONNECT, QzxyRecoveryStepStatus.RUNNING)
+                val reconnected = reconnectQuiet(device)
+                markRecoveryStep(
+                    QzxyRecovery.Step.RECONNECT,
+                    if (reconnected) QzxyRecoveryStepStatus.DONE else QzxyRecoveryStepStatus.FAILED,
+                )
+
+                var cleared = false
+                var settled = false
+                var roundFinished = false
+                for (probe in 1..QzxyRecovery.PROBES_PER_ROUND) {
+                    if (SystemClock.elapsedRealtime() - startedAt > QzxyRecovery.BUDGET_MILLIS) {
+                        note = "已经自动处理到时间上限"
+                        roundFinished = true
+                        break
+                    }
+                    markRecoveryStep(QzxyRecovery.Step.READ_STATE, QzxyRecoveryStepStatus.RUNNING)
+                    val state = readStateQuiet(device)
+                    markRecoveryStep(
+                        QzxyRecovery.Step.READ_STATE,
+                        if (state != null) QzxyRecoveryStepStatus.DONE else QzxyRecoveryStepStatus.FAILED,
+                    )
+                    val action = QzxyRecovery.nextAction(
+                        state = state?.deviceState,
+                        recordIsOurs = recordIsOurs(device),
+                        clearedThisRound = cleared,
+                        settledThisRound = settled,
+                    )
+                    // HTTP 类失败重试时不碰设备上的记录：下单都没成功，清记录不会让下单变好，
+                    // 却可能把别人正在用的那笔单毁掉
+                    if (kind == QzxyRecovery.Failure.ORDER &&
+                        (action == QzxyRecovery.Action.SETTLE_OURS ||
+                            action == QzxyRecovery.Action.CLEAR_RECORD)
+                    ) {
+                        note = "下单接口失败，这一轮不动设备上的记录"
+                        roundFinished = true
+                        break
+                    }
+                    when (action) {
+                        QzxyRecovery.Action.OPEN -> {
+                            step("正在重新开阀")
+                            markRecoveryStep(QzxyRecovery.Step.OPEN, QzxyRecoveryStepStatus.RUNNING)
+                            // 手上还有没写进设备的单就只重发：重试不能变成第二笔预扣
+                            val attempt = attemptOpenLocked(
+                                device = device,
+                                forceResend = pendingOpenFor(device) != null,
+                            )
+                            if (attempt == null) {
+                                markRecoveryStep(QzxyRecovery.Step.OPEN, QzxyRecoveryStepStatus.DONE)
+                                opened = true
+                            } else {
+                                markRecoveryStep(QzxyRecovery.Step.OPEN, QzxyRecoveryStepStatus.FAILED)
+                                lastFailure = attempt
+                                note = attempt.failure.reason
+                            }
+                            roundFinished = true
+                        }
+
+                        QzxyRecovery.Action.SETTLE_OURS -> {
+                            step("正在结算上次的用水")
+                            markRecoveryStep(
+                                QzxyRecovery.Step.SETTLE_OURS,
+                                QzxyRecoveryStepStatus.RUNNING,
+                            )
+                            val settledOk = settleQuiet(device)
+                            settled = true
+                            markRecoveryStep(
+                                QzxyRecovery.Step.SETTLE_OURS,
+                                if (settledOk) {
+                                    QzxyRecoveryStepStatus.DONE
+                                } else {
+                                    QzxyRecoveryStepStatus.FAILED
+                                },
+                            )
+                        }
+
+                        QzxyRecovery.Action.CLEAR_RECORD -> {
+                            step("正在清除设备上的记录")
+                            markRecoveryStep(
+                                QzxyRecovery.Step.CLEAR_RECORD,
+                                QzxyRecoveryStepStatus.RUNNING,
+                            )
+                            val clearedOk = clearDeviceRecordLocked(
+                                device,
+                                allowIdle = false,
+                                quiet = true,
+                            )
+                            // 试过就算「这一轮清过」：清完回读仍是状态 3 就停手，
+                            // 否则同一轮会用同一批候选反复清，白耗预算
+                            cleared = true
+                            markRecoveryStep(
+                                QzxyRecovery.Step.CLEAR_RECORD,
+                                if (clearedOk) {
+                                    QzxyRecoveryStepStatus.DONE
+                                } else {
+                                    QzxyRecoveryStepStatus.FAILED
+                                },
+                            )
+                        }
+
+                        QzxyRecovery.Action.WAIT -> {
+                            // 结算中 / 正在出水：这时发清除会被拒，等设备自己走完
+                            markRecoveryStep(QzxyRecovery.Step.WAIT, QzxyRecoveryStepStatus.RUNNING)
+                            delay(QzxyRecovery.SETTLING_POLL_MILLIS)
+                        }
+
+                        QzxyRecovery.Action.LINK_RETRY -> {
+                            note = "蓝牙还是没有响应"
+                            roundFinished = true
+                        }
+
+                        QzxyRecovery.Action.STOP -> {
+                            note = if (cleared) {
+                                "清除命令没有被设备接受，设备上的记录还在"
+                            } else {
+                                "设备当前状态不适合自动处理，已停手"
+                            }
+                            roundFinished = true
+                        }
+                    }
+                    if (roundFinished) break
+                }
+                if (!opened && !roundFinished) {
+                    note = note ?: "设备状态一直没有回到可用（可能一直在结算或出水）"
+                }
+                if (opened) break
+            }
+        } catch (error: Throwable) {
+            // 任何意外都收尾成「自动处理没走通」：别把弹窗留在「进行中」，
+            // 更别让异常从 viewModelScope 里冒出去崩掉进程
+            if (error is CancellationException) throw error
+            log("自动处理中断：${error.message}")
+            note = error.message ?: "自动处理时出了意外"
+        } finally {
+            finishRecovery(opened, note, lastFailure)
+        }
+    }
+
+    /** 阶梯收尾：成功收弹窗；失败转「手动清除」并把最后一个现场留在失败卡上。 */
+    private fun finishRecovery(opened: Boolean, note: String?, lastFailure: QzxyOpenAttempt?) {
+        _uiState.update { state ->
+            val recovery = state.recovery ?: return@update state
+            if (opened) {
+                state.copy(recovery = null)
+            } else {
+                state.copy(
+                    flow = (state.flow as? QzxyFlowState.Failed)
+                        ?: lastFailure?.failure
+                        ?: recovery.failure,
+                    recovery = recovery.copy(
+                        running = false,
+                        exhausted = true,
+                        note = note ?: lastFailure?.failure?.detail ?: "自动处理没有走通",
+                        steps = recovery.steps.map { stage ->
+                            if (stage.status == QzxyRecoveryStepStatus.RUNNING) {
+                                stage.copy(status = QzxyRecoveryStepStatus.FAILED)
+                            } else {
+                                stage
+                            }
+                        },
+                    ),
+                )
+            }
+        }
+    }
+
+    /** 同一类步骤只出现一次：重复读状态就地改状态，别把清单刷成一长串。 */
+    private fun markRecoveryStep(step: QzxyRecovery.Step, status: QzxyRecoveryStepStatus) {
+        _uiState.update { state ->
+            val recovery = state.recovery ?: return@update state
+            val index = recovery.steps.indexOfFirst { it.step == step }
+            val steps = if (index >= 0) {
+                recovery.steps.toMutableList().apply {
+                    this[index] = this[index].copy(status = status)
+                }
+            } else {
+                recovery.steps + QzxyRecoveryStepUi(step, status)
+            }
+            state.copy(recovery = recovery.copy(steps = steps))
+        }
+    }
+
+    /** 重试要用哪台：当前选中 → 上次用过 → 唯一一台已绑定。都没有返回 null。 */
+    private fun currentOrLastDevice(): QzxyScannedDevice? {
+        _uiState.value.selected?.let { return it }
+        val bound = deviceStore.lastUsed()
+            ?: _uiState.value.boundDevices.firstOrNull()
+            ?: return null
+        return QzxyScannedDevice(
+            name = bound.name,
+            address = bound.address,
+            rssi = 0,
+            deviceKey = QzxyBluetoothScanner.extractDeviceKey(bound.name, bound.address),
+        )
+    }
+
+    /**
+     * 设备上那条记录是不是自己上一次没用完的。
+     *
+     * 只认未过期的本地记账：超过 1 小时（[QzxyWatering.isExpired]）的记账只用于
+     * 「待核对」展示，设备上那条多半已经属于别人——拿去结算等于把别人的消费
+     * 记到自己账上，比清掉更糟。
+     */
+    private fun recordIsOurs(device: QzxyScannedDevice): Boolean {
+        val watering = wateringStore.watering.value ?: return false
+        if (watering.isExpired(System.currentTimeMillis())) return false
+        return watering.deviceAddress.equals(device.address, ignoreCase = true)
+    }
+
+    /**
+     * 强制重建链路：close → 等系统释放 → connect。
+     *
+     * 与 [preconnect] / [ensureLink] 共用 [connectMutex]（两个 connect 撞在同一个
+     * GATT 上会互相拆台）。失败只写日志：下一步读状态还会再连一次，这里报错
+     * 只会多一条假失败。
+     */
+    private suspend fun reconnectQuiet(device: QzxyScannedDevice): Boolean =
+        connectMutex.withLock {
+            link.close()
+            delay(QzxyRecovery.RECONNECT_SETTLE_MILLIS)
+            val ok = link.connect(device.address)
+                .onSuccess { table ->
+                    _uiState.update { it.copy(gattTable = table) }
+                    armIdleDisconnect()
+                }
+                .onFailure { error -> log("自动重试重连失败：${error.message}") }
+                .isSuccess
+            ok
+        }
+
+    /** 断开链路。连接期间设备不广播，短扫前必须先让出（与 [reconnectQuiet] 共用锁）。 */
+    private suspend fun closeLinkQuiet() = connectMutex.withLock { link.close() }
+
+    /**
+     * 短扫确认设备还在附近。
+     *
+     * 扫不了（没权限 / 蓝牙关着 / 页面正在扫）一律当「情况不明，继续」：这一步
+     * 是加分项，不该因为它没跑起来就把整轮重试拦下。
+     */
+    private suspend fun deviceSeenOrUnknown(device: QzxyScannedDevice): Boolean {
+        // 页面自己的扫描正在跑：抢过来会换掉它的回调，页面会一直停在「扫描中」
+        if (_uiState.value.scanning) return true
+        val found = CompletableDeferred<Boolean>()
+        val started = scanner.startScan(
+            durationMillis = QzxyRecovery.RESCAN_MILLIS,
+            onDevice = { scanned ->
+                if (!found.isCompleted &&
+                    scanned.address.equals(device.address, ignoreCase = true)
+                ) {
+                    found.complete(true)
+                }
+            },
+            onFinished = { if (!found.isCompleted) found.complete(false) },
+            onError = { if (!found.isCompleted) found.complete(true) },
+        )
+        if (!started) return true
+        val seen = withTimeoutOrNull(QzxyRecovery.RESCAN_MILLIS + 1_500L) { found.await() } ?: false
+        scanner.stopScan()
+        return seen
+    }
+
+    /**
+     * 阶梯里的结算：设备上那条是自己的记录时先救钱。
+     *
+     * 失败不算终点——返回 false 后阶梯会改走清除（放弃上报），与失败卡上
+     * 「重试结算 / 清除设备记录」两个出口的语义一致。
+     */
+    private suspend fun settleQuiet(device: QzxyScannedDevice): Boolean {
+        _uiState.update {
+            it.copy(timings = emptyList(), clearTrials = emptyList(), clearResult = null)
+        }
+        val outcome = waterFlow(device).stop(
+            address = device.address,
+            stopPollTimeoutMillis = STOP_POLL_TIMEOUT_MILLIS,
+            stopPollIntervalMillis = STOP_POLL_INTERVAL_MILLIS,
+            stopPollMaxFailures = STOP_POLL_MAX_FAILURES,
+            verifyDelayMillis = CLEAR_VERIFY_DELAY_MILLIS,
+            clearTimeoutMillis = CLEAR_TIMEOUT_MILLIS,
+            maxClearAttempts = CLEAR_TRIAL_LIMIT,
+            preferredClearKey = clearStore.preferredKey,
+            nowMillis = { SystemClock.elapsedRealtime() },
+            delayMillis = { delay(it) },
+        )
+        return when (outcome) {
+            is QzxyWaterFlow.Outcome.Settled -> {
+                handleSettled(outcome, quiet = true)
+                outcome.uploaded
+            }
+            is QzxyWaterFlow.Outcome.Blocked -> false
+            is QzxyWaterFlow.Outcome.Opened -> false
+        }
+    }
 
     /**
      * 今日页面板里的「开始用水」。
@@ -1336,19 +1797,26 @@ class QzxyViewModel(
     /**
      * 清除记录的实体。调用方必须已持有 [valveMutex]。
      *
+     * [quiet] = 自动修复阶梯里的清除：读状态走不弹提示的那条（[readStateQuiet]），
+     * 「设备上没有待清除的记录」也不写失败卡——阶梯会按回读结果自己决定下一步。
+     *
      * @return true = 设备回读已离开状态 3，记录确实清掉了。
      */
     private suspend fun clearDeviceRecordLocked(
         device: QzxyScannedDevice,
         allowIdle: Boolean = false,
+        quiet: Boolean = false,
     ): Boolean {
         _uiState.update {
             it.copy(timings = emptyList(), clearTrials = emptyList(), clearResult = null)
         }
         // 先看状态：只有「消费完成，数据待采集」才有记录可清，
         // 否则发 0x85 设备只会回一句「没有数据」，用户看不出所以然
-        val state = timed("读状态") { ensureDeviceState(device, forceRefresh = true) }
-            ?: return false
+        val state = if (quiet) {
+            readStateQuiet(device)
+        } else {
+            timed("读状态") { ensureDeviceState(device, forceRefresh = true) }
+        } ?: return false
         if (state.deviceState != QzxyProtocol.STATE_FINISHED_UNCOLLECTED) {
             // 清除并开阀的场景：另一台手机可能已经先清掉了，设备回到空闲。
             // 这时没什么可清，直接放行去开阀，不要把用户挡在「没有待清除记录」。
@@ -1356,6 +1824,7 @@ class QzxyViewModel(
                 pendingOpen = null
                 return true
             }
+            if (quiet) return false
             fail(
                 "设备上没有待清除的记录",
                 "当前状态：${QzxyProtocol.stateText(state.deviceState)}",
@@ -1549,8 +2018,14 @@ class QzxyViewModel(
         )
     }
 
-    /** 结算流程的结果落库：`Settled`（上报成功或失败）/ `Blocked` 两类。 */
-    private fun handleSettled(result: QzxyWaterFlow.Outcome.Settled) {
+    /**
+     * 结算流程的结果落库：`Settled`（上报成功或失败）/ `Blocked` 两类。
+     *
+     * [quiet] = 自动修复阶梯里的结算：失败不写失败卡、不发提示——阶梯自己会接着
+     * 走（先结算、失败再清），这时弹一句「结算失败」只会让用户以为整个重试断了。
+     * 成功照常落账并刷新余额/账单（那笔钱是真的结了）。
+     */
+    private fun handleSettled(result: QzxyWaterFlow.Outcome.Settled, quiet: Boolean = false) {
         // clData 展示与「试通哪条清除候选」的偏好都在这里落
         val clDataPlain = QzxyClData.decrypt(result.clDataRaw)
         if (result.clDataRaw != null) {
@@ -1567,6 +2042,10 @@ class QzxyViewModel(
 
         if (!result.uploaded) {
             // 记录已保留（见 QzxyWaterFlow.Settled 的说明），双出口：重试结算 / 显式清记录
+            if (quiet) {
+                log("自动修复里的结算没上报成功：${result.uploadError ?: "服务端没有返回结算结果"}")
+                return
+            }
             fail(
                 "结算失败",
                 "${result.uploadError ?: "服务端没有返回结算结果"}；${result.clearDetail}" +
@@ -1991,21 +2470,22 @@ class QzxyViewModel(
         settleRecovery: Boolean = false,
         clearThenOpen: Boolean = false,
         resendRecovery: Boolean = false,
-    ) {
-        log("失败：$reason / ${detail ?: "-"}")
-        _uiState.update {
-            it.copy(
-                flow = QzxyFlowState.Failed(
-                    reason = reason,
-                    detail = detail,
-                    settleRecovery = settleRecovery,
-                    clearRecovery = clearRecovery,
-                    clearThenOpen = clearThenOpen,
-                    resendRecovery = resendRecovery,
-                ),
-            )
-        }
-        notice(reason, NoticeTone.Error)
+    ) = fail(
+        QzxyFlowState.Failed(
+            reason = reason,
+            detail = detail,
+            settleRecovery = settleRecovery,
+            clearRecovery = clearRecovery,
+            clearThenOpen = clearThenOpen,
+            resendRecovery = resendRecovery,
+        ),
+    )
+
+    /** 失败落账的唯一出口：调试日志 + 失败卡 + 一句提示。 */
+    private fun fail(failure: QzxyFlowState.Failed) {
+        log("失败：${failure.reason} / ${failure.detail ?: "-"}")
+        _uiState.update { it.copy(flow = failure) }
+        notice(failure.reason, NoticeTone.Error)
     }
 
     // ── 用水流程（QzxyWaterFlow 的接线） ──
