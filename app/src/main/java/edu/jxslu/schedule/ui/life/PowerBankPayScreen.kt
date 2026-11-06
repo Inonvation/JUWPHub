@@ -223,7 +223,8 @@ fun PowerBankPayScreen(
                                     override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                                         Log.i(
                                             PAY_LOG,
-                                            "console ${message.messageLevel()} ${message.message()} " +
+                                            "console ${message.messageLevel()} " +
+                                                "${redactCashierSecrets(message.message())} " +
                                                 "@${logUrlOf(message.sourceId())}:${message.lineNumber()}",
                                         )
                                         return true
@@ -409,3 +410,15 @@ private const val BANK_UA =
 private const val PAY_LOG = "PowerPayWeb"
 
 private fun logUrlOf(url: String?): String = url?.substringBefore('?') ?: "null"
+
+/** 收银台会话参数（query 里就这几个是凭证）。 */
+private val CASHIER_SECRET =
+    Regex("""(?i)\b(token|ticket|payTicket|access_token|refresh_token)=([^&\s'"]+)""")
+
+/**
+ * 日志脱敏（2026-11-06）：页面控制台的报错十有八九是「某个请求失败了」外加一整条 URL，
+ * 而收银台把会话放在 query 里（`ticket=` / `token=`）。凭证不进日志是硬规则，可内容
+ * 是第三方页面自己吐的，只能在写日志前抹掉。
+ */
+internal fun redactCashierSecrets(text: String): String =
+    CASHIER_SECRET.replace(text) { "${it.groupValues[1]}=***" }

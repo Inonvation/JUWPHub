@@ -347,7 +347,9 @@
   （页面自己的错误处理把失败吞成「加载中」）。所以 `LifeViewModel.reopenBankCashier()`
   先 `pendingOrderIds()` 查未支付列表：**单子不在就照原金额重下一单**，别拿死单去开页面。
   单子什么时候会没：打开充值弹层时的自动清理（`preparePowerRecharge`）、用户另一处操作、
-  平台过期。排错时先看 `adb logcat -s PowerPayWeb`（页面控制台 / 主框架加载 / 桥命中）。
+  平台过期。排错时先看 `adb logcat -s PowerPayWeb`（页面控制台 / 主框架加载 / 桥命中）——
+  这套日志自带脱敏（`redactCashierSecrets` 抹 `ticket=` / `token=`，URL 只打 path），
+  往这条链路加日志时**不要绕过它直接打原始 URL**。
   ⑧ **平台慢响应不等于网络故障**（2026-11-06 实测）：`paystep=2` 生成收银台会话会慢到
   20s 以上（同一条请求 PC 端 1.5s，平台网关上限 60s），共享 OkHttp 的 20s 读超时会把
   它报成「网络不给力」。`PowerClient.create` 已单独放宽到读 45s / 写 30s / 总 60s；

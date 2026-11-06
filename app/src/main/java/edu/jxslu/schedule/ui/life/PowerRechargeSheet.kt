@@ -186,7 +186,8 @@ private fun AmountStep(
     state.error?.let {
         Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
     }
-    // 下单成功、收银台没打开（平台慢响应超时）：同一单重试，不再下一单。
+    // 下单成功、收银台没打开（平台慢响应超时）：先在同一单上重试；这笔单若已被清理
+    // （打开弹层会清未支付单），VM 会照原金额重下一单——两种都由这一个按钮兜住。
     if (state.orderId != null && state.error != null) {
         OutlinedButton(
             onClick = onReopenCashier,

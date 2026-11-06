@@ -378,6 +378,9 @@ class LifeViewModel(
         val credentials = credentialStore.read() ?: return
         val state = _powerRecharge.value
         val orderId = state.orderId ?: return
+        // 进行中就别再点火：按钮虽已按 busy 置灰，连点仍有「重组前那一下」的空窗，
+        // 两个协程同时判定「单子没了」会各下一单（钱相关，宁可多一道闸）
+        if (state.busy) return
         if (state.step != PowerRechargeUi.Step.BankPay &&
             state.step != PowerRechargeUi.Step.Amount
         ) {
@@ -413,6 +416,7 @@ class LifeViewModel(
                 }
             } else {
                 // 旧单已失效：同金额重下一单（新单、新收银台会话），用户不用重填金额
+                _powerRecharge.update { it.copy(busy = false) }
                 placePowerOrder(amount)
             }
         }
