@@ -2,6 +2,8 @@ package edu.jxslu.schedule.ui.week
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -94,6 +96,7 @@ import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
+import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
@@ -328,14 +331,12 @@ fun WeekScreen(
     LaunchedEffect(pagerState, totalWeeks, state.week) {
         val ps = pagerState ?: return@LaunchedEffect
         val target = state.week.coerceIn(1, totalWeeks) - 1
-        if (ps.settledPage != target) {
-            // 相邻周动画滚回（回本周最常见就是从 ±1 页滑走）；远距瞬移，
-            // 避免动画一路掠过中间几周造成无意义闪烁
-            if (kotlin.math.abs(target - ps.settledPage) == 1) {
-                ps.animateScrollToPage(target)
-            } else {
-                ps.scrollToPage(target)
-            }
+        val pages = kotlin.math.abs(target - ps.settledPage)
+        if (pages > 0) {
+            // **一律逐周滑过去**，不瞬移（2026-11-06 用户口径：相隔几周也要看到「滑回来」）。
+            // 时长按页距给（[weekSlideSpec]）：跨 12 周与跨 1 周不能同长——同长就是之前
+            // 「远距瞬移」与「糊成一片的快进」两种坏结果。
+            ps.animateScrollToPage(target, animationSpec = weekSlideSpec(pages))
         }
     }
 
@@ -1063,3 +1064,32 @@ private fun BackToCurrentWeekButton(
         }
     }
 }
+
+/** 跨周滑动每多一页加的时间（见 [weekSlideSpec]）。 */
+private const val WeekSlidePerPageMillis = 28
+
+/** 跨周滑动的时间上限：跨得多也不慢放（整学期 20 周 ≈ 620ms）。 */
+private const val WeekSlideMaxMillis = 620
+
+/**
+ * 跨周滑动（回到本周 / 周次弹层选周 / 外部改周）的动画 spec。
+ *
+ * **例外：时长按页距算，不走四档固定时长**（归并表见 `ui/theme/Motion.kt` 文件头；
+ * 例外口径见 `.agents/rules/ui-common.md` 的「跟随手势 / 距离的连续动画」一类）。
+ * 相邻一周与跨十几周是两件不同的事：1 页给 [Motion.pageMillis] 是「滑一页」，
+ * 12 页同样给 280ms 就成了糊成一片的快进，而给固定 600ms 又让 1 页显得拖沓。
+ * 所以起步对齐 page 档、每多一页加 [WeekSlidePerPageMillis]、封顶 [WeekSlideMaxMillis]：
+ *
+ * | 页距 | 1 | 2 | 5 | 11 | 20 |
+ * |------|---|---|---|----|----|
+ * | 时长 | 280 | 308 | 392 | 560 | 620 |
+ *
+ * 曲线用全 App 默认的 [Motion.standard]（两头都缓）：中段飞快掠过、两端慢下来，
+ * 落点不会「啪」地停住——这也是 `animateScrollToPage` 默认 spring 给不了的东西
+ * （spring 的落地时间几乎与距离无关，页距一长就整段变成快进）。
+ */
+private fun weekSlideSpec(pages: Int): AnimationSpec<Float> = tween(
+    durationMillis = (Motion.pageMillis + WeekSlidePerPageMillis * (pages - 1))
+        .coerceAtMost(WeekSlideMaxMillis),
+    easing = Motion.standard,
+)
