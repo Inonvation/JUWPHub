@@ -127,19 +127,20 @@
   `Motion.page()` 280（`pageExit()` 同长、加速曲线）。曲线 `standard` / `decelerate`（进场）/
   `accelerate`（退场）。**档位数值与归并表只写在 `Motion.kt` 文件头**（改档位只改那一处）；
   规格与理由见 `design/03a-ui-shell.md` 的「动效口径」一节，这里只记怎么用、怎么验。
-- **验收命令**（2026-11-06 复核后修正，旧版写成「0 命中」是错的）：
+- **验收命令（2026-11-06 起用脚本，别再手写 grep）**：
 
   ```powershell
-  # 允许出现的只有：Motion.kt 自身、引导页（一次性编排动画，见下）、无限循环周期、标注了例外的行
-  Get-ChildItem -Path app\src\main\java\edu\jxslu\schedule -Recurse -Filter *.kt |
-    Select-String -Pattern 'tween\(\s*\d|durationMillis\s*=\s*\d' |
-    Where-Object { $_.Path -notmatch 'Motion\.kt|onboarding' }
+  pwsh -File scripts\check-motion-literals.ps1   # 0 干净 / 1 有命中 / 2 环境不对
   ```
 
-  除 `ui/onboarding/`（引导是逐段编排的动画，切屏 320ms、对勾描边 1100ms、呼吸 1500ms 这些
-  数是按「这一步要让人看懂什么」设计的，压到四档会把描边压成看不清、把呼吸压成抽搐；
-  理由写在 `OnboardingScreen.kt` 的时长口径注释里）与无限循环周期外，命中即漏改。
-  **别用「全仓 0 命中」当验收**——注释里的 `tween(300ms…)` 也会被匹配到。
+  脚本递归扫 `app/src/main/java`、跳过整行注释、按**包内相对路径**排除五处例外
+  （`ui/theme/Motion.kt`、`ui/onboarding/OnboardingScreen.kt`、`ui/common/Skeleton.kt`、
+  `ui/common/LoadingHint.kt`、`ui/ujing/UjingScreen.kt`），输出 `文件:行: 内容`。
+  新增例外必须**同时**改脚本的排除清单与本节，否则 CI 会红。
+  **别用「全仓 0 命中」当验收**：手写 grep 会命中注释里的 `tween(300ms…)`，
+  而 `tween(durationMillis = 700)` 这种写法 `tween(\s*\d` 又抓不到——两条一起用才对。
+  脚本必须存成 **UTF-8 with BOM**：Windows PowerShell 5.1 读无 BOM 的 `.ps1` 会按 ANSI
+  解码，中文注释变乱码后直接语法错误（2026-11-06 实测踩过）。
 - **例外只有三类**，且必须在调用点写 `// 例外：<原因>`：① 跟手动画（拖拽、滑杆、预测性返回）；
   ② 无限循环（呼吸/涟漪/骨架微光，周期不是"过渡时长"）；③ 不是动画的超时上限
   （如 `SheetDismissIme` 等键盘收起的 450ms、闹钟分钟刻度）。**区块进入/退出**不再各写常量：
@@ -221,8 +222,23 @@
 
 ## 确认型弹窗的既有规格
 
-- 纯确认/声明类弹窗（无输入）用 M3 `AlertDialog`，不走 `ImeAwareModalBottomSheet`（那是
-  含输入框弹层的专属口径）。正文长时给 `heightIn(max=…)` + `verticalScroll` 防小屏裁切。
+- **通用确认/提示弹窗只有两个实现（2026-11-06 起）**：`ui/common/ConfirmDialog.kt` 的
+  `AppConfirmDialog`（两键）与 `AppInfoDialog`（单键「知道了」）。两者都自带窗口淡入、
+  `heightIn(max = 400.dp)` + 纵向滚动兜底、48dp 按钮命中区；`AppConfirmDialog` 另有
+  `danger`（危险动作确认键用 error 色）、`confirmEnabled` / `dismissEnabled`（进行中的
+  写操作要真的按不动，禁用时连返回键/点遮罩一起挡）、`onTapOutside`。
+  **不要再各页抄一份 `AlertDialog` 骨架**——每份自建都会漏上面三条里的一条。
+  - `onTapOutside` 只在「关窗」与「取消这件事」不是同一件事时传：校园卡到账确认点空白
+    只该收窗（轮询继续跑），点「我没有付款」才停轮询并清落盘记录；共用一个出口会静默
+    改掉其中一条语义。
+  - 正文要编号要点 / 勾选框 / 列表时用 content 版，**内部不要再套 `verticalScroll`**
+    （外层已经套好，嵌套滚动会让长内容只滚一小段就停）。
+  - 单按钮的详情/错误提示用 `AppInfoDialog`：套 `AppConfirmDialog` 会凭空多出一个
+    什么也不做的「取消」。开水页与开水入口弹层里那两份逐行相同的详情弹窗即此例。
+- 声明类弹窗（用户须知 / 免责声明 / 充值风险）仍走 `NoticeDialog` 那一套（见下），
+  不套 `AppConfirmDialog`：它们有锁秒数、同意落盘、不同意出口这些额外语义。
+- 纯确认/声明类弹窗（无输入）不走 `ImeAwareModalBottomSheet`（那是含输入框弹层的专属
+  口径）。正文长时由上面的共享实现给 `heightIn(max=…)` + `verticalScroll`，调用方不用自己补。
 - **长文声明弹窗只有 `ui/common/LegalDialogs.kt` 的 `NoticeDialog` 一个实现**
   （标题 / 开场句 / 逐条正文都由调用方从 `domain/` 取，弹窗只排版）。`DisclaimerDialog`
   是它的免责声明薄封装；加新的声明类弹窗就再包一层，**不要另写一个 AlertDialog**。
