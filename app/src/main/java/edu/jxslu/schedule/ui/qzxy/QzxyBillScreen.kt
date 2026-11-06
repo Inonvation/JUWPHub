@@ -30,11 +30,9 @@ import edu.jxslu.schedule.domain.billMoneyText
 import edu.jxslu.schedule.domain.groupBillsByDay
 import edu.jxslu.schedule.domain.parseBillCents
 import edu.jxslu.schedule.domain.parseBillTime
-import edu.jxslu.schedule.domain.sumCents
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
-import edu.jxslu.schedule.ui.common.PageEmpty
 import edu.jxslu.schedule.ui.common.PageRefreshAction
 import edu.jxslu.schedule.ui.common.PageScaffold
 import edu.jxslu.schedule.ui.common.SettingsSection

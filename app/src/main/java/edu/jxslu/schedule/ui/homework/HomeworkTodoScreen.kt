@@ -34,8 +34,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.domain.Course
-import edu.jxslu.schedule.domain.Homework
 import edu.jxslu.schedule.domain.homeworkDisplayTitle
 import edu.jxslu.schedule.domain.pendingHomework
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals

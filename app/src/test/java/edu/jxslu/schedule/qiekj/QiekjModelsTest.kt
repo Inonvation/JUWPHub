@@ -2,7 +2,6 @@ package edu.jxslu.schedule.qiekj
 
 import edu.jxslu.schedule.data.qiekj.ApiEnvelope
 import edu.jxslu.schedule.data.qiekj.BalanceData
-import edu.jxslu.schedule.data.qiekj.DeviceItem
 import edu.jxslu.schedule.data.qiekj.GoodsDetailsData
 import edu.jxslu.schedule.data.qiekj.ItemsList
 import edu.jxslu.schedule.data.qiekj.LoginData

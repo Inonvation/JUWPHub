@@ -1,14 +1,12 @@
 package edu.jxslu.schedule.data.ykt
 
 import edu.jxslu.schedule.data.net.AppHttp
-import edu.jxslu.schedule.domain.YktKeyboard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
 
 /**
  * 一卡通平台 HTTP 客户端（DESIGN §4.19）。裸 OkHttp，只做请求与状态码归一，

@@ -1,12 +1,8 @@
 package edu.jxslu.schedule.ui.ebike
 
-import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
-import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.kqcx.KvcxRideSession

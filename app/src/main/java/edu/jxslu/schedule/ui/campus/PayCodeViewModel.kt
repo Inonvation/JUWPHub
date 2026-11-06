@@ -11,7 +11,6 @@ import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.NetworkHint
 import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer
 import edu.jxslu.schedule.data.ykt.toWatchRow
-import edu.jxslu.schedule.data.ykt.YktBarcodeData
 import edu.jxslu.schedule.data.ykt.YktCard
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktException
@@ -20,7 +19,6 @@ import edu.jxslu.schedule.domain.ThemeMode
 import edu.jxslu.schedule.domain.YktPayWatch
 import edu.jxslu.schedule.domain.YktPayCode
 import edu.jxslu.schedule.domain.YktPayment
-import edu.jxslu.schedule.domain.YktTurnoverRow
 import edu.jxslu.schedule.ui.common.CodeBitmaps
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.reminder.ReminderVibration

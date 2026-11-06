@@ -1,11 +1,5 @@
 package edu.jxslu.schedule.domain
 
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.common.BitMatrix
-import com.google.zxing.oned.Code128Writer
-import com.google.zxing.qrcode.QRCodeWriter
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import java.security.MessageDigest
 
 /**

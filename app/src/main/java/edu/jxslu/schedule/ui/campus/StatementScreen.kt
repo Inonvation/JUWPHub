@@ -46,7 +46,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.data.local.TypeAmountRow
 import edu.jxslu.schedule.data.local.YktTurnoverEntity
 import edu.jxslu.schedule.data.ykt.YktModels
 import edu.jxslu.schedule.ui.common.AppBarChart

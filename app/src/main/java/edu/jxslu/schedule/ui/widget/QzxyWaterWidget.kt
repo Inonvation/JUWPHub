@@ -35,7 +35,6 @@ import androidx.glance.layout.padding
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import androidx.glance.unit.ColorProvider
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.ROUTE_QZXY
 import edu.jxslu.schedule.ROUTE_QZXY_START

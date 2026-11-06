@@ -59,7 +59,6 @@ import edu.jxslu.schedule.TranscriptActivity
 import edu.jxslu.schedule.domain.ScoreCalculator
 import edu.jxslu.schedule.domain.ScoreGroups
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import edu.jxslu.schedule.domain.ScoreRecord
 import edu.jxslu.schedule.domain.ScoreSortMode

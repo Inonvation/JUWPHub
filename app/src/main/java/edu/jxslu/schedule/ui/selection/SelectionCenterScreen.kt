@@ -3,7 +3,6 @@ package edu.jxslu.schedule.ui.selection
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -65,7 +64,6 @@ import edu.jxslu.schedule.domain.SelectionCourses
 import edu.jxslu.schedule.domain.SelectionFilter
 import edu.jxslu.schedule.domain.SelectionQuery
 import edu.jxslu.schedule.domain.SelectionRound
-import edu.jxslu.schedule.domain.SelectionRoundPhase
 import edu.jxslu.schedule.domain.SelectionRounds
 import edu.jxslu.schedule.domain.SelectionSort
 import edu.jxslu.schedule.domain.SelectionWishHits

@@ -52,7 +52,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.Homework
-import edu.jxslu.schedule.domain.HomeworkCourseGroup
 import edu.jxslu.schedule.domain.courseHomeworkOrder
 import edu.jxslu.schedule.domain.homeworkDisplayTitle
 import edu.jxslu.schedule.ui.common.AppCard

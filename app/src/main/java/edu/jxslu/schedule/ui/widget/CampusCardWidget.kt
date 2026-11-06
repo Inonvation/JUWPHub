@@ -35,7 +35,6 @@ import androidx.glance.layout.padding
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import androidx.glance.unit.ColorProvider
 import edu.jxslu.schedule.ROUTE_CAMPUS_CARD
 import edu.jxslu.schedule.ROUTE_PAY_CODE
 import edu.jxslu.schedule.ROUTE_POWER_BILL

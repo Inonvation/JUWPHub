@@ -15,11 +15,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonElement
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 /**
  * 蓝牙下单所需的一组现场参数（DESIGN §4.30）。

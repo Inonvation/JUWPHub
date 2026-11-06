@@ -3,7 +3,6 @@ package edu.jxslu.schedule.ui.qzxy
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import android.content.Context
 import android.os.SystemClock
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.qzxy.QzxyApiException
@@ -46,7 +45,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock

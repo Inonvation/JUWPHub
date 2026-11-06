@@ -1,7 +1,6 @@
 package edu.jxslu.schedule
 
 import edu.jxslu.schedule.data.ykt.YktTurnover
-import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer
 import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer.Companion.paymentInboxCandidates
 import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer.Companion.toEntity
 import edu.jxslu.schedule.domain.YktTurnoverRow

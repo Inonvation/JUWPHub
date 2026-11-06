@@ -5,7 +5,6 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Upsert
 import edu.jxslu.schedule.domain.HomeworkCourseGroup
 import edu.jxslu.schedule.domain.NoteCourseGroup
 import kotlinx.coroutines.flow.Flow

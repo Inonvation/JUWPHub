@@ -32,10 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.domain.Course
-import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.Timetable
-import edu.jxslu.schedule.ui.common.courseColor
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01

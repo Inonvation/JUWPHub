@@ -10,7 +10,6 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.os.Build
 import androidx.annotation.RequiresApi
-import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.ShortcutItem
 
 /**

@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.data.power
 
 import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.JsonObject
 import edu.jxslu.schedule.data.net.AppHttp
 import kotlinx.coroutines.Dispatchers

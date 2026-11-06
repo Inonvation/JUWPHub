@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.me
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,19 +7,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,30 +27,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.JwImportActivity
 import edu.jxslu.schedule.OnboardingActivity
-import edu.jxslu.schedule.R
 import edu.jxslu.schedule.TranscriptActivity
 import edu.jxslu.schedule.data.session.LoginState
 import edu.jxslu.schedule.data.session.LoginStateRules
 import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionStatus
 import edu.jxslu.schedule.data.session.WebViewCookieBridge
-import edu.jxslu.schedule.domain.AccountMask
 import edu.jxslu.schedule.ui.common.AccountCard
-import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.SettingItem
@@ -71,8 +58,6 @@ import me.rerere.hugeicons.stroke.Book01
 import me.rerere.hugeicons.stroke.CalendarSetting01
 import me.rerere.hugeicons.stroke.GridView
 import me.rerere.hugeicons.stroke.Settings01
-import me.rerere.hugeicons.stroke.View
-import me.rerere.hugeicons.stroke.ViewOff
 
 /**
  * 教务账户页（DESIGN §3.3）。

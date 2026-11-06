@@ -19,7 +19,6 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import java.io.File
-import java.util.concurrent.TimeUnit
 
 class NotLoggedInException(message: String = "请先登录") : Exception(message)
 

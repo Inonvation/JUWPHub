@@ -13,7 +13,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 
 /**
  * U净 裸 OkHttp 客户端（DESIGN §4.37）。

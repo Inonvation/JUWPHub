@@ -8,9 +8,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.longOrNull
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * 一卡通登录与取码编排（DESIGN §4.19）。

@@ -6,7 +6,6 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.os.StrictMode
 import edu.jxslu.schedule.data.repo.CrashReporter
-import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.UpdateCheckClient
 import edu.jxslu.schedule.data.repo.UpdateCheckResult
 import edu.jxslu.schedule.data.session.AutoSyncRules

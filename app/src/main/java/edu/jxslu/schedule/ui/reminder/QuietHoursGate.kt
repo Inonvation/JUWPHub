@@ -22,7 +22,6 @@ import edu.jxslu.schedule.SubpageRequest
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.subpageLaunchIntent
 import edu.jxslu.schedule.EXTRA_ROUTE
-import edu.jxslu.schedule.ROUTE_ME
 import java.time.LocalDateTime
 import java.time.LocalTime
 import kotlinx.coroutines.CoroutineScope

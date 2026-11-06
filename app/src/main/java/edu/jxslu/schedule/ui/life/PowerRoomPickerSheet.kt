@@ -37,8 +37,6 @@ import edu.jxslu.schedule.data.power.PowerSceneOption
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowRight01
 
 /**
  * 「选择寝室」弹层（DESIGN §4.24「未设置寝室」，2026-10-08）。

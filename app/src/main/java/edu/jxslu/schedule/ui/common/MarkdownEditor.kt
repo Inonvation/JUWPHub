@@ -38,7 +38,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import edu.jxslu.schedule.domain.MdAction
 import edu.jxslu.schedule.domain.applyMarkdownAction
 import edu.jxslu.schedule.domain.autoPairDollar

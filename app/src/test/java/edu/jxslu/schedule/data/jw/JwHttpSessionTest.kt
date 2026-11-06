@@ -3,7 +3,6 @@ package edu.jxslu.schedule.data.jw
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
-import okhttp3.Dns
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
