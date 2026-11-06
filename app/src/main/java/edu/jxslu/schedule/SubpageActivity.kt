@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import edu.jxslu.schedule.domain.CourseKind
+import edu.jxslu.schedule.ui.common.PredictiveBackExitHost
 import edu.jxslu.schedule.ui.me.CalendarSettingsScreen
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
 import edu.jxslu.schedule.ui.me.JwAccountScreen
@@ -275,20 +276,24 @@ class SubpageActivity : ComponentActivity() {
         // 原文交给 U净 页自己识别，本窗口首帧消费一次
         val ujingScanRaw = UjingScanHandoff.consume(request.screen)
         enableEdgeToEdge()
-        // 预测性返回（DESIGN §3.1）：34+ 由本窗口声明过渡，系统才会把手势进度交给它
-        enablePredictiveBackTransitions()
+        // 预测性返回（DESIGN §3.1）：34+ 由本窗口声明过渡。
+        // 关闭侧交给页面自己播（selfDrivenClose = true）：真机实测系统的跨窗口
+        // 跟手预览在 HyperOS 上不生效，改由 PredictiveBackExitHost 按手势进度驱动。
+        enablePredictiveBackTransitions(selfDrivenClose = true)
         setContent {
             JuwRoot {
-                SubpageContent(
-                    screen = request.screen,
-                    onBack = { finish() },
-                    focusItemId = request.focusItemId,
-                    courseName = request.courseName,
-                    itemId = request.itemId,
-                    startEditing = request.startEditing,
-                    autoStart = autoStart,
-                    ujingScanRaw = ujingScanRaw,
-                )
+                PredictiveBackExitHost(onExited = { finish() }) { exit ->
+                    SubpageContent(
+                        screen = request.screen,
+                        onBack = exit,
+                        focusItemId = request.focusItemId,
+                        courseName = request.courseName,
+                        itemId = request.itemId,
+                        startEditing = request.startEditing,
+                        autoStart = autoStart,
+                        ujingScanRaw = ujingScanRaw,
+                    )
+                }
             }
         }
     }
@@ -305,7 +310,7 @@ class SubpageActivity : ComponentActivity() {
         // 拿到焦点，才能还原推入/滑出覆盖——更早还原会把拉起前换上的静止过渡又改回去，
         // 被抑制的右推入就重回返回动画（见 WindowTransitions.startActivityOutsideApp）。
         // 平时焦点恢复（系统弹框关掉、上层二级页关闭）只是重复声明同样的覆盖，无副作用。
-        if (hasFocus) enablePredictiveBackTransitions()
+        if (hasFocus) enablePredictiveBackTransitions(selfDrivenClose = true)
     }
 
     override fun onDestroy() {
@@ -572,8 +577,8 @@ class SubpageActivity : ComponentActivity() {
         // clearTop 与系统回收不走这里，记录必须留着，否则恢复不了。
         SubpageStack.onWindowFinished(request)
         super.finish()
-        // 顶层窗口向右滑出；露出的主窗口原地不动（stay_still / ≤33 的 legacy 路径传 0）。
-        // 34+ 由 enablePredictiveBackTransitions 声明，这里不碰旧 API
+        // 34+：退场动画由 PredictiveBackExitHost 播完才走到这里，窗口关闭侧已声明为静止，
+        // 这里不碰旧 API；≤33：没有手势进度，退回窗口滑出（旧口径）
         applySubpageCloseTransition(this)
     }
 

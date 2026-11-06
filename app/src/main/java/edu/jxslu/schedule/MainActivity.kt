@@ -196,13 +196,25 @@ class MainActivity : ComponentActivity() {
             finish()
             return
         }
+        // 冷启动就带着二级页定位（通知跳板）：**记下来，等 setContent 之后同步启动**。
+        // 不走 pendingSubpages 队列——那条走 JuwApp 里的 LaunchedEffect，要等首帧组合
+        // 跑完才执行，用户先看到一帧今日页、再滑出二级页（2026-11-06 用户报「先跳首页
+        // 再跳二级页」）。这里同步 startActivity，主窗口还没走到首帧就被盖住，等于直接进页。
+        val coldStartSubpage = if (savedInstanceState == null) SubpageRequest.from(intent) else null
+        // 小组件 / 快捷磁贴 / 登录失效通知走 EXTRA_ROUTE，落二级页的那几种与通知跳板是同一个
+        // 毛病（先闪一帧今日页），这里一并同步启动；课表 Tab 那条仍交给 JuwApp 的 LaunchedEffect。
+        val coldStartRoute = if (savedInstanceState == null) intent?.getStringExtra(EXTRA_ROUTE) else null
+        val coldStartRouteScreen = subpageForRoute(coldStartRoute)
         if (savedInstanceState == null) {
             // task 与进程都是新的：窗口链只可能是「用户把 App 从最近任务划掉」留下的残影，
             // 留着会让下一次点图标凭空落进某个二级页。只在真是根实例时清——
             // 上面那条 finish 路径的实例不该动记录
             if (isTaskRoot()) SubpageStack.clear()
-            pendingRoute.value = intent?.getStringExtra(EXTRA_ROUTE)
-            pendingSubpages.value = SubpageRequest.from(intent)?.let { listOf(it) } ?: emptyList()
+            // 二级页型 route 下面已同步启动，不能再留在状态里（否则 JuwApp 会再开一次）；
+            // 课表 Tab / 旧生活页仍走状态
+            pendingRoute.value = if (coldStartRouteScreen == null) coldStartRoute else null
+            // 队列只留给热启动（onNewIntent）那条路径
+            pendingSubpages.value = emptyList()
         }
         // 预报名仪表板重开（DESIGN §4.45，2026-10-21）：预报名/结果通知的落点带这个 extra，
         // 读到就请求弹面板（突破「用户关过不再自动弹」；没在跑时 reopen 是无害空操作）。
@@ -217,12 +229,27 @@ class MainActivity : ComponentActivity() {
         // 不弹引导，只在「我的」页显示登录状态卡。阻塞读一次，与 resolveStartRouteBlocking
         // 同一模式（读一次就定，不让它跟 Flow 变）。引导是不透明全屏窗口，主界面照常
         // setContent 也看不到底下，用户感知就是「打开就是引导」。
-        if (savedInstanceState == null && shouldShowOnboarding()) {
+        val startedOnboarding = savedInstanceState == null && shouldShowOnboarding()
+        if (startedOnboarding) {
             OnboardingActivity.start(this)
         }
         setContent {
             JuwRoot {
                 JuwApp(pendingRoute = pendingRoute, pendingSubpages = pendingSubpages)
+            }
+        }
+        // 同步启动二级页：setContent 只把组合排上队、还没到首帧，这里 startActivity
+        // 之后主窗口不会被绘制，观感就是「点通知直接进目标页」。
+        // 引导窗口刚起时不叠——那会儿课表还没导入，落点没有意义（与上面那条 finish 同一口径）。
+        if (!startedOnboarding) {
+            if (coldStartSubpage != null) {
+                openSubpage(this, coldStartSubpage)
+            } else if (coldStartRouteScreen != null) {
+                // 「去开水」胶囊（_start）在进页前武装一次性令牌，页面首帧消费后自动开水
+                if (coldStartRoute == ROUTE_WATER_START || coldStartRoute == ROUTE_QZXY_START) {
+                    WaterAutoStart.arm(coldStartRouteScreen)
+                }
+                openSubpage(this, SubpageRequest(screen = coldStartRouteScreen))
             }
         }
     }
@@ -330,6 +357,25 @@ internal const val ROUTE_WATER_START = "water_start"
 
 /** [EXTRA_ROUTE] 的取值：趣智开水卡胶囊「去开水」→ 趣智页并自动开阀（同上）。 */
 internal const val ROUTE_QZXY_START = "qzxy_start"
+
+/**
+ * [EXTRA_ROUTE] → 二级页（桌面小组件 / 快捷磁贴 / 登录失效通知的落点）。
+ * null = 这条路由不是二级页（课表 Tab、旧生活页），交给 `JuwApp` 的 `LaunchedEffect` 处理。
+ *
+ * **单一出处**：`MainActivity.onCreate`（冷启动同步启动）与 `JuwApp`（热启动）共用这一份映射。
+ * 别在两处各写一遍 `when`——加一条新落点时漏改一处，表现就是「冷启动进得去、热启动进不去」。
+ */
+internal fun subpageForRoute(route: String?): SubpageScreen? = when (route) {
+    // 「我的」不再是 Tab（2026-10-20 收进侧栏）：登录失效通知原本落这一页，
+    // 现在直接落「账号与登录」——它才是那类通知真正要人处理的地方
+    ROUTE_ME -> SubpageScreen.ACCOUNTS
+    ROUTE_PAY_CODE -> SubpageScreen.PAY_CODE
+    ROUTE_POWER_BILL -> SubpageScreen.POWER_BILL
+    ROUTE_WATER, ROUTE_WATER_START -> SubpageScreen.WATER
+    ROUTE_QZXY, ROUTE_QZXY_START -> SubpageScreen.QZXY
+    ROUTE_CAMPUS_CARD -> SubpageScreen.CAMPUS_CARD_SETTINGS
+    else -> null
+}
 
 /**
  * 主题首帧快照（进程级，2026-09-28）。
@@ -868,9 +914,9 @@ internal fun JuwApp(
     // （2026-10-22 生活页删除，DESIGN §3.6 / §3.10）。
     // 跳转后消费掉 extra，否则每次重组/返回都会把用户弹回那个 Tab。
     //
-    // 判据写成「route 等于某个非空常量」而不是先算出目标再判空：Kotlin 的智能转换
-    // 只有在这种形态下才认得出 `pendingRoute` 非空（`pendingRoute?.value` 非空 ⇒ 它非空），
-    // 换成 `val target = when(route){…}` 再判 target 就会编译不过（2026-09-24 实测）。
+    // 落二级页的那几种 route **冷启动时不走这里**：`MainActivity.onCreate` 已经同步启动过
+    // （与通知跳板同一套，避免先闪一帧今日页）并把状态置空。这里剩下的是课表 Tab 那条
+    // 与热启动（onNewIntent，进程活着时的补投）。
     val route = pendingRoute?.value
     LaunchedEffect(route) {
         if (route == ROUTE_WEEK || route == ROUTE_LIFE) {
@@ -883,34 +929,19 @@ internal fun JuwApp(
                 restoreState = true
             }
             pendingRoute.value = null
-        } else if (route == ROUTE_ME) {
-            // 「我的」不再是 Tab（2026-10-20 收进侧栏）：登录失效通知原本落这一页，
-            // 现在直接落「账号与登录」——它才是那类通知真正要人处理的地方。
-            pendingRoute.value = null
-            SubpageActivity.start(context, SubpageScreen.ACCOUNTS)
-        } else if (
-            route == ROUTE_PAY_CODE || route == ROUTE_POWER_BILL || route == ROUTE_CAMPUS_CARD ||
-            route == ROUTE_WATER || route == ROUTE_QZXY ||
-            route == ROUTE_WATER_START || route == ROUTE_QZXY_START
-        ) {
-            // 小组件点击（DESIGN §3.6 二条目改版 + 开水两卡）：落点不是底栏 Tab 而是二级页
-            // （付款码 / 用电统计 / 校园卡设置 / 开水页 / 趣智页）。仍走「先消费再启动」，
-            // 与上面同一套防重组回弹的口径；主界面在底下保持今日页原样。
-            // 「去开水」胶囊（_start）在进页前武装一次性令牌，页面首帧消费后自动开水；
-            // 整卡其余位置不带令牌，只进页面
-            pendingRoute.value = null
-            val screen = when (route) {
-                ROUTE_PAY_CODE -> SubpageScreen.PAY_CODE
-                ROUTE_POWER_BILL -> SubpageScreen.POWER_BILL
-                ROUTE_WATER, ROUTE_WATER_START -> SubpageScreen.WATER
-                ROUTE_QZXY, ROUTE_QZXY_START -> SubpageScreen.QZXY
-                else -> SubpageScreen.CAMPUS_CARD_SETTINGS
-            }
-            if (route == ROUTE_WATER_START || route == ROUTE_QZXY_START) {
-                WaterAutoStart.arm(screen)
-            }
-            openSubpage(context, SubpageRequest(screen = screen))
+            return@LaunchedEffect
         }
+        // 二级页型 route（小组件 / 磁贴 / 登录失效通知）：映射只有 subpageForRoute 一份
+        val screen = subpageForRoute(route) ?: return@LaunchedEffect
+        // 仍走「先消费再启动」，防重组把用户弹回去；主界面在底下保持今日页原样。
+        // 「去开水」胶囊（_start）在进页前武装一次性令牌，页面首帧消费后自动开水；
+        // 整卡其余位置不带令牌，只进页面
+        // （这里用 `?.`：`route` 非空已经蕴含 `pendingRoute` 非空，但编译器推不过函数调用）
+        pendingRoute?.value = null
+        if (route == ROUTE_WATER_START || route == ROUTE_QZXY_START) {
+            WaterAutoStart.arm(screen)
+        }
+        openSubpage(context, SubpageRequest(screen = screen))
     }
 
     // 待打开的二级页（通知跳板 / 从桌面图标回来恢复窗口链，DESIGN §3.1）。

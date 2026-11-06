@@ -242,7 +242,7 @@ launcher：选中车后先收地图，**今日页接住车号再开出码页**�
 |------|------|
 | Tab 间切换 | 180ms 交叉淡入淡出——三个 Tab 平级，横向滑动会误导层级 |
 | 打开二级页（SubpageActivity / JwImportActivity / TranscriptActivity） | 新窗口从右缘平移推入覆盖主窗口，280ms 减速曲线（`res/anim/slide_in_right`）；主窗口给 `res/anim/stay_still`（0→0 静止动画 = 原地不动，纯覆盖，非左右推移） |
-| 关闭二级页（页内返回 / 系统返回，统一走 `finish()`） | 顶层窗口向右滑出露出主窗口，240ms 加速曲线（`res/anim/slide_out_right`）；被露出的主窗口给 `res/anim/stay_still` |
+| 关闭二级页（页内返回 / 系统返回，统一走 `finish()`） | **2026-11-06 起由 App 自己播**：`PredictiveBackExitHost` 按返回手势进度驱动整页平移/缩放/淡出，松手提交后再 `finish()`；窗口关闭侧声明为 `stay_still`，不叠第二次动画。见下方「跟手返回」 |
 
 **不动的那一侧要给 `stay_still`，不能传 0**（2026-09-26 修：二级页返回没有跟手预览）：
 0 的含义是「这一侧没有动画资源」，跟手预览（预测性返回）需要两侧都有可按进度驱动的
@@ -253,7 +253,7 @@ launcher：选中车后先收地图，**今日页接住车号再开出码页**�
 
 | 系统 | 做法 | 效果 |
 |------|------|------|
-| API 34+（Android 14） | 窗口自己在 `onCreate` 调 `overrideActivityTransition` 声明 OPEN/CLOSE 过渡 | 系统把返回手势的进度交给这套动画：滑到一半能看见上一页、松手前可以撤回（预测性返回） |
+| API 34+（Android 14） | 窗口自己在 `onCreate` 调 `overrideActivityTransition` 声明 OPEN/CLOSE 过渡 | **打开**：新页从右缘推入覆盖主窗口，主窗口原地不动（正常）。**关闭**：系统不会代播跨窗口跟手动画——见下方「跟手返回（2026-11-06 更正）」 |
 | API 33 及以下 | 启动方 / 关闭方调 `overridePendingTransition`（platform 没有新机制） | 手势结束后才播过渡 |
 
 **App 自己接管返回的页面没有系统跟手预览**：AndroidX activity 1.9.3 在 API 34+ 会把
@@ -269,11 +269,25 @@ launcher：选中车后先收地图，**今日页接住车号再开出码页**�
   要换成系统的跟手动画就得放弃「返回回启动页」的栈语义（回到任何 Tab 上按返回都退到桌面），
   2026-09-26 未改。
 
-**34+ 上不要调 `overridePendingTransition`**：它是已废弃 API，调了等于告诉系统「这个 App
-没适配预测性返回」，预览会被整个关掉。2026-09-23 在 Redmi K70（Android 16）上对比过：
-调旧 API 时手势过程中只有边缘指示条、没有任何预览，松手才切页；换成新 API 后能看到下层
-页面从左侧跟手推入。manifest 的 `android:enableOnBackInvokedCallback="true"` 是同一件事的
-声明（targetSdk 34+ 本就默认开，写出来是为了表明意图，**别改成 false**）。
+**跟手返回（2026-11-06 更正）**：此前本文与 `WindowTransitions.kt` 都写着「34+ 换成新 API
+后能看到下层页面跟手推入」——**这条在真机上不成立**。Redmi K70 / HyperOS 3 / Android 16 实测：
+开发者选项「预测性返回动画」开着、应用侧声明齐全（`enableOnBackInvokedCallback` +
+`OVERRIDE_TRANSITION_CLOSE` + 可 seek 的 `<translate>` + 无任何 `BackHandler` 抢手势），
+二级页返回仍然既不预览也不跟手。同机对照课表页显示设置面板（`DisplaySettingsOverlay`
+用 `PredictiveBackHandler`）**跟手正常**——说明系统会送 `OnBackProgressed`，只是自己不做
+跨窗口动画。
+
+所以关闭侧改成 App 自己驱动（`ui/common/PredictiveBackExit.kt` 的 `PredictiveBackExitHost`）：
+手势进度直接驱动整页 `translationX`/缩放/透明度，顶栏返回与手势提交走同一个出口，动画播完
+才 `finish()`；窗口关闭侧同时声明为 `stay_still`（`enablePredictiveBackTransitions(selfDrivenClose = true)`），
+否则窗口会再滑一次、与页面动画叠成「抖一下」。**≤33 不接管**：那里 `PredictiveBackHandler`
+只在松手时补发一个 `progress = 1` 的事件，照这套驱动会瞬间跳位，所以低版本整段退回窗口动画。
+
+**代价**：注册 `PredictiveBackHandler` 会关掉系统的跨窗口预览；页面在独立窗口里看不到下面
+那一页，退场落点是宿主铺的 `surface` 底色（防深色主题透出浅色窗口背景）。要让真页面露出来
+得把窗口改成 `windowIsTranslucent`，代价是每个页面必须自带不透明底，暂不做。
+已接入 `SubpageActivity`（35+ 页）；Settings / JwImport / Transcript / XgForm / PowerBankPay
+仍是窗口动画，等 SubpageActivity 真机验过再铺开。
 
 **二级页里拉起 App 之外的界面（微信扫一扫 / 微信支付 / 浏览器 / 快趣出行 / 系统设置页…）
 一律走 `WindowTransitions.startActivityOutsideApp`**（2026-09-26 修「打开微信后页面跳动」）：

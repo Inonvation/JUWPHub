@@ -97,18 +97,45 @@
   通知的 `PendingIntent` 必须指向 MainActivity 跳板（`subpageLaunchIntent`）而不是
   `SubpageActivity`，且带 `NEW_TASK|CLEAR_TASK`；小组件点击同理——`SINGLE_TOP|CLEAR_TOP`
   在 standard 上匹配不上显式 intent，清不掉二级页。
+- **通知落点要在 `onCreate` 里同步开二级页，不能走 `pendingSubpages` 队列**（2026-11-06 修）：
+  队列由 `JuwApp` 的 `LaunchedEffect` 消费，而它要等首帧组合跑完才执行——用户先看到一帧
+  今日页、再滑出二级页。现在 `onCreate` 在 `setContent` 之后直接 `openSubpage(this, request)`，
+  主窗口还没走到首帧就被盖住，观感是「点通知直接进目标页」。注意三条：
+  ① 同步开了就**不要再写 `pendingSubpages`**（否则会被开两次，靠 `LaunchGate` 兜也不该靠它）；
+  ② 刚起引导窗口（`startedOnboarding`）时不叠，那会儿课表还没导入；
+  ③ `onNewIntent` 那条路径保持走队列——它是进程活着时的补投，窗口已经可见，动画是对的。
+- **走 `EXTRA_ROUTE` 的落点（桌面小组件 / 快捷磁贴 / 登录失效通知）同一套处理**：
+  `subpageForRoute(route)` 是 route → 二级页的**唯一映射**，`onCreate`（冷启动同步启动）与
+  `JuwApp`（热启动 / 课表 Tab 那条）共用。落二级页的 route 在 `onCreate` 里启动后必须把
+  `pendingRoute` 置空，否则 `JuwApp` 会再开一次。加新落点时**只改 `subpageForRoute`**——
+  在两处各写一遍 `when` 的话，漏改一处就表现成「冷启动进得去、热启动进不去」。
+  `ROUTE_WEEK` / `ROUTE_LIFE` 不是二级页，仍由 `JuwApp` 切 Tab（冷启动会先停在今日页再切过去，
+  这是既有行为，未改）。
 
 ## 二级页过渡分两套
 
 - **二级页过渡分两套**（2026-09-23，DESIGN §3.1，实现在 `WindowTransitions.kt`）：
-  API 34+ 由窗口自己 `overrideActivityTransition` 声明（系统才会把返回手势进度交给它，
-  也就是预测性返回的跟手预览），API 33 及以下才用 `overridePendingTransition`。
+  API 34+ 由窗口自己 `overrideActivityTransition` 声明，API 33 及以下才用 `overridePendingTransition`。
   **34+ 上调旧 API 会把跟手预览关掉**：它是已废弃 API，调了等于声明「未适配」，
-  真机上表现为滑到一半毫无预览、松手才切页。manifest 的 `enableOnBackInvokedCallback`
-  别改成 `false`（同一件事的声明）。
-  **不动的那一侧要给 `R.anim.stay_still`，不能传 0**（2026-09-26 修：二级页返回没有
-  跟手预览）：0 = 「这一侧没有动画资源」，跟手预览要两侧都有可按进度驱动的动画才接力得出来；
-  静止动画是 0→0 位移，观感与传 0 一致。
+  manifest 的 `enableOnBackInvokedCallback` 别改成 `false`（同一件事的声明）。
+- **「34+ 窗口声明了就有跟手预览」是错的（2026-11-06 真机推翻）**：Redmi K70 / HyperOS 3 /
+  Android 16 上，开发者选项「预测性返回动画」开着、应用侧声明齐全（`enableOnBackInvokedCallback`
+  + `OVERRIDE_TRANSITION_CLOSE` + 可 seek 的 `<translate>` + 无任何 `BackHandler` 抢手势），
+  **二级页返回仍然既不预览也不跟手**。同机对照课表页显示设置面板（`DisplaySettingsOverlay`
+  用 `PredictiveBackHandler`）跟手正常 —— 说明系统**会送 `OnBackProgressed`，只是自己不做
+  跨窗口动画**。所以不要再指望 ROM 实现窗口级跟手。
+- **二级页的跟手改成 App 自己驱动**：`ui/common/PredictiveBackExit.kt` 的
+  `PredictiveBackExitHost` 用同一份手势进度驱动整页平移/缩放/淡出，顶栏返回与手势提交走
+  同一个出口（动画播完才 `finish()`）。窗口关闭侧必须同时静止
+  （`enablePredictiveBackTransitions(selfDrivenClose = true)`），否则窗口会再滑一次、
+  与页面动画叠成「抖一下」。**≤33 不接管**：那里 `PredictiveBackHandler` 只在松手时补发
+  一个 progress=1 的事件，照这套驱动会瞬间跳位，所以低版本整段退回窗口动画（旧口径）。
+  **代价**：注册 `PredictiveBackHandler` 会关掉系统的跨窗口预览；页面在独立窗口里看不到
+  下面那一页，所以落点是 `surface` 底色（铺在宿主里，防深色主题透出浅色窗口背景）。
+  已接入：`SubpageActivity`（35+ 页）。未接入：Settings / JwImport / Transcript / XgForm /
+  PowerBankPay —— 它们仍是窗口动画，接法是同一套，等 SubpageActivity 真机验过再铺开。
+- **不动的那一侧要给 `R.anim.stay_still`，不能传 0**（2026-09-26 修）：0 = 「这一侧没有
+  动画资源」；静止动画是 0→0 位移，观感与传 0 一致。
 - **App 接管了返回的页面没有系统跟手预览**：AndroidX activity 1.9.3 在 API 34+ 会把
   `OnBackPressedDispatcher` 的回调注册成 `OnBackAnimationCallback`（只要该窗口有启用中的
   回调），系统就不再代播跟手动画，而 `BackHandler` / `NavController` 的返回栈不给动画。
