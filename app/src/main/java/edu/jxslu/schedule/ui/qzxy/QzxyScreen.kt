@@ -92,6 +92,7 @@ import edu.jxslu.schedule.ui.common.SettingsDivider
 import edu.jxslu.schedule.ui.common.SettingsNote
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.postNotice
+import edu.jxslu.schedule.ui.common.RechargeRiskNote
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
@@ -371,11 +372,13 @@ fun QzxyScreen(
                 modifier = Modifier.padding(top = 8.dp),
             )
             Text(
-                "充值与退款由学校运营方负责，与本应用无关；由此造成的损失开发者不承担责任。",
+                "充值与退款由学校运营方负责，与本应用无关。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 modifier = Modifier.padding(top = 8.dp),
             )
+            // 跳转前的风险小字：账户核对 + 上游接口变更（口径单一来源，见 RechargeRiskNote）
+            RechargeRiskNote()
         }
     }
 }
@@ -771,6 +774,17 @@ private fun StatusCard(
             failure = failure,
             onOpenDiagnostics = { onOpenDiagnostics(state.selected?.address) },
             onDismiss = { failureDetail = null },
+        )
+    }
+    // 开阀失败的原因 + 自动重试（DESIGN §3.18）。与今日页面板挂的是同一个实现，
+    // 由 ViewModel 的 recovery 状态驱动，两处不会各弹一个
+    state.recovery?.let { recovery ->
+        QzxyRecoveryDialog(
+            recovery = recovery,
+            onRetry = { viewModel.retryOpenAfterFailure() },
+            onManualClear = { viewModel.clearFromRecovery() },
+            onOpenDiagnostics = { onOpenDiagnostics(state.selected?.address) },
+            onDismiss = { viewModel.dismissRecovery() },
         )
     }
 }

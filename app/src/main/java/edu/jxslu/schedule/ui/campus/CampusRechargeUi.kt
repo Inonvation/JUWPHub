@@ -31,6 +31,7 @@ import edu.jxslu.schedule.ui.common.AmountHeroText
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
+import edu.jxslu.schedule.ui.common.RechargeRiskNote
 
 /**
  * 校园卡充值/到账共享 UI（DESIGN §4.19「充值」、§3.10）。
@@ -207,6 +208,8 @@ fun RechargeSheet(
                     append("在微信内确认支付；未支付的订单会自动失效，不会扣款。")
                 },
             )
+            // 跳转前的风险小字：账户核对 + 上游接口变更（口径单一来源，见 RechargeRiskNote）
+            RechargeRiskNote()
         }
     }
 }

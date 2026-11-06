@@ -35,6 +35,7 @@ import edu.jxslu.schedule.data.power.PowerEntryState
 import edu.jxslu.schedule.ui.common.AmountHeroText
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
+import edu.jxslu.schedule.ui.common.RechargeRiskNote
 
 /**
  * 电费充值弹层（DESIGN §4.24）：金额 → 下单 → 平台聚合收银台网页（选支付方式并付款）→ 受理。
@@ -235,6 +236,8 @@ private fun AmountStep(
                     append("没付款就离开不会扣款，订单 30 分钟自动失效。")
                 },
             )
+            // 跳转前的风险小字：账户核对 + 上游接口变更（口径单一来源，见 RechargeRiskNote）
+            RechargeRiskNote()
         }
     }
 }

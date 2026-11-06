@@ -93,6 +93,7 @@ import edu.jxslu.schedule.ui.common.SettingsDivider
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WaterUnlockButton
 import edu.jxslu.schedule.ui.common.postNotice
+import edu.jxslu.schedule.ui.common.RechargeRiskNote
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
@@ -416,11 +417,13 @@ fun WaterScreen(
                 modifier = Modifier.padding(top = 8.dp),
             )
             Text(
-                "充值与退款由胖乖官方负责，与本应用无关；由此造成的损失开发者不承担责任。",
+                "充值与退款由胖乖官方负责，与本应用无关。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 modifier = Modifier.padding(top = 8.dp),
             )
+            // 跳转前的风险小字：账户核对 + 上游接口变更（口径单一来源，见 RechargeRiskNote）
+            RechargeRiskNote()
         }
     }
 }
