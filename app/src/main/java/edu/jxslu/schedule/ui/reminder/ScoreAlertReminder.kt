@@ -27,6 +27,7 @@ import edu.jxslu.schedule.data.repo.PendingLaunch
 import edu.jxslu.schedule.data.repo.PendingNotification
 import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.domain.ExamChangeDetector
+import edu.jxslu.schedule.domain.ExamChangeText
 import edu.jxslu.schedule.domain.ScheduleAlertDefaults
 import edu.jxslu.schedule.domain.ScoreAlertDefaults
 import edu.jxslu.schedule.domain.WenquRules
@@ -360,19 +361,13 @@ object ScoreAlertReminder {
     }
 
     /**
-     * 考试通知正文（共用口径同 [scoresText]）。
+     * 考试通知正文（共用口径同 [scoresText]；单条正文见 [ExamChangeText]，与收件箱同一份）。
      * [merged] > 0 时补一行「已自动合并到课表」：自动写库没有确认弹窗，通知里必须说一声。
      */
     private fun examsText(changes: List<ExamChangeDetector.Change>, merged: Int = 0): String {
         val lines = changes.take(MAX_LINES).map { change ->
             val prefix = if (change.kind == ExamChangeDetector.Kind.NEW) "新增" else "调整"
-            val e = change.entry
-            buildString {
-                append(prefix).append("：").append(e.name)
-                if (e.date.isNotBlank()) append(' ').append(e.date)
-                if (e.startTime.isNotBlank()) append(' ').append(e.startTime)
-                if (e.room.isNotBlank()) append(' ').append(e.room)
-            }
+            "$prefix：${ExamChangeText.describe(change)}"
         }
         val rest = changes.size - lines.size
         return buildString {

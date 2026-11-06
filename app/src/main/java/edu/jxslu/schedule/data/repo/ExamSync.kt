@@ -10,6 +10,7 @@ import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.domain.ExamChangeDetector
+import edu.jxslu.schedule.domain.ExamChangeText
 import edu.jxslu.schedule.domain.ExamMapper.ExamEntry
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
@@ -157,7 +158,7 @@ class ExamSync(
                     kind = InboxKind.EXAM,
                     dedupeKey = InboxKeys.EXAM_PREFIX + ExamChangeDetector.keyOf(change.entry),
                     title = if (change.kind == ExamChangeDetector.Kind.NEW) "新增考试安排" else "考试安排调整",
-                    body = examChangeBody(change),
+                    body = ExamChangeText.describe(change),
                     route = SubpageScreen.EXAMS.name,
                 )
             }
@@ -178,41 +179,6 @@ class ExamSync(
             0
         }
         return Result.Updated(term = term, count = exams.size, changes = changes, merged = merged)
-    }
-
-    /** 考试变更的消息正文：新发布的给时刻与考场，调整的给「调整后 → 调整前」对照。 */
-    private fun examChangeBody(change: ExamChangeDetector.Change): String {
-        val entry = change.entry
-        val slot = buildString {
-            if (entry.date.isNotBlank()) append(entry.date)
-            if (entry.startTime.isNotBlank()) {
-                if (isNotEmpty()) append(" ")
-                append(entry.startTime)
-                if (entry.endTime.isNotBlank()) append("–${entry.endTime}")
-            }
-            if (entry.room.isNotBlank()) {
-                if (isNotEmpty()) append(" ")
-                append(entry.room)
-            }
-        }
-        val head = "《${entry.name}》" + if (slot.isNotBlank()) " $slot" else ""
-        val before = change.before
-        return if (change.kind == ExamChangeDetector.Kind.UPDATED && before != null) {
-            val oldSlot = buildString {
-                if (before.date.isNotBlank()) append(before.date)
-                if (before.startTime.isNotBlank()) {
-                    if (isNotEmpty()) append(" ")
-                    append(before.startTime)
-                }
-                if (before.room.isNotBlank()) {
-                    if (isNotEmpty()) append(" ")
-                    append(before.room)
-                }
-            }
-            "$head（原 $oldSlot）"
-        } else {
-            head
-        }
     }
 
     companion object {

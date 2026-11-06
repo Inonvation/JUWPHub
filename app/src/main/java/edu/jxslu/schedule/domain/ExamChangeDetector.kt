@@ -39,12 +39,42 @@ object ExamChangeDetector {
     }
 
     /** 调整判据：起止时刻、考场、校区、座位号任一变了才算，教师/场次名不动。 */
-    private fun ExamEntry.isSameSlot(other: ExamEntry): Boolean =
-        startTime == other.startTime &&
-            endTime == other.endTime &&
-            room == other.room &&
-            campus == other.campus &&
-            seatNo == other.seatNo
+    private fun ExamEntry.isSameSlot(other: ExamEntry): Boolean = diff(this, other).isEmpty()
+
+    /** 判据字段，顺序即正文展示顺序。 */
+    enum class Field(val label: String) {
+        TIME("时间"),
+        ROOM("考场"),
+        CAMPUS("校区"),
+        SEAT("座位号"),
+    }
+
+    /** 单个字段的新旧值；[text] 是正文用的「标签 旧 → 新」。 */
+    data class FieldChange(val field: Field, val before: String, val after: String) {
+        /** 空值写成「空」：座位号/校区从无到有时，不写「空」就看不出变了。 */
+        val text: String = "${field.label} ${before.ifBlank { "空" }} → ${after.ifBlank { "空" }}"
+    }
+
+    /**
+     * 逐字段差异（空列表 = 没变）。**判据与正文共用这一份**：检测比哪些字段、消息就该说
+     * 哪些字段——2026-11-05 之前正文只渲染日期/开始时刻/考场，座位号或校区变化就渲染成
+     * 新旧一模一样的「考试安排调整」（用户实测 8 场考试一次刷 8 条）。
+     */
+    fun diff(before: ExamEntry, after: ExamEntry): List<FieldChange> = buildList {
+        if (before.startTime != after.startTime || before.endTime != after.endTime) {
+            add(FieldChange(Field.TIME, rangeOf(before), rangeOf(after)))
+        }
+        if (before.room != after.room) add(FieldChange(Field.ROOM, before.room, after.room))
+        if (before.campus != after.campus) add(FieldChange(Field.CAMPUS, before.campus, after.campus))
+        if (before.seatNo != after.seatNo) add(FieldChange(Field.SEAT, before.seatNo, after.seatNo))
+    }
+
+    /** 起–止（缺一半只写有的那半，别渲染出「–17:10」）。 */
+    private fun rangeOf(entry: ExamEntry): String = when {
+        entry.startTime.isBlank() -> entry.endTime
+        entry.endTime.isBlank() -> entry.startTime
+        else -> "${entry.startTime}–${entry.endTime}"
+    }
 
     /**
      * 身份键 = 课程号（空则课程名）+ 日期。公开自 2026-09-30：考试页把「本次更新探测到的
