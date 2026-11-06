@@ -67,12 +67,10 @@ fun RechargeSheet(
     onDismiss: () -> Unit,
     /** [toElectricAccount] = true 表示充到电子账户（`yktcard` 走 accinfo type）。 */
     onLaunch: (yuan: String, toElectricAccount: Boolean) -> Unit,
-    /** 预选电子账户（生活页「去充值」入口联动，DESIGN §4.24）。 */
-    initiallyElectric: Boolean = false,
 ) {
     var amount by rememberSaveable { mutableStateOf("") }
     var confirmStep by remember { mutableStateOf(false) }
-    var toElectric by rememberSaveable { mutableStateOf(initiallyElectric) }
+    var toElectric by rememberSaveable { mutableStateOf(false) }
 
     val parsed = amount.toBigDecimalOrNull()
     val valid = parsed != null && parsed >= java.math.BigDecimal("0.01") &&

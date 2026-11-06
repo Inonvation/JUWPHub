@@ -68,7 +68,7 @@
   基线不补拉；判定 `domain/YktBalanceChange`（单测钉住）。**别把这条判断塞进
   `YktRepository.cards`**：数据层取数不带副作用，挂点统一写在余额落点。
   电费在 `LifeViewModel` 查单 `status==1` 两处
-  （密码步 `confirmPowerPaid` + 农行 `checkBankPaid`，都在 `isCurrentSession` 之前——弹层关了
+  （`confirmPowerPaid` + `checkBankPaid`，都在 `isCurrentSession` 之前——弹层关了
   不吞「钱已扣」；键 = 平台订单号）。
 - 今日页收件箱列表固定铺 **3 行**（`TODAY_PREVIEW_LIMIT`，2026-10-21 用户口径），
   **报修状态行占其中 1 行**（有报修时消息槽 = 2）；**超出部分不铺「还有 N 条」行**

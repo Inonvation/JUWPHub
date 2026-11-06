@@ -50,13 +50,44 @@ class PowerUsageTest {
     }
 
     @Test
-    fun `段内充值按单价折成度数从用量里扣掉`() {
-        // 两天里电表从 20 度回到 20 度，中间充了 62 元 = 100 度 → 用了 100 度
-        val readings = listOf(reading("2026-09-24 09:00", 20.0), reading("2026-09-25 09:00", 20.0))
+    fun `读数涨了说明有电充进来，用量等于充值度数减涨幅`() {
+        // 20 度 →（充 62 元 = 100 度入账）→ 115 度：期间实际用了 5 度
+        val readings = listOf(reading("2026-09-24 09:00", 20.0), reading("2026-09-25 09:00", 115.0))
         val segments = PowerUsage.segments(readings, listOf(recharge("2026-09-24 12:00", 6200)))
         assertEquals(1, segments.size)
-        assertEquals(100.0, segments[0].usedKwh, 1e-9)
+        assertEquals(5.0, segments[0].usedKwh, 1e-9)
         assertEquals(6200L, segments[0].rechargeFen)
+    }
+
+    /**
+     * **用户的回归钉子**（2026-11-06）：「电费充值的账单金额误进入用电量，导致用电量偏高」。
+     *
+     * 平台入账是异步的——付款那一刻读数往往还没涨。旧公式 `上次 + 充值 − 这次` 在
+     * 「付款后、入账前」取到的两次读数上，会把整笔充值算成用电量（充 10 元 = 凭空 16 度）。
+     * 现在读数没涨就只认下降的那一截，未入账的充值不进用量。
+     */
+    @Test
+    fun `充值还没入账时不能把充值算成用电量`() {
+        val readings = listOf(reading("2026-09-24 09:00", 50.0), reading("2026-09-24 10:00", 49.0))
+        val segments = PowerUsage.segments(readings, listOf(recharge("2026-09-24 09:30", 1000)))
+        assertEquals(1, segments.size)
+        // 只掉了 1 度就是 1 度；旧公式会算成 1 + 16.13 = 17.13
+        assertEquals(1.0, segments[0].usedKwh, 1e-9)
+        assertEquals(1000L, segments[0].rechargeFen)
+    }
+
+    /** 充值晚到账：读数涨的那一段算不出用量（涨幅 ≥ 已知充值），记 0，绝不倒推成用量。 */
+    @Test
+    fun `充值晚到账时那一段记零而不是把充值算成用量`() {
+        val readings = listOf(
+            reading("2026-09-24 09:00", 50.0),
+            reading("2026-09-24 10:00", 50.0), // 付款后、入账前
+            reading("2026-09-25 09:00", 60.0), // 入账了
+        )
+        val segments = PowerUsage.segments(readings, listOf(recharge("2026-09-24 09:30", 1000)))
+        assertEquals(2, segments.size)
+        assertEquals(0.0, segments[0].usedKwh, 1e-9)
+        assertEquals(0.0, segments[1].usedKwh, 1e-9)
     }
 
     @Test
@@ -65,6 +96,15 @@ class PowerUsageTest {
         val readings = listOf(reading("2026-09-24 09:00", 80.0), reading("2026-09-25 09:00", 20.0))
         val segments = PowerUsage.segments(readings, listOf(recharge("2026-09-24 12:00", -3100)))
         assertEquals(10.0, segments[0].usedKwh, 1e-9)
+    }
+
+    @Test
+    fun `退款还没从电表扣掉时那一段记零而不是负用量`() {
+        // 退款 31 元（50 度）到账了，但表上只降了 0.5 度：老公式算出来是 -49.5，按 0 记
+        val readings = listOf(reading("2026-09-24 09:00", 30.0), reading("2026-09-25 09:00", 29.5))
+        val segments = PowerUsage.segments(readings, listOf(recharge("2026-09-24 12:00", -3100)))
+        assertEquals(0.0, segments[0].usedKwh, 1e-9)
+        assertEquals(-3100L, segments[0].rechargeFen)
     }
 
     @Test
@@ -89,10 +129,14 @@ class PowerUsageTest {
     }
 
     @Test
-    fun `电量涨得比充值能解释的还多时跳过这一段`() {
+    fun `读数凭空上涨（流水缺失或电表改数）记零而不是负用量`() {
         // 没取到流水 / 平台登记延迟：20 度 → 25 度，凭空多出来 5 度
-        val readings = listOf(reading("2026-09-24 09:00", 20.0), reading("2026-09-25 09:00", 25.0))
-        assertTrue(PowerUsage.segments(readings, emptyList()).isEmpty())
+        val segments = PowerUsage.segments(
+            listOf(reading("2026-09-24 09:00", 20.0), reading("2026-09-25 09:00", 25.0)),
+            emptyList(),
+        )
+        assertEquals(1, segments.size)
+        assertEquals(0.0, segments[0].usedKwh, 1e-9)
 
         // 只有一条读数时没有任何段
         assertTrue(PowerUsage.segments(listOf(reading("2026-09-24 09:00", 20.0)), emptyList()).isEmpty())
@@ -122,8 +166,8 @@ class PowerUsageTest {
             listOf(recharge("2026-09-24 08:00", 3100)),
             zone,
         )
-        // 充值把度数加回去：4 + 50 = 54 度，仍按原有天数占比摊
-        assertEquals(54.0, days.sumOf { it.usedKwh }, 1e-6)
+        // 读数没涨（充值还没入账）：用量就是掉的那 4 度，充值金额只进「充值」那一栏
+        assertEquals(4.0, days.sumOf { it.usedKwh }, 1e-6)
         assertEquals(3100L, days.first { it.key == "2026-09-24" }.rechargeFen)
         assertEquals(0L, days.first { it.key == "2026-09-23" }.rechargeFen)
     }
@@ -203,8 +247,8 @@ class PowerUsageTest {
     }
 
     @Test
-    fun `周月窗口按桶合计，且跳过段会被计数`() {
-        // 都在 09-21 那一周里（09-22 周二 ~ 09-25 周五），中间夹一段算不出来的
+    fun `周月窗口按桶合计，涨价的那一段记零`() {
+        // 都在 09-21 那一周里（09-22 周二 ~ 09-25 周五），中间夹一段读数凭空上涨的
         val readings = listOf(
             reading("2026-09-22 00:00", 30.0),
             reading("2026-09-23 00:00", 28.0),
@@ -218,7 +262,8 @@ class PowerUsageTest {
             nowMs = at("2026-09-24 12:00"),
             zone = zone,
         )
-        assertEquals(1, summary.skippedSegments)
+        // 上涨那段只记 0，不算「跳过」——跳过的只剩「单价未知 + 段内有充值」
+        assertEquals(0, summary.skippedSegments)
         assertEquals(12, summary.buckets.size)
         val currentWeek = summary.buckets.last()
         assertEquals("2026-09-21", currentWeek.key)
@@ -234,6 +279,25 @@ class PowerUsageTest {
             zone = zone,
         )
         assertEquals(5.0, byMonth.totalKwh, 1e-6)
+    }
+
+    /** 跳过的段只剩一种：段内有充值但单价未知（度数换不出来）。 */
+    @Test
+    fun `单价未知又含充值的段会被计入跳过`() {
+        val readings = listOf(
+            reading("2026-09-24 09:00", 30.0, price = 0.0),
+            reading("2026-09-24 12:00", 29.0, price = 0.0),
+            reading("2026-09-25 09:00", 27.0, price = 0.0),
+        )
+        val summary = PowerUsage.summarize(
+            readings = readings,
+            recharges = listOf(recharge("2026-09-24 10:00", 1000)),
+            range = PowerUsageRange.Day,
+            nowMs = at("2026-09-25 12:00"),
+            zone = zone,
+        )
+        assertEquals(1, summary.skippedSegments)
+        assertEquals(2.0, summary.totalKwh, 1e-6)
     }
 
     @Test

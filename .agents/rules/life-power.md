@@ -196,8 +196,8 @@
 - **样式（历史，2026-10-13 / 2026-10-19）**：钱包 hero 卡 → 校园服务四格 → 问渠整行卡 →
   最近流水。相关组件 `WalletHeroCard` / `CampusServicesCard` / `FeedSectionsCard` 已随
   页面删除；这些入口现在分别在侧栏、教务 Tab、流水二级页。
-- **免责声明**：每个充值入口（侧栏选择后的两个弹层、电费弹层「去充值电子账户」、
-  我的 → 校园卡页「充值」）打开前都过 `RechargeDisclaimerDialog`；静默窗口在 DataStore
+- **免责声明**：每个充值入口（侧栏选择后的两个弹层、我的 → 校园卡页「充值」）打开前
+  都过 `RechargeDisclaimerDialog`；静默窗口在 DataStore
   首帧到达后才判（2026-10-22 修，此前初值 0 每次都弹）。
 - **码不预取，且只有一处出码**：付款码页 `PayCodeScreen` 是唯一码位；扣款结果经
   `PayCodeResultBus` 交 `CampusPayResultDialogHost`（MainActivity 根层 + 校园卡设置页）。
@@ -263,39 +263,51 @@
   扣款与入账分开报告：`orderState`/`PowerOrderState`（status + entry 两字段），Accepted
   步区分「已入账 / 入账处理中 / 入账失败」，别再拿 `status=1` 当「到账」说满话；
   **结果步要带金额**（2026-10-07）：`AcceptedStep` 顶部是 `AmountHeroText` 金额大字——
-  「金额只在密码步 / 农行等待步有、出结果的一步反而没有」是旧口径，别改回去；
+  「金额只在这之前那几步有、出结果的一步反而没有」是旧口径，别改回去；
   协议级验证脚本 `_archive/_probe_power_order_fix.py`（下单→验落库→删单）可随时重跑；
-  支付 = `paystep=2 + paytype=ACCOUNT + paytypeid=59` 拿 `passwordMap` 乱序表，
-  `PowerPayChallenge.cipherOf` 是密文换算唯一口径（用户数字 d → **d 在乱序表里的
-  下标**；官方键盘第 i 个键显示 `table[i]` 但提交 `String(i)`，2026-09-24 读前端
-  `app.7abec7aa…js` 修正——此前 `d → table[d]` 方向反了，正确密码也报「密码错误」），
-  6 位消费密码 = **登录缴费平台用的那个 6 位密码**（2026-09-24 用户纠正：学校就一套
-  6 位密码，不存在独立的「支付密码」）。测试单用完就 `deleteOrder`（JSON body），别留未支付单——堆积会让
-  新下单 500。服务时间闸门等业务拒绝原样透传，不降级跳网页；深链 `#/pays?id=181`
+  **支付一律在平台聚合收银台网页里完成**（2026-11-06 用户拍板改版）：下单成功 →
+  `paystep=2 + paytype=NEWPAYMENTPLATFORM` 取收银台链接 → 内嵌页打开 → 用户在页面里
+  自己选支付方式（农行缴电费专用 / 校园卡 / 电子帐户）并付款。App **不再选渠道、不再
+  收任何支付密码**（原 `PowerPayChallenge` / `PowerPayResult` / `payConfirm` / 6 位密码键盘
+  整块删除）；弹层 `Step` 只剩 `Amount / BankPay / Accepted`。
+  测试单用完就 `deleteOrder`（JSON body），别留未支付单——堆积会让新下单 500。
+  服务时间闸门等业务拒绝原样透传，不降级跳网页；深链 `#/pays?id=181`
   保留作兜底，无效路由会被前端打回首页，新增深链前先实测。
-  三条一改就坏的钉子：**订单号只能用下单响应里那一个**（`paystep=2` 的 `orderid` 恒为
-  null，别拿 `passwordMap` 的键——那是 uuid，发出去服务端回「订单不存在，请重新预定」）；
-  **`ccctype[0].balance` 单位是元**（同一时刻一卡通 `accinfo[].balance=100` 分对照确认，
-  按分渲染会把 1 元显示成 ¥0.01）；服务端拒绝含「订单不存在/已过期/已失效」时回金额步
-  重新下单（`PowerPayModels.isOrderGone`），别让人在密码步反复重输。
-- **充值有两个渠道**（2026-09-28 加农行，弹层金额步两枚 FilterChip，**下单后不许换**：
-  `selectPowerChannel` 在非金额步直接忽略，订单与渠道绑定）。
-  **农行支付**（`NEWPAYMENTPLATFORM` / `paytypeid=4`）= **App 内嵌农行手机版收银台**
-  （`PowerBankPayActivity` + `PowerBankPayScreen`）：手机号 → 短信验证码 → 支付密码
-  全在农行页面里，本 App 不读、不存、不落盘。五条不许动：
-  ① **这一跳必须发微信 UA**（`PowerClient.MOBILE_CASHIER_UA`）——平台按请求 UA 分三支，
-  只有微信 UA 给手机版收银台 `mobile.abchina.com/mpaynew/mpay/index`；桌面 UA 给 PC 版
-  （手机上被裁、还要装安全控件）；**手机浏览器 UA 直接回空的 `code=6230`**（`msg` 却写
-  「处理成功」，最容易误判成自己解析错了）。`body` 里的 `userAgent`/`isWX` 不影响分支；
-  ② **手机版链接不能自己拼**：拿网页版那条的 TOKEN 去拼手机版地址，页面回
-  `90015 无可用的支付方式`——必须由平台按手机版分支现发；
-  ③ **链接白名单只认 https + `*.abchina.com`**（`bankCashierUrlFrom`）——那段 HTML 由
-  第三方平台转发，不许把任意 URL 交给内嵌页；
-  ④ **内嵌页只当容器**：不注入脚本、不读输入，只有加载/缩放/重试/外链转发（掌银、
+  一改就坏的钉子：**订单号只能用下单响应里那一个**（`paystep=2` 的 `orderid` 恒为 null，
+  别拿 `passwordMap` 的键——那是 uuid，发出去服务端回「订单不存在，请重新预定」）。
+- **支付入口只有一条：平台聚合收银台**（2026-11-06 拍板；此前的「电子账户 App 内 6 位密码」
+  与「金额步两枚渠道 FilterChip」整块删除，`selectPowerChannel` / `PasswordStep` 已不存在）。
+  `paytype=NEWPAYMENTPLATFORM` / `paytypeid=4` = **App 内嵌收银台页**
+  （`PowerBankPayActivity` + `PowerBankPayScreen`）：付款只在对方页面里完成，本 App 不读、
+  不存、不落盘；页面里能切 农行缴电费专用 / 校园卡 / 电子帐户 三种，**渠道归平台管**。
+  **收银台形状变过两次，认不出就报「平台可能已改版」**：
+  - **2026-09-28 ~ 2026-11-05**：农行手机版收银台（`mobile.abchina.com/mpaynew/mpay/index`，
+    手机号 → 短信验证码 → 支付密码）。那一版平台按请求 UA 分三支——只有微信 UA 给手机版，
+    桌面 UA 给 PC 版（手机上被裁、还要装安全控件），手机浏览器 UA 直接回空的 `code=6230`
+    （`msg` 却写「处理成功」）——所以那一跳固定发 `PowerClient.MOBILE_CASHIER_UA`；
+    手机版链接也不能自己拼（拿网页版那条的 TOKEN 去拼回 `90015 无可用的支付方式`）。
+  - **2026-11-06 起**：平台把农行这条换成**学校自己的聚合收银台**
+    `https://yktpay.juwp.edu.cn/cashier/cashier`（页面 `<title>` 是「聚合支付」），
+    `data` 里只剩 `paymentcashierStr` / `qrFormUrl`，表单是 **GET + 三个 hidden input**
+    （`redirectUrl` / `ticket` / `embed`）。**只取 `<form action>` 会丢会话、页面打不开**
+    ——真实地址 = action + `?` + 这些字段（值按表单口径编码）；`bankCashierUrlFrom` 现在
+    老形状（无字段，直接 GET action）与新形状都解析。当天实测三个 UA 返回同一份响应，
+    UA 分支作废（`MOBILE_CASHIER_UA` 保留，别把它当解析依据）。
+  三条不许动：
+  ① **链接白名单是硬闸**（`PowerPayModels.bankCashierUrlFrom`）：只认 https +
+  `*.abchina.com` / `*.juwp.edu.cn`——那段 HTML 由第三方平台转发，不许把任意 URL 交给内嵌页。
+  平台再换域时先改这里，并保留「认不出 → null → 报平台已改版」的测试；
+  ② **内嵌页只当容器**：不注入脚本、不读输入，只有加载/缩放/重试/外链转发（掌银、
   `intent://`）；别在这条链路上加任何输入框——想「把手机号/验证码/密码画成本 App 的表单」
-  就是复刻农行的支付接口，凭证会经手本 App，不做（2026-09-28 用户问过，口径在 DESIGN §4.24）；
-  ⑤ **TOKEN 现取现用**：一次性会话，「重新打开」是重新 `paystep=2` 取新的，别缓存复用；
-  回到商户域（`charge.juwp.edu.cn`）即关内嵌页，剩下的交给等待步查单。
+  就是复刻支付接口、让凭证经手本 App，不做（2026-09-28 用户问过，口径在 DESIGN §4.24）；
+  ③ **链接现取现用**：一次性会话（老形状的 TOKEN、新形状的 ticket），「重新打开」是重新
+  `paystep=2` 取新的，别缓存复用；回到商户域（`charge.juwp.edu.cn`）即关内嵌页，
+  剩下的交给等待步查单。
+  ④ **平台慢响应不等于网络故障**（2026-11-06 实测）：`paystep=2` 生成收银台会话会慢到
+  20s 以上（同一条请求 PC 端 1.5s，平台网关上限 60s），共享 OkHttp 的 20s 读超时会把
+  它报成「网络不给力」。`PowerClient.create` 已单独放宽到读 45s / 写 30s / 总 60s；
+  `openBankCashier` 失败时保留 `orderId`，金额步出现「重新打开支付页」——**同一单重试，
+  不再下一单**。别把读超时调回 base 的 20s，也别删那个重试入口。
   等待步只有 `order.status=1` 才说「支付成功，已确认扣款」，没查到只说回调可能有延迟。
 
 - **账单要能看出「充到哪」**（2026-09-28 用户问「已充值的账单能显示这个信息吗」）：
@@ -309,10 +321,7 @@
   不填、电子账户路径」）**是误诊**：2026-09-29 定位真相 = App 旧版下单缺
   `third_party`/`abstracts`，谁下的单谁空（App 单全空、官方单全有），修复见下节「下单」；
   历史那几笔补不了（平台落库，事后改不了）。
-- **电费充值的密码步没有输入框**（2026-09-24 用户拍板）：6 格点阵就是输入位，键盘仍是
-  系统的（透明 `BasicTextField` 垫在点阵下面，点阵不拦触摸）。进步自动聚焦、失败自动清空、
-  受理后自动收键盘。别把 `OutlinedTextField` 加回来——用户明确否掉了那个矩形框。
-- **充值免责声明先过一道**（2026-09-29 用户要求，DESIGN §4.24）：**每个充值入口**（侧栏充值选择、电费弹层「去充值电子账户 ›」、我的 → 校园卡页「充值」）打开弹层前都过
+- **充值免责声明先过一道**（2026-09-29 用户要求，DESIGN §4.24）：**每个充值入口**（侧栏充值选择、我的 → 校园卡页「充值」）打开弹层前都过
   `ui/common/RechargeDisclaimerDialog`，三条声明 + 「一周内不再提醒」。**首次（从未确认过）
   锁 5 秒**（按钮置灰、返回/遮罩无效、确认键倒数），确认（继续或取消）落
   `recharge_disclaimer_seen_at` 后任何一次弹出立即可关；勾选静默 7 天
@@ -361,6 +370,11 @@
   `PowerRepository.snapshot()` 一处、去重靠 `(epochMs, roomId)` 唯一索引，公式/均摊/跳过规则
   的唯一实现在 `domain/PowerUsage.kt`——别在 UI 或别处再算一遍，也别加后台轮询去采读数
   （第三方平台，记录密度就等于用户打开 App 的密度，DESIGN §3.13「用电统计」）。
+- **充值不能直接加进用电量**（2026-11-06 用户报「充值那段用电量凭空多一截，充 10 元多 16 度」）：
+  平台入账是**异步**的，付款那一刻读数往往还没涨，旧公式 `上次 + 充值度数 − 这次` 就把整笔
+  充值算成了用量。现在按读数变化分两支（`PowerUsage.segments`）：**读数涨了**（有电进来）→
+  用量 = 段内充值度数 − 涨幅；**读数没涨**（没看到入账）→ 用量 = 上次度数 − 这次度数，
+  未入账的充值不进用量（这是下界，宁少不多）。退款仍按老公式扣回。别改回「无条件加回充值」。
 
 ## 消费流水页 / 缴费账单页（2026-09-26 重构）
 

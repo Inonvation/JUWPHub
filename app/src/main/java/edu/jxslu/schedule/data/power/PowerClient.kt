@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.data.power
 
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.JsonObject
 import edu.jxslu.schedule.data.net.AppHttp
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +36,7 @@ class PowerClient private constructor(private val http: OkHttpClient) {
                 "Chrome/120.0.0.0 Mobile Safari/537.36"
 
         /**
-         * 微信 UA：**只有取农行收银台链接那一条请求用它**（2026-09-28 实测）。
+         * 微信 UA：**只有取支付页链接那一条请求用它**（2026-09-28 实测）。
          *
          * 平台按请求 UA 把 `paystep=2 + 农行渠道` 分成三支，只有这一支给**手机版**收银台：
          *
@@ -52,6 +53,12 @@ class PowerClient private constructor(private val http: OkHttpClient) {
          *
          * `body` 里的 `userAgent` / `isWX` 字段都不影响分支（三个字段各测一遍，差别只在
          * 请求头 UA）。
+         *
+         * **2026-11-06 起上表作废**：平台把农行那条换成学校自己的聚合收银台
+         * （`yktpay.juwp.edu.cn/cashier/cashier`），微信 / 手机 / 桌面三个 UA 当天实测
+         * 返回**同一份**响应（`paymentcashierStr`）。这里仍发微信 UA——它是历史验证过的
+         * 那一份，且平台随时可能把分支加回来；解析侧已不再依赖它（见
+         * [PowerPayModels.bankCashierUrlFrom]）。
          */
         const val MOBILE_CASHIER_UA =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
@@ -62,9 +69,15 @@ class PowerClient private constructor(private val http: OkHttpClient) {
         private const val PAYMENT_URL = "https://yktwx.juwp.edu.cn/plat"
 
         fun create(): PowerClient = PowerClient(
-            // 共享池派生；下单链路给 callTimeout 总上限（慢响应体不再能挂死读超时）
-            AppHttp.withCallTimeout(30)
-                .newBuilder()
+            // 共享池派生 + 单独放宽超时（2026-11-06）：
+            // 共享 base 的 readTimeout = 20s，但**缴费平台的收银台会话生成会慢到 20s 以上**
+            // ——同一条 `paystep=2` 请求 PC 端 1.5s，手机上连续超时报「网络不给力」；
+            // 平台侧的网关上限本身是 60s（慢到顶时回空响应）。20s 读超时会把这类
+            // 慢响应误报成网络故障，所以这一条链路放宽到读 45s / 写 30s / 总上限 60s。
+            AppHttp.base.newBuilder()
+                .readTimeout(45, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .callTimeout(60, TimeUnit.SECONDS)
                 .build(),
         )
 
@@ -164,7 +177,7 @@ class PowerClient private constructor(private val http: OkHttpClient) {
      * POST 签名表单（`/blade-pay/pay` 下单与支付）。鉴权走 **header**
      * （2026-09-23 实测：表单字段形式报「未知异常」），与 [login] 的 Basic 头不同。
      *
-     * [userAgent] 默认移动端 UA；**取农行收银台链接那一跳必须传
+     * [userAgent] 默认移动端 UA；**取支付页链接那一跳必须传
      * [MOBILE_CASHIER_UA]**（分支表见该常量的注释，不传会拿到空的 `code=6230`）。
      */
     suspend fun postSigned(

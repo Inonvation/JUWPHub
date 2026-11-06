@@ -302,20 +302,21 @@ class PowerRepository(
         }
 
     /**
-     * 农行支付第一步（DESIGN §4.24「农行支付」，2026-09-28 实测打通）：
-     * `paystep=2` + 农行渠道 → 服务端回一段自动提交的收银台表单，从中取**手机版**支付链接。
+     * 支付页第一步（DESIGN §4.24「聚合收银台」，2026-09-28 实测打通；
+     * **2026-11-06 平台改版，改走学校聚合收银台**）：
+     * `paystep=2` + 农行渠道 → 服务端回一段自动提交的收银台表单，从中取支付链接。
      *
      * 链接由 `PowerBankPayActivity` 的**内嵌 WebView** 打开（2026-09-28 用户拍板）：
-     * 页面里就是用户熟悉的那套——手机号 → 短信验证码 → 支付密码。卡号、手机号、验证码、
-     * 密码全部只进农行页面，App 不内嵌表单、不读输入、不落盘。
+     * 卡号、手机号、验证码、密码全部只进收银台页面，App 不内嵌表单、不读输入、不落盘。
      *
-     * **[PowerClient.MOBILE_CASHIER_UA] 不能改**：平台按 UA 分三支，只有微信 UA 给手机版
-     * 收银台（`mobile.abchina.com/mpaynew/mpay/index`）；桌面 UA 给 PC 版网页收银台
-     * （手机上会被裁、还提示装安全控件），手机浏览器 UA 直接回空的 `code=6230`
-     * （`msg` 却写「处理成功」）。
+     * **形状会变，解析在 [PowerPayModels.bankCashierUrlFrom]**：2026-11-06 起农行那条
+     * 不再回农行手机版收银台，而是学校自己的聚合收银台
+     * （`https://yktpay.juwp.edu.cn/cashier/cashier` + `redirectUrl`/`ticket`/`embed`
+     * 三个 hidden 字段）。同一刻 UA 的三分支也一并没了——微信 / 手机 / 桌面 UA 当天实测
+     * 返回同一份响应，[PowerClient.MOBILE_CASHIER_UA] 保留是因为它仍是历史验证过的那份请求。
      *
-     * 链接里的 TOKEN 是农行侧**一次性会话**，每次要用都重新调这个方法取新的（重开支付页
-     * 也走它，别缓存复用）。
+     * 链接里的一次性会话（老形状的 `TOKEN`、新形状的 `ticket`）每次要用都重新调这个方法
+     * 取新的（重开支付页也走它，别缓存复用）。
      */
     suspend fun bankCashier(username: String, password: String, orderId: String): String =
         withToken(username, password) { token ->
@@ -339,77 +340,10 @@ class PowerRepository(
             if (PowerPayModels.codeOf(raw.text) == 6230) {
                 throw PowerException.Protocol("平台没返回收银台链接（code=6230），请稍后重试")
             }
-            expectOk(raw, "取农行收银台链接")
+            expectOk(raw, "取支付页链接")
             PowerPayModels.bankCashierUrlFrom(raw.text)
-                ?: throw PowerException.Protocol("农行收银台链接没拿到（平台可能已改版）")
+                ?: throw PowerException.Protocol("支付页链接没拿到（平台可能已改版）")
         }
-
-    /**
-     * 第一步支付：`paystep=2` + 电子账户渠道 → 服务端返回 `passwordMap`
-     * （键 = uuid，值 = 乱序数字串）与 `ccctype`。UI 用它渲染密码键盘。
-     */
-    suspend fun payChallenge(
-        username: String,
-        password: String,
-        orderId: String,
-    ): PowerPayChallenge = withToken(username, password) { token ->
-        val raw = client.postSigned(
-            "/blade-pay/pay",
-            token,
-            PowerPaySign.signed(
-                mapOf(
-                    "orderid" to orderId,
-                    "paystep" to "2",
-                    "paytype" to PowerPayChannels.ACCOUNT_CODE,
-                    "paytypeid" to PowerPayChannels.ACCOUNT_ID,
-                    "synAccessSource" to "h5",
-                ),
-            ),
-        )
-        expectOk(raw, "发起电子账户支付")
-        // 订单号用下单时那一个：paystep=2 响应里的 orderid 恒为 null（2026-09-24 实测）
-        PowerPayModels.challengeFrom(raw.text, requestedOrderId = orderId)
-            ?: throw PowerException.Protocol("支付响应里没有 passwordMap（平台可能已改版）")
-    }
-
-    /**
-     * 第二步支付：带 6 位密文（`passwordMap[uuid][i]` 拼接）+ uuid + ccctype。
-     * `code=200` = 受理成功（由查单确认 status=1）；密码错返回 [PowerPayResult.Rejected]。
-     *
-     * [orderId] 优先于 [challenge] 里的订单号（VM 手上那个是下单时服务端给的，最可信）。
-     */
-    suspend fun payConfirm(
-        username: String,
-        password: String,
-        challenge: PowerPayChallenge,
-        /** 6 位密文（已按 `passwordMap[uuid]` 乱序表替换，见 [PowerPayChallenge.cipherOf]。）。 */
-        cipher: String,
-        orderId: String? = null,
-    ): PowerPayResult = withToken(username, password) { token ->
-        val uuid = challenge.passwordMap.keys.firstOrNull()
-            ?: throw PowerException.Protocol("支付响应缺 uuid")
-        val targetOrderId = orderId?.takeIf { it.isNotBlank() }
-            ?: challenge.orderId.takeIf { it.isNotBlank() }
-            ?: throw PowerException.Protocol("支付会话缺订单号，请重新下单")
-        val form = buildMap {
-            put("orderid", targetOrderId)
-            put("paystep", "2")
-            put("paytype", PowerPayChannels.ACCOUNT_CODE)
-            put("paytypeid", PowerPayChannels.ACCOUNT_ID)
-            put("password", cipher)
-            put("uuid", uuid)
-            challenge.accountType?.let { put("ccctype", it) }
-            put("synAccessSource", "h5")
-        }
-        val raw = client.postSigned("/blade-pay/pay", token, PowerPaySign.signed(form))
-        val code = PowerPayModels.codeOf(raw.text)
-        when (code) {
-            200 -> PowerPayResult.Accepted
-            else -> PowerPayResult.Rejected(
-                PowerPayModels.messageOf(raw.text) ?: "支付失败（code=${code ?: raw.httpCode}）",
-            )
-        }
-    }
 
     /**
      * 查单（2026-09-29 起**扣款与入账分开回**）：`status` 1 = 已扣款；

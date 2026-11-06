@@ -362,7 +362,14 @@ GET  /charge/turnover/personal_data?feeitemid=181&flag=3   # 电费充值流水
    要用电量得自己按时间记读数再差分：App 侧落在 `power_readings` 表（DESIGN §3.13「用电统计」）。
 
 7. **农行支付那条 `paystep=2` 按请求 UA 分三支**（2026-09-28 实测，探针在
-   `_archive/_probe_power_abc*.py`）：同一单、同一 token，只有请求头 UA 不同——
+   `_archive/_probe_power_abc*.py`）：
+   > **2026-11-06 复核：三分支作废**。平台把这步换成学校自己的聚合收银台
+   > `https://yktpay.juwp.edu.cn/cashier/cashier`，`data` 只剩 `paymentcashierStr`/`qrFormUrl`，
+   > 表单是 **GET + 三个 hidden input**（`redirectUrl`/`ticket`/`embed`）——真实地址要把字段
+   > 拼进 query；微信/手机/桌面三个 UA 返回同一份响应。探针见 `_archive/_probe_power_abc4.py`
+   > 与 `_probe_power_cashier5.py`。下面这段是改版前的形状，留作对照。
+
+   同一单、同一 token，只有请求头 UA 不同——
    微信 UA（含 `MicroMessenger`）→ `200` + `paysubmit`＝**手机版收银台**
    `mobile.abchina.com/mpaynew/mpay/index?TOKEN=…`（农银快e付：手机号 + 验证码 + 支付密码）；
    桌面 / 非手机 UA → `200` + 网页版 `pay.abchina.com/EbusPerbankFront/PaymentModeNewAct?TOKEN=…`；
@@ -381,8 +388,8 @@ GET  /charge/turnover/personal_data?feeitemid=181&flag=3   # 电费充值流水
    的 form 编码不同——官方 `$api.post` 没带 `"qs"` 参数即 axios 默认 JSON），`code=200` 即成功；
    upsert 语义、官方允许改绑。同房间重绑探针：`_archive/_probe_power_scene.py`（2026-10-08 实测通过）。
 
-App 端（JUWPHub）已在生活页接入电费读数与 App 内充值（`blade-pay` 下单 + 电子账户
-密码支付 + 农行支付内嵌手机版收银台，DESIGN §4.24），并以同样三接口在 App 内提供
+App 端（JUWPHub）已接入电费读数与 App 内充值（`blade-pay` 下单 + 内嵌平台聚合收银台
+付款——支付方式在网页里选，App 不经手密码，DESIGN §4.24），并以同样三接口在 App 内提供
 「选择寝室」流程（未设置寝室时的 CTA 与改绑入口，DESIGN §4.24「未设置寝室与 App 内确认」）。
 **脚本不做充值、也不做绑定**：支付链路留在 App 里，脚本侧只读（探针那一次同房间重绑是
 一次性验证，`--read-only` 可跳过），只产出 `scripts/out/power.json` 供本机查看。

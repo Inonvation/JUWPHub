@@ -10,7 +10,7 @@ import edu.jxslu.schedule.ui.common.LaunchGate
 import edu.jxslu.schedule.ui.life.PowerBankPayScreen
 
 /**
- * 农行支付收银台独立窗口（DESIGN §4.24「农行支付」）。
+ * 支付收银台独立窗口（DESIGN §4.24「聚合收银台」）。
  *
  * 与 [JwImportActivity] / 学工表单同一个形态：**窗口里有第三方网页表单**，所以
  * 独立窗口 + 锁竖屏 + `adjustResize`（键盘起来时表单要能被顶出来，收银台的

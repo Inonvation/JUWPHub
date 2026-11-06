@@ -17,7 +17,8 @@ import kotlinx.coroutines.flow.Flow
  * `/turnover/mouthAccount` 是一卡通月消费、`/turnover/app_totalAccount` 是累计缴费、
  * `/turnover/appAccountDetail` 直接 500，都不是用电量）。所以用电量只能靠**本机把每次
  * 读到的度数记下来**，相邻两条之间差分：
- * `用电 = 上次度数 + 期间充值度数 − 这次度数`（算法见 `domain/PowerUsage.kt`）。
+ * `读数涨了：用量 = 段内充值度数 − 涨幅；读数没涨：用量 = 上次度数 − 这次度数`
+ * （充值入账是异步的，未入账的充值不能算成用量；算法见 `domain/PowerUsage.kt`）。
  *
  * 去重键是 `(epochMs, roomId)` 唯一索引：`epochMs` 用读数自身的
  * `PowerMeter.fetchedAtMs`（真·读数时刻）而不是落库时刻，于是仓库内存缓存

@@ -53,13 +53,14 @@ import me.rerere.hugeicons.stroke.Browser
 import me.rerere.hugeicons.stroke.Refresh
 
 /**
- * 农行支付收银台（**App 内嵌**，DESIGN §4.24「农行支付」）。
+ * 支付收银台（**App 内嵌**，DESIGN §4.24「聚合收银台」）。
  *
- * 打开的是农行**手机版收银台**（`mobile.abchina.com/mpaynew/mpay/index?TOKEN=…`，
- * 由 `PowerRepository.bankCashier` 用微信 UA 向平台换来——平台按 UA 分三支，只有微信那条
- * 给手机版，见 `PowerClient.MOBILE_CASHIER_UA`）。页面里就是用户平时在微信里用的那套：
- * **手机号 → 获取短信验证码 → 验证码（如需再输支付密码）**。页面是纯 H5 表单，不依赖
- * 微信 JSAPI（实测 `WeixinJSBridge`/`jweixin` 0 处），普通手机 UA 下渲染正常。
+ * 打开的是平台**现取的支付页**，形状变过两次（解析见 `PowerPayModels.bankCashierUrlFrom`）：
+ * 2026-09-28 至 2026-11-05 是农行**手机版收银台**（`mobile.abchina.com/mpaynew/mpay/index?TOKEN=…`，
+ * 由 `PowerRepository.bankCashier` 用微信 UA 向平台换来）；2026-11-06 起平台改走**学校自己的
+ * 聚合收银台**（`yktpay.juwp.edu.cn/cashier/cashier`），页面标题是「聚合支付」，农行只是其中
+ * 一个付款选项。本页只当容器，**不假设页面里有哪些字段**：卡号、手机号、短信验证码、支付密码
+ * 全部只进对方页面。
  *
  * **身份边界（不许越）**：手机号、短信验证码、支付密码、卡号全部只进农行页面。
  * 本页**不注入任何脚本、不读任何输入、不落盘**——只有加载、缩放、重试、外链转发。
@@ -99,9 +100,11 @@ fun PowerBankPayScreen(
         topBar = {
             TopAppBar(
                 windowInsets = pinnedStatusBars(),
-                // 标题固定「农行支付」：页面自身的 <title> 是主机名（实测
-                // `mobile.abchina.com/`），拿来当标题只会让人误以为进了浏览器。
-                title = { Text("农行支付", maxLines = 1) },
+                // 标题固定「电费支付」：页面自身选的支付方式不由 App 决定（2026-11-06 起
+                // 农行缴电费专用 / 校园卡 / 电子帐户都在那一页里），标题再写「农行支付」会
+                // 让选校园卡的人以为走错了。页面自身的 <title> 是主机名（老形状实测
+                // `mobile.abchina.com/`）或「聚合支付」，拿来当标题只会让人以为进了浏览器。
+                title = { Text("电费支付", maxLines = 1) },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
                         Icon(HugeIcons.ArrowLeft01, contentDescription = "关闭")
@@ -217,7 +220,7 @@ fun PowerBankPayScreen(
                             modifier = Modifier.padding(24.dp),
                         ) {
                             Text(
-                                "农行支付页没打开（网络或页面改版）",
+                                "支付页没打开（网络或页面改版）",
                                 style = MaterialTheme.typography.titleSmall,
                                 textAlign = TextAlign.Center,
                             )

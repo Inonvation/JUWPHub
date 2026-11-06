@@ -273,8 +273,9 @@
 `refund_flag`**、500 与 401 外壳、剩余电量键回退、`sceneinfo` 容错、token 与时间解析）、
 `PowerBillTest`（账单：月份按缴费日期归/退回 `feerange`/
 未知月沉底、充值退款分列、明细倒序、月窗口跨年、标签与金额文案）、
-`PowerUsageTest`（用电统计：差分、充值折算、退款扣回、单价缺失的两条分支、
-算不出的段跳过、跨天均摊、周/月桶与窗口、房间过滤、标签与文案）。
+`PowerUsageTest`（用电统计：差分、**读数涨/没涨两支**（读数涨了 = 充值度数 − 涨幅；
+没涨 = 下降多少，未入账的充值不算用量）、退款扣回、单价缺失的两条分支、
+跳过只剩「单价未知 + 含充值」、跨天均摊、周/月桶与窗口、房间过滤、标签与文案）。
 
 #### 电费充值（2026-09-23 实测打通，Python 侧 9 笔真实下单验证；2026-09-24 补测下单/删单）
 
@@ -315,24 +316,37 @@ POST https://charge.juwp.edu.cn/blade-pay/pay          # 注意路径在根域�
 
 | payid | 名称 | code | 支付方式 |
 |-------|------|------|----------|
-| 4 | 农行支付 | `NEWPAYMENTPLATFORM` | **App 内嵌农行手机版收银台**（2026-09-28 打通）：`paystep=2` 返回 `paysubmit`（HTML form，无字段、TOKEN 在 action 的 query 里）→ 取链接交给 `PowerBankPayActivity` 的内嵌 WebView；页面里是「农银快e付」的手机号 → 短信验证码 → 支付密码。**这一跳必须发微信 UA**，见下「农行支付」 |
-| 59 | 电子账户 | `ACCOUNT` | **6 位消费密码**（`passwordMap` 乱序键位），扣电子账户余额 |
+| 4 | 农行支付 | `NEWPAYMENTPLATFORM` | **App 内嵌收银台页**：`paystep=2` 回一段自动提交的收银台表单 → `PowerPayModels.bankCashierUrlFrom` 解析成链接交给 `PowerBankPayActivity` 的内嵌 WebView。**形状换过两次**：2026-09-28~11-05 是农行手机版收银台（`paysubmit`，无字段、TOKEN 在 action 的 query 里；那版必须发微信 UA）；**2026-11-06 起是学校聚合收银台**（`yktpay.juwp.edu.cn/cashier/cashier`，GET + `redirectUrl`/`ticket`/`embed` 三个 hidden 字段）。见下「农行支付」 |
+| 59 | 电子账户 | `ACCOUNT` | 扣电子账户余额。**2026-11-06 起这个渠道也在收银台网页里选**（`paytype=ACCOUNT` 那条 App 内密码链路已删），App 不再自己发 `paystep=2 + ACCOUNT` |
 
-**农行支付（2026-09-28 打通，App 内嵌收银台，用户拍板）**：平台侧这一步不需要密码
-（`payList` 里农行那条 `nopassword=0`，认证全在农行页面），App 只做三件事：
+**聚合收银台（2026-09-28 打通 App 内嵌页；2026-11-06 平台换成学校聚合收银台，同一周用户拍板
+把三种支付方式都搬进去）**：
+平台侧这一步不需要 App 给密码（`payList` 里农行那条 `nopassword=0`，认证全在收银台页面；
+2026-11-06 起校园卡 / 电子帐户也在那一页里选），App 只做三件事：
 
 1. `paystep=2 + paytype=NEWPAYMENTPLATFORM + paytypeid=4` 取收银台表单 →
-   `PowerPayModels.bankCashierUrlFrom` 从 `paysubmit` 里取 `action`（实测值首尾带空格，
-   要 trim），**只认 https + `*.abchina.com`**——这段 HTML 由第三方平台转发，
-   白名单是不把任意 URL 交给内嵌页打开的最后一道闸；
+   `PowerPayModels.bankCashierUrlFrom` 解析出链接。**两种形状都要认**：
+   - 老形状：`<form action="https://pay.abchina.com/…">` 没有字段（会话全在 action 的
+     query 里，实测值首尾带空格要 trim）→ 直接 GET action；
+   - 新形状（2026-11-06）：`<form method="GET" action="https://yktpay.juwp.edu.cn/cashier/cashier">`
+     \+ `redirectUrl` / `ticket` / `embed` 三个 hidden input → 真实地址 = action + `?` +
+     这些字段（按表单编码）。**只取 action 会丢会话，页面打不开**——用户当时看到的就是
+     「农行收银台链接没拿到（平台可能已改版）」。
+   白名单**只认 https + `*.abchina.com` / `*.juwp.edu.cn`**——这段 HTML 由第三方平台转发，
+   白名单是不把任意 URL 交给内嵌页打开的最后一道闸；认不出返回 null，由上层报「平台可能
+   已改版」，绝不拼半截地址；
 2. 链接交给 **App 内嵌页**（`PowerBankPayActivity`，2026-09-28 用户拍板；页面里再没有任何
-   本 App 的表单）：手机号 → 短信验证码 → 支付密码全在农行页面里输入，本 App 不读、不存、
+   本 App 的表单）：卡号 / 手机号 / 验证码 / 密码全在对方页面里输入，本 App 不读、不存、
    不落盘。顶栏留「用浏览器打开」兜底，加载失败给「重试 / 用浏览器打开」浮层；
 3. 弹层落「等待支付结果」步：从内嵌页回到 App 自动查一次单（`rememberResumeTick`）、
    另有手动「检查到账」；只有 `order.status=1` 才进「支付成功，已确认扣款」，没查到只说
    「银行侧回调可能有延迟」——不编成功、也不报成失败。
+4. **慢响应与重试**（2026-11-06）：`paystep=2` 生成收银台会话会慢到 20s 以上（PC 端同请求
+   1.5s、平台网关上限 60s），共享 OkHttp 的 20s 读超时会把它误报成「网络不给力」。
+   `PowerClient.create` 单独放宽到读 45s / 写 30s / 总 60s；若仍失败，`openBankCashier`
+   保留已建的订单号，金额步给「重新打开支付页」——同一单再取一条会话，不重复下单。
 
-**平台按 UA 分三支（2026-09-28 实测，`PowerClient.MOBILE_CASHIER_UA`）**——同一单、同一
+**UA 三分支（2026-09-28 实测，只对老形状成立；2026-11-06 起作废）**——同一单、同一
 token，只有请求头 UA 不同：
 
 | 请求 UA | `paystep=2` 响应 |
@@ -347,6 +361,11 @@ token，只有请求头 UA 不同：
 所以这一跳固定发微信 UA；手机版页面**不依赖微信 JSAPI**（实测 `WeixinJSBridge`/`jweixin`
 0 处），普通手机 UA 的 WebView 里渲染正常（真机截图：农银快e付 + 商户 + 金额 + 手机号/验证码）。
 
+> **2026-11-06 起上表作废**：平台把农行这条换成学校自己的聚合收银台
+> （`yktpay.juwp.edu.cn/cashier/cashier`），微信 / 手机 / 桌面三个 UA 当天实测返回**同一份**
+> 响应（`paymentcashierStr`，表单 GET + `redirectUrl`/`ticket`/`embed`）。代码仍发微信 UA
+> （历史验证过的那份请求），但解析侧已不依赖 UA——**别再把 UA 当分支依据加回来**。
+
 **手机版收银台的会话不能自己拼**（2026-09-28 实测，别省这一步）：拿**网页版**那条的 TOKEN
 去拼 `mobile.abchina.com/mpaynew/mpay/index?TOKEN=…`，页面回
 `{"respCode":"90015","respMsg":"无可用的支付方式，请下载安装我行掌上银行客户端进行支付。"}`
@@ -360,44 +379,26 @@ token，只有请求头 UA 不同：
 与内存——银行页面的安全控件、短信风控、协议确认全都不在我们的实现范围内，出一次错就是钱。
 所以内嵌页只当容器：**不注入脚本、不读输入**，只有加载、缩放、外链转发（掌银/微信 scheme）。
 
-**App 内电子账户支付**（2026-09-23 用户拍板：同意 App 内安全键盘输 6 位）：
+**2026-11-06 改版：支付方式全部搬进收银台网页**（用户拍板「既然上游已经换了支付方式，网页里
+又能切三种，不如支付就在网页里进行」）：此前「电子账户 = App 内 6 位消费密码（`passwordMap`
+乱序键盘）+ 农行 = 内嵌收银台」两条腿，现在收成一条——下单成功即开收银台，用户在页面里选
+**农行缴电费专用 / 校园卡 / 电子帐户** 并付款。随之删除：`PowerPayChallenge`（含密文换算
+`cipherOf`）、`PowerPayResult`、`PowerPayModels.challengeFrom` / `isOrderGone`、
+`PowerRepository.payChallenge` / `payConfirm`、`LifeViewModel.selectPowerChannel` /
+`loadPayChallenge` / `submitPowerPassword`、弹层的 `PasswordStep`（6 格点阵）与渠道 FilterChip、
+标题行右上的「电子账户余额 / 去充值电子账户」。理由：渠道与密码都在平台页面上，App 复刻一遍
+既多一处会过期的解析，也多一处经手钱与密码的地方。
 
-> **密码口径（2026-09-24 修正）**：这里的 6 位消费密码 = **登录缴费平台用的那个 6 位
-> 密码**（学校只有这一套；此前「与登录密码相互独立」的写法是错的，用户纠正）。
-> 报「密码错误」的真因是密文换算方向反了，见下条。
-> 密文换算唯一口径是 `PowerPayChallenge.cipherOf`（用户数字 d →
-> **d 在 `passwordMap[uuid]` 里的下标**）。
+> 历史留档（2026-09-23~11-06 删除前踩过的两个坑，**别再实现回去**）：
+> ① 6 位消费密码 = 登录缴费平台用的那个 6 位密码；乱序键盘的换算口径是「数字 d → d 在
+> `passwordMap[uuid]` 里的下标」（官方前端第 i 个键**显示** `map[i]`、**提交** `String(i)`；
+> 方向反了会「密码正确也报错」）。② `ccctype[0].balance` 单位是**元**（同一时刻一卡通
+> `accinfo[].balance=100` 分对照，同一个电子账户），按分渲染会把 1 元显示成 ¥0.01。
 
-**两个把首版打回去的坑（2026-09-24 实测，都已在代码里收口）**：
-
-| 现象 | 真因 | 修法 |
-|------|------|------|
-| 输对密码也报「密码错误」 | 密文方向反了：官方键盘第 i 个键**显示** `passwordMap[uuid][i]`、**提交键位下标 i**（`app.7abec7aa…js` 的 `keyUpHandle` 与渲染模板），旧代码提交的是 `table[d]` | `cipherOf` = 数字 d → d 在乱序表里的下标；表非 0-9 双射直接拒绝 |
-| 支付时服务端回「订单不存在，请重新预定」 | `paystep=2` 响应的 `orderid` **恒为 null**，旧解析拿 `passwordMap` 的键（uuid）兜底当订单号，于是把 uuid 当 `orderid` 发出去 | 订单号只用下单响应里那一个：`challengeFrom(raw, requestedOrderId)`，`payConfirm` 另有 `orderId` 参数（VM 手上那个最可信），空值直接报「支付会话缺订单号」 |
-
-**`ccctype[0].balance` 的单位是「元」**（2026-09-24 同一时刻两个来源对照：电费平台
-`ccctype[0].balance=1`，一卡通 `queryCard` 的 `accinfo[].balance=100`（分），同一个电子
-账户）——所以电费充值弹层曾把 1 元显示成 ¥0.01。解析时按 `元 × 100` 折成分，
-全项目内部统一用分（`PowerPayChallenge.accountBalanceFen`）。
-
-**订单没了要回金额步**：服务端拒绝且文案含「订单不存在 / 已过期 / 已失效」时
-（`PowerPayModels.isOrderGone`），VM 把流程退回金额步并清掉订单号与挑战，不让用户在
-密码步反复重输（`订单已过期，请重新提交` 是官方前端同一口径）。
-
-1. `POST /blade-pay/pay`（`paystep=2`、`paytype=ACCOUNT`、`paytypeid=59`、`orderid`）
-   → 返回 `data.passwordMap`（键 = uuid，值 = 乱序数字串）与 `data.ccctype`（账户类型，
-   电子账户为 `<account>-000` 形态）；
-2. UI 输 6 位数字（明文系统键盘 + 6 格点阵，2026-09-24 现状；官方页是乱序键盘，
-   第 i 个键显示 `passwordMap[uuid][i]`、**提交键位下标 i**——`app.7abec7aa…js` 的
-   `keyUpHandle` 钉死）。App 端换算 = 数字 d → **d 在乱序表里的下标**（
-   `PowerPayChallenge.cipherOf`，2026-09-24 修正方向反了导致密码正确也报错的 bug）；
-3. 再次 `POST /blade-pay/pay`（同上 + `password=<6位密文>`、`uuid`、`ccctype`）
-   → `code=200` 即支付成功；
-4. `GET /charge/pay/getpayinfo?orderid=` → `order.status=1` 即「已扣款」（2026-10-07
-   订正与实现不符的旧口径：电费充值**不走** `PendingRecharge` 状态机与余额基线轮询，
-   支付确认成功后由 `LifeViewModel.confirmPowerPaid` **有限次查单**确认扣款与入账位
-   （`order.flag`），扣款与入账分开报告——见本节「入账修复」；余额基线那一套只属于
-   一卡通充值 §4.19）。
+**到账判定不变**（与改版无关）：`GET /charge/pay/getpayinfo?orderid=` → `order.status=1` 即
+「已扣款」，入账位看 `order.flag` 第 2 位（`PowerEntryState`）。电费充值**不走**
+`PendingRecharge` 状态机与余额基线轮询（那一套只属于一卡通充值 §4.19），支付确认后由
+`LifeViewModel.confirmPowerPaid` **有限次查单**确认扣款与入账，扣款与入账分开报告。
 
 **电子账户充值（充电子账户的钱包）与正式卡同链路「立即支付」**（2026-09-24 修正）：
 两条路统一走 **thirdOrder 下单（302 收银台）**，`yktcard` 属于下单表单（正式卡=6位卡号，
@@ -438,7 +439,7 @@ JSON 后连 2024 年的过期单也能删（平台**不自动清理** `status=0`
 不做后台轮询，也没有 12 小时闸门（一个触发点就够，多一个就是多 1 + N 条对第三方平台的请求）。
 
 **充值免责声明**（2026-09-29 用户要求，§3.13 与 §4.19 共用一条）：**电费与一卡通的每个
-充值入口**（侧栏钱包卡两格、电费弹层内的「去充值电子账户 ›」、我的 → 校园卡页的「充值」）
+充值入口**（侧栏钱包卡两格、我的 → 校园卡页的「充值」）
 在打开充值弹层前都要先过 `ui/common/RechargeDisclaimerDialog`：三条声明（只提供官方入口、
 先小额并核对账户、严禁违法用途与泄露凭证）+ 勾选「一周内不再提醒」。**首次弹出（从未确认过）锁 5 秒**：两枚按钮置灰、返回/点遮罩无效、
 确认键倒数秒数；点「继续充值」或「不同意并取消支付」（2026-09-30 起，原「取消」——
@@ -449,21 +450,15 @@ JSON 后连 2024 年的过期单也能删（平台**不自动清理** `status=0`
 电费与一卡通**共用同一份**——同一件事的同一句提醒，分开存只会让弹窗节奏难预期。
 静默期内所有入口直开充值弹层，声明不再弹。
 
-**流程（侧栏电费卡）**：电费充值格 → `PowerRechargeSheet` → 金额步先在两枚 FilterChip 里
-**选渠道**（2026-09-28 加农行；下单后不许换，订单与渠道绑定）：
-**电子账户** —— 标题行右上角是「电子账户余额」与「去充值电子账户 ›」入口（只在电子账户
-渠道出现；说明文案默认灰、余额不足时转红）→ 金额输入（预设 10/50/100，上限 500）→
+**流程（侧栏电费卡）**：电费充值格 → `PowerRechargeSheet` → 金额步（预设 10/50/100，
+上限 500；说明文案直说「下一步在 App 内打开平台收银台，用页面里的支付方式付款」）→
 二次确认（**房间号加粗**：一个房间一个电表，充错就是别人的；房间取不到就不显示数字）→
-下单 → 密码键盘 → 到账轮询（读数卡同步刷新）；
-**农行支付** —— 金额 → 二次确认（同样加粗房间号）→ 下单 → 取手机版收银台链接 → 打开
-`PowerBankPayActivity` 内嵌页 → 弹层落「等待支付结果」步（重开/检查到账，金额行也带房间号）。
+下单 → 取收银台链接 → 打开 `PowerBankPayActivity` 内嵌页 → 弹层落「等待支付结果」步
+（重开 / 检查到账，金额行也带房间号）。
 
-**密码步交互（2026-09-24 改版，用户反馈「那个矩形输入框体验太差」）**：**没有输入框**。
-6 格点阵本身就是输入位——点它就弹系统数字键盘（键盘仍是系统的），输入直接填格、退格可改；
-做法是透明 `BasicTextField`（`decorationBox` 丢掉内部渲染、字色与光标全透明）铺满那条带，
-点阵叠在上面但不带点击处理，触摸自然落到输入框。进这一步自动聚焦（不用先点一下），
-提交失败自动清空重来（不需要用户按 6 次退格），受理后自动收键盘。
-密码步因此也不再受 IME 半高锚点影响（金额步仍有输入框，`ImeAwareModalBottomSheet` 照旧）。
+**金额步之后没有任何输入控件**（2026-11-06）：渠道 FilterChip 与 6 位密码键盘都删了，
+`Step` 只剩 `Amount / BankPay / Accepted`；键盘只剩金额框那一个（`ImeAwareModalBottomSheet`
+的 IME 半高锚点只在金额步生效）。
 
 #### 请求节流（2026-09-24）
 

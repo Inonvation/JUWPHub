@@ -73,7 +73,7 @@ internal fun LazyListScope.powerUsageItems(
     summary.skippedSegments.takeIf { it > 0 }?.let { skipped ->
         item(key = "usage-skipped") {
             InlineNoticeRow(
-                message = "有 $skipped 段读数对不上（充值流水缺失或电表改过数），这几段的用量没计入",
+                message = "有 $skipped 段含充值但查不到单价，度数换不出来，这几段的用量没计入",
                 tone = NoticeTone.Warning,
             )
         }
@@ -325,9 +325,10 @@ private fun UsageFootnote(summary: PowerUsageSummary) {
             tone = NoticeTone.Info,
         )
         Text(
-            text = "平台只提供当前剩余电量，没有用电量接口；这里按「上次度数 + 期间充值度数 − " +
-                "这次度数」推算，两次读数之间按天数均摊。读数疏时按天看到的是均摊值，" +
-                "充值登记或电表改数会让某几段对不上（已跳过）。仅供参考，以缴费平台为准。",
+            text = "平台只提供当前剩余电量，没有用电量接口；这里按相邻两次读数的变化推算：" +
+                "读数涨了说明这段有电充进来（用量 = 充值度数 − 涨幅），读数没涨就按下降多少算。" +
+                "两次读数之间按天数均摊，读数疏时按天看到的是均摊值；还没入账的充值不计入用电量。" +
+                "仅供参考，以缴费平台为准。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
         )

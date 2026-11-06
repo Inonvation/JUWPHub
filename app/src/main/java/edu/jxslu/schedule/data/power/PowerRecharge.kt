@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.data.power
 
 import edu.jxslu.schedule.domain.CampusPaySign
+import java.net.URLEncoder
 import kotlin.random.Random
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -46,7 +47,7 @@ object PowerPaySign {
  */
 object PowerPayChannels {
 
-    /** 电子账户（扣电子账户余额，App 内 6 位消费密码）。`payList` 名称「电子账户」。 */
+    /** 电子账户（扣电子账户余额）。`payList` 名称「电子账户」。2026-11-06 起这个渠道在聚合收银台网页里选，App 不再走 `paystep=2 + ACCOUNT` 密码链路。 */
     const val ACCOUNT_CODE = "ACCOUNT"
     const val ACCOUNT_ID = "59"
 
@@ -131,59 +132,6 @@ data class PowerOrder(
 /** 支付渠道（下单响应的 `payList` 元素）。 */
 data class PowerPayChannel(val payId: String, val name: String, val code: String, val noPassword: Boolean)
 
-/**
- * `paystep=2` 拿到的支付参数（DESIGN §4.24，2026-09-23 实测口径）。
- *
- * - [passwordMap]：键 = uuid，值 = **乱序数字字符表**（10 位）。官方缴费页键盘的
- *   第 i 个按键**显示** `table[i]`，但提交的是**键位下标 i**（2026-09-24 读前端
- *   `app.7abec7aa…js` 的 `keyUpHandle`/渲染模板钉死：`push(String(i))`）——服务端拿
- *   uuid 找回乱序表按下标还原。此前「数字 d → table[d]」方向反了，正确密码也报错。
- *   `cipherOf` 是唯一换算点。
- * - [accountBalanceFen]：电子账户余额（`ccctype[0].balance`）。**实测单位是「元」**，
- *   不是分：2026-09-24 同一时刻对同一个电子账户取两个来源，`ccctype[0].balance=1` 而
- *   一卡通 `accinfo[].balance=100`（1 元 = 100 分）——按分渲染会把 1 元显示成 ¥0.01。
- *   解析时已按 `元 × 100` 折成分，全项目内部统一用分。
- */
-data class PowerPayChallenge(
-    val orderId: String,
-    val passwordMap: Map<String, String>,
-    /** 电子账户类型值（`000`，来自 `ccctype[0].ccctype`；支付回传要用）。 */
-    val accountType: String?,
-    /** 电子账户余额（**分**；由 `ccctype[0].balance` 的元值折分而来）。 */
-    val accountBalanceFen: Long?,
-) {
-    /** 提交用的 uuid（passwordMap 唯一键；服务端还有顶层 uuid 字段但实测为 null）。 */
-    val uuid: String? get() = passwordMap.keys.firstOrNull()
-
-    /**
-     * 用户输入的数字串 → 提交密文（数字 d 在乱序表里的下标）。
-     * 表缺失 / 表不是 0-9 双射 / 字符不在表里一律返回 null（上层拦截，绝不瞎猜——
-     * 与 `YktKeyboard` 的「未知字形/非双射即报错」同一纪律）。
-     */
-    fun cipherOf(digits: String): String? {
-        val table = passwordMap[uuid] ?: return null
-        if (digits.length !in 1..6) return null
-        if (table.length != 10 || table.toSet().size != 10 || !table.all { it.isDigit() }) return null
-        val sb = StringBuilder()
-        for (c in digits) {
-            if (!c.isDigit()) return null
-            val idx = table.indexOf(c)
-            if (idx < 0) return null
-            sb.append(idx)
-        }
-        return sb.toString()
-    }
-}
-
-/** 支付结果（`POST /blade-pay/pay` `paystep=2` 带 password）。 */
-sealed interface PowerPayResult {
-    /** 服务端受理成功（之后由查单确认 status=1）。 */
-    data object Accepted : PowerPayResult
-
-    /** 密码错误等业务失败（可重试）。 */
-    data class Rejected(val message: String) : PowerPayResult
-}
-
 object PowerPayModels {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -200,18 +148,6 @@ object PowerPayModels {
         (obj["msg"] as? JsonPrimitive)?.contentOrNull
             ?: (obj["message"] as? JsonPrimitive)?.contentOrNull
     }.getOrNull()
-
-    /**
-     * 服务端是不是在说「这一单没了」（订单不存在 / 已过期 / 已失效）。
-     *
-     * 含义与密码错完全不同：前者要回到金额步重新下单，后者留在密码步重输。
-     * 文案取自实测与官方前端（`订单不存在，请重新预定`、`订单已过期，请重新提交`）。
-     */
-    fun isOrderGone(message: String?): Boolean {
-        val text = message.orEmpty()
-        return text.contains("订单不存在") || text.contains("不存在") ||
-            text.contains("过期") || text.contains("已失效")
-    }
 
     fun orderFrom(raw: String): PowerOrder? = runCatching {
         val data = dataOf(raw) ?: return@runCatching null
@@ -237,47 +173,6 @@ object PowerPayModels {
             )
         }
     }.getOrDefault(emptyList())
-
-    /**
-     * 解析 `paystep=2` 响应。
-     *
-     * [requestedOrderId] 是下单时拿到的**真实订单号**，必填。2026-09-24 实测：
-     * `paystep=2` 响应的 `orderid` **恒为 null**，而 `passwordMap` 的键是 uuid（32 位十六
-     * 进制）——旧代码拿这个键当订单号兜底，支付时把 uuid 当 `orderid` 发出去，服务端回
-     * 「订单不存在，请重新预定」。订单号绝不能从这段响应里猜。
-     */
-    fun challengeFrom(raw: String, requestedOrderId: String): PowerPayChallenge? = runCatching {
-        val data = dataOf(raw) ?: return@runCatching null
-        val mapObj = data["passwordMap"] as? JsonObject ?: return@runCatching null
-        val map = mapObj.entries.associate { (k, v) -> k to (v as? JsonPrimitive)?.contentOrNull.orEmpty() }
-        val orderId = (data["orderid"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
-            ?: (data["orderId"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
-            ?: requestedOrderId
-        // ccctype 实测是数组 [{balance:1, ccctype:"000"}]；**balance 单位是元**
-        // （2026-09-24 与一卡通 accinfo 的 100 分对照确认），这里折成分存。
-        // 兼容旧字符串形态。
-        val cccEl = data["ccctype"]
-        var accountType: String? = null
-        var balanceFen: Long? = null
-        when (cccEl) {
-            is kotlinx.serialization.json.JsonArray -> {
-                val first = cccEl.firstOrNull() as? JsonObject
-                accountType = (first?.get("ccctype") as? JsonPrimitive)?.contentOrNull
-                balanceFen = (first?.get("balance") as? JsonPrimitive)?.contentOrNull
-                    ?.toDoubleOrNull()
-                    ?.let { kotlin.math.round(it * 100).toLong() }
-            }
-
-            is JsonPrimitive -> accountType = cccEl.contentOrNull
-            else -> {}
-        }
-        PowerPayChallenge(
-            orderId = orderId,
-            passwordMap = map,
-            accountType = accountType,
-            accountBalanceFen = balanceFen,
-        )
-    }.getOrNull()
 
 /**
  * 入账状态（`getpayinfo` / `appAccountDetail` 的 `order.flag`，第 2 位字符——
@@ -315,47 +210,89 @@ fun orderStateFrom(raw: String): PowerOrderState? = runCatching {
 }.getOrNull()
 
     /**
-     * 农行收银台链接（`paystep=2` + [PowerPayChannels.ABC_CODE] 的响应，2026-09-28 实测）。
+     * 支付收银台链接（`paystep=2` + [PowerPayChannels.ABC_CODE] 的响应）。
      *
-     * 实测响应（`paysubmit` 与 `qrFormUrl` 是同一段 HTML）：
-     * ```
-     * {"code":200,"success":true,"data":{
-     *   "paysubmit":"<form name=\"punchout_form\" method=\"post\" target=\"_parent\"
-     *      action=\" https://pay.abchina.com/EbusPerbankFront/PaymentModeNewAct?TOKEN=…\">\n</form>
-     *      <script>document.forms[0].submit();</script>"}}
-     * ```
-     * 那段表单**没有任何字段**（会话全在 action 的 query 里），所以链接直接 GET 就能打开——
-     * 2026-09-28 真机浏览器实测页面正常渲染（金额 / 商户 / 订单号齐全），K 码支付入口也在。
+     * 平台有两种形状，**都要认**：
      *
-     * **只认 https + `*.abchina.com`**：这段 HTML 由第三方平台转发，不许把任意 URL
-     * 交给系统浏览器打开（平台改版或被篡改时的最后一道闸）。
+     * 1. **2026-09-28 至 2026-11-06 的农行直连**（`paysubmit` / `qrFormUrl`）：表单**没有字段**
+     *    （会话全在 action 的 query 里），链接直接 GET 就能打开。
+     *    ```
+     *    <form name="punchout_form" method="post" target="_parent"
+     *       action=" https://pay.abchina.com/EbusPerbankFront/PaymentModeNewAct?TOKEN=…">
+     *    ```
+     * 2. **2026-11-06 起的聚合收银台**（`paymentcashierStr` / `qrFormUrl`，`data` 里已经没有
+     *    `paysubmit`）：学校自己的收银台 `https://yktpay.juwp.edu.cn/cashier/cashier`，
+     *    **`method="GET"` + 三个 hidden input**（`redirectUrl` / `ticket` / `embed`），
+     *    真实地址 = action + `?` + 这些字段。只取 action 会丢会话，页面打不开。
+     *    这就是用户报「农行收银台链接没拿到（平台可能已改版）」的那次改版。
+     *    ```
+     *    <form name="auto_form" method="GET" action="https://yktpay.juwp.edu.cn/cashier/cashier">
+     *    <input type="hidden" name="redirectUrl" value="/pay?ticket=…&payTicket=…">
+     *    <input type="hidden" name="ticket" value="…"><input type="hidden" name="embed" value="1">
+     *    ```
+     *
+     * **白名单是硬闸**（这段 HTML 由第三方平台转发）：只认 https + `*.abchina.com`（农行）
+     * 与 `*.juwp.edu.cn`（学校自己的聚合收银台）。平台再换域时这里是第一个要改的地方，
+     * 认不出就返回 null，由调用方报「平台可能已改版」，绝不把任意 URL 交给内嵌页。
      */
     fun bankCashierUrlFrom(raw: String): String? = runCatching {
         val data = dataOf(raw) ?: return@runCatching null
         val candidates = buildList {
-            (data["webUrl"] as? JsonPrimitive)?.contentOrNull?.let { add(it) }
-            for (key in listOf("paysubmit", "qrFormUrl", "paymentcashierStr")) {
+            (data["webUrl"] as? JsonPrimitive)?.contentOrNull?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { add(it) }
+            for (key in CASHIER_HTML_KEYS) {
                 (data[key] as? JsonPrimitive)?.contentOrNull?.let { html ->
-                    formActionOf(html)?.let { add(it) }
+                    cashierUrlOfForm(html)?.let { add(it) }
                 }
             }
         }
-        candidates.firstOrNull { isAbcCashierUrl(it) }
+        candidates.firstOrNull { isCashierUrl(it) }
     }.getOrNull()
 
-    /** 从收银台 HTML 里取 `<form action="…">`；实测值首尾带空格，必须 trim。 */
-    private fun formActionOf(html: String): String? =
-        FORM_ACTION.find(html)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+    /**
+     * 表单 → 可直接 GET 的收银台地址：没有字段就交出 action（老形状）；
+     * 有字段则按 GET 表单的拼法把字段编码进 query（新形状）。POST 带字段的表单
+     * 没法变成一个 URL——认不出就 null，不猜。
+     */
+    private fun cashierUrlOfForm(html: String): String? {
+        val formTag = FORM_TAG.find(html)?.value ?: return null
+        val action = attrOf(formTag, "action")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val fields = FIELD_INPUT.findAll(html).mapNotNull { input ->
+            val name = attrOf(input.value, "name") ?: return@mapNotNull null
+            name to attrOf(input.value, "value").orEmpty()
+        }.toList()
+        if (fields.isEmpty()) return action
+        if (!attrOf(formTag, "method").orEmpty().equals("GET", ignoreCase = true)) return null
+        val query = fields.joinToString("&") { (name, value) ->
+            "${URLEncoder.encode(name, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
+        }
+        return action + (if ("?" in action) "&" else "?") + query
+    }
 
-    /** 收银台链接白名单：https + `abchina.com` 域（含子域）。 */
-    private fun isAbcCashierUrl(url: String): Boolean = runCatching {
+    /** 取标签里的属性值；实测引号是双引号，单引号一并认（第三方 HTML，别赌格式）。 */
+    private fun attrOf(tag: String, name: String): String? =
+        Regex("""(?<![\w-])$name\s*=\s*["']([^"']*)["']""", RegexOption.IGNORE_CASE)
+            .find(tag)?.groupValues?.get(1)
+
+    /** 收银台链接白名单：https + 农行域或校内域（含子域）。 */
+    private fun isCashierUrl(url: String): Boolean = runCatching {
         val uri = java.net.URI(url)
         val host = uri.host.orEmpty().lowercase()
-        uri.scheme.equals("https", ignoreCase = true) &&
-            (host == "abchina.com" || host.endsWith(".abchina.com"))
+        uri.scheme.equals("https", ignoreCase = true) && ALLOWED_CASHIER_HOSTS.any { allowed ->
+            host == allowed || host.endsWith(".$allowed")
+        }
     }.getOrDefault(false)
 
-    private val FORM_ACTION = Regex("""action\s*=\s*"([^"]+)"""", RegexOption.IGNORE_CASE)
+    /** 收银台可能给的两个 HTML 键（老形状 `paysubmit`，新形状 `paymentcashierStr`）。 */
+    private val CASHIER_HTML_KEYS = listOf("paysubmit", "qrFormUrl", "paymentcashierStr")
+
+    private val ALLOWED_CASHIER_HOSTS = listOf("abchina.com", "juwp.edu.cn")
+
+    private val FORM_TAG = Regex("""<form\b[^>]*>""", RegexOption.IGNORE_CASE)
+
+    /** 带 `name` 的 input：hidden 字段与提交按钮（无 name）靠这个区分。 */
+    private val FIELD_INPUT = Regex("""<input\b[^>]*>""", RegexOption.IGNORE_CASE)
 
     private fun dataOf(raw: String): JsonObject? = runCatching {
         (json.parseToJsonElement(raw).jsonObject["data"] as? JsonObject)

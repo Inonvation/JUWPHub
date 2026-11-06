@@ -9,7 +9,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
@@ -84,9 +83,6 @@ fun RechargeHost(
         showRoomPicker = true
     }
     val powerRecharge by viewModel.powerRecharge.collectAsStateWithLifecycle()
-    // 「去充值电子账户」联动：打开一卡通充值时预选电子账户（DESIGN 4.24）
-    var campusRechargePreferElectric by rememberSaveable { mutableStateOf(false) }
-
     // 充值免责声明（2026-09-29 用户要求）：电费与一卡通**每个充值入口**打开弹层前都要过
     // 一道提醒，勾「一周内不再提醒」静默 7 天（窗口口径 domain/RechargeDisclaimer）。
     // `initialValue = null`：此前初值 0，侧栏进页的 effect 抢在 DataStore 首帧前就判
@@ -135,15 +131,13 @@ fun RechargeHost(
 
     // 每次侧栏发起充值：只补这一项要用的数据（都走缓存/闸门）。
     // 一卡通充值不需要电费读数——顺手刷它只会让侧栏电费栏无谓地进入 loading；
-    // 电费充值要一卡通余额，是因为弹层里还有「去充值电子账户」的联动。
+    // 电费充值也**不再**刷一卡通余额：2026-11-06 改版后电费弹层里没有「去充值电子账户」
+    // 联动、也不显示电子账户余额（支付方式在收银台网页里选），余额由侧栏自己刷新。
     LaunchedEffect(pending) {
         when (pending) {
             null -> Unit
             RechargeKind.Campus -> campusViewModel.refreshBalance(force = false)
-            RechargeKind.Power -> {
-                viewModel.refreshPower(force = false)
-                campusViewModel.refreshBalance(force = false)
-            }
+            RechargeKind.Power -> viewModel.refreshPower(force = false)
         }
     }
 
@@ -169,18 +163,7 @@ fun RechargeHost(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // 电费充值进入密码步骤：下单成功即取键盘挑战（passwordMap）。
-    // **电子账户渠道专属**：农行渠道下单后走 BankPay 步，不该在这里多打一条 ACCOUNT 的请求。
-    LaunchedEffect(powerRecharge.orderId, powerRecharge.step, powerRecharge.channel) {
-        if (powerRecharge.channel == LifeViewModel.PowerRechargeUi.Channel.Account &&
-            powerRecharge.step == LifeViewModel.PowerRechargeUi.Step.Amount &&
-            powerRecharge.orderId != null
-        ) {
-            viewModel.loadPayChallenge()
-        }
-    }
-
-    // 农行支付：从浏览器切回时自动查一次到账（静默——银行侧回调常有几十秒延迟，
+    // 支付页那步：从支付页切回时自动查一次到账（静默——平台回调常有几十秒延迟，
     // 没查到只留一句中性提示，不弹错误）。
     val resumeTick = rememberResumeTick()
     LaunchedEffect(resumeTick) {
@@ -196,12 +179,12 @@ fun RechargeHost(
                 // 事件成串来时新的提示才能当场顶掉旧的（见 AppNotice.kt）
                 is LifeEvent.Notice -> scope.postNotice(snackbar, event.text, event.tone)
 
-                // 农行收银台：**App 内嵌页**打开（2026-09-28 用户拍板，不再甩给浏览器）。
+                // 支付页：**App 内嵌页**打开（2026-09-28 用户拍板，不再甩给浏览器）。
                 // 卡号 / 手机号 / 短信验证码 / 支付密码只在农行页面里输入，本 App 不读不存。
                 is LifeEvent.OpenBankCashier -> {
                     runCatching { PowerBankPayActivity.start(context, event.url) }
                         .onFailure {
-                            scope.postNotice(snackbar, "农行支付页打不开，请重试", NoticeTone.Error)
+                            scope.postNotice(snackbar, "支付页打不开，请重试", NoticeTone.Error)
                         }
                 }
             }
@@ -215,23 +198,13 @@ fun RechargeHost(
     if (showPowerRecharge) {
         PowerRechargeSheet(
             state = powerRecharge,
-            accountFen = powerRecharge.challenge?.accountBalanceFen ?: balance?.accountFen,
             roomLabel = state.power.snapshot?.meter?.room?.room,
             remainText = state.power.snapshot?.meter?.remain?.let { "%.2f 度".format(it) },
             onDismiss = {
                 showPowerRecharge = false
                 viewModel.dismissPowerRecharge()
             },
-            onOpenCampusRecharge = {
-                showPowerRecharge = false
-                viewModel.dismissPowerRecharge()
-                campusRechargePreferElectric = true
-                openRecharge(RechargeKind.Campus)
-            },
-            onSelectChannel = { channel -> viewModel.selectPowerChannel(channel) },
             onPlaceOrder = { yuan -> viewModel.placePowerOrder(yuan) },
-            onLoadChallenge = { viewModel.loadPayChallenge() },
-            onSubmitPassword = { cipher -> viewModel.submitPowerPassword(cipher) },
             onReopenCashier = { viewModel.reopenBankCashier() },
             onCheckPaid = { viewModel.checkBankPaid() },
         )
@@ -243,11 +216,7 @@ fun RechargeHost(
             // 二次确认弹窗里加粗展示的目标卡号：与下单链路同一份选取口径
             // （`rechargeTargetCard` = 第一张非挂失卡）
             cardAccount = balance?.cards?.rechargeTargetCard()?.account,
-            initiallyElectric = campusRechargePreferElectric,
-            onDismiss = {
-                showRechargeSheet = false
-                campusRechargePreferElectric = false
-            },
+            onDismiss = { showRechargeSheet = false },
             onLaunch = { yuan, toElectric ->
                 showRechargeSheet = false
                 scope.launch {
@@ -303,9 +272,6 @@ fun RechargeHost(
             },
             onDismiss = {
                 disclaimerFor = null
-                // 从电费弹层「去充值电子账户」过来时预选了电子账户；用户在这里取消，
-                // 下次打开一卡通充值应回到默认（正式卡），别把预选留到下一次。
-                if (kind == RechargeKind.Campus) campusRechargePreferElectric = false
                 scope.launch { displayPrefs.markRechargeDisclaimerSeen() }
             },
         )
