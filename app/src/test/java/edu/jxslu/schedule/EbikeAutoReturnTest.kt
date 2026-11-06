@@ -77,6 +77,82 @@ class EbikeAutoReturnTest {
     }
 
     @Test
+    fun `三分：没到触发点与没有在案计时都静默`() {
+        val start = 1_760_000_000_000L
+        val trigger = EbikeAutoReturn.triggerAtMillis(start, EbikeAutoReturn.DEFAULT_LEAD_SECONDS)
+        // 窗口下沿：触发点前一毫秒是「没到点」，不是「过窗」——静默是对的
+        assertEquals(
+            EbikeAutoReturn.Outcome.NOT_YET,
+            EbikeAutoReturn.outcomeOf(start, EbikeAutoReturn.DEFAULT_LEAD_SECONDS, trigger - 1),
+        )
+        // 没有在案计时（startAt = 0）：0 这个时刻早就过了任何窗口，但不能因此给用户
+        // 发一条假的「自动还车没来得及执行」
+        assertEquals(
+            EbikeAutoReturn.Outcome.NOT_YET,
+            EbikeAutoReturn.outcomeOf(
+                0L,
+                EbikeAutoReturn.DEFAULT_LEAD_SECONDS,
+                EbikeFreeRide.freeEndMillis(0L) + EbikeFreeRide.END_WINDOW_MS,
+            ),
+        )
+    }
+
+    @Test
+    fun `三分：触发点那一毫秒就该执行`() {
+        val start = 1_760_000_000_000L
+        val trigger = EbikeAutoReturn.triggerAtMillis(start, EbikeAutoReturn.DEFAULT_LEAD_SECONDS)
+        assertEquals(
+            EbikeAutoReturn.Outcome.DUE,
+            EbikeAutoReturn.outcomeOf(start, EbikeAutoReturn.DEFAULT_LEAD_SECONDS, trigger),
+        )
+        assertEquals(
+            EbikeAutoReturn.Outcome.DUE,
+            EbikeAutoReturn.outcomeOf(start, EbikeAutoReturn.DEFAULT_LEAD_SECONDS, trigger + 1),
+        )
+        assertTrue(EbikeAutoReturn.isDue(start, EbikeAutoReturn.DEFAULT_LEAD_SECONDS, trigger))
+    }
+
+    @Test
+    fun `三分：迟到窗口最后一毫秒仍执行，越过后判过窗`() {
+        val start = 1_760_000_000_000L
+        val windowEnd = EbikeFreeRide.freeEndMillis(start) + EbikeFreeRide.END_WINDOW_MS
+        assertEquals(
+            EbikeAutoReturn.Outcome.DUE,
+            EbikeAutoReturn.outcomeOf(start, EbikeAutoReturn.DEFAULT_LEAD_SECONDS, windowEnd - 1),
+        )
+        assertEquals(
+            EbikeAutoReturn.Outcome.MISSED,
+            EbikeAutoReturn.outcomeOf(start, EbikeAutoReturn.DEFAULT_LEAD_SECONDS, windowEnd),
+        )
+        // 被 Doze 推迟十几分钟：这一轮彻底不跑了，必须走通知那条路
+        assertEquals(
+            EbikeAutoReturn.Outcome.MISSED,
+            EbikeAutoReturn.outcomeOf(
+                start,
+                EbikeAutoReturn.DEFAULT_LEAD_SECONDS,
+                windowEnd + 15 * 60_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun `三分与 isDue 同一判据，过窗文案写清计费与手动还车`() {
+        val start = 1_760_000_000_000L
+        val windowEnd = EbikeFreeRide.freeEndMillis(start) + EbikeFreeRide.END_WINDOW_MS
+        val lead = EbikeAutoReturn.DEFAULT_LEAD_SECONDS
+        for (now in listOf(start, start + 1, windowEnd - 1, windowEnd, windowEnd + 1)) {
+            assertEquals(
+                EbikeAutoReturn.isDue(start, lead, now),
+                EbikeAutoReturn.outcomeOf(start, lead, now) == EbikeAutoReturn.Outcome.DUE,
+            )
+        }
+        // 文案是这条修复的全部价值所在：用户必须知道「还在计费」+「要手动还车」
+        assertTrue(EbikeAutoReturn.MISSED_TEXT.contains("计费"))
+        assertTrue(EbikeAutoReturn.MISSED_TEXT.contains("手动还车"))
+        assertTrue(EbikeAutoReturn.TITLE_MISSED.isNotBlank())
+    }
+
+    @Test
     fun `自动还车坐标：人车在一处时用用户定位`() {
         val now = 1_760_000_000_000L
         val point = EbikeAutoReturn.chooseReturnPoint(
@@ -235,6 +311,19 @@ class EbikeAutoReturnTest {
         // 上课 1001/1004、作业 1002/1003、免费提醒 1000/1005/1006、其余 1007~1013
         assertEquals(1014, EbikeAutoReturn.NotificationIds.RESULT)
         assertEquals("ebike_auto_return", EbikeAutoReturn.NotificationIds.CHANNEL)
+    }
+
+    @Test
+    fun `加急任务的前台通知 id 与结果通知分开`() {
+        // 加急任务在 Android 11 及以下由前台服务跑，WorkManager 结束时会摘掉自己那条通知；
+        // 与结果通知同 id 会把刚发出去的成功 / 失败结果一起撤掉，所以必须分开
+        assertEquals(1015, EbikeAutoReturn.NotificationIds.FOREGROUND)
+        assertTrue(EbikeAutoReturn.NotificationIds.FOREGROUND != EbikeAutoReturn.NotificationIds.RESULT)
+        // channel 也要分开：结果那条是 HIGH + 震动，这条只挂几秒，不能跟着震
+        assertEquals("ebike_auto_return_foreground", EbikeAutoReturn.NotificationIds.FOREGROUND_CHANNEL)
+        assertTrue(
+            EbikeAutoReturn.NotificationIds.FOREGROUND_CHANNEL != EbikeAutoReturn.NotificationIds.CHANNEL,
+        )
     }
 
     // ---------- 尝试循环 ----------

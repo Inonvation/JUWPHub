@@ -322,6 +322,12 @@
                 <!-- 覆盖安装也补排（2026-10-02）：精确闹钟不跨安装存活，升级后不补
                      的话所有提醒静默失效到下一次冷启动 -->
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <!-- 时区 / 系统时间变化也补排（2026-11-06）：所有提醒都是「墙上时钟 →
+                     绝对时刻」换算后钉在 AlarmManager 上的，时区一换（回家 / 出差）或
+                     用户手改时间，已排的闹钟就落在错误的墙上时刻。系统不会替我们重算，
+                     而 BOOT_COMPLETED 不会因为改时区而发。这两个是受保护广播，只有系统能发。 -->
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
             </intent-filter>
         </receiver>
 

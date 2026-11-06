@@ -9,7 +9,9 @@ import android.provider.AlarmClock
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import edu.jxslu.schedule.Graph
@@ -28,7 +30,7 @@ import kotlinx.coroutines.launch
  * | 层 | 手段 | 作用 |
  * |----|------|------|
  * | 主 | `AlarmManager.setAlarmClock`（requestCode 4004） | 到**免费结束前 [EbikeAutoReturn.DEFAULT_LEAD_SECONDS] 秒**（可设 10~60 秒）精确触发 |
- * | 执行 | [EbikeAutoReturnWorker]（WorkManager 一次性） | 网络动作 + 3 秒间隔重试，进程被杀也还在 |
+ * | 执行 | [EbikeAutoReturnWorker]（WorkManager 一次性，**加急**） | 网络动作 + 3 秒间隔重试，进程被杀也还在 |
  * | 兜 | 进「骑行」页 / 账号页时的 [reconcile] | 闹钟被 ROM 丢掉时补跑（到点才打开开关不追补，见下） |
  *
  * **触发点恒在免费结束之前**（提前量下限 10 秒）：还车动作要落在免费时段内完成，
@@ -99,14 +101,28 @@ object EbikeAutoReturnReminder {
         cancelAlarm(context.applicationContext)
     }
 
-    /** 闹钟落点：把还车动作排进 WorkManager（网络与重试都在那里，接收器不挂长任务）。 */
+    /**
+     * 闹钟落点：把还车动作排进 WorkManager（网络与重试都在那里，接收器不挂长任务）。
+     *
+     * **必须加急**（2026-11-06，audit E1）：`setAlarmClock` 只保证广播准时，任务的**执行**
+     * 时机归 WorkManager + Doze/省电策略——普通一次性任务在灭屏 Doze 里被推迟十几分钟是
+     * 常态，而迟到窗口只有 `EbikeFreeRide.END_WINDOW_MS`（免费结束后 5 分钟），一越过
+     * 这一轮就作废。加急走 job 的 `setExpedited(true)` 通道（API < 31 退化为前台服务）。
+     * 配额不足时 [OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST] 把它降级成普通任务、
+     * 不抛异常，所以最坏情况与加急之前相同，不会更糟。
+     *
+     * **配套件是 [EbikeAutoReturnWorker.getForegroundInfo]**，两者一起改：Android 11 及以下
+     * 的加急任务是前台服务，没有那条通知这次工作会直接失败（不是"降级"，是"不跑"）。
+     */
     fun enqueueNow(context: Context) {
         runCatching {
             WorkManager.getInstance(context.applicationContext)
                 .enqueueUniqueWork(
                     WORK_NAME,
                     ExistingWorkPolicy.KEEP,
-                    OneTimeWorkRequestBuilder<EbikeAutoReturnWorker>().build(),
+                    OneTimeWorkRequestBuilder<EbikeAutoReturnWorker>()
+                        .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                        .build(),
                 )
         }.onFailure { Log.w(TAG, "enqueue failed", it) }
     }
@@ -115,7 +131,9 @@ object EbikeAutoReturnReminder {
      * Worker 主体：复核全部闸门 → 跑 [runAutoReturn] → 按结果善后 / 通知 → 落去重键。
      *
      * 早退（开关关 / 不是账号方式 / 没有在案计时 / 没到点 / 已执行过）都**不落键**：
-     * 那是"这次不该跑"，不是"这轮跑完了"。
+     * 那是"这次不该跑"，不是"这轮跑完了"。**唯一的例外是「已过窗」**——那一轮确实不会再
+     * 执行，用户却还在被计费，所以补一条通知（[EbikeAutoReturn.Outcome.MISSED]）；
+     * 它同样不落键，靠"过窗之后没有别的入队路径"避免重复（见 [reconcile] 的 else 分支）。
      */
     suspend fun run(context: Context) {
         val app = context.applicationContext
@@ -126,15 +144,26 @@ object EbikeAutoReturnReminder {
         if (!enabled || startAt <= 0L) return
         if (!prefs.ebikeUseMode.first().isAccount) return
         val lead = prefs.ebikeAutoReturnLeadSeconds.first()
-        // 没到触发点（极罕见：闹钟 / 任务早到）或已越过迟到窗口都不动手；
-        // 窗口外那一种由 reconcile 清掉残留排程（见 [reconcile]）
-        if (!EbikeAutoReturn.isDue(startAt, lead, now)) return
+        val strongVibration = prefs.strongReminderVibration.first()
+        // 先看去重键再判时刻：这一轮已经有结论（成功 / 重试用尽）时，哪怕现在已过窗也
+        // 不能再发一条"没来得及执行"——那是假的。键的检查因此提到时刻判定之前。
         val key = EbikeAutoReturn.doneKey(startAt)
         if (prefs.ebikeAutoReturnDoneKey.first() == key) return
+        when (EbikeAutoReturn.outcomeOf(startAt, lead, now)) {
+            // 没到触发点（极罕见：闹钟 / 任务早到）：这次不该跑，静默
+            EbikeAutoReturn.Outcome.NOT_YET -> return
+            // 已越过迟到窗口：任务被系统推迟过久，这一轮一次都不会跑了。用户此时可能正在
+            // 被计费，静默就是 audit E1 那条"订单继续计费且毫无感知"——必须发通知
+            EbikeAutoReturn.Outcome.MISSED -> {
+                cancelAlarm(app)
+                EbikeAutoReturnNotifier.postMissed(app, strongVibration)
+                return
+            }
+            EbikeAutoReturn.Outcome.DUE -> Unit
+        }
 
         val session = Graph.kqcx(app)
         val retries = prefs.ebikeAutoReturnRetries.first()
-        val strongVibration = prefs.strongReminderVibration.first()
         // 闹钟已经到点（或这是补跑）：先撤掉，免得残留一个不会再响的排程
         cancelAlarm(app)
 
@@ -237,6 +266,21 @@ class EbikeAutoReturnWorker(
     appContext: Context,
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
+
+    /**
+     * 加急任务的前台服务通知（2026-11-06）。**别删**：`setExpedited` 在 Android 11 及以下
+     * 由 WorkManager 用前台服务实现，它必须先拿到一条 `ForegroundInfo`；`CoroutineWorker`
+     * 的默认实现是抛 `IllegalStateException("Not implemented")`，WorkManager 随即以
+     * `"... but did not provide ForegroundInfo"` 让这次工作**失败**——那意味着自动还车
+     * 在 API 26~30 上彻底不跑，比加急之前还糟（audit-2026-11-06 E1）。
+     *
+     * Android 12+ 走 JobScheduler 的加急通道，不会调用它；两个分支共用同一份实现即可。
+     */
+    override suspend fun getForegroundInfo(): ForegroundInfo = ForegroundInfo(
+        EbikeAutoReturn.NotificationIds.FOREGROUND,
+        EbikeAutoReturnNotifier.foregroundNotification(applicationContext),
+    )
+
     override suspend fun doWork(): Result {
         runCatching { EbikeAutoReturnReminder.run(applicationContext) }
         return Result.success()

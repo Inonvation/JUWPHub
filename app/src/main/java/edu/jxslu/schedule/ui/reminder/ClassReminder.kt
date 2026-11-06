@@ -50,6 +50,7 @@ import edu.jxslu.schedule.domain.liveClassLine
 import edu.jxslu.schedule.domain.minutesLeft
 import edu.jxslu.schedule.domain.progressPercent
 import edu.jxslu.schedule.ui.wenqu.WenquPreregReminder
+import edu.jxslu.schedule.ui.widget.TodayWidgetRefresh
 import kotlinx.coroutines.flow.first
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -75,10 +76,23 @@ object ClassReminder {
     private const val ALARM_REQUEST_CODE = 4002
 
     /**
-     * 重排下一个提醒：上课（提前量 / 上课时刻 / 倒计时卡片的分钟刻度）与作业两个来源
-     * 取**更早**的触发时刻，排同一个闹钟。某一类开关关掉就忽略那一类；两者都没有
-     * （提醒关、课表空、不在学期内、没有待提醒作业）时撤销已排闹钟——「关掉开关后
-     * 通知还在响」比不响严重得多。顺带：不在倒计时窗口里就撤掉岛上那张卡。
+     * 倒计时卡片「分钟刻度」的闹钟 requestCode（2026-11-06 从 [ALARM_REQUEST_CODE] 拆出来）。
+     *
+     * 与上课（4002）、小组件日界（4001）、骑行（4003）、选课（4004）、U净（4005）、
+     * 免扰补发（4006）、问渠周提醒（4007）、问渠预报名（4008）都错开：
+     * PendingIntent 的身份是「requestCode + Intent.filterEquals」，撞了会互相顶掉。
+     * **别把它合回 4002**——两者要用不同的 AlarmManager API（见 [scheduleLiveTick]）。
+     * 取 4009 而不是 4007：问渠周提醒（`WenquWeeklyAlertReminder`）已经占了 4007，
+     * 号段登记表只能有一份真相（2026-11-06 交叉复核）。
+     */
+    private const val LIVE_TICK_REQUEST_CODE = 4009
+
+    /**
+     * 重排下一个提醒：上课（提前量 / 上课时刻）与作业两个来源取**更早**的触发时刻，
+     * 排同一个精确闹钟；倒计时卡片的「分钟刻度」另排一枚非精确闹钟（见 [scheduleLiveTick]）。
+     * 某一类开关关掉就忽略那一类；两者都没有（提醒关、课表空、不在学期内、没有待提醒作业）
+     * 时撤销已排闹钟——「关掉开关后通知还在响」比不响严重得多。顺带：不在倒计时窗口里
+     * 就撤掉岛上那张卡。
      */
     suspend fun scheduleNext(context: Context) {
         runCatching {
@@ -89,9 +103,11 @@ object ClassReminder {
             val manager = context.getSystemService(AlarmManager::class.java)
                 ?: return
             val pending = alarmPendingIntent(context)
+            val tickPending = liveTickPendingIntent(context)
             val now = LocalDateTime.now()
             val reminderOn = repo.reminderEnabled.first()
             var livePlan: ReminderPlan? = null
+            var liveTickAt: LocalDateTime? = null
             val classTriggerAt = if (reminderOn) {
                 val semester = repo.semester.first()
                 val slots = repo.timeSlots.first()
@@ -101,15 +117,14 @@ object ClassReminder {
                 // 补课那天按借来的课排——与今日页同一口径
                 val overrides = repo.overridesFor()
                 // 灵动岛倒计时卡片（2026-10-29）：提前量窗口内每分钟边界醒一次，
-                // 刷新芯片上的剩余分钟数与进度条。借**同一枚闹钟**（核对 Worker 每轮
-                // 都会重排），不新增闹钟通道、不常驻前台服务——岛上分钟级足够，
-                // 秒级交给卡片头部的系统 chronometer。
+                // 刷新芯片上的剩余分钟数与进度条。**单独一枚非精确闹钟**（2026-11-06），
+                // 不再挤进下面这枚精确闹钟——理由见 [scheduleLiveTick]。
                 livePlan = dueReminderPlan(semester, slots, courses, now, lead, overrides)
-                val liveTickAt = livePlan
+                liveTickAt = livePlan
                     ?.takeIf { ReminderNotifications.liveTickNeeded(context, repo, it) }
                     ?.let { nextMinuteBoundary(now) }
-                // 上课提醒现在有三个候选触发点（DESIGN §3.7）：提前量、上课时刻、
-                // 倒计时的分钟刻度，取最早的排闹钟；核对 Worker 会先补发窗口内的、再重排
+                // 上课提醒两个**精确**触发点（DESIGN §3.7）：提前量、上课时刻，取更早的排闹钟；
+                // 核对 Worker 会先补发窗口内的、再重排
                 listOfNotNull(
                     nextReminderPlan(
                         semester = semester,
@@ -126,12 +141,13 @@ object ClassReminder {
                         now = now,
                         overrides = overrides,
                     )?.startAt,
-                    liveTickAt,
                 ).minOrNull()
             } else null
             // 不在倒计时窗口里（提醒关 / 已上课 / 调休停课 / 换了课表）就别让岛上那张卡留着：
             // 设置页与数据变化只调这里、不调核对 Worker，撤卡不能只指望 Worker
             if (livePlan == null) ReminderNotifications.cancelLiveUpdate(context)
+            // 分钟刻度：窗口内才排，出窗口（含提醒关掉）就撤。空跑是一次 cancel。
+            scheduleLiveTick(manager, tickPending, liveTickAt)
             // 作业开关关 → 连库都不读（未完成列表要查 Room）；开着才求下一个作业提醒点
             val homeworkTriggerAt = if (repo.homeworkReminderEnabled.first()) {
                 nextHomeworkReminder(
@@ -182,6 +198,46 @@ object ClassReminder {
         Intent(context, ReminderAlarmReceiver::class.java),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
+
+    /** 分钟刻度的落点（与提醒闹钟分开的 PendingIntent，理由见 [scheduleLiveTick]）。 */
+    private fun liveTickPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+        context,
+        LIVE_TICK_REQUEST_CODE,
+        Intent(context, ReminderAlarmReceiver::class.java),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    /**
+     * 倒计时卡片的「分钟刻度」闹钟：**非精确**（`setAndAllowWhileIdle`），[at] 为 null 时撤销。
+     *
+     * 为什么与提醒闹钟分开（2026-11-06）：刻度只为刷新灵动岛芯片上的「剩 N 分」与进度条，
+     * 迟几十秒对用户没有任何意义；而旧实现把刻度塞进 `setAlarmClock`，代价有两笔——
+     * ① 提前量 10~30 分钟里每分钟排一枚系统级闹钟，状态栏那枚闹钟图标**常驻整个窗口**；
+     * ② 每响一次都要走一遍「Receiver → 一次性 Worker → 读库 → 重排」的核对链。
+     * 真正的提醒点（提前量 / 上课时刻）仍用 `setAlarmClock`，那两处才「不能迟」。
+     *
+     * **别把两者合回一枚闹钟**：`AlarmClockInfo` 只能表达一个触发时刻，合回去就得二选一
+     * ——要么刻度拖着精确闹钟一起变非精确（提醒迟到，正是 2026-09-23 改 setAlarmClock 的原因），
+     * 要么精确闹钟被刻度占满（状态栏图标常驻）。
+     *
+     * 已知代价：Doze 下 `setAndAllowWhileIdle` 被限制为每 9 分钟一次。那时屏幕是灭的，
+     * 芯片本来就看不见，刻度丢几次不影响任何可感知行为；出 Doze / 亮屏后下一轮核对
+     * （15 分钟 Worker 或任一数据变化）会立刻重排回逐分。
+     */
+    private fun scheduleLiveTick(
+        manager: AlarmManager,
+        pending: PendingIntent,
+        at: LocalDateTime?,
+    ) {
+        if (at == null) {
+            manager.cancel(pending)
+            return
+        }
+        val millis = at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        runCatching {
+            manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, millis, pending)
+        }.onFailure { Log.w(TAG, "schedule live tick failed", it) }
+    }
 
     /**
      * 下一个整分边界（严格晚于 [now]）。倒计时卡片的分钟刻度：芯片「剩 N 分」与
@@ -768,15 +824,25 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
 }
 
 /**
- * 重启与**应用更新**后闹钟全部丢失，各补排一次（上课/作业与选课提醒各自重排）。
+ * 重启、**应用更新**、以及**时区 / 系统时间变化**后各补排一次
+ * （上课/作业、选课、问渠、小组件边界闹钟各自重排）。
+ *
  * `MY_PACKAGE_REPLACED`（2026-10-02，体检第三批）：覆盖安装不走 BOOT_COMPLETED，
  * 而精确闹钟不跨安装存活——不加这条，用户每次升级后所有提醒静默失效到下一次冷启动。
+ *
+ * `TIMEZONE_CHANGED` / `TIME_SET`（2026-11-06）：所有提醒都是「墙上时钟 → 绝对时刻」
+ * 换算后钉在 AlarmManager 上（`atZone(systemDefault()).toInstant()`），时区一换
+ * （放假回家 / 出差）或用户手改系统时间，已排的闹钟就落在错误的墙上时刻，而系统
+ * 不会替我们重算。这两条广播只在**时间基准**变了时发，正常一天里一次都不会来。
+ * 补排本身是幂等的（全量重算 + `REPLACE`/`KEEP`），重复触发只是白跑一轮。
  */
 class ReminderBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_TIMEZONE_CHANGED,
+            Intent.ACTION_TIME_CHANGED,
             -> {
                 ClassReminder.enqueueCheck(context)
                 SelectionAlertReminder.enqueueCheck(context)
@@ -785,6 +851,9 @@ class ReminderBootReceiver : BroadcastReceiver() {
                 // 问渠预报名（2026-10-16）：精确闹钟不跨重启 / 安装存活，补排——
                 // 没排上时是撤闹钟的空跑；错过窗口的在补排里作废并通知
                 WenquPreregReminder.enqueueReschedule(context)
+                // 小组件边界闹钟同一条口径（2026-11-06）：它也是「墙上时刻 → 绝对时刻」，
+                // 时区一变就落在错误的时刻上。无实例时是廉价空跑（内部先查 getGlanceIds）。
+                TodayWidgetRefresh.enqueueRefresh(context)
             }
         }
     }

@@ -59,11 +59,40 @@ object EbikeAutoReturn {
          * （与免费提醒 `_v2` 同一踩坑，见 EbikeFreeRide.NotificationIds 的 KDoc）。
          */
         const val CHANNEL = "ebike_auto_return"
+
+        /**
+         * 加急任务**前台服务**那条通知的 id（2026-11-06，见 `EbikeAutoReturnReminder.enqueueNow`）。
+         *
+         * **必须与 [RESULT] 不同**：Android 11 及以下的加急任务由 WorkManager 用前台服务
+         * 实现，任务结束时会摘掉自己那条通知；同 id 会把刚发出去的成功 / 失败结果一起撤掉
+         * ——用户刚被告知「已自动还车」，一秒后那条通知凭空消失。
+         */
+        const val FOREGROUND = 1015
+
+        /**
+         * 前台服务那条通知的 channel（LOW、无声、不震动）。
+         *
+         * **不能复用 [CHANNEL]**：那个是 HIGH + 震动（结果通知要能叫醒人），而这一条只在
+         * 「任务正在跑」的几秒里挂着——每骑一次车震一下纯属骚扰。
+         */
+        const val FOREGROUND_CHANNEL = "ebike_auto_return_foreground"
     }
 
     /** 结果通知标题。 */
     const val TITLE_SUCCESS = "已自动还车"
     const val TITLE_FAILURE = "自动还车失败"
+
+    /**
+     * 过窗通知标题：任务被系统推迟到迟到窗口之外，这一轮**根本没执行**。
+     * 与 [TITLE_FAILURE] 分开——那条说的是"尝试过、失败了"，这条是"没来得及跑"。
+     */
+    const val TITLE_MISSED = "自动还车没来得及执行"
+
+    /**
+     * 过窗通知文案。必须写清「订单可能仍在计费」与「手动还车」两件事：
+     * 用户对自动还车的预期是"什么都不用做"，静默失败时他只会看到账单变多。
+     */
+    const val MISSED_TEXT = "已错过免费时段的自动还车，订单可能仍在计费，请在「骑行」页手动还车"
 
     /** 未登录（凭证失效）时的失败文案：重试救不了，只能让用户手动处理。 */
     const val NOT_LOGGED_IN_TEXT = "快趣登录已失效，请在「骑行」页重新登录后手动还车"
@@ -141,16 +170,43 @@ object EbikeAutoReturn {
     }
 
     /**
+     * 本轮自动还车在某一时刻的走向。**必须三分，不能只留"该不该跑"**：
+     * 「还没到点」与「已过窗」都是 `isDue == false`，但前者该静默、后者必须通知用户
+     * ——迟到窗口只有 [EbikeFreeRide.END_WINDOW_MS]，任务被 Doze 推迟过它时这一轮
+     * 就永远不跑了，用户却还在被计费（audit-2026-11-06 E1）。
+     */
+    enum class Outcome {
+        /** 还没到触发点（或没有在案计时）：这次不该跑，静默。 */
+        NOT_YET,
+
+        /** 落在「触发点」到「免费结束 + 迟到窗口」之间：该执行。 */
+        DUE,
+
+        /** 已越过迟到窗口：这一轮不会执行了，订单可能已在计费，必须发通知。 */
+        MISSED,
+    }
+
+    /**
      * 该不该在 [nowMillis] 执行本轮自动还车：已到触发点，且没越过**迟到窗口**
      * （免费结束后 [EbikeFreeRide.END_WINDOW_MS]，与免费提醒的补发窗口同口径）。
      *
      * 触发点恒早于免费结束；迟到窗口只兜系统延迟——闹钟 / 任务晚到十几秒仍要还车
      * （否则这一轮白开），拖过窗口就不再追（那时订单已经计费，交给失败通知与手动处理）。
      */
-    fun isDue(startAtMillis: Long, leadSeconds: Int, nowMillis: Long): Boolean {
-        if (startAtMillis <= 0L) return false
-        return nowMillis >= triggerAtMillis(startAtMillis, leadSeconds) &&
-            nowMillis < EbikeFreeRide.freeEndMillis(startAtMillis) + EbikeFreeRide.END_WINDOW_MS
+    fun isDue(startAtMillis: Long, leadSeconds: Int, nowMillis: Long): Boolean =
+        outcomeOf(startAtMillis, leadSeconds, nowMillis) == Outcome.DUE
+
+    /**
+     * [isDue] 的三分版：把「还没到点」与「已过窗」分开，供调用方决定要不要出声。
+     *
+     * [startAtMillis] ≤ 0（没有在案计时）归 [Outcome.NOT_YET]：没有这一轮骑行，
+     * 不能因为"0 这个时刻早就过窗了"就给用户发一条假的"没来得及还车"。
+     */
+    fun outcomeOf(startAtMillis: Long, leadSeconds: Int, nowMillis: Long): Outcome {
+        if (startAtMillis <= 0L) return Outcome.NOT_YET
+        if (nowMillis < triggerAtMillis(startAtMillis, leadSeconds)) return Outcome.NOT_YET
+        val windowEnd = EbikeFreeRide.freeEndMillis(startAtMillis) + EbikeFreeRide.END_WINDOW_MS
+        return if (nowMillis < windowEnd) Outcome.DUE else Outcome.MISSED
     }
 
     /**

@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.ui.ebike
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -68,6 +69,63 @@ internal object EbikeAutoReturnNotifier {
     /** 某一次尝试失败（原因 + 是否重试，文案由 [EbikeAutoReturn.failureText] 出）。 */
     fun postFailure(context: Context, text: String, strongVibration: Boolean): Boolean =
         post(context, EbikeAutoReturn.TITLE_FAILURE, text, strongVibration)
+
+    /**
+     * 过窗：任务被推迟到迟到窗口之外，这一轮**一次都没尝试**。
+     *
+     * 复用 [EbikeAutoReturn.NotificationIds.RESULT] 同一个 id 与 channel：它说的仍是
+     * "这一轮自动还车的结论"，同 id 覆盖能让上一轮残留的结果通知被顶掉，通知栏不会多出
+     * 一摞条目。**别为此新建 channel**——channel 建出来后重要性改不动（见类 KDoc）。
+     */
+    fun postMissed(context: Context, strongVibration: Boolean): Boolean =
+        post(context, EbikeAutoReturn.TITLE_MISSED, EbikeAutoReturn.MISSED_TEXT, strongVibration)
+
+    /**
+     * 加急任务的前台服务通知（2026-11-06，见 `EbikeAutoReturnReminder.enqueueNow`）。
+     *
+     * **为什么必须有这一条**：`setExpedited` 在 Android 11 及以下是**前台服务**实现的，
+     * WorkManager 会调 `CoroutineWorker.getForegroundInfo()` 来拿这条通知；拿不到就直接
+     * 以 `IllegalStateException("... but did not provide ForegroundInfo")` 让这次工作失败
+     * ——自动还车在那些机型上会**彻底不跑**，比不加急还糟（audit-2026-11-06 E1 的修复
+     * 如果只加 `setExpedited` 就是这个后果）。Android 12+ 走 JobScheduler 的加急通道，
+     * 不读这个通知。
+     *
+     * id 与结果通知**不同**（见 [EbikeAutoReturn.NotificationIds.FOREGROUND]）：
+     * 任务结束时 WorkManager 会摘掉这一条，同 id 会把刚发出去的结果一起撤掉。
+     */
+    fun foregroundNotification(context: Context): Notification {
+        ensureForegroundChannel(context)
+        return NotificationCompat.Builder(
+            context,
+            EbikeAutoReturn.NotificationIds.FOREGROUND_CHANNEL,
+        )
+            .setSmallIcon(R.drawable.ic_stat_bell)
+            .setContentTitle("正在自动还车")
+            .setContentText("正在结束订单，稍等几秒")
+            .setOngoing(true)
+            .setShowWhen(false)
+            .setContentIntent(contentIntent(context))
+            .build()
+    }
+
+    /**
+     * 前台服务那条 channel（LOW、无声、不震动；幂等）。
+     *
+     * 与结果 channel 分开的理由见 [EbikeAutoReturn.NotificationIds.FOREGROUND_CHANNEL] 的
+     * KDoc：结果通知要响要震，这条只挂几秒，**别合并**。
+     */
+    fun ensureForegroundChannel(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val id = EbikeAutoReturn.NotificationIds.FOREGROUND_CHANNEL
+        runCatching {
+            if (manager.getNotificationChannel(id) == null) {
+                manager.createNotificationChannel(
+                    NotificationChannel(id, "自动还车执行中", NotificationManager.IMPORTANCE_LOW)
+                        .apply { description = "自动还车那几秒的进度提示" },
+                )
+            }
+        }.onFailure { Log.w(TAG, "ensureForegroundChannel failed", it) }
+    }
 
     /** 清掉结果通知（新一轮骑行开始时：上一轮的结果已经过期）。 */
     fun cancel(context: Context) {
