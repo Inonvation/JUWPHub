@@ -89,6 +89,17 @@ object WenquRules {
     const val INDEX_MAX_AGE_MS: Long = 24 * 60 * 60 * 1000L
 
     /**
+     * 「快照不完整」的**重抓冷却**（毫秒）。
+     *
+     * 为什么需要它：2026-11-06 修好锁内二次判定后，`cacheComplete = false` 会让每次进页都整份重抓
+     * （≤8s / ≤15 个请求）。而快照不完整有两种成因——平台条目数长期超过
+     * [ACTIVITY_INDEX_MAX_ITEMS]，或那一次抓取撞上 [ACTIVITY_INDEX_BUDGET_MS] 的时间预算。
+     * 两种都不是「下一次就能抓全」，于是退化成每次进页白打一轮。加冷却后：
+     * 30 分钟内先用手上这份（不完整的）快照，30 分钟后再试一次自愈。
+     */
+    const val INDEX_INCOMPLETE_RETRY_MS: Long = 30 * 60 * 1000L
+
+    /**
      * 搜索输入的防抖窗口（毫秒）。有本地索引时搜索是纯内存过滤，
      * 所以「即输即搜」不会打服务端；这个窗口只是别让每次按键都重排整个列表。
      */
@@ -421,8 +432,8 @@ object WenquRules {
     /**
      * 进页（或下拉刷新）时快照该走哪条路。
      *
-     * - [Rebuild]：没有快照 / 上次**整份重抓**超过 [INDEX_MAX_AGE_MS] / 快照不完整
-     *   → 整份重抓（几秒，页面给进度提示）；
+     * - [Rebuild]：没有快照 / 上次**整份重抓**超过 [INDEX_MAX_AGE_MS] / 快照不完整且距上次整份
+     *   重抓已过 [INDEX_INCOMPLETE_RETRY_MS]（冷却见该常量）→ 整份重抓（几秒，页面给进度提示）；
      * - [SyncNewest]：只抓第一页（[INDEX_SYNC_PAGE_SIZE] 条）按 id 合并——新活动一定在
      *   列表开头，所以增量够用；[force]（下拉刷新）跳过间隔闸门，用户动作立即生效；
      * - [UseCache]：距上次同步不足 [INDEX_SYNC_INTERVAL_MS] → **一个请求都不发**。
@@ -438,12 +449,40 @@ object WenquRules {
         now: Long,
         force: Boolean,
     ): IndexLoad = when {
-        !hasCache || !cacheComplete -> IndexLoad.Rebuild
+        !hasCache -> IndexLoad.Rebuild
+        // 不完整快照要自愈，但**不能每次进页都重抓**（见 INDEX_INCOMPLETE_RETRY_MS）
+        !cacheComplete && now - fullCrawledAt >= INDEX_INCOMPLETE_RETRY_MS -> IndexLoad.Rebuild
         now - fullCrawledAt >= INDEX_MAX_AGE_MS -> IndexLoad.Rebuild
         force -> IndexLoad.SyncNewest
         now - syncedAt >= INDEX_SYNC_INTERVAL_MS -> IndexLoad.SyncNewest
         else -> IndexLoad.UseCache
     }
+
+    /**
+     * **锁内二次判定**：`WenquRepository.activityIndex` 拿到 [IndexLoad.Rebuild] 后要进互斥锁，
+     * 等锁期间另一个调用可能已经把快照抓好了——所以进锁后必须用**重新读到的**快照再问一次
+     * [indexLoadPlan]，而不是「有缓存就用缓存」。
+     *
+     * 2026-11-06 修的就是后者：上一版锁内写 `latest != null && !force`，于是 [IndexLoad.Rebuild]
+     * 的三个理由里，「快照不完整」与「整份重抓超过 [INDEX_MAX_AGE_MS]」在**已有缓存**时永远
+     * 走不到重建——24 小时漂移封顶与不完整快照自愈同时失效；而 `syncNewest` 每次都会把缓存
+     * 重新 `put` 一遍（TTL 随之续命），所以**越活跃的用户越不会重建**。
+     *
+     * 两个方向都不能改：
+     * - **不能退回「有缓存就复用」**（上面那条事故）；
+     * - **不能删掉双检直接重建**——并发下两个入口会各整份抓一遍，第三方接口被白打两次。
+     *
+     * @param hasCache 锁内重新读到的快照是否存在；false 时一律重建（与 [indexLoadPlan] 同口径）
+     */
+    fun indexReuseUnderLock(
+        hasCache: Boolean,
+        cacheComplete: Boolean,
+        fullCrawledAt: Long,
+        syncedAt: Long,
+        now: Long,
+        force: Boolean,
+    ): Boolean = hasCache &&
+        indexLoadPlan(hasCache, cacheComplete, fullCrawledAt, syncedAt, now, force) != IndexLoad.Rebuild
 
     /**
      * 用**不可变的时间字段**校正缓存里的状态。
@@ -1066,6 +1105,21 @@ object WenquRules {
     /** 「已报名」类拒绝 = 实际已经报上了（先前某发已生效，或用户手动报了）。 */
     fun preregRejectIsApplied(kind: PreregRejectKind): Boolean =
         kind == PreregRejectKind.AlreadyApplied
+
+    /**
+     * 平台把「这条**已经报上了**」当成**失败话术**回时的判据（实测原文
+     * `已报名该活动，无法重复报名`）。
+     *
+     * 手动报名（`WenquRepository.applyActivity`）用它把这类拒绝改判成**成功**：
+     * 用户的目标状态（已报名）已经成立，报成失败只会让人以为没抢到、回头反复点，
+     * 而预报名那条路早就是这么判的（[preregRejectIsApplied]）——同一件事不能两套口径。
+     *
+     * 话术表**与预报名共用** [classifyPreregReject]，不要另写一份子串表：平台话术一变，
+     * 两处必须同时改，一张表才不会漂。**只认「已报名」这一族**——「名额已满 / 已下架 /
+     * 报名尚未开始」等仍是失败（那几种情况下目标状态并没有达成，说成功就是骗人）。
+     */
+    fun isAlreadyAppliedMessage(msg: String?): Boolean =
+        preregRejectIsApplied(classifyPreregReject(msg))
 
     /**
      * 业务拒绝之后要不要补一次只读核对（`volunteer/detail/{id}` 的 `apply` 段）。

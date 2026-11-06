@@ -107,7 +107,8 @@ class SelectionSync(
                 if (index > 0) delay(AutoSyncRules.interRequestDelayMs())
                 fetched[term] = fetchResults(term)
             }
-            fetched.forEach { (term, rows) -> repo.replaceTerm(term, rows) }
+            // 整批一个事务：抓 2 个学期时不能留下「第 1 个已换、第 2 个还是旧的」半套数据
+            repo.replaceTerms(fetched.toList())
             prefs.setSelectionSyncMillis(nowMillis())
             return Result.Updated(terms = fetched.keys.toList(), rowCount = fetched.values.sumOf { it.size })
         } catch (e: CancellationException) {

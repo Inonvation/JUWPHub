@@ -505,13 +505,21 @@ class WenquRepository(
                 }
 
                 WenquRules.IndexLoad.Rebuild -> indexMutex.withLock {
-                    // 双检：等锁期间另一个调用可能已经抓好了
+                    // 锁内二次判定：等锁期间另一个调用可能已经抓好了，用**重新读到的**快照
+                    // 再问一次 indexLoadPlan（纯函数）。上一版写「有缓存且非下拉刷新就复用」，
+                    // 把 Rebuild 的「快照不完整 / 整份重抓超 24 小时」两个理由整个吞掉——
+                    // 24 小时漂移封顶与不完整快照自愈都失效（2026-11-06 修，判据见
+                    // WenquRules.indexReuseUnderLock 的 KDoc）。
                     val latest = indexCache.get(INDEX_KEY, now())
-                    if (latest != null && !force) {
-                        latest
-                    } else {
-                        buildIndex() ?: latest
-                    }
+                    val reuse = WenquRules.indexReuseUnderLock(
+                        hasCache = latest != null,
+                        cacheComplete = latest?.complete == true,
+                        fullCrawledAt = latest?.fullCrawledAt ?: 0L,
+                        syncedAt = latest?.syncedAt ?: 0L,
+                        now = now(),
+                        force = force,
+                    )
+                    if (reuse) latest else (buildIndex() ?: latest)
                 }
             }
         }
@@ -691,6 +699,12 @@ class WenquRepository(
      * 补一发只读的详情核对（`apply` 段）——报上了就按成功收尾；**写请求本身不重发**。
      * 平台业务话术的拒绝（`requireSuccess` 抛的）与会话失效确定没生效，不核对。
      *
+     * **「已经报上了」不是失败**（2026-11-06）：平台把这类情况也用失败话术回
+     * （实测 `已报名该活动，无法重复报名`）。超时后重试、或列表陈旧时重复点击都会撞上它，
+     * 而目标状态（已报名）其实已经成立——按失败报会让用户以为没抢到、回头反复点。
+     * 判据走 [WenquRules.isAlreadyAppliedMessage]（与预报名共用一张话术表）；
+     * 名额已满 / 已下架 / 尚未开始等仍照原样抛给 UI。
+     *
      * 成功后做**本地乐观更新**（索引里那条置「已报名」、名额 -1）并作废「我的记录」缓存；
      * 权威值等下一次同步（30 分钟闸门 / 下拉刷新 / 重进页）回来对齐。
      */
@@ -705,6 +719,14 @@ class WenquRepository(
                 return@withContext
             }
             throw e
+        }
+        // 「已报名」这一族拒绝 = 目标状态已成立，按成功收尾（见 KDoc）。
+        // 只在**本来会抛**的 envelope 上改判（status != 200），不碰正常成功路径。
+        if (envelope.status != WenquEnvelope.STATUS_OK &&
+            WenquRules.isAlreadyAppliedMessage(envelope.msg)
+        ) {
+            patchAfterApply(activityId)
+            return@withContext
         }
         envelope.requireSuccess()
         patchAfterApply(activityId)

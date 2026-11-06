@@ -132,7 +132,9 @@ class ScoreSync(
         val changes = ScoreChangeDetector.detect(old, records)
 
         val grouped = records.groupBy { it.term }
-        grouped.forEach { (term, list) -> repo.replaceTerm(term, list) }
+        // 多学期必须**一个事务写完**（2026-11-06 审计 J3）：逐学期各起一个事务时，
+        // 中途失败会留下「前几个学期已替换、后面的没动」的半套状态，而界面只报失败。
+        repo.replaceTerms(grouped.toList())
         prefs.setScoreSyncDate(today().toString())
         if (alertOn) prefs.setScoreAlertCheckMillis(nowMillis())
         // 收件箱留痕（DESIGN §4.38）：首导是基线不是「变动」，与通知层同一条豁免。

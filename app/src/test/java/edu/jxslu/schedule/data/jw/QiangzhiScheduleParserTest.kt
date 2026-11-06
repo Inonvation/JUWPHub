@@ -57,6 +57,24 @@ class QiangzhiScheduleParserTest {
         assertEquals("唐刚", c.teacher)
     }
 
+    /**
+     * 节次解析不出来必须整条丢弃（2026-11-06 审计 J2）：旧实现兜底成第 1 节，模板一改版
+     * 整张课表会堆到第 1 节写库、还进调课基线，之后把真课表误报成「教务删除」。
+     * 周次坏会丢课，节次坏也不能继续造数据。
+     */
+    @Test
+    fun toCourseWithoutSectionsIsDropped() {
+        assertNull(
+            QiangzhiScheduleParser.toCourse(
+                QiangzhiScheduleParser.RawItem(
+                    name = "液压与气压传动A",
+                    detail = "老师:唐刚;时间:7-11周;地点:教学南大楼(南B206)",
+                    day = 1,
+                ),
+            ),
+        )
+    }
+
     @Test
     fun decodeExtractJson() {
         val json = """

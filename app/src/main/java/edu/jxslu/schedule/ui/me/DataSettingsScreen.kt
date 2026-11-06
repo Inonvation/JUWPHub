@@ -39,8 +39,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.ImportTargetDialogHost
 import edu.jxslu.schedule.ui.common.SettingsSection
+import edu.jxslu.schedule.ui.common.importPreviewNote
 import edu.jxslu.schedule.ui.common.showNotice
 
 /**
@@ -116,7 +118,10 @@ fun DataSettingsScreen(
         ) {
             SettingsSection(
                 title = "导入 / 导出",
-                subtitle = "导出当前课表「${state.timetableName.ifBlank { "—" }}」，成绩随文件一起备份；导入时整体替换",
+                // 笔记/作业是用户自写数据，必须说清它们跟着备份走；图片附件不并进 JSON，
+                // 不提前讲清楚，换机后用户会以为「备份坏了」（2026-11-06 审计 D2）。
+                subtitle = "导出当前课表「${state.timetableName.ifBlank { "—" }}」，" +
+                    "成绩、笔记、作业随文件一起备份（笔记里的图片不随备份）；导入时整体替换",
             ) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
@@ -164,44 +169,11 @@ fun DataSettingsScreen(
             courses = confirm.preview.courses,
             title = "导入 JSON 课表",
             term = confirm.preview.term,
-            // 文件带成绩段/学期作息段时必须让用户知情：整体替换、不可撤销（DESIGN §4.3）
-            note = buildString {
-                confirm.preview.scores.takeIf { it.isNotEmpty() }?.let { scores ->
-                    append(
-                        "${scores.map { it.term }.distinct().size} 个学期共 ${scores.size} 条成绩，" +
-                            "导入时会整体替换现有成绩。",
-                    )
-                }
-                if (confirm.preview.scholarCourseCount > 0) {
-                    if (isNotEmpty()) append(" ")
-                    append(
-                        "另有 ${confirm.preview.scholarCourseCount} 门课程的学业完成情况，" +
-                            "导入时会整体替换。",
-                    )
-                }
-                if (confirm.preview.curriculumCourseCount > 0) {
-                    if (isNotEmpty()) append(" ")
-                    append(
-                        "另有 ${confirm.preview.curriculumCourseCount} 门培养方案课程设置，" +
-                            "导入时会整体替换。",
-                    )
-                }
-                if (confirm.preview.textbookCount > 0) {
-                    if (isNotEmpty()) append(" ")
-                    append(
-                        "另有 ${confirm.preview.textbookCount} 本教材，" +
-                            "导入时会整体替换现有教材记录。",
-                    )
-                }
-                val configParts = buildList {
-                    if (confirm.preview.semester != null) add("学期配置")
-                    if (confirm.preview.slotCount > 0) add("作息 ${confirm.preview.slotCount} 节")
-                }
-                if (configParts.isNotEmpty()) {
-                    if (isNotEmpty()) append(" ")
-                    append("并将恢复目标课表的${configParts.joinToString("与")}。")
-                }
-            },
+            // 文件带成绩段/学期作息段时必须让用户知情（DESIGN §4.3）。
+            // 文案收口在 `ui/common/BackupImportText.kt`：两个导入入口共用一份，且必须按
+            // 「覆盖 / 合并」两种模式分别说清后果（合并导入**不动**笔记与作业）——
+            // 原先这里手拼的文案说合并模式也「整体替换笔记」，与行为相反（2026-11-06 复核）。
+            note = importPreviewNote(confirm.preview),
             defaultMerge = false,
             repo = Graph.repository(context),
             onConfirm = { target, merge -> viewModel.confirmImport(target, merge) },
@@ -214,6 +186,8 @@ fun DataSettingsScreen(
             onDismissRequest = { showClearConfirm = false },
             title = { Text("确认清空全部课程？") },
             text = {
+                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
+                DialogWindowFadeEffect()
                 Text(
                     "将删除当前课表「${state.timetableName.ifBlank { "—" }}」中的全部课程。\n" +
                         "清空后提示条消失前可撤销；请重新从教务导入或从 JSON 恢复。",

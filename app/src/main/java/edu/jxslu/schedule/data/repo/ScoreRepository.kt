@@ -33,12 +33,30 @@ class ScoreRepository(private val db: JuwDatabase) {
     /** 全量快照（变更检测在写库前比对用，DESIGN §4.33）。 */
     suspend fun getAll(): List<ScoreRecord> = dao.getAll().map { it.toDomain() }
 
-    /** 按学期替换：该学期先删后插，importedAt 统一取本次导入时间。 */
-    suspend fun replaceTerm(term: String, records: List<ScoreRecord>) {
+    /**
+     * 按学期批量替换，**整批一个事务**（2026-11-06 审计 J3）。
+     *
+     * 为什么不能让调用方自己逐学期各开一个事务：那样导 4 个学期时第 3 个失败，前 2 个已经
+     * 提交、后 2 个没有——用户看到的是「新旧混排」的成绩列表，而失败提示无法说清哪几个学期
+     * 已更新，重试也无从下手。整批一个事务 = 要么全换、要么一行都不动，失败重试一次即可，
+     * 不留半套数据。
+     *
+     * 一次导入的所有行 `importedAt` 取同一个时刻：便于按导入批次判断新旧。
+     * 空 [byTerm] 直接返回——不开一个什么都不做的事务。
+     *
+     * 这是成绩写入的**唯一**入口（单学期替换也走它）：留一个 `replaceTerm(term, rows)` 包装
+     * 只会让人继续逐学期调用，把上面的半套数据问题带回来。
+     */
+    suspend fun replaceTerms(byTerm: List<Pair<String, List<ScoreRecord>>>) {
+        if (byTerm.isEmpty()) return
         val now = System.currentTimeMillis()
         db.withTransaction {
-            dao.deleteForTerm(term)
-            dao.insertAll(records.map { ScoreEntity.fromDomain(it.copy(term = term), now) })
+            byTerm.forEach { (term, records) ->
+                dao.deleteForTerm(term)
+                if (records.isNotEmpty()) {
+                    dao.insertAll(records.map { ScoreEntity.fromDomain(it.copy(term = term), now) })
+                }
+            }
         }
     }
 

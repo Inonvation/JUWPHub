@@ -5,7 +5,9 @@ import edu.jxslu.schedule.data.DefaultData
 import edu.jxslu.schedule.data.local.CourseEntity
 import edu.jxslu.schedule.data.local.CurriculumCourseEntity
 import edu.jxslu.schedule.data.local.DateOverrideEntity
+import edu.jxslu.schedule.data.local.HomeworkEntity
 import edu.jxslu.schedule.data.local.JuwDatabase
+import edu.jxslu.schedule.data.local.NoteEntity
 import edu.jxslu.schedule.data.local.ScoreEntity
 import edu.jxslu.schedule.data.local.ScholarCourseEntity
 import edu.jxslu.schedule.data.local.ScholarGroupEntity
@@ -1464,11 +1466,20 @@ class ScheduleRepository(
     }
 
     // ------------------------------------------------------------------
-    // JSON 导入导出（导出 = 当前课表；格式不变，拾光互导兼容）
+    // JSON 导入导出（导出 = 当前课表；`courses` 段格式不变，拾光互导兼容）
+    //
+    // 成绩/学业/培养方案/教材/笔记/作业/学期/作息/日期覆盖都是**追加的旁路段**：
+    // 读侧一律 `ignoreUnknownKeys` + 全字段默认值，所以「新读旧」「旧读新」都不破。
+    // 但对方（拾光）的解码配置不归本项目管——它若严格解析，看到 `notes` 这类
+    // 未知键会不会报错只能在它那一侧确认；`courses` 段的键一个都没动。
     // ------------------------------------------------------------------
 
     suspend fun exportJson(timetableId: Long? = null): String {
-        val courses = getTimetableCourses(timetableId ?: currentTimetableId.first()).map {
+        // 目标课表只在开头解析一次：currentTimetableId 是 DataStore + Room 的合流，读两次之间
+        // 用户切了课表的话，会出现「课程段来自 A 表、学期/作息/日期覆盖段来自 B 表」的备份——
+        // 一份自相矛盾的文件，导入端无从判断（2026-11-06 复核）
+        val ttId = timetableId ?: currentTimetableId.first()
+        val courses = getTimetableCourses(ttId).map {
             CourseJson(
                 id = it.id,
                 name = it.name,
@@ -1496,13 +1507,22 @@ class ScheduleRepository(
         val curriculumCourses = db.curriculumDao().getCourses().map { it.toDomain().toBackupJson() }
         // 教材（DESIGN §4.31）：同样全局归属学生，全学期一起带走
         val textbooks = db.textbookDao().getAll().map { it.toDomain().toBackupJson() }
+        // 笔记 / 作业（2026-11-06 审计 D2）：**用户自写数据，本机没有第二份**，必须随备份走。
+        // 两者都是全局归属（挂课程名、不带 timetableId），所以不分课表全量带走。
+        // 图片附件不并进 JSON：正文里的 `img:` 引用保留，二进制留在 notes_img/（见 CourseExport 的注释）。
+        val notes = db.noteDao().observeAll().first().map { it.toDomain().toBackupJson() }
+        val homework = db.homeworkDao().observeAll().first().map { it.toDomain().toBackupJson() }
         // 学期配置与作息按课表（DESIGN §4.3）：导出的就是这份课表的时间口径，恢复时跟课表走
-        val ttId = timetableId ?: currentTimetableId.first()
         val semester = db.semesterConfigDao().getForTimetable(ttId)?.toDomain()?.let {
             SemesterBackupJson(it.startDate, it.totalWeeks, it.firstDayOfWeek)
         }
         val slots = db.timeSlotDao().getForTimetable(ttId).map {
             TimeSlotBackupJson(it.number, it.startTime, it.endTime)
+        }
+        // 日期覆盖同理按课表（DESIGN §4.40）：`getForTimetable` 的 `ORDER BY id ASC` 就是
+        // 「后写的覆盖前面的」那个顺序，备份列表保序、导入按序插 → 同一槽位的胜负不变。
+        val overrides = db.dateOverrideDao().getForTimetable(ttId).map {
+            it.toDomain().toBackupJson()
         }
         return json.encodeToString(
             CourseExport.serializer(),
@@ -1513,8 +1533,11 @@ class ScheduleRepository(
                 scholarCourses = scholarCourses,
                 curriculumCourses = curriculumCourses,
                 textbooks = textbooks,
+                notes = notes,
+                homework = homework,
                 semester = semester,
                 timeSlots = slots,
+                dateOverrides = overrides,
             ),
         )
     }
@@ -1539,6 +1562,17 @@ class ScheduleRepository(
      * 导入 JSON 到指定课表（null = 当前课表）。
      * 目标选择与覆盖/合并由 UI 弹窗强制确定（DESIGN §4.9），本方法只负责校验与写库。
      * 文件携带成绩段时**整体替换**现有成绩（先清后插，DESIGN §4.3）；空段/缺段不动成绩。
+     *
+     * **整个写库是一个事务**（2026-11-06 审计 D3）。此前是 6 段各自 `withTransaction`，
+     * 中途失败（磁盘满 / 进程被杀 / 课程写入抛异常）会留下「成绩已换、课表没换」的半套
+     * 状态，而调用方只看到「导入失败」。现在任一段抛异常 = 全部回滚，UI 的失败提示与
+     * 实际状态一致。事务里**只有 DAO 调用**：网络与文件 IO 都不进来——
+     * `refreshBaselineFromDb` 要写 `filesDir/schedule_baseline.json`，所以它留在事务外，
+     * 且必须排在课程写完之后（否则基线存的是导入前的旧课表，见函数尾部注释）。
+     *
+     * 空段口径（成绩/学业/培养方案/教材/笔记/作业/日期覆盖同一套）：段里有数据才动，
+     * 空列表 = 这份文件不管这件事。理由见 `validateBackup` 的 KDoc——旧备份里没有
+     * 笔记/作业/覆盖这三段，若空段也清库，「恢复备份」会把本机新写的东西删光。
      */
     suspend fun importJson(text: String, merge: Boolean, timetableId: Long? = null): ImportResult {
         val export = try {
@@ -1551,129 +1585,160 @@ class ScheduleRepository(
             is BackupCheck.Ok -> check.value
         }
         val domain = validated.courses
-        val scoreRecords = validated.scores
-        val scholarGroups = validated.scholarGroups
-        val scholarCourses = validated.scholarCourses
-        val backupCurriculum = validated.curriculum
-        val backupTextbooks = validated.textbooks
-        val backupSemester = validated.semester
-        val backupSlots = validated.slots
-        val restoredScores = if (scoreRecords.isEmpty()) {
-            0
-        } else {
-            db.withTransaction {
+        // 目标课表与「要删的旧行 id」都必须在事务外取：
+        // - `currentTimetableId` 是 Flow（DataStore + Room 合流），在事务里收集会换线程；
+        // - 笔记/作业的 DAO 只有单条 delete/upsert（没有 deleteAll/insertAll，见 Daos.kt），
+        //   整体替换要先读出本机现有行 id。Room 的 Flow 在事务里 `first()` 会落到别的线程，
+        //   有死锁风险——所以先在外面读，进事务只做删/插。
+        val ttId = timetableId ?: currentTimetableId.first()
+        // `merge` 也要在这里短路：合并导入根本不碰笔记/作业（事务里那两段带 `&& !merge`），
+        // 只按「段非空」判断会把全表笔记/作业正文读进内存再丢掉（2026-11-06 交叉复核）。
+        val staleNoteIds =
+            if (merge || validated.notes.isEmpty()) {
+                emptyList()
+            } else {
+                db.noteDao().observeAll().first().map { it.id }
+            }
+        val staleHomeworkIds =
+            if (merge || validated.homework.isEmpty()) {
+                emptyList()
+            } else {
+                db.homeworkDao().observeAll().first().map { it.id }
+            }
+
+        var restoredScores = 0
+        var restoredScholar = 0
+        var restoredCurriculum = 0
+        var restoredTextbooks = 0
+        var restoredNotes = 0
+        var restoredHomework = 0
+        var restoredSemester = false
+        var restoredSlots = 0
+        var restoredOverrides = 0
+        var addedByMerge = 0
+
+        db.withTransaction {
+            // ---- 成绩（DESIGN §4.15）：按学期整表替换 ----
+            if (validated.scores.isNotEmpty()) {
                 db.scoreDao().deleteAll()
                 db.scoreDao().insertAll(
-                    scoreRecords.map { ScoreEntity.fromDomain(it, System.currentTimeMillis()) },
+                    validated.scores.map { ScoreEntity.fromDomain(it, System.currentTimeMillis()) },
                 )
+                restoredScores = validated.scores.size
             }
-            scoreRecords.size
-        }
-        // 学业完成情况（DESIGN §4.29）：与成绩同一口径——带数据才整体替换，空段不动现有数据
-        val restoredScholar = if (scholarGroups.isEmpty() && scholarCourses.isEmpty()) {
-            0
-        } else {
-            db.withTransaction {
+            // ---- 学业完成情况（DESIGN §4.29）----
+            if (validated.scholarGroups.isNotEmpty() || validated.scholarCourses.isNotEmpty()) {
                 db.scholarProgressDao().deleteGroups()
                 db.scholarProgressDao().deleteCourses()
                 db.scholarProgressDao().insertGroups(
-                    scholarGroups.map { ScholarGroupEntity.fromDomain(it) },
+                    validated.scholarGroups.map { ScholarGroupEntity.fromDomain(it) },
                 )
                 db.scholarProgressDao().insertCourses(
-                    scholarCourses.map { ScholarCourseEntity.fromDomain(it) },
+                    validated.scholarCourses.map { ScholarCourseEntity.fromDomain(it) },
                 )
+                restoredScholar = validated.scholarCourses.size
             }
-            scholarCourses.size
-        }
-        // 培养方案（DESIGN §4.41）：与学业同一口径——带数据才整体替换，空段不动现有数据
-        val restoredCurriculum = if (backupCurriculum.isEmpty()) {
-            0
-        } else {
-            db.withTransaction {
+            // ---- 培养方案（DESIGN §4.41）----
+            if (validated.curriculum.isNotEmpty()) {
                 db.curriculumDao().deleteAll()
                 db.curriculumDao().insertAll(
-                    backupCurriculum.map { CurriculumCourseEntity.fromDomain(it) },
+                    validated.curriculum.map { CurriculumCourseEntity.fromDomain(it) },
                 )
+                restoredCurriculum = validated.curriculum.size
             }
-            backupCurriculum.size
-        }
-        // 教材（DESIGN §4.31）：与成绩同一口径——带数据才整体替换，空段不动现有数据
-        val restoredTextbooks = if (backupTextbooks.isEmpty()) {
-            0
-        } else {
-            db.withTransaction {
+            // ---- 教材（DESIGN §4.31）----
+            if (validated.textbooks.isNotEmpty()) {
                 db.textbookDao().deleteAll()
                 db.textbookDao().insertAll(
-                    backupTextbooks.map { TextbookEntity.fromDomain(it) },
+                    validated.textbooks.map { TextbookEntity.fromDomain(it) },
                 )
+                restoredTextbooks = validated.textbooks.size
             }
-            backupTextbooks.size
-        }
-        // 配置恢复到**目标课表**（与课程同落点）；恢复作息视为用户数据，置位防结构性迁移覆盖
-        val ttId = timetableId ?: currentTimetableId.first()
-        var restoredSemester = false
-        var restoredSlots = 0
-        if (backupSemester != null || backupSlots.isNotEmpty()) {
-            db.withTransaction {
-                if (backupSemester != null) {
-                    db.semesterConfigDao().upsert(SemesterConfigEntity.fromDomain(ttId, backupSemester))
-                    restoredSemester = true
+            // ---- 笔记 / 作业（2026-11-06 审计 D2）：用户自写数据，带数据才整体替换 ----
+            // 归属键是课程名（不带 timetableId），所以这里是**全库**替换，不分课表——
+            // 与成绩同一口径；空段不动，旧备份因此不会删掉本机新写的笔记。
+            // **合并导入不碰这两段**：合并的语义是「把文件里的课并进来，别动我现有的东西」，
+            // 拿备份里的笔记去替换本机笔记属于静默毁数据；要恢复笔记就用覆盖导入。
+            if (validated.notes.isNotEmpty() && !merge) {
+                staleNoteIds.forEach { db.noteDao().deleteById(it) }
+                validated.notes.forEach { db.noteDao().upsert(NoteEntity.fromDomain(it)) }
+                restoredNotes = validated.notes.size
+            }
+            if (validated.homework.isNotEmpty() && !merge) {
+                staleHomeworkIds.forEach { db.homeworkDao().deleteById(it) }
+                validated.homework.forEach { db.homeworkDao().upsert(HomeworkEntity.fromDomain(it)) }
+                restoredHomework = validated.homework.size
+            }
+            // ---- 学期配置与作息：恢复到**目标课表**（与课程同落点）----
+            // 恢复作息视为用户数据，置位防结构性迁移覆盖
+            if (validated.semester != null) {
+                db.semesterConfigDao().upsert(
+                    SemesterConfigEntity.fromDomain(ttId, validated.semester),
+                )
+                restoredSemester = true
+            }
+            if (validated.slots.isNotEmpty()) {
+                db.timeSlotDao().clearForTimetable(ttId)
+                db.timeSlotDao().upsertAll(
+                    validated.slots.map { TimeSlotEntity(ttId, it.number, it.startTime, it.endTime) },
+                )
+                db.timetableDao().getById(ttId)?.let {
+                    db.timetableDao().upsert(it.copy(slotsCustomized = true))
                 }
-                if (backupSlots.isNotEmpty()) {
-                    db.timeSlotDao().clearForTimetable(ttId)
-                    db.timeSlotDao().upsertAll(
-                        backupSlots.map { TimeSlotEntity(ttId, it.number, it.startTime, it.endTime) },
-                    )
-                    db.timetableDao().getById(ttId)?.let {
-                        db.timetableDao().upsert(it.copy(slotsCustomized = true))
-                    }
-                    restoredSlots = backupSlots.size
+                restoredSlots = validated.slots.size
+            }
+            // ---- 日期覆盖（§4.40）：文件带了才动 ----
+            // 覆盖模式 = 整体替换（先清目标课表的旧覆盖）；合并模式 = 追加。
+            // 追加而不是替换是因为 `ScheduleOverrides.plan` 里「后写的覆盖前面的」：
+            // 备份里的安排排在已有覆盖之后，语义就是「以这份文件为准」，与合并导入
+            // 「文件里的课盖在现有课之上」一致。
+            // **旧逻辑在这里无条件 `deleteForTimetable`**（当时备份不带覆盖，删了才叫
+            // 「恢复成备份的样子」）；现在文件能带这一段了，无条件删等于把旧备份的
+            // 调休安排直接抹掉——那正是审计 D2 要修的数据丢失。
+            if (validated.overrides.isNotEmpty()) {
+                if (!merge) db.dateOverrideDao().deleteForTimetable(ttId)
+                db.dateOverrideDao().insertAll(
+                    validated.overrides.map { DateOverrideEntity.of(it, ttId) },
+                )
+                restoredOverrides = validated.overrides.size
+            }
+            // 备份顶层 term 是数据的学年学期：恢复时写进目标课表，教材查询才有学期钥匙。
+            // 文件没带 term 就不动课表现有值
+            if (!export.term.isNullOrBlank()) {
+                db.timetableDao().getById(ttId)?.let {
+                    db.timetableDao().upsert(it.copy(term = export.term))
                 }
             }
-        }
-        // 备份顶层 term 是数据的学年学期：恢复时写进目标课表，教材查询才有学期钥匙。
-        // 文件没带 term 就不动课表现有值
-        if (!export.term.isNullOrBlank()) {
-            db.timetableDao().getById(ttId)?.let {
-                db.timetableDao().upsert(it.copy(term = export.term))
+            // ---- 课程：最后写 ----
+            // 传**已解析的 ttId** 而不是 `timetableId`：后者为 null 时两个方法内部会
+            // `currentTimetableId.first()`，那是 Room Flow + DataStore 的合流——
+            // 在事务里收集会跑到别的线程上，是死锁面。ttId 在事务外已经解析过了。
+            // mergeCourses / replaceAllCourses 内部也开 `withTransaction`；Room 的
+            // `withTransaction` 支持嵌套（复用外层的事务上下文），这里不会真起第二个事务。
+            if (merge) {
+                addedByMerge = mergeCourses(domain, ttId)
+            } else {
+                replaceAllCourses(domain, ttId)
             }
-        }
-        // 课程写入拆成结果值；基线推进必须排在**课程写完之后**（见函数尾部的理由）。
-        val result = if (merge) {
-            val added = mergeCourses(domain, timetableId)
-            ImportResult.Success(
-                added = added,
-                total = domain.size,
-                merge = true,
-                restoredScores = restoredScores,
-                restoredScholarCourses = restoredScholar,
-                restoredCurriculumCourses = restoredCurriculum,
-                restoredTextbooks = restoredTextbooks,
-                restoredSemester = restoredSemester,
-                restoredSlots = restoredSlots,
-            )
-        } else {
-            // 恢复式导入同理（§4.40）：备份 JSON 里不带日期覆盖，整表恢复后旧覆盖已无
-            // 对应关系，留着会让「恢复成备份的样子」变成一句空话
-            db.dateOverrideDao().deleteForTimetable(ttId)
-            replaceAllCourses(domain, timetableId)
-            ImportResult.Success(
-                added = domain.size,
-                total = domain.size,
-                merge = false,
-                restoredScores = restoredScores,
-                restoredScholarCourses = restoredScholar,
-                restoredCurriculumCourses = restoredCurriculum,
-                restoredTextbooks = restoredTextbooks,
-                restoredSemester = restoredSemester,
-                restoredSlots = restoredSlots,
-            )
         }
         // 备份恢复也是一次「写库成功」：基线推进为恢复后的实际内容。**必须排在课程
         // 写完之后**——此前调用点写得太早，基线存的是恢复前的旧课表，恢复完再检查
         // 全是假差异（2026-10-07 复核修）。旧基线与已阅指纹整体作废。
         refreshBaselineFromDb(ttId)
-        return result
+        return ImportResult.Success(
+            added = if (merge) addedByMerge else domain.size,
+            total = domain.size,
+            merge = merge,
+            restoredScores = restoredScores,
+            restoredScholarCourses = restoredScholar,
+            restoredCurriculumCourses = restoredCurriculum,
+            restoredTextbooks = restoredTextbooks,
+            restoredNotes = restoredNotes,
+            restoredHomework = restoredHomework,
+            restoredSemester = restoredSemester,
+            restoredSlots = restoredSlots,
+            restoredOverrides = restoredOverrides,
+        )
     }
 
     /** 解析并校验待导入文件；成功时携带领域模型，供目标课表弹窗按所选目标计算统计。 */
@@ -1695,8 +1760,11 @@ class ScheduleRepository(
             scholarCourseCount = validated.scholarCourses.size,
             curriculumCourseCount = validated.curriculum.size,
             textbookCount = validated.textbooks.size,
+            noteCount = validated.notes.size,
+            homeworkCount = validated.homework.size,
             semester = validated.semester,
             slotCount = validated.slots.size,
+            overrideCount = validated.overrides.size,
         )
     }
 
@@ -1734,6 +1802,12 @@ sealed interface ImportResult {
         val restoredSlots: Int = 0,
         /** 随文件整体替换的教材条数；0 = 文件没带教材段。 */
         val restoredTextbooks: Int = 0,
+        /** 随文件整体替换的笔记条数；0 = 文件没带笔记段（旧备份都是 0）。 */
+        val restoredNotes: Int = 0,
+        /** 随文件整体替换的作业条数；0 = 文件没带作业段。 */
+        val restoredHomework: Int = 0,
+        /** 随文件恢复的日期覆盖（调休 / 停课）条数；0 = 文件没带这一段。 */
+        val restoredOverrides: Int = 0,
     ) : ImportResult
     data class Failure(val message: String) : ImportResult
 }
@@ -1753,10 +1827,21 @@ sealed interface ImportPreview {
         val curriculumCourseCount: Int = 0,
         /** 文件携带的教材条数（DESIGN §4.31）：导入时整体替换；0 = 没带。 */
         val textbookCount: Int = 0,
+        /**
+         * 文件携带的笔记条数（2026-11-06 审计 D2）：导入时整体替换；0 = 没带（旧备份）。
+         *
+         * 必须出现在确认弹窗里——笔记是用户自己写的东西，不告诉他就整体替换，
+         * 等于「导入一份课表顺手删掉他的笔记」（DESIGN §4.3 的知情口径）。
+         */
+        val noteCount: Int = 0,
+        /** 文件携带的作业条数（同上）：导入时整体替换；0 = 没带。 */
+        val homeworkCount: Int = 0,
         /** 文件带的学期配置（null = 没有）；随预览展示到确认弹窗注记。 */
         val semester: SemesterConfig? = null,
         /** 文件带的作息条数（0 = 没有）。 */
         val slotCount: Int = 0,
+        /** 文件带的日期覆盖条数（调休 / 停课；0 = 没有）。 */
+        val overrideCount: Int = 0,
     ) : ImportPreview
     data class Error(val message: String) : ImportPreview
 }

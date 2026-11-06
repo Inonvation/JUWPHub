@@ -24,6 +24,7 @@ import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.TimeSlotRules
 import edu.jxslu.schedule.domain.Timetable
 import edu.jxslu.schedule.ui.common.ImportTarget
+import edu.jxslu.schedule.ui.common.importSuccessText
 import edu.jxslu.schedule.ui.common.readTextFromUri
 import edu.jxslu.schedule.ui.common.resolveImportTarget
 import kotlinx.coroutines.Dispatchers
@@ -114,8 +115,20 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
      * 默认渲染、真值到达后再跳一次（2026-09-28 用户反馈）。构造时阻塞读一次真值作初值，
      * 与 MainActivity 启动链的 runBlocking 读同一模式；DataStore 读过一次后常驻内存，
      * 这次收集走的是缓存，不额外读盘。
+     *
+     * **本类只保留这一次阻塞读**（2026-11-06 审计 §3.7）：同一份 DataStore 文件拆成多条流
+     * 各读一次不会更快——它们串行排队，每次 `runBlocking` 的代价照付。所以天气提示开关
+     * （单键流，进不了 `DisplayPrefs` 的合并模型）也在这**同一次**里取出来，
+     * 见 [firstFrame]；要加新开关就并进这里，别再加第二个 `runBlocking`。
      */
-    private val initialPrefs: DisplayPrefs = runBlocking { repo.displayPrefs.first() }
+    private val firstFrame: FirstFrame = runBlocking {
+        FirstFrame(
+            prefs = repo.displayPrefs.first(),
+            weatherEnabled = repo.weatherEnabled.first(),
+        )
+    }
+
+    private val initialPrefs: DisplayPrefs get() = firstFrame.prefs
 
     val uiState: StateFlow<MeUiState> = combine(
         configFlow,
@@ -154,29 +167,29 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
     val oneShot: StateFlow<OneShot?> = _oneShot
 
     /**
-     * 通知强提醒（2026-10-06，通用设置）：上课 / 作业截止 / 免费时长三类提醒发出即
-     * 直接震动，能穿过免打扰与 HyperOS 的通知策略。**单独一条流**——
-     * `baseDisplayPrefs` 的 combine 已满员（AGENTS.md 口径），不进合并模型。
-     * 首帧真值同 [initialPrefs] 的模式，开关不先按默认渲染再跳一次。
-     */
-    val strongReminderVibration: StateFlow<Boolean> = repo.strongReminderVibration
-        .stateIn(
-            viewModelScope,
-            SharingStarted.Eagerly,
-            runBlocking { repo.strongReminderVibration.first() },
-        )
-
-    /**
      * 今日页顶栏天气提示开关（DESIGN §3.29）。**默认关**，单独一条流——
      * `baseDisplayPrefs` 的 combine 已满员（AGENTS.md 口径），不进合并模型。
-     * 首帧真值同 [initialPrefs] 的模式，开关不先按默认渲染再跳一次。
+     *
+     * 首帧真值取 [firstFrame]（同一次阻塞读），开关不先按默认值渲染再跳一次。
+     *
+     * **不能删**：`ui/weather/WeatherSettingsScreen.kt:54/80` 订的就是本类的这一条与
+     * [setWeatherEnabled]——天气页**没有**自己的 ViewModel。2026-11-06 曾因误判"零引用"
+     * 删掉，`compileDebugKotlin` 立刻报 `Unresolved reference 'weatherEnabled'`。
+     * 删成员前 grep 必须覆盖整个 `app/src/main`，不能只看自己写域。
      */
     val weatherEnabled: StateFlow<Boolean> = repo.weatherEnabled
         .stateIn(
             viewModelScope,
             SharingStarted.Eagerly,
-            runBlocking { repo.weatherEnabled.first() },
+            firstFrame.weatherEnabled,
         )
+
+    // 2026-11-06：这里原有 `strongReminderVibration` 的 StateFlow（一次 runBlocking 读
+    // DataStore），**零引用**——提醒页订阅的是 `ReminderSettingsScreen.kt:270` 文件内自己的
+    // 那一份（`ui/me/ReminderSettingsScreen.kt:84` 的 `viewModel.strongReminderVibration`
+    // 解析到的是它，不是本类）。删掉后设置页少一次主线程阻塞读。
+    // **不要再加回来**：需要这个值的页面自己从 `repo` 取，别在共用的 MeViewModel 上挂
+    // 只有某一页用的流（它一被实例化就付阻塞读的代价）。
 
     // ---- 背景图（DESIGN §4.21）：选图与移除都在 VM 里跑，转屏不丢进行中的导入 ----
 
@@ -321,30 +334,11 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
             when (val r = repo.importJson(text, merge, targetId)) {
                 is ImportResult.Success -> {
                     repo.setCurrentTimetable(targetId)
-                    val base = if (merge) {
-                        "合并完成：新增 ${r.added} / 文件共 ${r.total}"
-                    } else {
-                        "已覆盖导入 ${r.total} 门课"
-                    }
-                    _oneShot.value = OneShot.Message(
-                        buildString {
-                            append(base)
-                            if (r.restoredScores > 0) append("；成绩已整体替换（${r.restoredScores} 条）")
-                            if (r.restoredScholarCourses > 0) {
-                                append("；学业完成情况已整体替换（${r.restoredScholarCourses} 门）")
-                            }
-                            if (r.restoredCurriculumCourses > 0) {
-                                append("；培养方案已整体替换（${r.restoredCurriculumCourses} 门）")
-                            }
-                            val configParts = buildList {
-                                if (r.restoredSemester) add("学期配置")
-                                if (r.restoredSlots > 0) add("作息 ${r.restoredSlots} 节")
-                            }
-                            if (configParts.isNotEmpty()) {
-                                append("；已恢复目标课表的${configParts.joinToString("与")}")
-                            }
-                        },
-                    )
+                    // 成功提示收口在 `ui/common/BackupImportText.kt`：两个导入入口
+                    // （我的 → 数据 / 课表页 → 导入 JSON）必须报同样的内容——课程数之外还要
+                    // 报出顺手恢复了多少成绩/笔记/作业/调休，否则用户以为只动了课表
+                    // （2026-11-06 审计 D2）。手拼两份必然漂移，别再写回来。
+                    _oneShot.value = OneShot.Message(importSuccessText(r))
                 }
                 is ImportResult.Failure ->
                     _oneShot.value = OneShot.Message(r.message)
@@ -411,11 +405,6 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
         viewModelScope.launch { repo.setFontScaleLocked(value) }
     }
 
-    /** 通知强提醒开关（入口在「提醒与桌面」hub，2026-10-07 迁入；语义见 [strongReminderVibration]）。 */
-    fun setStrongReminderVibration(value: Boolean) {
-        viewModelScope.launch { repo.setStrongReminderVibration(value) }
-    }
-
     /** 动态取色开关（全局，Material You）。 */
     fun setDynamicColor(value: Boolean) {
         viewModelScope.launch { repo.setDynamicColor(value) }
@@ -468,7 +457,12 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
 
     fun setTapBlankToAdd(value: Boolean) = viewModelScope.launch { repo.setTapBlankToAdd(value) }
 
-    /** 今日页顶栏天气提示开关（DESIGN §3.29）。关掉即从顶栏撤下，不残留占位。 */
+    /**
+     * 今日页顶栏天气提示开关（DESIGN §3.29）。关掉即从顶栏撤下，不残留占位。
+     *
+     * 入口在 `ui/weather/WeatherSettingsScreen.kt:80`（`viewModel::setWeatherEnabled`），
+     * 与本类的 [weatherEnabled] 是一对，**不能只删其中一个**。
+     */
     fun setWeatherEnabled(value: Boolean) = viewModelScope.launch { repo.setWeatherEnabled(value) }
 
     /** 兼容入口：老调用点一次改两天。 */
@@ -564,6 +558,17 @@ private data class TargetConfig(
     val id: Long,
     val semester: SemesterConfig?,
     val courseCount: Int,
+)
+
+/**
+ * 设置页首帧快照：构造时**一次** `runBlocking` 读出来的真值。
+ *
+ * 为什么打包而不是各读各的：`displayPrefs` 与 `weatherEnabled` 在同一个 DataStore 文件里，
+ * 拆成两次阻塞读就是两次串行排队、两次主线程阻塞（2026-11-06 审计 §3.7）。加新开关并进这里。
+ */
+private data class FirstFrame(
+    val prefs: DisplayPrefs,
+    val weatherEnabled: Boolean,
 )
 
 fun meFactory(context: Context) = MeViewModel.Factory(Graph.repository(context))

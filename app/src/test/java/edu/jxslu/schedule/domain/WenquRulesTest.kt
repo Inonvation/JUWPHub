@@ -530,15 +530,24 @@ class WenquRulesTest {
                 fullCrawledAt = now, syncedAt = now, now = now, force = true,
             ),
         )
-        // 没有快照 / 快照不完整 / 上次整份重抓超过 24 小时 → 整份重抓
+        // 没有快照 → 整份重抓
         assertEquals(
             WenquRules.IndexLoad.Rebuild,
             WenquRules.indexLoadPlan(false, false, 0L, 0L, now, force = false),
         )
+        // 快照不完整且上次整份重抓已过冷却窗 → 重抓（自愈）
         assertEquals(
             WenquRules.IndexLoad.Rebuild,
+            WenquRules.indexLoadPlan(
+                true, false, now - WenquRules.INDEX_INCOMPLETE_RETRY_MS, now, now, force = false,
+            ),
+        )
+        // 快照不完整但刚抓过 → 先用手上这份，别每次进页都白打一轮（冷却，2026-11-06）
+        assertEquals(
+            WenquRules.IndexLoad.UseCache,
             WenquRules.indexLoadPlan(true, false, now, now, now, force = false),
         )
+        // 上次整份重抓超过 24 小时 → 整份重抓
         assertEquals(
             WenquRules.IndexLoad.Rebuild,
             WenquRules.indexLoadPlan(
@@ -550,6 +559,72 @@ class WenquRulesTest {
             WenquRules.IndexLoad.Rebuild,
             WenquRules.indexLoadPlan(
                 true, true, now - WenquRules.INDEX_MAX_AGE_MS, now, now, force = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `锁内二次判定_该重建就重建_不许退回用旧缓存`() {
+        val now = 1_000_000_000L
+        val min = 60_000L
+        // 等锁期间别人刚抓好：完整 + 新鲜 → 复用。这是双检存在的理由，不能删
+        assertTrue(
+            WenquRules.indexReuseUnderLock(
+                hasCache = true, cacheComplete = true,
+                fullCrawledAt = now - min, syncedAt = now - min, now = now, force = false,
+            ),
+        )
+        // 快照不完整且已过冷却窗 → 仍要重建。旧写法「有缓存就复用」会让不完整快照永不自愈
+        assertFalse(
+            WenquRules.indexReuseUnderLock(
+                hasCache = true, cacheComplete = false,
+                fullCrawledAt = now - WenquRules.INDEX_INCOMPLETE_RETRY_MS,
+                syncedAt = now - min, now = now, force = false,
+            ),
+        )
+        // 但不完整且**刚抓过**（冷却窗内）→ 先复用手上这份：否则每次进页都整份重抓一轮
+        // （平台条目超上限 / 撞上时间预算时快照会长期不完整，2026-11-06）
+        assertTrue(
+            WenquRules.indexReuseUnderLock(
+                hasCache = true, cacheComplete = false,
+                fullCrawledAt = now - min, syncedAt = now - min, now = now, force = false,
+            ),
+        )
+        // 整份重抓超过 24 小时 → 仍要重建（漂移封顶就靠这一条）
+        assertFalse(
+            WenquRules.indexReuseUnderLock(
+                hasCache = true, cacheComplete = true,
+                fullCrawledAt = now - WenquRules.INDEX_MAX_AGE_MS, syncedAt = now, now = now,
+                force = false,
+            ),
+        )
+        // 没有快照 → 一定重建（与 indexLoadPlan 同口径）
+        assertFalse(
+            WenquRules.indexReuseUnderLock(
+                hasCache = false, cacheComplete = false,
+                fullCrawledAt = 0L, syncedAt = 0L, now = now, force = false,
+            ),
+        )
+        // 下拉刷新不能把「过期」变成「复用」：漂移封顶优先于「快」
+        assertFalse(
+            WenquRules.indexReuseUnderLock(
+                hasCache = true, cacheComplete = true,
+                fullCrawledAt = now - WenquRules.INDEX_MAX_AGE_MS, syncedAt = now, now = now,
+                force = true,
+            ),
+        )
+        // 与 indexLoadPlan 同源：UseCache / SyncNewest 两档都算「复用」——
+        // 增量同步是**调用方下一步**的事，锁内不该因为它再整份抓一遍
+        assertTrue(
+            WenquRules.indexReuseUnderLock(
+                hasCache = true, cacheComplete = true,
+                fullCrawledAt = now - min, syncedAt = now - 31 * min, now = now, force = false,
+            ),
+        )
+        assertTrue(
+            WenquRules.indexReuseUnderLock(
+                hasCache = true, cacheComplete = true,
+                fullCrawledAt = now, syncedAt = now, now = now, force = true,
             ),
         )
     }
@@ -625,6 +700,28 @@ class WenquRulesTest {
         assertEquals("活动已结束", blockReason(status = 3, peopleNum = 20, balanceNum = 0))
         // 招募人数没填（0）时不算满
         assertEquals("", blockReason(peopleNum = 0, balanceNum = 0))
+    }
+
+    @Test
+    fun `手动报名_平台回已报名算成功_其它拒绝仍算失败`() {
+        // 实测原文（用户手动报名时平台回的）：目标状态已成立，必须按成功收尾，
+        // 否则用户看到红色「报名失败」会以为没抢到、回头反复点
+        assertTrue(WenquRules.isAlreadyAppliedMessage("已报名该活动，无法重复报名"))
+        assertTrue(WenquRules.isAlreadyAppliedMessage("您已报名该活动"))
+        assertTrue(WenquRules.isAlreadyAppliedMessage("请勿重复报名"))
+        assertTrue(WenquRules.isAlreadyAppliedMessage("已参加该活动"))
+        // 目标状态**没达成**的拒绝一律仍算失败——不能被这条判据吞掉
+        assertFalse(WenquRules.isAlreadyAppliedMessage("活动已结束"))
+        assertFalse(WenquRules.isAlreadyAppliedMessage("名额已满"))
+        assertFalse(WenquRules.isAlreadyAppliedMessage("报名尚未开始"))
+        assertFalse(WenquRules.isAlreadyAppliedMessage("服务项目不存在或已下架"))
+        assertFalse(WenquRules.isAlreadyAppliedMessage("当前账号被限制报名"))
+        // 认不出的与空串：不猜，仍按失败报（宁可让用户点一次详情核对）
+        assertFalse(WenquRules.isAlreadyAppliedMessage("未知异常，请联系管理员"))
+        assertFalse(WenquRules.isAlreadyAppliedMessage(null))
+        assertFalse(WenquRules.isAlreadyAppliedMessage(""))
+        // 正常成功话术不该被误判成「已报名」（status=200 时调用方根本不走这条判据）
+        assertFalse(WenquRules.isAlreadyAppliedMessage("报名成功"))
     }
 
     @Test

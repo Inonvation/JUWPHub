@@ -110,7 +110,7 @@ object QiangzhiScheduleParser {
                     .distinct()
                 if (courses.isEmpty()) {
                     ImportParseResult.Failure(
-                        "解析到 ${items.size} 条，但周次/星期字段不完整（失败 $failed 条）",
+                        "解析到 ${items.size} 条，但周次/节次/星期字段不完整（失败 $failed 条）",
                     )
                 } else {
                     ImportParseResult.Success(courses, term = extractTermField(json))
@@ -144,7 +144,10 @@ object QiangzhiScheduleParser {
         val parsed = parseDetail(raw.detail)
         val weeks = parseWeeks(parsed.weeksRaw)
         if (weeks.isEmpty()) return null
-        val sections = parsed.sections ?: (1 to 1)
+        // 节次解析不出来就整条丢弃，不再兜底成第 1 节（2026-11-06 审计 J2）：兜底会把模板改版后的
+        // 整张课表堆到第 1 节、写库、还进调课基线，之后把真课表误报成「教务删除」。
+        // 周次坏会丢课，节次坏却继续造数据——两条口径必须一致。
+        val sections = parsed.sections ?: return null
         return Course(
             id = 0,
             name = raw.name,

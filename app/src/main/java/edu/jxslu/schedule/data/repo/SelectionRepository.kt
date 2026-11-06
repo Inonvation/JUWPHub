@@ -33,13 +33,25 @@ class SelectionRepository(private val db: JuwDatabase) {
     /** 某学期是否已有本地数据（决定要不要自动抓）。 */
     suspend fun hasTermData(term: String): Boolean = dao.countForTerm(term) > 0
 
-    /** 按学期替换：该学期先删后插，importedAt 统一取本次同步时间。 */
-    suspend fun replaceTerm(term: String, rows: List<CourseSelection>) {
+    /**
+     * 按学期批量替换，**整批一个事务**（2026-11-06 审计 J3 的同款问题）。
+     *
+     * 与 `ScoreRepository.replaceTerms` 同一口径：一次同步抓 2 个学期（当前学期 + 下一学期）
+     * 时，逐个学期各开一个事务会让「第 2 个学期失败」留下「第 1 个已换、第 2 个还是旧的」
+     * 半套数据——选课页按学期分组展示，用户看到的是新旧混排，而失败提示说不清哪几个学期
+     * 已更新。整批一个事务 = 要么全换、要么一行都不动。
+     *
+     * 空 [byTerm] 直接返回，不开一个什么都不做的事务。
+     */
+    suspend fun replaceTerms(byTerm: List<Pair<String, List<CourseSelection>>>) {
+        if (byTerm.isEmpty()) return
         val now = System.currentTimeMillis()
         db.withTransaction {
-            dao.deleteForTerm(term)
-            if (rows.isNotEmpty()) {
-                dao.insertAll(rows.map { CourseSelectionEntity.fromDomain(it.copy(term = term), now) })
+            byTerm.forEach { (term, rows) ->
+                dao.deleteForTerm(term)
+                if (rows.isNotEmpty()) {
+                    dao.insertAll(rows.map { CourseSelectionEntity.fromDomain(it.copy(term = term), now) })
+                }
             }
         }
     }

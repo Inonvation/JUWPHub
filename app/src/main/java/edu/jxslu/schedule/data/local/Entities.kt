@@ -3,7 +3,6 @@ package edu.jxslu.schedule.data.local
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
-import androidx.room.TypeConverter
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.domain.Homework
@@ -164,16 +163,13 @@ data class SemesterConfigEntity(
  * 调课自动检测的两张表（`detect_baselines`/`detect_reports`）已随功能移除（2026-09-24，
  * v10 迁移 DROP TABLE）。实体与 DAO 一并删除；`MIGRATION_4_5` 的建表语句保留——
  * 迁移链不可断，v4 用户仍需先建表再被 v10 删掉。
+ *
+ * 同一位置原先还有一个 `Converters`（`Set<Int> ↔ "1,2,3"`）：`Course.weeks` 现在是
+ * `Set<Int>` 但**没有任何实体字段**用它（`CourseEntity.weeks` 存的是逗号串，转换在
+ * `CourseEntity.fromDomain/toDomain` 里手写），所以那个转换器从未被 Room 调用过。
+ * 2026-11-06 审计删除；`@TypeConverters` 也一并从 `JuwDatabase` 摘掉——将来真有字段需要
+ * 转换器时再加，别留一个"看起来在用"的空类。
  */
-
-class Converters {
-    @TypeConverter
-    fun fromWeeksSet(weeks: Set<Int>): String = weeks.sorted().joinToString(",")
-
-    @TypeConverter
-    fun toWeeksSet(value: String): Set<Int> =
-        value.split(',').mapNotNull { it.trim().toIntOrNull() }.toSet()
-}
 
 /**
  * 课程成绩（DESIGN §4.15）。全局归属学生、不挂 timetableId；
