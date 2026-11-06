@@ -74,7 +74,10 @@ import me.rerere.hugeicons.stroke.ArrowDown01
  * 排版纪律：**不放说明文字**——身后就是真实课表，效果即时可见，文字说明是冗余；
  * 行只留「标题 + 当前值」，面板保持低调，视线留在课表上。
  * 分组可折叠（[CollapsibleSection]），**没动过的组默认收起、动过的组默认展开**：
- * 面板默认只露五个标题，改过的设置下次打开就在眼前，不用滚。
+ * 首装只露五个标题，改过的设置下次打开就在眼前，不用滚。
+ * **两组例外，恒展开**：「内容与开关」（都是常用开关，收起来只剩一次多余的点击）与
+ * 「背景」（选图是这组唯一的入口，收起后用户找不到换图/移除；2026-11-06 复核：
+ * 设过图但没拖滑块时，旧的判定会把它判成「没改过」而收起）。
  */
 @Composable
 fun DisplaySettingsContent(
@@ -254,6 +257,7 @@ fun DisplaySettingsContent(
             )
         }
 
+        // 恒展开（不传 initiallyExpanded）：这组都是常用开关，收起只是多一次点击。
         CollapsibleSection(title = "内容与开关") {
             SettingSwitchRow(
                 title = "文字水平居中",
@@ -318,14 +322,10 @@ fun DisplaySettingsContent(
 
         // 背景（DESIGN §4.21）：只铺课表页。没有图时不摆滑块——滑块拖了也没效果，
         // 摆在那儿只会让人以为坏了。
-        // 没设过背景时保持展开：这一组里唯一的入口（选图）不能藏在折叠头后面。
-        CollapsibleSection(
-            title = "背景",
-            initiallyExpanded = prefs.bgImageName == null ||
-                prefs.bgImageOpacity != 1f ||
-                prefs.bgImageDim != 0f ||
-                prefs.bgImageBlur != 0f,
-        ) {
+        // 恒展开：这一组里唯一的入口（选图 / 换图 / 移除）不能藏在折叠头后面。
+        // 旧判定「没设图 || 滑块被动过」在「设了图但没拖滑块」时会判成没改过而收起，
+        // 用户找不到换图入口（2026-11-06 复核）。四行而已，不值得为它做判定。
+        CollapsibleSection(title = "背景") {
             BackgroundImageRow(
                 fileName = prefs.bgImageName,
                 importing = bgImporting,

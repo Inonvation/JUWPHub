@@ -389,7 +389,13 @@ private fun WishCard(
     }
 }
 
-/** 添加/编辑弹窗：课程名关键词（必填）、教师名（可选）、优先级三档、备注。 */
+/**
+ * 添加/编辑弹窗：课程名关键词（必填）、教师名（可选）、优先级三档、备注。
+ *
+ * **不迁公共件**（2026-11-06 复核）：正文是三个 `OutlinedTextField` + FilterChip 的表单，
+ * 而 `AppConfirmDialog` 的正文槽会套 `verticalScroll`——输入框进滚动容器后，聚焦时键盘
+ * 弹出与光标定位都不可靠。判定条件与文案逐字沿用原实现。
+ */
 @Composable
 private fun WishEditDialog(
     initial: SelectionWish,

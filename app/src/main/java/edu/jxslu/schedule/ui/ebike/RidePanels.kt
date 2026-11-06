@@ -83,8 +83,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import edu.jxslu.schedule.domain.BikeCluster
@@ -343,7 +341,7 @@ internal fun RideActionArea(
                 val enter = slideInVertically(
                     animationSpec = Motion.reveal(),
                 ) { it } + fadeIn(animationSpec = Motion.reveal())
-                val exit = fadeOut(animationSpec = Motion.tap())
+                val exit = fadeOut(animationSpec = Motion.exit())
                 (enter togetherWith exit).using(
                     SizeTransform(clip = true) { _, _ ->
                         Motion.reveal()
@@ -1227,7 +1225,10 @@ private fun RidingStateChip(
             // **heightIn 与 clickable 必须留在外层、clip/background 放内层**：三者排在同一
             // 条链上时，被撑到 40dp 的是胶囊底色本身（~27dp → 40dp），可见胶囊变胖
             // （2026-11-06 交叉复核）。拆成两层后可见高度不变、命中区仍是 40dp。
+            // 外层补同一个 `clip`：不补的话涟漪会被裁成 40dp 高的矩形，在胶囊上下各露
+            // 约 6.5dp 的方角（2026-11-06 收尾复核）；clip 只影响绘制/涟漪，不改布局高度。
             .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(9.dp))
             .clickable(
                 enabled = enabled,
                 onClickLabel = "现查车辆锁状态",
@@ -1253,7 +1254,7 @@ private fun RidingStateChip(
                 targetState = text,
                 transitionSpec = {
                     fadeIn(animationSpec = Motion.reveal()) togetherWith
-                        fadeOut(animationSpec = Motion.tap())
+                        fadeOut(animationSpec = Motion.exit())
                 },
                 label = "chipText",
             ) { current ->
@@ -1481,7 +1482,7 @@ internal fun RideBikePanel(
                         targetState = state.loading,
                         transitionSpec = {
                             fadeIn(animationSpec = Motion.reveal()) togetherWith
-                                fadeOut(animationSpec = Motion.tap())
+                                fadeOut(animationSpec = Motion.exit())
                         },
                         label = "refreshSlot",
                         modifier = Modifier.fillMaxSize(),
@@ -1723,7 +1724,7 @@ private fun <T> AnimatedCardList(
         contentKey = { list -> list.map(itemKey) },
         transitionSpec = {
             (fadeIn(animationSpec = Motion.reveal()) togetherWith
-                fadeOut(animationSpec = Motion.tap())).using(
+                fadeOut(animationSpec = Motion.exit())).using(
                 SizeTransform(clip = false) { _, _ ->
                     Motion.reveal()
                 },
@@ -1940,7 +1941,7 @@ private fun RideClusterCard(
                 exit = shrinkVertically(
                     animationSpec = Motion.state(),
                     shrinkTowards = Alignment.Top,
-                ) + fadeOut(animationSpec = Motion.tap()),
+                ) + fadeOut(animationSpec = Motion.exit()),
             ) {
                 Column {
                     cluster.bikes.forEach { bike ->
@@ -2193,7 +2194,7 @@ internal fun RideCarNumberSheet(
                             animationSpec = Motion.reveal(),
                             expandFrom = Alignment.Top,
                         ),
-                    exit = fadeOut(animationSpec = Motion.tap()) +
+                    exit = fadeOut(animationSpec = Motion.exit()) +
                         shrinkVertically(
                             animationSpec = Motion.state(),
                             shrinkTowards = Alignment.Top,
@@ -2224,7 +2225,7 @@ internal fun RideCarNumberSheet(
                     // 挂到里面的按钮上会落到 AnimatedVisibilityScope，位置就散了
                     modifier = Modifier.align(Alignment.End),
                     enter = fadeIn(animationSpec = Motion.reveal()),
-                    exit = fadeOut(animationSpec = Motion.tap()),
+                    exit = fadeOut(animationSpec = Motion.exit()),
                 ) {
                     RideTextAction(
                         icon = HugeIcons.QrCode01,
@@ -2242,7 +2243,7 @@ internal fun RideCarNumberSheet(
                 targetState = ready,
                 transitionSpec = {
                     fadeIn(animationSpec = Motion.reveal()) togetherWith
-                        fadeOut(animationSpec = Motion.tap())
+                        fadeOut(animationSpec = Motion.exit())
                 },
                 label = "qrPanel",
                 contentAlignment = Alignment.Center,
@@ -2292,7 +2293,7 @@ internal fun RideCarNumberSheet(
             AnimatedVisibility(
                 visible = ready,
                 enter = fadeIn(animationSpec = Motion.reveal()),
-                exit = fadeOut(animationSpec = Motion.tap()),
+                exit = fadeOut(animationSpec = Motion.exit()),
             ) {
                 Text(
                     text = "车 $qrCarNum",
@@ -2636,7 +2637,7 @@ private fun RideActionButton(
             targetState = text,
             transitionSpec = {
                 fadeIn(animationSpec = Motion.reveal()) togetherWith
-                    fadeOut(animationSpec = Motion.tap())
+                    fadeOut(animationSpec = Motion.exit())
             },
             label = "actionLabel",
         ) { current ->

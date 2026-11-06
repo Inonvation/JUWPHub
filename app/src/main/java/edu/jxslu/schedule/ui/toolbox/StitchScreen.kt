@@ -223,12 +223,16 @@ fun StitchScreen(onBack: () -> Unit) {
                     }
                 }
                 result = rendered
-                // 先解锁再滚：滚动动画期间不该继续拦返回键（finally 里那次只是兜底）
-                busy = false
-                // 结果在页顶，滚回去让用户立刻看到（长列表时页面停在下面）
+                // 结果在页顶，滚回去让用户立刻看到（长列表时页面停在下面）。
+                // **busy 留到 finally 才放开**（2026-11-06 复核）：滚动动画在 20 张图时
+                // 可持续约 1 秒，期间放开会让人连点「开始拼接」，起第二次完整渲染
+                // （结果正确但内存峰值翻倍）。代价是这 1 秒内返回键被拦——无害。
                 scroll.animateScrollTo(0)
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: OutOfMemoryError) {
+                // 单独拦 OOM：它的 message 是一长串英文分配信息，直接透给用户等于没解释
+                notice("图片太大，内存不足：试试减少张数或先裁剪", NoticeTone.Error)
             } catch (e: Throwable) {
                 notice("拼接失败：${e.message ?: "未知错误"}", NoticeTone.Error)
             } finally {

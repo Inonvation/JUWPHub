@@ -289,9 +289,14 @@ private fun DeviceTabs(deviceType: Int, onSelect: (Int) -> Unit) {
  * 为什么不能只写 `id.toString()`：`id` 是 `Long?`，缺了就是 `"null"`——一列里多行共用同一个 key
  * 会让 LazyColumn 直接抛「Key was already used」。这里按「服务端 id → 订单号 → 车号@结束时刻」
  * 逐级退：`KqcxAuth` 解析阶段已经把「车号和订单号都为空」的行 mapNotNull 掉了，所以退到底也不会是空串。
+ *
+ * **每一级必须带命名空间前缀**（2026-11-06 复核）：`id` 是 Long 转字符串、`orderNum` 是字符串，
+ * 两者数值恰好相同时（如 `id=1234567890` 与 `orderNum="1234567890"`）会撞成同一个 key。
  */
 private val KqcxAuth.OrderItem.listKey: String
-    get() = id?.toString() ?: orderNum ?: "${carNum}@${endAt}"
+    get() = id?.let { "id:$it" }
+        ?: orderNum?.let { "no:$it" }
+        ?: "car:$carNum@$endAt"
 
 @Composable
 private fun OrderCard(
@@ -401,5 +406,3 @@ private fun statusColor(order: KqcxAuth.OrderItem): Color = when {
     order.unpaid -> MaterialTheme.semanticColors.warning
     else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
 }
-
-

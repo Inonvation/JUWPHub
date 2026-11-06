@@ -22,7 +22,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -55,7 +54,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
@@ -77,7 +75,6 @@ import edu.jxslu.schedule.domain.QzxyPhoneMask
 import edu.jxslu.schedule.domain.calculateActualCost
 import edu.jxslu.schedule.domain.cashPaidAmount
 import edu.jxslu.schedule.domain.ticketPaidAmount
-import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.AccountHeroCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppInfoDialog
@@ -89,7 +86,6 @@ import edu.jxslu.schedule.ui.common.MetricCell
 import edu.jxslu.schedule.ui.common.MetricsRow
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.copyPlainText
-import edu.jxslu.schedule.ui.common.SettingChoiceRow
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
@@ -111,7 +107,6 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Droplet
-import me.rerere.hugeicons.stroke.GlassWater
 import me.rerere.hugeicons.stroke.History
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
@@ -518,7 +513,9 @@ private fun LoginSection(state: WaterUiState, viewModel: WaterViewModel) {
  *
  * 2026-11-05：原来的「开水卡设置 · 点击方式」整节删除（用户要求）——整节只有一个
  * 单击/双击选择，且只对页内大按钮生效。开水按钮现在固定单击，与今日页余额面板同口径；
- * `DisplayPrefs.waterRequireDoubleClick` 字段保留（老备份里可能带着它），但本页不再读写。
+ * `DisplayPrefs.waterRequireDoubleClick` 字段与 DataStore 键**都已删除**（2026-11-06 复核：
+ * 备份格式 `TimetablePrefs` 里从来没有这个键，所以不存在「老备份带着它」的情况；
+ * 老 prefs 文件里若有孤儿键，DataStore 直接忽略）。
  */
 @Composable
 private fun FooterActions(onLogout: () -> Unit) {

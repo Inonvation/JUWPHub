@@ -35,7 +35,6 @@ import edu.jxslu.schedule.domain.ReminderPlan
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.dueReminderPlan
-import edu.jxslu.schedule.domain.homeworkReminderPlan
 import edu.jxslu.schedule.domain.dueClassStartPlan
 import edu.jxslu.schedule.domain.metaLine
 import edu.jxslu.schedule.domain.nextHomeworkReminder
@@ -211,10 +210,14 @@ object ClassReminder {
      * 倒计时卡片的「分钟刻度」闹钟：**非精确**（`setAndAllowWhileIdle`），[at] 为 null 时撤销。
      *
      * 为什么与提醒闹钟分开（2026-11-06）：刻度只为刷新灵动岛芯片上的「剩 N 分」与进度条，
-     * 迟几十秒对用户没有任何意义；而旧实现把刻度塞进 `setAlarmClock`，代价有两笔——
-     * ① 提前量 10~30 分钟里每分钟排一枚系统级闹钟，状态栏那枚闹钟图标**常驻整个窗口**；
-     * ② 每响一次都要走一遍「Receiver → 一次性 Worker → 读库 → 重排」的核对链。
+     * 迟几十秒对用户没有任何意义；而旧实现把刻度塞进 `setAlarmClock`，代价是提前量
+     * 10~30 分钟里每分钟排一枚**系统级**闹钟，状态栏那枚闹钟图标**常驻整个窗口**。
      * 真正的提醒点（提前量 / 上课时刻）仍用 `setAlarmClock`，那两处才「不能迟」。
+     *
+     * **代价没有全消**（2026-11-06 复核纠正）：刻度仍落 [ReminderAlarmReceiver]，
+     * 每次依旧走「Receiver → 一次性 Worker → 读库 → 重排」整条核对链，只是不再占精确闹钟
+     * 与状态栏图标。真要省这笔得给刻度单独一个只刷芯片 + 重排的轻量 Receiver，
+     * 属另一件事（收益是每次省一次数据库读，风险是两条重排路径要各自正确）。
      *
      * **别把两者合回一枚闹钟**：`AlarmClockInfo` 只能表达一个触发时刻，合回去就得二选一
      * ——要么刻度拖着精确闹钟一起变非精确（提醒迟到，正是 2026-09-23 改 setAlarmClock 的原因），

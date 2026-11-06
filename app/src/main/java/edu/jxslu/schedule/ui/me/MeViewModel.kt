@@ -27,7 +27,7 @@ import edu.jxslu.schedule.ui.common.ImportTarget
 import edu.jxslu.schedule.ui.common.importSuccessText
 import edu.jxslu.schedule.ui.common.readTextFromUri
 import edu.jxslu.schedule.ui.common.resolveImportTarget
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -42,7 +42,6 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 data class MeUiState(
@@ -331,7 +330,18 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
         _oneShot.value = null
         viewModelScope.launch {
             val targetId = resolveImportTarget(repo, target)
-            when (val r = repo.importJson(text, merge, targetId)) {
+            // 写库异常必须在这里收住：`ImportResult.Failure` 只覆盖解析/校验阶段，
+            // 事务抛异常（磁盘满 / SQLite 异常）会一路冒到 viewModelScope——进程崩，
+            // 而数据其实已经整体回滚（2026-11-06 复核）。
+            val r = try {
+                repo.importJson(text, merge, targetId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                _oneShot.value = OneShot.Message("写入失败：${e.message ?: "未知错误"}，未改动任何数据")
+                return@launch
+            }
+            when (r) {
                 is ImportResult.Success -> {
                     repo.setCurrentTimetable(targetId)
                     // 成功提示收口在 `ui/common/BackupImportText.kt`：两个导入入口
@@ -460,8 +470,6 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
      */
     fun setWeatherEnabled(value: Boolean) = viewModelScope.launch { repo.setWeatherEnabled(value) }
 
-    /** 兼容入口：老调用点一次改两天。 */
-    fun setShowWeekend(value: Boolean) = viewModelScope.launch { repo.setShowWeekend(value) }
 
     fun setShowNonCurrentWeek(value: Boolean) =
         viewModelScope.launch { repo.setShowNonCurrentWeek(value) }

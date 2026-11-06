@@ -29,7 +29,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,7 +56,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -68,7 +66,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.qzxy.QzxyBluetoothScanner
-import edu.jxslu.schedule.data.qzxy.QzxyBoundDevice
 import edu.jxslu.schedule.data.qzxy.QzxyDeviceInfo
 import edu.jxslu.schedule.data.qzxy.QzxyScannedDevice
 import edu.jxslu.schedule.data.session.SessionService
@@ -77,7 +74,6 @@ import edu.jxslu.schedule.domain.QzxyWatering
 import edu.jxslu.schedule.domain.QzxyWateringFormat
 import edu.jxslu.schedule.domain.QzxyPhoneMask
 import edu.jxslu.schedule.ui.common.AccountHeroCard
-import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
@@ -104,15 +100,12 @@ import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChevronLeft
-import me.rerere.hugeicons.stroke.ChevronRight
 import me.rerere.hugeicons.stroke.Droplet
 import me.rerere.hugeicons.stroke.InformationCircle
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.WalletAdd01
 import java.math.BigDecimal
-import java.time.YearMonth
 
 /**
  * 趣智校园开热水页（DESIGN §3.18）。
@@ -737,7 +730,7 @@ private fun StatusCard(
                 targetState = statusContentOf(state),
                 transitionSpec = {
                     fadeIn(animationSpec = Motion.state()) togetherWith
-                        fadeOut(animationSpec = Motion.tap())
+                        fadeOut(animationSpec = Motion.exit())
                 },
                 label = "qzxy-status",
             ) { content ->

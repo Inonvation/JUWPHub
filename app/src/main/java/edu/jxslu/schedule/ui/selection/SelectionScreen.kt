@@ -5,13 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -397,6 +395,9 @@ private fun RoundsCard(
         )
         Button(
             onClick = { onOpenCenter(target) },
+            // 同步中不可点：首帧快照没读出来时 target 还是 null，点进去会以「无目标轮次」
+            // 打开选课中心（页面显示得像没有轮次），文案却已经写着「同步中…」（2026-11-06 复核）。
+            enabled = !syncing,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 10.dp)

@@ -100,17 +100,13 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Bolt
 import me.rerere.hugeicons.stroke.Book01
 import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.HeartHandshake
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.QrCodeScan
-import me.rerere.hugeicons.stroke.ScooterElectric
 import me.rerere.hugeicons.stroke.Settings01
-import me.rerere.hugeicons.stroke.ShowerHead
 import me.rerere.hugeicons.stroke.Sun01
 import me.rerere.hugeicons.stroke.Task01
 import me.rerere.hugeicons.stroke.Toolbox
 import me.rerere.hugeicons.stroke.Wallet01
-import me.rerere.hugeicons.stroke.WashingMachine
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -736,7 +732,7 @@ private fun WalletHero(
                 // 进 state 档、退 tap 档：新内容淡入要看得清，旧内容让位要快——
                 // 两个方向同长会读成"两行字互相叠着糊一下"。这不是随手取的差值，
                 // 别把两者统一成同一档。
-                transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap()) },
+                transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.exit()) },
                 label = "drawerBalance",
                 modifier = Modifier.weight(1f),
             ) { text ->
@@ -840,7 +836,7 @@ private fun WalletStat(
         Spacer(Modifier.width(6.dp))
         AnimatedContent(
             targetState = value,
-            transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap()) },
+            transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.exit()) },
             label = "drawerWalletStat",
             modifier = Modifier.weight(1f),
         ) { text ->
@@ -1228,7 +1224,7 @@ private fun DrawerRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 AnimatedContent(
                     targetState = trailing,
-                    transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap()) },
+                    transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.exit()) },
                     contentAlignment = Alignment.CenterEnd,
                     label = "drawerRowTrailing",
                 ) { text ->

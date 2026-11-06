@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.theme
 
-import android.content.Context
 import android.provider.Settings
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
@@ -47,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
  * | 130–200 | [stateMillis] 180 | 原来 150/160/180/190/200 |
  * | 201–250 | [revealMillis] 220 | 原来 210/220/240/250 |
  * | 251–450 | [pageMillis] 280 | 原来 260/280/300/320/340/380/400/450 |
+ * | 退场淡出 | [exit] 90 | 原来 90~200 的 fadeOut；退场要**更快更急**（accelerate） |
  *
  * 归并会改动个别页面的实际时长（多在 ±40ms 内，肉眼不可分辨）。**不要**为了"保持原值"
  * 在调用点另写常量——那正是这次要清掉的东西；确有必须例外的（例如跟随手势的连续动画），
@@ -82,6 +82,25 @@ object Motion {
 
     fun <T> reveal(): FiniteAnimationSpec<T> = tween(revealMillis, easing = decelerate)
 
+    /**
+     * 退场淡出一档：90ms + [accelerate]。
+     *
+     * 为什么单独一档：全仓 20+ 处原本写 `fadeOut(Motion.tap())`，用的是 [tap]（90ms + standard），
+     * 时长对（退场就该比进场快），曲线不对（standard 两头都缓，退场看起来「黏」）。
+     * 另写一个函数而不是让调用点自己拼 `tween(90, accelerate)`，是为了让「退场」在代码里
+     * 有个名字——否则下一个人照归并表把退场改回 [reveal] 220ms，手感会明显变拖沓。
+     */
+    fun <T> exit(): FiniteAnimationSpec<T> = tween(tapMillis, easing = accelerate)
+
+    /**
+     * 退场用的 reveal 档（曲线换成 [accelerate]）。
+     *
+     * 为什么不能直接复用 [reveal]：它带的是 decelerate（起步快、收尾慢），那是"东西进来了"的
+     * 曲线。同一个 spec 拿去做 `AnimatedVisibility(exit = shrinkVertically(Motion.reveal()))`，
+     * 退场会先猛地缩一截再慢慢收——手感是"卡住"，不是"走了"。与 [pageExit] 同一个理由。
+     */
+    fun <T> revealExit(): FiniteAnimationSpec<T> = tween(revealMillis, easing = accelerate)
+
     fun <T> page(): FiniteAnimationSpec<T> = tween(pageMillis, easing = standard)
 
     /** 退场用的 page 档（曲线换成 accelerate）。`AnimatedVisibility(exit = …)` 用这个。 */
@@ -112,4 +131,3 @@ fun rememberAnimationsEnabled(): Boolean {
         }.getOrDefault(true)
     }
 }
-

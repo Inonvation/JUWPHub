@@ -25,6 +25,7 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * AI 调课 · 单页工作单的状态容器（DESIGN §3.25 / §4.39 / §4.40，2026-10-07 v2 重构）。
@@ -609,7 +611,10 @@ class AiChatViewModel(
                 entries = result.report.entries.map { it.toRow() },
                 overrideIds = result.overrideIds,
             )
-            historyStore.append(record)
+            // 留痕必须落盘：上面的事务已经提交，这里若被取消（用户在「应用」后立刻返回、
+            // 二级页 finish 把 viewModelScope 一起取消），结果是「课表已改、回执与撤销记录
+            // 都没有」，UI 还会退回 READY 像没应用过。NonCancellable 只护这一小段。
+            withContext(NonCancellable) { historyStore.append(record) }
             val receipt = AiAppliedReceipt(
                 appliedCourses = result.report.applied,
                 appliedOverrides = result.overrideIds.size,

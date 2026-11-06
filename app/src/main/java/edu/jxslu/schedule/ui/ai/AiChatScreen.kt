@@ -361,6 +361,10 @@ fun AiChatScreen(
     }
 
     // ---- 「当前模型未标记支持图片」的发送前拦截
+    //
+    // 这个弹窗**不迁公共件**（2026-11-06 复核）：取消位是「去开启图片识别」，点了会
+    // `onOpenSettings()` 离开本页；而返回键 / 点外部只 `dismissImagePrompt`。两个出口
+    // 语义不同，套 `AppConfirmDialog` 的单一 `onDismiss` 会把「取消」静默变成「跳设置」。
     if (imagePrompt) {
         AlertDialog(
             onDismissRequest = viewModel::dismissImagePrompt,

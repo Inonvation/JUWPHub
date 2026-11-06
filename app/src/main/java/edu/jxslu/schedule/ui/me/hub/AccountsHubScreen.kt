@@ -453,7 +453,7 @@ private fun SummaryCard(enabled: Int, total: Int) {
             AnimatedContent(
                 targetState = enabled,
                 transitionSpec = {
-                    fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap())
+                    fadeIn(Motion.state()) togetherWith fadeOut(Motion.exit())
                 },
                 label = "enabledCount",
             ) { count ->
@@ -585,7 +585,7 @@ private fun StatusPill(state: LoginState, labels: StatusLabels = StatusLabels())
         AnimatedContent(
             targetState = text,
             transitionSpec = {
-                fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap())
+                fadeIn(Motion.state()) togetherWith fadeOut(Motion.exit())
             },
             label = "pillText",
         ) { label ->

@@ -17,7 +17,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -31,7 +30,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -53,7 +51,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -65,19 +62,16 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.zxing.BarcodeFormat
@@ -87,7 +81,6 @@ import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.DormRepairRecord
 import edu.jxslu.schedule.domain.DormRepairRules
-import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.QuickScanTarget
 import edu.jxslu.schedule.domain.ShortcutSettings
@@ -115,8 +108,6 @@ import edu.jxslu.schedule.domain.QzxyWatering
 import edu.jxslu.schedule.ui.qzxy.QzxyEntrySheet
 import edu.jxslu.schedule.ui.qzxy.QzxyUiState
 import edu.jxslu.schedule.ui.qzxy.WateringReconcileEffect
-import edu.jxslu.schedule.ui.qzxy.isQzxyWateringExpired
-import edu.jxslu.schedule.ui.qzxy.rememberQzxyWateringClock
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.domain.placeTeacherLine
 import edu.jxslu.schedule.domain.remarkPreview
@@ -126,15 +117,12 @@ import edu.jxslu.schedule.domain.sectionShortLabel
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.UnlockFlowState
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSession
-import edu.jxslu.schedule.domain.calculateActualCost
 import edu.jxslu.schedule.ui.common.ResumedTickerEffect
 import edu.jxslu.schedule.ui.common.AppCardRow
-import edu.jxslu.schedule.ui.common.QuickCardMinHeight
 import edu.jxslu.schedule.ui.common.AppCardDefaults
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
-import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.CourseDetailSheet
@@ -157,14 +145,7 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.CalendarOff
 import me.rerere.hugeicons.stroke.CheckmarkCircle02
-import me.rerere.hugeicons.stroke.ChevronDown
-import me.rerere.hugeicons.stroke.ChevronUp
-import me.rerere.hugeicons.stroke.Droplet
-import me.rerere.hugeicons.stroke.ShowerHead
 import me.rerere.hugeicons.stroke.Menu01
-import me.rerere.hugeicons.stroke.Package01
-import me.rerere.hugeicons.stroke.WashingMachine
-import me.rerere.hugeicons.stroke.ScooterElectric
 import edu.jxslu.schedule.domain.TodayTip
 import edu.jxslu.schedule.domain.PendingHomework
 import edu.jxslu.schedule.ui.homework.HomeworkTodayCard
@@ -385,7 +366,7 @@ fun TodayScreen(
         }
     }
     // 进页 / 回页各静默查一拍（骑行页同款 LifecycleEventObserver 写法）
-    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner, kvcxInAppRide, kvcxLoggedIn) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {

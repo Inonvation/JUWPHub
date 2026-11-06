@@ -76,7 +76,14 @@ object WenquWeeklyAlertReminder {
     private const val CHANNEL_ID = "wenqu_weekly"
     private const val NOTIFICATION_TAG = "wenqu_weekly"
 
-    /** 固定通知 id：1013 是「新增志愿活动」，这条取 1015（1014 是骑行自动还车）。 */
+    /**
+     * 固定通知 id：1013 是「新增志愿活动」，这条取 1015。
+     *
+     * **1015 与 `EbikeAutoReturn.NotificationIds.FOREGROUND` 同号**（2026-11-06 复核登记）：
+     * 通知的身份是「tag + id」，这里带 `NOTIFICATION_TAG = "wenqu_weekly"`、那边不带 tag
+     * （前台服务通知），所以运行时不会互相覆盖。但**号段没有单一登记表**，下一个人按数字
+     * 再加一个 1015 就会真撞——新增通知 id 前先 `grep "= 10"` 把全仓扫一遍。
+     */
     private const val NOTIFICATION_ID = 1015
 
     /**

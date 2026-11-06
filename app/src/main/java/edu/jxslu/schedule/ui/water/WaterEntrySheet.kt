@@ -306,4 +306,3 @@ private fun clock(totalSeconds: Int): String {
     val s = totalSeconds % 60
     return "%02d:%02d".format(m, s)
 }
-

@@ -67,6 +67,9 @@ object EbikeAutoReturn {
          * 实现，任务结束时会摘掉自己那条通知；同 id 会把刚发出去的成功 / 失败结果一起撤掉
          * ——用户刚被告知「已自动还车」，一秒后那条通知凭空消失。
          */
+        // 1015 与问渠「本周志愿活动」通知同号（`WenquWeeklyAlertReminder`），但那条带
+        // tag `wenqu_weekly`、这条不带，运行时互不覆盖。全仓没有号段登记表，新增 id 前
+        // 先 `grep "= 10"` 扫一遍。
         const val FOREGROUND = 1015
 
         /**

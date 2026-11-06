@@ -39,7 +39,6 @@ import edu.jxslu.schedule.data.jw.TermOption
 import edu.jxslu.schedule.data.repo.ImportStats
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.domain.Course
-import edu.jxslu.schedule.domain.Timetable
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Tick02
@@ -201,10 +200,16 @@ fun ImportTargetDialogHost(
                     )
                 }
                 if (!note.isNullOrBlank()) {
+                    // note 现在最多拼 7 段（成绩/学业/培养方案/教材/笔记/作业/调休 + 配置），
+                    // 600dp 级屏上会把正文顶出弹窗——而被裁掉的正是「会替换你哪些数据」
+                    // 这段知情文案。单独给 note 一个滚动上限，与下面的课表列表并列（不嵌套）。
                     Text(
                         note,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier
+                            .heightIn(max = 120.dp)
+                            .verticalScroll(rememberScrollState()),
                     )
                 }
                 Text(

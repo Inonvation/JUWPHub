@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -102,16 +103,20 @@ fun AppConfirmDialog(
             )
         },
         confirmButton = {
-            // 48dp 命中区：弹窗按钮默认 40dp，低于无障碍最小触控目标
+            // 48dp 命中区：弹窗按钮默认 40dp，低于无障碍最小触控目标。
+            // 强调色必须交给 TextButton 的 colors 而不是 Text(color = …)：后者会绕过
+            // enabled=false 的降透明，禁用态（写入中 / 重试中）的确认键仍保持鲜亮，
+            // 用户会当成按钮坏了。textButtonColors 的 disabledContentColor 默认就是
+            // 同一个色降 38% 透明度，正好是我们要的。
             TextButton(
                 enabled = confirmEnabled,
                 onClick = onConfirm,
                 modifier = Modifier.heightIn(min = 48.dp),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                ),
             ) {
-                Text(
-                    confirmLabel,
-                    color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                )
+                Text(confirmLabel)
             }
         },
         dismissButton = {

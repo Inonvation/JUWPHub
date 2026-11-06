@@ -21,7 +21,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,8 +31,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -60,7 +57,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -88,13 +84,12 @@ import edu.jxslu.schedule.domain.ExamMapper
 import edu.jxslu.schedule.domain.ExamMapper.ExamEntry
 import edu.jxslu.schedule.domain.ScoreRecord
 import edu.jxslu.schedule.data.session.CasEnsureResult
-import edu.jxslu.schedule.data.session.CredentialVault
 import edu.jxslu.schedule.data.session.NetworkHint
 import edu.jxslu.schedule.data.session.SessionStatus
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
+import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.CasLoginDialog
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.ImportTargetDialogHost
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.resolveImportTarget
@@ -1774,23 +1769,19 @@ fun JwImportScreen(
     // 「这一学期教务还没排考」的终态弹窗（2026-09-30）：一键式的另一条出口。
     // 考试由教务考前数周才录入，平时 count=0 是**正常空态不是错误**，所以文案只陈述
     // 事实 + 给出下次再来的路，不用 warning/error 语气。
-    // **不要套 `AppConfirmDialog`**（2026-11-06 复核）：这里是**单键提示**（只有「知道了」），
-    // 确认弹窗恒有两个键，套过去会凭空多出一个「取消」——用户会以为关掉它等于取消导入。
+    // **单键提示走 `AppInfoDialog`，不要套 `AppConfirmDialog`**：后者恒有两个键，
+    // 套过去会凭空多出一个「取消」——用户会以为关掉它等于取消导入（2026-11-06 复核：
+    // 这里原来手写了一份 AlertDialog，公共件里早有单键版本）。
     emptyExamTerm?.let { term ->
-        AlertDialog(
-            onDismissRequest = { emptyExamTerm = null },
-            title = { Text("暂时没有考试安排") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "$term 教务还没有录入考试安排。教务通常考前数周才排考，" +
-                        "过段时间再来查一次即可。",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { emptyExamTerm = null }) { Text("知道了") }
-            },
-        )
+        AppInfoDialog(
+            title = "暂时没有考试安排",
+            onDismiss = { emptyExamTerm = null },
+        ) {
+            Text(
+                "$term 教务还没有录入考试安排。教务通常考前数周才排考，" +
+                    "过段时间再来查一次即可。",
+            )
+        }
     }
 
     pendingScores?.let { grouped ->

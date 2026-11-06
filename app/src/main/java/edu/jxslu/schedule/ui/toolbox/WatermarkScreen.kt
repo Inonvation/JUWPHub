@@ -173,8 +173,9 @@ fun WatermarkScreen(onBack: () -> Unit) {
         scope.launch {
             // busy 必须由 finally 兜底复位：渲染 OOM / 写相册抛异常时若逃逸出去，
             // busy 会永久停在 true —— 返回键此后只会提示「正在处理」，整页变死页
+            var bitmap: android.graphics.Bitmap? = null
             try {
-                val bitmap = withContext(Dispatchers.Default) { renderFull(uri) }
+                bitmap = withContext(Dispatchers.Default) { renderFull(uri) }
                 if (bitmap == null) {
                     notice("读取图片失败，请重试", NoticeTone.Error)
                     return@launch
@@ -190,12 +191,17 @@ fun WatermarkScreen(onBack: () -> Unit) {
                         is GallerySaveResult.Failed -> notice(result.message, NoticeTone.Error)
                     }
                 }
-                bitmap.recycle()
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: OutOfMemoryError) {
+                // 单独拦 OOM：它的 message 是一长串英文分配信息，直接透给用户等于没解释
+                notice("图片太大，内存不足：试试先裁剪", NoticeTone.Error)
             } catch (e: Throwable) {
                 notice("保存失败：${e.message ?: "未知错误"}", NoticeTone.Error)
             } finally {
+                // 回收放 finally（recycle 幂等）：分享 / 写相册抛异常时原来会漏掉这一张
+                // 全尺寸位图，连着试几张就把内存顶到 OOM（2026-11-06 复核）
+                bitmap?.recycle()
                 busy = false
             }
         }

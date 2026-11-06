@@ -118,7 +118,6 @@ import edu.jxslu.schedule.ui.life.RechargeKind
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.QuickScanTarget
-import edu.jxslu.schedule.domain.UnlockFlowState
 import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.domain.quickScanTargetOf
 import edu.jxslu.schedule.ui.common.AppPermissions
@@ -149,8 +148,6 @@ import edu.jxslu.schedule.domain.WenquRules
 import me.rerere.hugeicons.stroke.Book01
 import me.rerere.hugeicons.stroke.Calendar01
 import me.rerere.hugeicons.stroke.School01
-import me.rerere.hugeicons.stroke.Settings01
-import me.rerere.hugeicons.stroke.Wallet03
 import me.rerere.hugeicons.HugeIcons
 
 class MainActivity : ComponentActivity() {
@@ -426,9 +423,13 @@ private var themeSnapshot: ThemeSnapshot? = null
  *
  * shortcut: 真实收益是**少两次 `runBlocking` + 两次 Flow 收集**（µs 级），不是「少两次磁盘读」
  * ——旧版 `shouldShowOnboarding()` 那一读就已经是整份 DataStore 的冷读，后面两处本来吃缓存
- * （2026-11-06 交叉复核纠正了这条注释原来的说法）。**已知行为差异**：debug 包走完引导后
- * 在同一进程里重建 `MainActivity`，快照里 `onboardingSeen` 还是 false，引导会再弹一次；
- * release 被 `isFreshInstall` 挡住，不受影响。
+ * （2026-11-06 交叉复核纠正了这条注释原来的说法）。
+ *
+ * **`onboarding_seen` 不进快照**（2026-11-06 收尾复核）：它是会变的键——用户走完引导当场写入，
+ * 而快照是进程级常量。缓存它会让「新装 → 走完引导 → 返回键退出（进程未死）→ 再从桌面进入」
+ * 重复走一遍引导：新实例 `savedInstanceState == null`，`isFreshInstall` 在全新安装上恒为
+ * true，挡不住。现在 `shouldShowOnboarding()` 每次现读（此时 DataStore 已被本快照读热，
+ * 不碰磁盘）。
  *
  * **启动页仍单独真读**（[resolveStartRouteBlocking]）：它的 KDoc 承诺「重开窗口就取
  * 当时的偏好」，进程级缓存会把这语义退化成「重启生效」。那是唯一剩下的主线程读，
@@ -436,8 +437,6 @@ private var themeSnapshot: ThemeSnapshot? = null
  */
 private data class StartupSnapshot(
     val prefs: DisplayPrefs,
-    /** `onboarding_seen`。读失败时按 `true`（= 不弹引导），见 [shouldShowOnboarding]。 */
-    val onboardingSeen: Boolean,
 )
 
 /** 进程级快照。**只在主线程访问**：三个调用点都在 `onCreate` / 首帧组合里，无需同步。 */
@@ -445,18 +444,9 @@ private var startupSnapshot: StartupSnapshot? = null
 
 private fun startupSnapshotBlocking(): StartupSnapshot = startupSnapshot ?: runCatching {
     runBlocking {
-        // 两次 runCatching 分开：偏好读失败不该把 onboarding_seen 一起拖成默认值。
-        val prefs = runCatching {
-            Graph.repository(Graph.appContext).displayPrefs.first()
-        }.getOrDefault(DisplayPrefs())
-        // 读不到就当作「已走过引导」：宁可不引导，也不要在老用户机器上凭空冒出一段
-        // 引导（与 isFreshInstall 读不到安装信息时返回 false 是同一条保守口径）。
-        val seen = runCatching {
-            Graph.displayPrefs(Graph.appContext).onboardingSeen.first()
-        }.getOrDefault(true)
-        StartupSnapshot(prefs, seen)
+        StartupSnapshot(Graph.repository(Graph.appContext).displayPrefs.first())
     }
-}.getOrDefault(StartupSnapshot(DisplayPrefs(), onboardingSeen = true))
+}.getOrDefault(StartupSnapshot(DisplayPrefs()))
     .also { startupSnapshot = it }
 
 private fun readThemeSnapshotBlocking(): ThemeSnapshot = startupSnapshotBlocking().prefs.let {
@@ -580,7 +570,17 @@ private fun resolveStartRouteBlocking(): String = runBlocking {
  * 不打扰」这条保护，所以只在那里判安装时间。
  */
 private fun shouldShowOnboarding(): Boolean {
-    if (startupSnapshotBlocking().onboardingSeen) return false
+    // 先把显示偏好读热（主题 / 悬浮栏要吃它），再读 onboarding_seen——后者**每次现读**：
+    // 它在进程生命周期里会变（用户走完引导当场写入），缓存成进程级常量会让新装用户
+    // 「返回键退出再进」重复走一遍引导（新实例 savedInstanceState == null，
+    // 而 isFreshInstall 在全新安装上恒为 true，挡不住）。
+    startupSnapshotBlocking()
+    // 读不到就当作「已走过引导」：宁可不引导，也不要在老用户机器上凭空冒出一段引导
+    // （与 isFreshInstall 读不到安装信息时返回 false 是同一条保守口径）。
+    val seen = runCatching {
+        runBlocking { Graph.displayPrefs(Graph.appContext).onboardingSeen.first() }
+    }.getOrDefault(true)
+    if (seen) return false
     if (BuildConfig.DEBUG) return true
     return isFreshInstall(Graph.appContext)
 }
@@ -1077,7 +1077,9 @@ internal fun JuwApp(
     val showSyncOutcome = outcome != null && !outcome.consumed && onboardingSeen
     // 「查看」只跳页不消费（用户看完回来还要看别的）；连点用时间戳挡，防重复 startActivity
     var lastViewClickAt by remember { mutableStateOf(0L) }
-    if (showSyncOutcome && outcome != null) {
+    // 顺序不能换：`outcome != null` 放前面，后面才能智能转换（`showSyncOutcome` 里
+    // 已经蕴含非空，写成 `showSyncOutcome && outcome != null` 编译器会报「条件恒真」）
+    if (outcome != null && showSyncOutcome) {
         OnboardingSyncResultDialog(
             outcome = outcome,
             onConsume = {

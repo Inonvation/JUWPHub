@@ -84,7 +84,7 @@ fun WaterWorkingAction(
         targetState = action,
         transitionSpec = {
             fadeIn(animationSpec = Motion.state()) togetherWith
-                fadeOut(animationSpec = Motion.tap())
+                fadeOut(animationSpec = Motion.exit())
         },
         label = "water-working-action",
         modifier = modifier.fillMaxWidth(),

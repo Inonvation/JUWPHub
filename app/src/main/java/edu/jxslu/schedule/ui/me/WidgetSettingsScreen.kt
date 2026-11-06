@@ -76,12 +76,9 @@ import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 import edu.jxslu.schedule.ui.widget.QiekjWaterWidgetReceiver
 import edu.jxslu.schedule.ui.widget.QzxyWaterWidgetReceiver
 import edu.jxslu.schedule.ui.widget.ScheduleWidgetReceiver
-import edu.jxslu.schedule.ui.widget.WidgetDay
 import edu.jxslu.schedule.ui.widget.WidgetFocus
-import edu.jxslu.schedule.ui.widget.WidgetLayout
 import edu.jxslu.schedule.ui.widget.WidgetModel
 import edu.jxslu.schedule.ui.widget.WidgetSnapshot
-import edu.jxslu.schedule.ui.widget.WidgetSnapshotStore
 import edu.jxslu.schedule.ui.widget.buildWidgetSnapshot
 import edu.jxslu.schedule.ui.widget.buildWidgetWeek
 import edu.jxslu.schedule.ui.widget.forSize
@@ -763,7 +760,13 @@ private fun FormGridItem(
     }
 }
 
-/** 迷你预览：按该档实测 dp 走同一套 [widgetMetricsFor] 分档；课表为空时给占位文案。 */
+/**
+ * 迷你预览：按该档实测 dp 走同一套 [widgetMetricsFor] 分档。
+ *
+ * 占位文案是「载入中」而不是「课表为空」：`WidgetSnapshot.forSize` 返回非空模型，
+ * 所以模型为 null ⟺ 快照还没算完 / 算失败，**从不**代表真空课表（空课表会正常渲染）。
+ * 尺寸不会闪——外层 Box 固定 w×h。
+ */
 @Composable
 private fun PreviewTile(size: WidgetPreviewSize, snapshot: State<WidgetSnapshot?>) {
     val (w, h) = when (size) {
@@ -784,7 +787,7 @@ private fun PreviewTile(size: WidgetPreviewSize, snapshot: State<WidgetSnapshot?
         val model = snapshot.value?.forSize(widgetMetricsFor(size.widthDp, size.heightDp))
         if (model == null) {
             Text(
-                text = "课表\n为空",
+                text = "载入中…",
                 fontSize = 8.sp,
                 lineHeight = 9.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

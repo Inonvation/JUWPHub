@@ -123,19 +123,22 @@ class AiScheduleStreamTest {
      */
     @Test
     fun `消费端慢时分片一个都不丢`() = runBlocking {
-        val sse = sseOf(*Array(40) { """{"choices":[{"delta":{"content":"c$it"}}]}""" })
-        val channel = Channel<StreamEvent>(capacity = 1)
-        val producer = launch(Dispatchers.IO) {
-            AiScheduleClient.create().readStreamForTest(Buffer().apply { writeUtf8(sse) }, channel)
-            channel.close()
+        // withTimeout：真回归（背压写坏成死等）时快速失败，而不是挂到 Gradle 超时
+        withTimeout(10_000) {
+            val sse = sseOf(*Array(40) { """{"choices":[{"delta":{"content":"c$it"}}]}""" })
+            val channel = Channel<StreamEvent>(capacity = 1)
+            val producer = launch(Dispatchers.IO) {
+                AiScheduleClient.create().readStreamForTest(Buffer().apply { writeUtf8(sse) }, channel)
+                channel.close()
+            }
+            val got = mutableListOf<String>()
+            while (true) {
+                val event = channel.receiveCatching().getOrNull() ?: break
+                got += (event as StreamEvent.Content).delta
+                delay(2)
+            }
+            producer.join()
+            assertEquals((0 until 40).map { "c$it" }, got)
         }
-        val got = mutableListOf<String>()
-        while (true) {
-            val event = channel.receiveCatching().getOrNull() ?: break
-            got += (event as StreamEvent.Content).delta
-            delay(2)
-        }
-        producer.join()
-        assertEquals((0 until 40).map { "c$it" }, got)
     }
 }

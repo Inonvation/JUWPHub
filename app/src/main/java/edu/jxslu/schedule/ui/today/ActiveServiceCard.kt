@@ -48,8 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
@@ -647,7 +646,7 @@ private val ExitRow = fadeOut(Motion.state()) +
  * 的接收者作用域里调用，所以做成扩展函数而不是顶层 `ContentTransform` 常量。
  */
 private fun AnimatedContentTransitionScope<*>.rowSwapSpec(): ContentTransform =
-    (fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap())).using(
+    (fadeIn(Motion.state()) togetherWith fadeOut(Motion.exit())).using(
         SizeTransform(clip = true) { _, _ ->
             // 高度补间与淡入淡出同档（state 180）：两态差 11dp，比内容淡出更慢会看到「文字
             // 已经换完、卡片下沿还在缩」

@@ -18,25 +18,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
@@ -56,22 +51,16 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
@@ -80,28 +69,20 @@ import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.repo.ImportPreview
 import edu.jxslu.schedule.data.repo.ImportResult
 import edu.jxslu.schedule.domain.Course
-import edu.jxslu.schedule.domain.CourseFilter
-import edu.jxslu.schedule.domain.LocalTimeLike
-import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.ScheduleOverrides
-import edu.jxslu.schedule.domain.SemesterConfig
-import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.TimetablePrefs
 import edu.jxslu.schedule.ui.common.CourseDetailSheet
 import edu.jxslu.schedule.ui.common.CourseEditSheet
 import edu.jxslu.schedule.ui.common.ResumedTickerEffect
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppInfoDialog
-import edu.jxslu.schedule.ui.common.GhostCourseCard
 import edu.jxslu.schedule.ui.common.GridCellStyle
-import edu.jxslu.schedule.ui.common.GridCourseCard
 import edu.jxslu.schedule.ui.common.ImportTargetDialogHost
 import edu.jxslu.schedule.ui.common.importPreviewNote
 import edu.jxslu.schedule.ui.common.importSuccessText
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.LocalBottomBarVisibleRequest
-import edu.jxslu.schedule.ui.common.SingleSectionCard
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.readTextFromUri
 import edu.jxslu.schedule.ui.common.resolveImportTarget
@@ -113,7 +94,7 @@ import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -122,7 +103,6 @@ import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Eye
 import me.rerere.hugeicons.stroke.Import
 import me.rerere.hugeicons.stroke.Share08
-import android.Manifest
 import android.util.Log
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -205,7 +185,23 @@ fun WeekScreen(
     }
 
     suspend fun runJsonImport(text: String, merge: Boolean, targetId: Long) {
-        when (val r = repo.importJson(text, merge, targetId)) {
+        // 写库异常必须在这里收住：`ImportResult.Failure` 只覆盖解析/校验阶段，
+        // 事务抛异常（磁盘满 / SQLite 异常）会一路冒到协程作用域——进程崩，
+        // 而数据其实已经整体回滚（2026-11-06 复核）。与 JwImportScreen 的成绩导入同口径。
+        val r = try {
+            repo.importJson(text, merge, targetId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            snackbar.showNotice(
+                AppNoticeVisuals(
+                    "写入失败：${e.message ?: "未知错误"}，未改动任何数据",
+                    tone = NoticeTone.Error,
+                ),
+            )
+            return
+        }
+        when (r) {
             is ImportResult.Success -> snackbar.showNotice(
                 AppNoticeVisuals(
                     // 只报课程数会让用户以为「只动了课表」：备份文件还会整体替换成绩 / 教材 /
@@ -384,7 +380,7 @@ fun WeekScreen(
     // 一旦在这里读 `nowState.value`，30 秒 tick 就会让整个 WeekScreen 重组，白拆一场；
     // 读取点只有 `WeekGrid.NowLine`，所以一次 tick 的代价 = 重画一条 1.5dp 的线。
     // 也不能改回 `state.now`（已从 `WeekUiState` 里移走）：那是把 tick 重新绑回整页状态。
-    val nowState = produceState(viewModel.now.value, viewModel.now) {
+    val nowState = produceState(initialValue = viewModel.now.value, key1 = viewModel.now) {
         viewModel.now.collect { value = it }
     }
 
