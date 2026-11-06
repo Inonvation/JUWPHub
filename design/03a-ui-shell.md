@@ -240,9 +240,38 @@ launcher：选中车后先收地图，**今日页接住车号再开出码页**�
 
 | 场景 | 规格 |
 |------|------|
-| Tab 间切换 | 180ms 交叉淡入淡出——三个 Tab 平级，横向滑动会误导层级 |
+| Tab 间切换 | 180ms 交叉淡入淡出——三个 Tab 平级，横向滑动会误导层级（2026-11-06 复核：仍为现状；`docs/motion-polish-plan.md` 阶段 1.1 的 fade-through 方案**不做**，用户当日决定） |
 | 打开二级页（SubpageActivity / JwImportActivity / TranscriptActivity） | 新窗口从右缘平移推入覆盖主窗口，280ms 减速曲线（`res/anim/slide_in_right`）；主窗口给 `res/anim/stay_still`（0→0 静止动画 = 原地不动，纯覆盖，非左右推移） |
-| 关闭二级页（页内返回 / 系统返回，统一走 `finish()`） | **2026-11-06 起由 App 自己播**：`PredictiveBackExitHost` 按返回手势进度驱动整页平移/缩放/淡出，松手提交后再 `finish()`；窗口关闭侧声明为 `stay_still`，不叠第二次动画。见下方「跟手返回」 |
+| 关闭二级页（页内返回 / 系统返回，统一走 `finish()`） | 窗口向右滑出，240ms 加速曲线（`res/anim/slide_out_right`），主窗口给 `stay_still`。**2026-11-06 试过 App 自驱跟手，当天回退**：二级页在独立不透明窗口里看不到下层页面，整页平移只能读成「错位停在右半边」，整屏 alpha 还导致掉帧。见下方「跟手返回」 |
+
+**动效口径（2026-11-06，`ui/theme/Motion.kt`）**——此前全 App 有 142 处 `tween(字面量)`、23 个不同值，
+同一件事在不同页面用不同时长（「展开」在课表页 250ms、设置页 200ms、今日页 340ms）。
+现在只有四档，按「用户在看什么」分，不按控件类型分：
+
+| 档 | 时长 | 用在哪 | 为什么是这个量级 |
+|----|------|--------|------------------|
+| `Motion.tap()` | 90ms | 按下/抬起、颜色与描边瞬间态 | 手指还在屏幕上，迟一帧就是「没反应」 |
+| `Motion.state()` | 180ms | 选中、开关、展开/收起 | 一次操作对应一次可见变化 |
+| `Motion.reveal()` | 220ms | 内容出现、骨架→内容、错峰出现 | 新内容进场，眼睛要跟上（曲线用 decelerate） |
+| `Motion.page()` / `pageExit()` | 280ms | 页面级进出场、弹层升降、大块位移 | 换「在哪一页」，要交代方位 |
+
+曲线取 Material 3 emphasized 家族（手写 `CubicBezierEasing`，不用 `MaterialTheme.motionScheme`——
+那套在 material3 1.3 仍标 experimental 且只给 spec 不给曲线，调用点没法与 `animateColorAsState` 混用）。
+**新代码一律用这四档**，别再写字面量；确有例外（跟手、无限循环、非动画的超时上限）在调用点写
+`// 例外：<原因>`。归并口径表在 `Motion.kt` 文件头。
+
+配套三条：
+
+- **按压反馈**：`rememberPressScale(interaction)` 按下 0.96。此前只有 3 处卡片自己接了
+  `collectIsPressedAsState`，其余可点卡片「点了没动静」，用户只能靠下一屏是否变化判断点没点上。
+- **无限动画跟随系统「关闭动画」**：`rememberAnimationsEnabled()`（读 `ANIMATOR_DURATION_SCALE`）。
+  Compose 的 `rememberInfiniteTransition` 不跟随系统设置，用户明确关掉动画后屏幕上仍有东西在动。
+  只用于无限循环，**不**关一次性过渡（那是状态变化的交代）。
+- **底栏胶囊指示器**：三格各自亮 → **一个指示器滑过去**（`Row.drawBehind` 按 `size.width/tabs.size`
+  画底块，绘制期读动画值；不用 `graphicsLayer{translationX}`——那要多一个 `Box` + `matchParentSize`
+  才拿得到槽宽，多一次子组合）。首帧 `currentRoute=null` 先不落位，首次拿到真槽位直接 snap。
+- **骨架 → 内容**：`PageScaffold` 用 `Crossfade(loading, Motion.reveal())`，只淡 loading↔content；
+  空态仍硬切（空态文案随调用方变化，把空态当 `targetState` 会在退场帧读到 null）。
 
 **不动的那一侧要给 `stay_still`，不能传 0**（2026-09-26 修：二级页返回没有跟手预览）：
 0 的含义是「这一侧没有动画资源」，跟手预览（预测性返回）需要两侧都有可按进度驱动的
@@ -277,17 +306,20 @@ launcher：选中车后先收地图，**今日页接住车号再开出码页**�
 用 `PredictiveBackHandler`）**跟手正常**——说明系统会送 `OnBackProgressed`，只是自己不做
 跨窗口动画。
 
-所以关闭侧改成 App 自己驱动（`ui/common/PredictiveBackExit.kt` 的 `PredictiveBackExitHost`）：
-手势进度直接驱动整页 `translationX`/缩放/透明度，顶栏返回与手势提交走同一个出口，动画播完
-才 `finish()`；窗口关闭侧同时声明为 `stay_still`（`enablePredictiveBackTransitions(selfDrivenClose = true)`），
-否则窗口会再滑一次、与页面动画叠成「抖一下」。**≤33 不接管**：那里 `PredictiveBackHandler`
-只在松手时补发一个 `progress = 1` 的事件，照这套驱动会瞬间跳位，所以低版本整段退回窗口动画。
+所以关闭侧曾改成 App 自己驱动（`ui/common/PredictiveBackExit.kt` 的 `PredictiveBackExitHost`）：
+手势进度直接驱动整页 `translationX`/缩放/透明度，窗口关闭侧同时声明为 `stay_still`
+避免叠两次动画。
 
-**代价**：注册 `PredictiveBackHandler` 会关掉系统的跨窗口预览；页面在独立窗口里看不到下面
-那一页，退场落点是宿主铺的 `surface` 底色（防深色主题透出浅色窗口背景）。要让真页面露出来
-得把窗口改成 `windowIsTranslucent`，代价是每个页面必须自带不透明底，暂不做。
-已接入 `SubpageActivity`（35+ 页）；Settings / JwImport / Transcript / XgForm / PowerBankPay
-仍是窗口动画，等 SubpageActivity 真机验过再铺开。
+**这套方案 2026-11-06 当天回退**，真机反馈「页面只往右挪了一点、左边空着」+ 掉帧。失败原因是
+架构性的，不是参数问题：二级页跑在**独立的不透明窗口**里，下面那一页根本不可见，所以任何
+「按进度平移本页」的写法都会被读成错位而不是滑动；整屏 `alpha` 又强制每帧离屏合成。
+`PredictiveBackExit.kt` 已删除，`SubpageActivity` / `WindowTransitions` 回到纯窗口动画
+（`slide_out_right`）。
+
+要让真页面露出来只有两条路，都不便宜：窗口改 `windowIsTranslucent`（每个页面必须自带不透明底，
+WebView / 输入法 / 状态栏都要重验），或把二级页并进 `MainActivity` 的 `NavHost`（72 个
+`SubpageScreen` 分支 + 9 个 Activity 的返回栈重写）。**再动之前先在这两条里选一条，
+不要重复做「自驱平移」。**
 
 **二级页里拉起 App 之外的界面（微信扫一扫 / 微信支付 / 浏览器 / 快趣出行 / 系统设置页…）
 一律走 `WindowTransitions.startActivityOutsideApp`**（2026-09-26 修「打开微信后页面跳动」）：

@@ -121,21 +121,46 @@
 - 区块标题同理走 `ui/common/SectionHeader.kt`（「今天还有 N 节」「明天 · 周二」
   与笔记/作业库的「最近更新」「按课程」共用一套规格）。
 
-## 动效口径（2026-10-16 起，U净 页收口）
+## 动效口径（2026-11-06 起：`ui/theme/Motion.kt` 是唯一来源）
 
-- **区块进入 / 退出**：`fadeIn + expandVertically(expandFrom = Top)`，220ms
-  `FastOutSlowInEasing`；退出 160ms `shrinkVertically`。写死在页内常量，**不建全局
-  motion token 文件**（与项目现状一致）。
+- **四档时长，别再写字面量**：`Motion.tap()` 90 / `Motion.state()` 180 / `Motion.reveal()` 220 /
+  `Motion.page()` 280（`pageExit()` 同长、加速曲线）。曲线 `standard` / `decelerate`（进场）/
+  `accelerate`（退场）。**档位数值与归并表只写在 `Motion.kt` 文件头**（改档位只改那一处）；
+  规格与理由见 `design/03a-ui-shell.md` 的「动效口径」一节，这里只记怎么用、怎么验。
+- **验收命令**（2026-11-06 复核后修正，旧版写成「0 命中」是错的）：
+
+  ```powershell
+  # 允许出现的只有：Motion.kt 自身、引导页（一次性编排动画，见下）、无限循环周期、标注了例外的行
+  Get-ChildItem -Path app\src\main\java\edu\jxslu\schedule -Recurse -Filter *.kt |
+    Select-String -Pattern 'tween\(\s*\d|durationMillis\s*=\s*\d' |
+    Where-Object { $_.Path -notmatch 'Motion\.kt|onboarding' }
+  ```
+
+  除 `ui/onboarding/`（引导是逐段编排的动画，切屏 320ms、对勾描边 1100ms、呼吸 1500ms 这些
+  数是按「这一步要让人看懂什么」设计的，压到四档会把描边压成看不清、把呼吸压成抽搐；
+  理由写在 `OnboardingScreen.kt` 的时长口径注释里）与无限循环周期外，命中即漏改。
+  **别用「全仓 0 命中」当验收**——注释里的 `tween(300ms…)` 也会被匹配到。
+- **例外只有三类**，且必须在调用点写 `// 例外：<原因>`：① 跟手动画（拖拽、滑杆、预测性返回）；
+  ② 无限循环（呼吸/涟漪/骨架微光，周期不是"过渡时长"）；③ 不是动画的超时上限
+  （如 `SheetDismissIme` 等键盘收起的 450ms、闹钟分钟刻度）。**区块进入/退出**不再各写常量：
+  进入 `fadeIn + expandVertically` 用 `Motion.reveal()`，退出 `shrinkVertically + fadeOut` 用
+  `Motion.state()`。
 - **高频数值（每秒变）不做 crossfade**：倒计时、计时文案每秒都在变，动画会一直闪
-  （今日页流程简报同款结论）。变化感交给**进度条**：进度值 `animateFloatAsState` 400ms，
-  每秒更新接续平滑，观感是连续推进。
-- **非高频状态文案**才 crossfade（180ms），如贴底动作条的所选档位摘要。
-- **列表增删**：`LazyColumn` 用 `Modifier.animateItem()`；普通 `Column` 里用
-  `Modifier.animateContentSize()` 收平高度（逐项退场动画要 LazyColumn 才撑得住，
-  别为此把整页改成 lazy）。整批换内容的卡片列表（骑行页附近车辆 / 还车点，
-  `RidePanels.AnimatedCardList`，2026-10-19）可以走一层 `AnimatedContent` 整块
-  淡入淡出 + `SizeTransform`：按**卡片身份集合**判是否播，只变距离数字不播；
-  它不是逐项退场，别拿它替代 LazyColumn 的 `animateItem()`。
+  （今日页流程简报同款结论）。变化感交给**进度条**：进度值 `Motion.page()`，每秒更新接续平滑，
+  观感是连续推进。
+- **非高频状态文案**才 crossfade（`Motion.state()`），如贴底动作条的所选档位摘要。
+- **列表增删**：`LazyColumn` 用 `Modifier.animateItem()`（前提：`items(key = …)` 有业务 id；
+  用下标当 key 等于每次重建）；普通 `Column` 里用 `Modifier.animateContentSize()` 收平高度
+  （逐项退场动画要 LazyColumn 才撑得住，别为此把整页改成 lazy）。整批换内容的卡片列表
+  （骑行页附近车辆 / 还车点，`RidePanels.AnimatedCardList`，2026-10-19）可以走一层
+  `AnimatedContent` 整块淡入淡出 + `SizeTransform`：按**卡片身份集合**判是否播，
+  只变距离数字不播；它不是逐项退场，别拿它替代 LazyColumn 的 `animateItem()`。
+- **按压反馈**：`rememberPressScale(interaction)`（0.96，走 `Motion.tap()`）。调用方必须自己建
+  `MutableInteractionSource` 并同时交给 `clickable(interactionSource = …)`，否则永远读不到按下态。
+- **无限动画必须跟随系统「关闭动画」**：套 `rememberAnimationsEnabled()`，关掉时给静止态
+  （保留元素、去掉循环）。**注意别破坏「绘制期读 State」**：原实现用 `by` 委托在
+  `graphicsLayer`/`drawBehind` 的 lambda 里读值，改成组合期 `val x: Float = …` 会把每帧读提到
+  组合期，`SkeletonBox`/`LoadingHint` 会变成每帧重组——用 `State<Float>?` + lambda 里 `?.value`。
 - **进页错峰入场**用 `ui/common/StaggeredReveal.kt`（每块 +60ms、6dp、220ms，
   **只在首次组合播一次**）：只包「一直存在的主区块」，别包由 `AnimatedVisibility`
   管出现/消失的块——两套动画叠加会打架。
