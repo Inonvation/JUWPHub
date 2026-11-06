@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -54,7 +53,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.power.PowerEntryState
 import edu.jxslu.schedule.ui.common.AmountHeroText
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
@@ -315,48 +314,46 @@ private fun AmountStep(
     }
 
     if (confirm) {
-        AlertDialog(
-            onDismissRequest = { confirm = false },
-            title = { Text("确认充值金额？") },
-            text = {
-                // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行才拿得到 Dialog 的 LocalView）
-                DialogWindowFadeEffect()
-                // 房间号**加粗**（2026-09-28 用户要求）：这一屏盖住了弹层头部的房间行，
-                // 而「充到哪个寝室」比「充多少」更容易错——一个房间一个电表，充错就是别人的。
-                // 房间号取不到（读数没回来）时不显示数字，宁缺勿错。
-                Text(
-                    buildAnnotatedString {
-                        append("将为")
-                        if (roomLabel.isNullOrBlank()) {
-                            append("当前绑定房间")
-                        } else {
-                            append("房间 ")
-                            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(roomLabel) }
-                        }
-                        append(
-                            if (isAccount) {
-                                " 的电费缴纳 ¥$amount（电子账户）。\n\n"
-                            } else {
-                                " 的电费缴纳 ¥$amount（农行支付）。\n\n"
-                            },
-                        )
+        AppConfirmDialog(
+            title = "确认充值金额？",
+            confirmLabel = "去下单",
+            onConfirm = {
+                confirm = false
+                onPlaceOrder(amount)
+            },
+            onDismiss = { confirm = false },
+            // 钱还没出去：这一步只是把订单提交给平台，未支付订单 30 分钟自动失效，
+            // 所以确认键保持主色（红色留给「退出登录 / 清凭证」那类不可撤销动作）
+            danger = false,
+        ) {
+            // 房间号**加粗**（2026-09-28 用户要求）：这一屏盖住了弹层头部的房间行，
+            // 而「充到哪个寝室」比「充多少」更容易错——一个房间一个电表，充错就是别人的。
+            // 房间号取不到（读数没回来）时不显示数字，宁缺勿错。
+            Text(
+                buildAnnotatedString {
+                    append("将为")
+                    if (roomLabel.isNullOrBlank()) {
+                        append("当前绑定房间")
+                    } else {
+                        append("房间 ")
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(roomLabel) }
+                    }
+                    append(
                         if (isAccount) {
-                            append("下单后用 6 位消费密码支付；未支付的订单 30 分钟自动失效，不会扣款。")
+                            " 的电费缴纳 ¥$amount（电子账户）。\n\n"
                         } else {
-                            append("下一步在 App 内打开农行支付页，用手机号 + 短信验证码付款；")
-                            append("没付款就离开不会扣款，订单 30 分钟自动失效。")
-                        }
-                    },
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirm = false
-                    onPlaceOrder(amount)
-                }) { Text("去下单") }
-            },
-            dismissButton = { TextButton(onClick = { confirm = false }) { Text("取消") } },
-        )
+                            " 的电费缴纳 ¥$amount（农行支付）。\n\n"
+                        },
+                    )
+                    if (isAccount) {
+                        append("下单后用 6 位消费密码支付；未支付的订单 30 分钟自动失效，不会扣款。")
+                    } else {
+                        append("下一步在 App 内打开农行支付页，用手机号 + 短信验证码付款；")
+                        append("没付款就离开不会扣款，订单 30 分钟自动失效。")
+                    }
+                },
+            )
+        }
     }
 }
 

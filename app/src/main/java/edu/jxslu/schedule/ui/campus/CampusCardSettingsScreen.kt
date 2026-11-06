@@ -22,7 +22,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,9 +61,9 @@ import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionStatus
 import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.ui.common.AccountCard
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.RechargeDisclaimerDialog
@@ -613,36 +612,27 @@ fun CampusCardSettingsScreen(
     }
 
     if (confirmDisable) {
-        AlertDialog(
-            onDismissRequest = { confirmDisable = false },
-            title = { Text("关闭并清除凭证？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "将清除已保存的学号密码，左侧栏的付款码与钱包回到未开启状态，寝室电费与余额提醒也会一并关闭" +
-                        "（它们都要用这份凭证）；重新开启时需要重新输入并验证。",
-                )
+        AppConfirmDialog(
+            title = "关闭并清除凭证？",
+            message = "将清除已保存的学号密码，左侧栏的付款码与钱包回到未开启状态，寝室电费与余额提醒也会一并关闭" +
+                "（它们都要用这份凭证）；重新开启时需要重新输入并验证。",
+            confirmLabel = "关闭并清除",
+            onConfirm = {
+                confirmDisable = false
+                busy = true
+                viewModel.disable {
+                    busy = false
+                    username = ""
+                    scope.launch {
+                        snackbar.showNotice(
+                            AppNoticeVisuals("已关闭并清除凭证", tone = NoticeTone.Info),
+                        )
+                    }
+                }
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmDisable = false
-                        busy = true
-                        viewModel.disable {
-                            busy = false
-                            username = ""
-                            scope.launch {
-                                snackbar.showNotice(
-                                    AppNoticeVisuals("已关闭并清除凭证", tone = NoticeTone.Info),
-                                )
-                            }
-                        }
-                    },
-                ) { Text("关闭并清除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDisable = false }) { Text("取消") }
-            },
+            onDismiss = { confirmDisable = false },
+            // 清掉已保存的学号密码、连带关掉付款码/钱包/电费与提醒：不可撤销，确认键染红
+            danger = true,
         )
     }
 

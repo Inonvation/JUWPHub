@@ -16,13 +16,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,7 +38,7 @@ import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.wenqu.WenquActivity
 import edu.jxslu.schedule.domain.WenquRules
 import edu.jxslu.schedule.startActivityOutsideApp
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
@@ -184,6 +182,11 @@ private enum class SheetConfirm { APPLY, CANCEL }
  *
  * 文案刻意**只陈述事实**：报名 / 取消都会**直接提交到问渠平台**（本应用不再是只读展示），
  * 所以要把「这一步会改平台数据」说清楚，别让用户以为是本地操作。
+ *
+ * 2026-11-06 起收口到 `AppConfirmDialog`：正文只是「活动名 + 时间 + 一句说明」，没有名额表、
+ * 没有勾选项、没有多段要点，属纯文案正文，自建那份唯一的收益是不用传参数——代价是漏掉
+ * 它的高度上限与滚动兜底（小屏 + 大字号下「确认报名」会被挤出弹窗，用户只能返回键退出、
+ * 以为操作没生效）。取消键文案是「再想想 / 保留报名」而不是「取消」，用 `dismissLabel` 保住。
  */
 @Composable
 private fun WenquActionConfirmDialog(
@@ -194,50 +197,49 @@ private fun WenquActionConfirmDialog(
     onDismiss: () -> Unit,
 ) {
     val isApply = kind == SheetConfirm.APPLY
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (isApply) "报名确认" else "取消报名") },
-        text = {
-            DialogWindowFadeEffect()
-            Column {
-                Text(
-                    text = activityName,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (timeText.isNotBlank()) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = timeText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = if (isApply) {
-                        "报名会直接提交到「问渠」平台。报名后如需取消，可再打开本条活动取消（以平台规则为准）。"
-                    } else {
-                        "取消后本条报名会从平台移除，如需再次参加请重新报名。"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text(if (isApply) "确认报名" else "确认取消") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(if (isApply) "再想想" else "保留报名") }
-        },
-    )
+    AppConfirmDialog(
+        title = if (isApply) "报名确认" else "取消报名",
+        confirmLabel = if (isApply) "确认报名" else "确认取消",
+        dismissLabel = if (isApply) "再想想" else "保留报名",
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+    ) {
+        Text(
+            text = activityName,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (timeText.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = timeText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = if (isApply) {
+                "报名会直接提交到「问渠」平台。报名后如需取消，可再打开本条活动取消（以平台规则为准）。"
+            } else {
+                "取消后本条报名会从平台移除，如需再次参加请重新报名。"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+    }
 }
 
 /**
  * 「预报名」二次确认（DESIGN §3.28 / §4.45，2026-10-16；用户拍板）。
  *
  * 说清三件事：这是**自动提交**（本应用唯一一处）、会重试但有限次、结果通知 / 随时可取消。
+ *
+ * 2026-11-06 起收口到 `AppConfirmDialog`：正文仍是「活动名 + 报名时间 + 一段说明」，
+ * 但这段说明是全 App 最长的确认文案（重试秒数、次数、顺延、可取消四件事挤在一段里），
+ * 自建实现**没有高度上限也没有滚动**——小屏 + 大字号档位下「开启预报名」会被顶出弹窗，
+ * 而这是个不可撤销的自动提交，用户点不到只能返回键退出、以为没开成。合并后正文进
+ * `AppConfirmDialog` 的滚动槽，段落间距与字号一字未改（内容槽直出，没有多套一层 Column）。
  */
 @Composable
 private fun WenquPreregConfirmDialog(
@@ -246,40 +248,37 @@ private fun WenquPreregConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("预报名确认") },
-        text = {
-            DialogWindowFadeEffect()
-            Column {
-                Text(
-                    text = activityName,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (opensAtText.isNotBlank()) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = "报名时间 $opensAtText",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = "确认后本应用会代替你在开放时刻自动提交报名：从开始前 " +
-                        "${WenquRules.PREREG_TRY_BEFORE_MS / 1000} 秒起，" +
-                        "最多试 ${WenquRules.PREREG_MAX_ATTEMPTS} 发，成功或失败都会通知你；" +
-                        "活动时间有变化会自动顺延。" +
-                        "平台有时提前几秒放行，自动提交就是为了吃到这几秒；期间随时可在本页取消。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("开启预报名") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("再想想") } },
-    )
+    AppConfirmDialog(
+        title = "预报名确认",
+        confirmLabel = "开启预报名",
+        dismissLabel = "再想想",
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+    ) {
+        Text(
+            text = activityName,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (opensAtText.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "报名时间 $opensAtText",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "确认后本应用会代替你在开放时刻自动提交报名：从开始前 " +
+                "${WenquRules.PREREG_TRY_BEFORE_MS / 1000} 秒起，" +
+                "最多试 ${WenquRules.PREREG_MAX_ATTEMPTS} 发，成功或失败都会通知你；" +
+                "活动时间有变化会自动顺延。" +
+                "平台有时提前几秒放行，自动提交就是为了吃到这几秒；期间随时可在本页取消。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+    }
 }
 
 /**

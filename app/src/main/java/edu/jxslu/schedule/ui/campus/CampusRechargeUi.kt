@@ -5,11 +5,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,7 +28,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.domain.YktPayment
 import edu.jxslu.schedule.ui.common.AmountHeroText
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
+import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 
 /**
@@ -176,50 +175,50 @@ fun RechargeSheet(
     }
 
     if (confirmStep) {
-        AlertDialog(
-            onDismissRequest = { confirmStep = false },
-            title = { Text("确认充值金额？") },
-            text = {
-                // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行才拿得到 Dialog 的 LocalView）
-                DialogWindowFadeEffect()
-                // 目标账户**加粗**（2026-09-28 用户要求）：充错账户是钱的事，二次确认这一屏
-                // 必须让「充到哪」比「充多少」更显眼。正式卡给卡号，电子账户给账户名——
-                // 卡号取不到（余额还没回来）就不显示数字，宁缺勿错。
-                Text(
-                    buildAnnotatedString {
-                        append("将为")
-                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                            if (toElectric) {
-                                append("电子账户")
-                            } else {
-                                append("正式卡")
-                                val account = cardAccount?.takeIf { it.isNotBlank() }
-                                if (account != null) append("（卡号 $account）")
-                            }
-                        }
-                        append(" 充值 ¥$amount。\n\n")
+        AppConfirmDialog(
+            title = "确认充值金额？",
+            confirmLabel = if (toElectric) "立即支付" else "去支付",
+            onConfirm = {
+                confirmStep = false
+                onLaunch(amount, toElectric)
+            },
+            onDismiss = { confirmStep = false },
+            // 充值类不染红：红色留给「关闭并清除凭证 / 退出登录」那类不可撤销动作
+            danger = false,
+        ) {
+            // 目标账户**加粗**（2026-09-28 用户要求）：充错账户是钱的事，二次确认这一屏
+            // 必须让「充到哪」比「充多少」更显眼。正式卡给卡号，电子账户给账户名——
+            // 卡号取不到（余额还没回来）就不显示数字，宁缺勿错。
+            Text(
+                buildAnnotatedString {
+                    append("将为")
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
                         if (toElectric) {
-                            append("电子账户用于电费等线上缴费。")
+                            append("电子账户")
+                        } else {
+                            append("正式卡")
+                            val account = cardAccount?.takeIf { it.isNotBlank() }
+                            if (account != null) append("（卡号 $account）")
                         }
-                        append("点击「${if (toElectric) "立即支付" else "去支付"}」会直接拉起微信（微信充值渠道），")
-                        append("在微信内确认支付；未支付的订单会自动失效，不会扣款。")
-                    },
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmStep = false
-                    onLaunch(amount, toElectric)
-                }) { Text(if (toElectric) "立即支付" else "去支付") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmStep = false }) { Text("取消") }
-            },
-        )
+                    }
+                    append(" 充值 ¥$amount。\n\n")
+                    if (toElectric) {
+                        append("电子账户用于电费等线上缴费。")
+                    }
+                    append("点击「${if (toElectric) "立即支付" else "去支付"}」会直接拉起微信（微信充值渠道），")
+                    append("在微信内确认支付；未支付的订单会自动失效，不会扣款。")
+                },
+            )
+        }
     }
 }
 
-/** 充值成功弹窗（到账状态机 Arrived 时显示）；[onOpenPayCode] 一键跳付款码页（可为空则不显示该按钮）。 */
+/**
+ * 充值成功弹窗（到账状态机 Arrived 时显示）；[onOpenPayCode] 非空时「查看付款码」顺带跳付款码页。
+ *
+ * 两个键都收敛到 [onDismiss]（关窗），确认键多一步跳转——所以用 `AppConfirmDialog` 的
+ * content 版：正文是金额大字 + 到账/余额两行次级信息，版式靠 `spacedBy(4.dp)`。
+ */
 @Composable
 fun CampusArrivalDialog(
     arrived: CampusCardViewModel.ArrivalState.Arrived,
@@ -227,49 +226,53 @@ fun CampusArrivalDialog(
     onOpenPayCode: (() -> Unit)? = null,
 ) {
     val onSurface = MaterialTheme.colorScheme.onSurface
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("充值成功") },
-        text = {
-            DialogWindowFadeEffect()
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                AmountHeroText("¥%.2f".format(arrived.orderFen / 100.0))
+    AppConfirmDialog(
+        title = "充值成功",
+        confirmLabel = "查看付款码",
+        onConfirm = {
+            onDismiss()
+            onOpenPayCode?.invoke()
+        },
+        onDismiss = onDismiss,
+        // 到账提示不是危险动作：红色留给「退出登录 / 清凭证」那类
+        danger = false,
+        dismissLabel = "关闭",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            AmountHeroText("¥%.2f".format(arrived.orderFen / 100.0))
+            Text(
+                text = "已到账",
+                style = MaterialTheme.typography.bodyMedium,
+                color = onSurface.copy(alpha = 0.75f),
+            )
+            arrived.newBalanceFen?.let {
                 Text(
-                    text = "已到账",
+                    text = "当前卡余额 ¥%.2f".format(it / 100.0),
                     style = MaterialTheme.typography.bodyMedium,
                     color = onSurface.copy(alpha = 0.75f),
                 )
-                arrived.newBalanceFen?.let {
-                    Text(
-                        text = "当前卡余额 ¥%.2f".format(it / 100.0),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = onSurface.copy(alpha = 0.75f),
-                    )
-                }
-                Text(
-                    text = "本次交易已同步至「消费流水」。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = onSurface.copy(alpha = 0.55f),
-                    modifier = Modifier.padding(top = 4.dp),
-                )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                onDismiss()
-                onOpenPayCode?.invoke()
-            }) { Text("查看付款码") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        },
-    )
+            Text(
+                text = "本次交易已同步至「消费流水」。",
+                style = MaterialTheme.typography.bodySmall,
+                color = onSurface.copy(alpha = 0.55f),
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
 }
 
 /**
  * 「正在确认到账」弹窗（DESIGN §4.19「充值」）：微信支付完成返回后、余额尚未更新时给出
  * 反馈——说明在自动检测（刚充完时最密，之后自动放慢，到账后立即提示），确认到账后会
  * 再弹成功弹窗；用户关闭**不影响**后台轮询。金额同样是大字主角（2026-10-07）。
+ *
+ * **两个出口不是同一件事**（这也是它用 content 版 `AppConfirmDialog` 而不是纯文案版的原因）：
+ * 点遮罩 / 返回 = [onDismiss]（只收窗，轮询继续，钱真到了照样提示）；
+ * 「我没有付款」= [onNotPaid]（停轮询 + 清掉 `clearPendingRecharge` 的落盘记录）。
+ * 合并时靠公共件的 `onTapOutside` 把两者分开——接错一个，要么点一下空白就静默停掉到账监视，
+ * 要么「我没有付款」退化成纯关窗、落盘记录不清，下次冷启动按旧订单恢复「正在确认」，
+ * 等于给一笔没付的订单凭空续命。
  */
 @Composable
 fun CampusPendingConfirmDialog(
@@ -279,36 +282,36 @@ fun CampusPendingConfirmDialog(
     onNotPaid: (() -> Unit)? = null,
 ) {
     val onSurface = MaterialTheme.colorScheme.onSurface
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("正在确认充值结果") },
-        text = {
-            DialogWindowFadeEffect()
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                AmountHeroText("¥%.2f".format(orderFen / 100.0))
-                Text(
-                    text = "已发起充值订单。若你已在微信完成支付，余额更新常有数分钟延迟，" +
-                        "App 正在自动检测，确认到账后立即提示。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = onSurface.copy(alpha = 0.75f),
-                )
-                Text(
-                    text = "如果你没有付款（在微信里取消或直接返回），点「我没有付款」，" +
-                        "未支付订单 30 分钟后自动失效，不会扣款。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = onSurface.copy(alpha = 0.55f),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("我已付款，等通知") }
-        },
-        dismissButton = {
-            if (onNotPaid != null) {
-                TextButton(onClick = onNotPaid) { Text("我没有付款") }
-            }
-        },
-    )
+    AppConfirmDialog(
+        title = "正在确认充值结果",
+        confirmLabel = "我已付款，等通知",
+        onConfirm = onDismiss,
+        // 两个出口语义不同，映射**不能反过来**（2026-11-06 与公共件作者对齐过）：
+        // 取消键「我没有付款」= [onNotPaid]（停轮询 + 清落盘记录）；
+        // 点遮罩 / 返回键 = [onDismiss]（只收窗，到账轮询继续跑，钱真到了照样提示）。
+        onDismiss = onNotPaid ?: onDismiss,
+        onTapOutside = onDismiss,
+        danger = false,
+        // 没有 onNotPaid 时（当前两个调用点都传了）退化成单键「关闭」，
+        // 不能拿「我没有付款」去接一个做不到停轮询的动作
+        dismissLabel = if (onNotPaid != null) "我没有付款" else "关闭",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            AmountHeroText("¥%.2f".format(orderFen / 100.0))
+            Text(
+                text = "已发起充值订单。若你已在微信完成支付，余额更新常有数分钟延迟，" +
+                    "App 正在自动检测，确认到账后立即提示。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = onSurface.copy(alpha = 0.75f),
+            )
+            Text(
+                text = "如果你没有付款（在微信里取消或直接返回），点「我没有付款」，" +
+                    "未支付订单 30 分钟后自动失效，不会扣款。",
+                style = MaterialTheme.typography.bodySmall,
+                color = onSurface.copy(alpha = 0.55f),
+            )
+        }
+    }
 }
 
 /**
@@ -330,40 +333,38 @@ fun CampusPaymentDialog(
         payment.merchant?.takeIf { it.isNotBlank() },
         payment.timeText.ifBlank { payment.typeText }.takeIf { it.isNotBlank() },
     ).joinToString(" · ")
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("支付成功") },
-        text = {
-            DialogWindowFadeEffect()
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // 大字金额：与趣智/骑行页的大号数字同族（AmountHeroText 唯一口径）
-                AmountHeroText("¥%.2f".format(payment.amountFen / 100.0))
-                if (detail.isNotEmpty()) {
-                    Text(
-                        text = detail,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = onSurface.copy(alpha = 0.75f),
-                    )
-                }
-                payment.balanceAfterFen?.let {
-                    Text(
-                        text = "卡余额 ¥%.2f".format(it / 100.0),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = onSurface.copy(alpha = 0.75f),
-                    )
-                }
+    // 单按钮提示（原本就只有「知道了」一个键）：走 AppInfoDialog 而不是 AppConfirmDialog，
+    // 后者会渲染取消键——一个什么也不做、与「知道了」等价的按钮
+    AppInfoDialog(
+        title = "支付成功",
+        onDismiss = onDismiss,
+        dismissLabel = "知道了",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // 大字金额：与趣智/骑行页的大号数字同族（AmountHeroText 唯一口径）
+            AmountHeroText("¥%.2f".format(payment.amountFen / 100.0))
+            if (detail.isNotEmpty()) {
                 Text(
-                    text = "本次交易已同步至「消费流水」。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = onSurface.copy(alpha = 0.55f),
-                    modifier = Modifier.padding(top = 4.dp),
+                    text = detail,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = onSurface.copy(alpha = 0.75f),
                 )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("知道了") }
-        },
-    )
+            payment.balanceAfterFen?.let {
+                Text(
+                    text = "卡余额 ¥%.2f".format(it / 100.0),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = onSurface.copy(alpha = 0.75f),
+                )
+            }
+            Text(
+                text = "本次交易已同步至「消费流水」。",
+                style = MaterialTheme.typography.bodySmall,
+                color = onSurface.copy(alpha = 0.55f),
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
 }
 
 /**

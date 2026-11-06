@@ -1177,6 +1177,11 @@ internal data class KvcxConfirm(
  * 当前是**临时锁车**与**解锁继续骑**——前者订单与计费继续、随时可再解锁，后者本来就在
  * 计费中，两者都没有新增的计费后果，误触代价低于多一次确认的打扰。
  * 响铃寻车与锁状态查询是只读动作，同样不弹。
+ *
+ * **这里只有文案与规格，没有排版**：弹窗本体是 `ui/common/ConfirmDialog.kt` 的
+ * `AppConfirmDialog`（窗口淡入 / 正文滚动兜底 / 危险色确认键都在那儿），正文各自拼
+ * （骑行页是编号要点 + 可选的「以后开锁不再确认」，今日页同构但没有勾选）。
+ * 别在这里、也别在页面里再抄一份 `AlertDialog`。
  */
 internal fun kvcxConfirmDialog(
     action: KvcxAction,

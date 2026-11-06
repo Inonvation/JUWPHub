@@ -26,7 +26,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -81,8 +80,8 @@ import edu.jxslu.schedule.ui.common.AccountHeroCard
 import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppPermissions
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.HeroActionButton
 import edu.jxslu.schedule.ui.common.MetricCell
@@ -344,64 +343,47 @@ fun QzxyScreen(
 
     // 退出二次确认（2026-09-27）：顶栏图标就在返回键旁边，一次误触就得重新收短信才能回来
     if (confirmLogout) {
-        AlertDialog(
-            onDismissRequest = { confirmLogout = false },
-            title = { Text("退出趣智校园登录？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "将清除本机保存的趣智校园会话，侧栏入口回到未登录态。" +
-                        "如果水还在流，退出前先点「结束用水」结算。",
-                )
+        AppConfirmDialog(
+            title = "退出趣智校园登录？",
+            message = "将清除本机保存的趣智校园会话，侧栏入口回到未登录态。" +
+                "如果水还在流，退出前先点「结束用水」结算。",
+            confirmLabel = "退出登录",
+            onConfirm = {
+                confirmLogout = false
+                viewModel.logout()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmLogout = false
-                        viewModel.logout()
-                    },
-                ) { Text("退出登录") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmLogout = false }) { Text("取消") }
-            },
+            onDismiss = { confirmLogout = false },
+            // 清会话不可撤销：确认键染红，和「取消」区分开
+            danger = true,
         )
     }
 
     // 充值前确认（2026-11-05）：钱进的是支付宝里的小程序账户，本应用只负责跳过去。
     // 原来这段口径写成卡片底下的小字，没人看；改成跳转前的确认弹窗，确认了才离开应用。
     if (confirmRecharge) {
-        AlertDialog(
-            onDismissRequest = { confirmRecharge = false },
-            title = { Text("前往支付宝充值？") },
-            text = {
-                Column {
-                    DialogWindowFadeEffect()
-                    Text("将跳到支付宝的「趣智校园」小程序，钱进你在趣智的账户。")
-                    Text(
-                        "先核对支付宝登录的手机号与本应用登录的一致，充错账户退不回来。",
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    Text(
-                        "充值与退款由学校运营方负责，与本应用无关；由此造成的损失开发者不承担责任。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
+        AppConfirmDialog(
+            title = "前往支付宝充值？",
+            confirmLabel = "去充值",
+            onConfirm = {
+                confirmRecharge = false
+                openRecharge()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmRecharge = false
-                        openRecharge()
-                    },
-                ) { Text("去充值") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmRecharge = false }) { Text("取消") }
-            },
-        )
+            onDismiss = { confirmRecharge = false },
+            // 钱付给趣智运营方，本应用只跳转；不是危险动作，确认键保持主色
+            danger = false,
+        ) {
+            Text("将跳到支付宝的「趣智校园」小程序，钱进你在趣智的账户。")
+            Text(
+                "先核对支付宝登录的手机号与本应用登录的一致，充错账户退不回来。",
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Text(
+                "充值与退款由学校运营方负责，与本应用无关；由此造成的损失开发者不承担责任。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
     }
 }
 
@@ -1053,6 +1035,9 @@ private fun FailureBlock(
  *
  * 今日页的开水面板复用这一份（同包，2026-10-02）：面板与页面的失败态各写一个
  * 详情弹窗迟早会分叉，而两边要展示的字段完全一样。
+ *
+ * 2026-11-06 起骨架走 `AppConfirmDialog`（正文 slot 版）：淡入、`heightIn(max)` + 滚动、
+ * 危险色只在公共件里各有一处；这里只留「原因 + 原始数据 + 去诊断页」三段正文。
  */
 @Composable
 internal fun FailedDetailDialog(
@@ -1060,39 +1045,34 @@ internal fun FailedDetailDialog(
     onOpenDiagnostics: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("失败详情") },
-        text = {
-            DialogWindowFadeEffect()
-            Column {
-                Text(failure.reason, style = MaterialTheme.typography.bodyMedium)
-                failure.detail?.let { detail ->
-                    Text(
-                        text = detail,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-                Text(
-                    text = "设备服务表、原始数据体与调试日志都在「诊断与调试」页。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                    modifier = Modifier.padding(top = 10.dp),
-                )
-            }
+    AppConfirmDialog(
+        title = "失败详情",
+        confirmLabel = "去诊断页",
+        onConfirm = {
+            onDismiss()
+            onOpenDiagnostics()
         },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    onDismiss()
-                    onOpenDiagnostics()
-                },
-            ) { Text("去诊断页") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-    )
+        onDismiss = onDismiss,
+        // 只读提示，不是破坏性动作
+        danger = false,
+        dismissLabel = "关闭",
+    ) {
+        Text(failure.reason, style = MaterialTheme.typography.bodyMedium)
+        failure.detail?.let { detail ->
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+        Text(
+            text = "设备服务表、原始数据体与调试日志都在「诊断与调试」页。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            modifier = Modifier.padding(top = 10.dp),
+        )
+    }
 }
 
 // ── 设备弹层 ──

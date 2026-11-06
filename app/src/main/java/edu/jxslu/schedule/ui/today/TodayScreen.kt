@@ -28,16 +28,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -137,6 +134,7 @@ import edu.jxslu.schedule.ui.common.ResumedTickerEffect
 import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.QuickCardMinHeight
 import edu.jxslu.schedule.ui.common.AppCardDefaults
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import edu.jxslu.schedule.ui.common.AppCard
@@ -144,7 +142,6 @@ import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.CourseDetailSheet
 import edu.jxslu.schedule.ui.common.CourseEditSheet
-import edu.jxslu.schedule.ui.common.DeleteConfirmDialog
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -866,8 +863,11 @@ fun TodayScreen(
     }
 
     pendingDelete?.let { c ->
-        DeleteConfirmDialog(
-            courseName = c.name,
+        AppConfirmDialog(
+            title = "删除课程",
+            message = "确认删除「${c.name}」？",
+            confirmLabel = "删除",
+            danger = true,
             onConfirm = {
                 viewModel.deleteCourse(c)
                 pendingDelete = null
@@ -1608,9 +1608,16 @@ private fun TomorrowBlock(
 private val TodayPullRefreshThreshold = 56.dp
 
 /**
- * 今日页进行中服务卡的还车确认弹窗（2026-10-21）：规格与文案的唯一出处仍是
- * `KvcxRideController.kvcxConfirmDialog`（`KvcxAction.RETURN` 档），这里只做排版——
- * 与骑行页 `KvcxConfirmDialog` 同构但**没有**「不再提醒」勾选（那是开锁专属，见 KDoc）。
+ * 今日页进行中服务卡的还车确认弹窗：规格与文案的唯一出处仍是
+ * `KvcxRideController.kvcxConfirmDialog`（`KvcxAction.RETURN` 档），这里只做排版。
+ *
+ * 排版走 [AppConfirmDialog]（`ui/common/ConfirmDialog.kt`）：窗口淡入、长文滚动、危险色
+ * 三件事只该有一份实现，本文件不再自己拼 `AlertDialog`。
+ *
+ * 与骑行页那份（`ui/ebike/RideScreen.kt` 里的 `KvcxConfirmDialog`）的**唯一差异**：
+ * 这里没有「以后开锁不再确认」勾选。那个勾选只对开锁有意义（`skipNextTime` 记的是
+ * 「开锁免确认」），而今日页这张卡只会弹还车确认——**别为了「三处统一」把勾选搬过来**：
+ * 还车是花钱那一刻，一次性跳过等于把这次确认永久关掉。
  */
 @Composable
 private fun KvcxConfirmAlertDialog(
@@ -1620,40 +1627,26 @@ private fun KvcxConfirmAlertDialog(
     onDismiss: () -> Unit,
 ) {
     val dialog = kvcxConfirmDialog(action, carLabel) ?: return
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(dialog.title) },
-        text = {
-            DialogWindowFadeEffect()
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 400.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                dialog.points.forEachIndexed { index, point ->
-                    Row(modifier = Modifier.padding(bottom = 8.dp)) {
-                        Text(
-                            text = "${index + 1}.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                            modifier = Modifier.width(20.dp),
-                        )
-                        Text(text = point, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                // 还车是花钱那一刻：确认键用错误色，与骑行页同一口径
+    AppConfirmDialog(
+        title = dialog.title,
+        confirmLabel = dialog.confirmLabel,
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+        // 还车是花钱那一刻：确认键用错误色，与骑行页同一口径
+        danger = true,
+    ) {
+        // 正文是编号要点。滚动与最大高度已由 AppConfirmDialog 的正文槽套好，
+        // 这里**不要再包一层 `verticalScroll`**（嵌套滚动会让长文只滚一小段就停）。
+        dialog.points.forEachIndexed { index, point ->
+            Row(modifier = Modifier.padding(bottom = 8.dp)) {
                 Text(
-                    text = dialog.confirmLabel,
-                    color = MaterialTheme.colorScheme.error,
+                    text = "${index + 1}.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    modifier = Modifier.width(20.dp),
                 )
+                Text(text = point, style = MaterialTheme.typography.bodyMedium)
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-    )
+        }
+    }
 }

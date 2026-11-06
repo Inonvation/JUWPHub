@@ -28,9 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
@@ -93,6 +91,7 @@ import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CredentialVault
 import edu.jxslu.schedule.data.session.NetworkHint
 import edu.jxslu.schedule.data.session.SessionStatus
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.CasLoginDialog
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
@@ -1775,6 +1774,8 @@ fun JwImportScreen(
     // 「这一学期教务还没排考」的终态弹窗（2026-09-30）：一键式的另一条出口。
     // 考试由教务考前数周才录入，平时 count=0 是**正常空态不是错误**，所以文案只陈述
     // 事实 + 给出下次再来的路，不用 warning/error 语气。
+    // **不要套 `AppConfirmDialog`**（2026-11-06 复核）：这里是**单键提示**（只有「知道了」），
+    // 确认弹窗恒有两个键，套过去会凭空多出一个「取消」——用户会以为关掉它等于取消导入。
     emptyExamTerm?.let { term ->
         AlertDialog(
             onDismissRequest = { emptyExamTerm = null },
@@ -1794,98 +1795,78 @@ fun JwImportScreen(
 
     pendingScores?.let { grouped ->
         val total = grouped.sumOf { it.second.size }
-        AlertDialog(
-            onDismissRequest = {
-                if (!scoresImporting) {
+        // 骨架（窗口淡入 / 正文滚动兜底 / 48dp 按钮）走 AppConfirmDialog（2026-11-06）：
+        // 正文分项与按钮文案**逐字未改**——这是成绩写库前的最后一道确认，
+        // 改文案或改分项顺序都等于让用户对着不一样的说明点「导入」。
+        // `scoresImporting` 同时压两个键：写入中连返回键/点外部也关不掉（dismissEnabled 一并挡
+        // onDismissRequest），否则关窗时事务还在跑，用户会以为没导入。
+        AppConfirmDialog(
+            title = "确认导入成绩",
+            confirmLabel = when {
+                scoresImporting -> "写入中…"
+                scoresError != null -> "重试"
+                else -> "导入"
+            },
+            onConfirm = {
+                // 整批一个事务（`ScoreRepository.replaceTerms`）：要么全部学期都换，
+                // 要么一行都不动——不会留下「前几个学期已更新」的半套数据，
+                // 也不会让异常冒到组合作用域把进程带走（2026-11-06 审计 J3）。
+                scoresError = null
+                scoresImporting = true
+                scope.launch {
+                    try {
+                        scoreRepo.replaceTerms(grouped)
+                    } catch (e: CancellationException) {
+                        // 取消（关窗 / 退出）必须原样抛：事务自己回滚，
+                        // 吞掉它会把「用户走了」变成一条假的失败提示
+                        scoresImporting = false
+                        throw e
+                    } catch (e: Throwable) {
+                        scoresImporting = false
+                        scoresError = e.message?.takeIf { it.isNotBlank() } ?: "数据库写入异常"
+                        return@launch
+                    }
+                    scoresImporting = false
                     pendingScores = null
-                    scoresError = null
+                    // 终态反馈与课表导入同一口径：气泡落在返回的那一页（DESIGN §3.3）
+                    JwImportResultBus.publish("已导入 ${grouped.size} 个学期共 $total 条成绩")
+                    onBack()
                 }
             },
-            title = { Text("确认导入成绩") },
-            text = {
-                DialogWindowFadeEffect()
-                Column {
-                    Text("将导入 ${grouped.size} 个学期共 $total 条成绩，相同学期的旧数据会被替换：")
-                    Spacer(Modifier.height(8.dp))
-                    Column(
-                        modifier = Modifier
-                            .heightIn(max = 220.dp)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        grouped.forEach { (term, list) ->
-                            Text(
-                                "$term · ${list.size} 条",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        }
-                    }
-                    // 失败原因写在**弹窗正文里**：写库失败时弹窗不关，用户能原地重试。
-                    // 换成气泡/返回上一页都不行——前者被弹窗盖住，后者等于把「一次都没写成」
-                    // 说成「已导入」（2026-11-06 审计 J3）。
-                    scoresError?.let { message ->
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            "写入失败：$message",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        Text(
-                            "这次导入一个学期都没写进去，可以原地重试。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        )
-                    }
-                }
+            onDismiss = {
+                pendingScores = null
+                scoresError = null
             },
-            confirmButton = {
-                TextButton(
-                    enabled = !scoresImporting,
-                    onClick = {
-                        // 整批一个事务（`ScoreRepository.replaceTerms`）：要么全部学期都换，
-                        // 要么一行都不动——不会留下「前几个学期已更新」的半套数据，
-                        // 也不会让异常冒到组合作用域把进程带走（2026-11-06 审计 J3）。
-                        scoresError = null
-                        scoresImporting = true
-                        scope.launch {
-                            try {
-                                scoreRepo.replaceTerms(grouped)
-                            } catch (e: CancellationException) {
-                                // 取消（关窗 / 退出）必须原样抛：事务自己回滚，
-                                // 吞掉它会把「用户走了」变成一条假的失败提示
-                                scoresImporting = false
-                                throw e
-                            } catch (e: Throwable) {
-                                scoresImporting = false
-                                scoresError = e.message?.takeIf { it.isNotBlank() } ?: "数据库写入异常"
-                                return@launch
-                            }
-                            scoresImporting = false
-                            pendingScores = null
-                            // 终态反馈与课表导入同一口径：气泡落在返回的那一页（DESIGN §3.3）
-                            JwImportResultBus.publish("已导入 ${grouped.size} 个学期共 $total 条成绩")
-                            onBack()
-                        }
-                    },
-                ) {
-                    Text(
-                        when {
-                            scoresImporting -> "写入中…"
-                            scoresError != null -> "重试"
-                            else -> "导入"
-                        },
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    enabled = !scoresImporting,
-                    onClick = {
-                        pendingScores = null
-                        scoresError = null
-                    },
-                ) { Text("取消") }
-            },
-        )
+            confirmEnabled = !scoresImporting,
+            dismissEnabled = !scoresImporting,
+        ) {
+            Text("将导入 ${grouped.size} 个学期共 $total 条成绩，相同学期的旧数据会被替换：")
+            Spacer(Modifier.height(8.dp))
+            // 学期清单不再自套 `heightIn(220) + verticalScroll`：外层正文槽已经滚动，
+            // 嵌套滚动只会滚一小段就停（AppConfirmDialog 的契约）。
+            grouped.forEach { (term, list) ->
+                Text(
+                    "$term · ${list.size} 条",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            // 失败原因写在**弹窗正文里**：写库失败时弹窗不关，用户能原地重试。
+            // 换成气泡/返回上一页都不行——前者被弹窗盖住，后者等于把「一次都没写成」
+            // 说成「已导入」（2026-11-06 审计 J3）。
+            scoresError?.let { message ->
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "写入失败：$message",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Text(
+                    "这次导入一个学期都没写进去，可以原地重试。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+        }
     }
 
     // 前置登录弹窗（进窗触发，见 LaunchedEffect）：保存成功 = 凭据落库 + OkHttp 会话就绪。
@@ -2137,37 +2118,37 @@ private fun TermSwitchErrorDialog(
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = { if (!retrying) onDismiss() },
-        title = { Text("切换学期失败") },
-        text = {
-            DialogWindowFadeEffect()
-            Column {
-                Text(
-                    "没能读到「${failure.term.text}」的课表：",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    failure.reason,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "当前仍显示原来那个学期的识别结果；可以直接导入它，或重试。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onRetry, enabled = !retrying) { Text("重试") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !retrying) { Text("返回导入") }
-        },
-    )
+    // 骨架走 AppConfirmDialog（2026-11-06）：这是**双键**弹窗，语义不是「确认 / 取消」，
+    // 而是「重试 / 返回导入」——所以取消位显式给 dismissLabel，**不新增第三个键**
+    // （三键弹窗在窄屏会把按钮挤成两行，且「返回导入」本来就占的是取消位）。
+    // `retrying` 同时压两个键 + `onDismissRequest`：重试途中关窗会让用户看不到结果，
+    // 而他刚点的就是「重试」。
+    AppConfirmDialog(
+        title = "切换学期失败",
+        confirmLabel = "重试",
+        onConfirm = onRetry,
+        onDismiss = onDismiss,
+        dismissLabel = "返回导入",
+        confirmEnabled = !retrying,
+        dismissEnabled = !retrying,
+    ) {
+        Text(
+            "没能读到「${failure.term.text}」的课表：",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            failure.reason,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "当前仍显示原来那个学期的识别结果；可以直接导入它，或重试。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+    }
 }
 
 /**

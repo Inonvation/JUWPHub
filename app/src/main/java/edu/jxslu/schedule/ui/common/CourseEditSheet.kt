@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.common
 
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -152,21 +151,3 @@ fun CourseEditSheet(
     }
 }
 
-@Composable
-fun DeleteConfirmDialog(
-    courseName: String,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("删除课程") },
-        text = { Text("确认删除「$courseName」？") },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text("删除") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-    )
-}

@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -22,7 +21,6 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -42,7 +40,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.RideRecord
 import edu.jxslu.schedule.ui.common.AppCard
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
@@ -342,28 +340,21 @@ private fun OrderCard(
 
 @Composable
 private fun OrderDetailDialog(order: KqcxAuth.OrderItem, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("订单详情") },
-        text = {
-            // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行）
-            DialogWindowFadeEffect()
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                DetailRow("状态", order.statusText)
-                DetailRow("车型", order.deviceLabel)
-                DetailRow("车号", order.carNum ?: "—")
-                DetailRow("订单号", order.orderNum ?: "—")
-                DetailRow("结束时间", order.endAt?.trim().orEmpty().ifEmpty { "进行中" })
-                DetailRow("骑行时长", order.totalSeconds?.let { RideRecord.durationText(it) } ?: "—")
-                DetailRow("原价", moneyText(order.orderMoneyCents))
-                order.dispatchMoneyCents?.takeIf { it > 0 }?.let { DetailRow("调度费", moneyText(it)) }
-                DetailRow(if (order.unpaid) "应付" else "实付", moneyText(order.payMoneyCents))
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        },
-    )
+    // 单键详情（只有「关闭」）：走 ui/common 的 [AppInfoDialog]，套确认框会凭空多一个
+    // 什么也不做的「取消」。内层 Column 只为 `spacedBy(6.dp)` 的行距，不承担滚动
+    AppInfoDialog(title = "订单详情", onDismiss = onDismiss, dismissLabel = "关闭") {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            DetailRow("状态", order.statusText)
+            DetailRow("车型", order.deviceLabel)
+            DetailRow("车号", order.carNum ?: "—")
+            DetailRow("订单号", order.orderNum ?: "—")
+            DetailRow("结束时间", order.endAt?.trim().orEmpty().ifEmpty { "进行中" })
+            DetailRow("骑行时长", order.totalSeconds?.let { RideRecord.durationText(it) } ?: "—")
+            DetailRow("原价", moneyText(order.orderMoneyCents))
+            order.dispatchMoneyCents?.takeIf { it > 0 }?.let { DetailRow("调度费", moneyText(it)) }
+            DetailRow(if (order.unpaid) "应付" else "实付", moneyText(order.payMoneyCents))
+        }
+    }
 }
 
 @Composable

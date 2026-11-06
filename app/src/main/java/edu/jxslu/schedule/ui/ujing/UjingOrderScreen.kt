@@ -27,7 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -64,7 +63,7 @@ import edu.jxslu.schedule.data.ujing.UjingScanResult
 import edu.jxslu.schedule.data.ujing.UjingWashModel
 import edu.jxslu.schedule.domain.UjingState
 import edu.jxslu.schedule.ui.common.AppCard
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.SettingsNote
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.theme.Motion
@@ -687,7 +686,17 @@ internal fun ScanBadgePill(badge: UjingState.ScanBadge) {
     }
 }
 
-/** 下单确认弹层（写操作二次确认；对齐快趣开锁 / 电费充值的确认口径）。 */
+/**
+ * 下单确认弹层（写操作二次确认；对齐快趣开锁 / 电费充值的确认口径）。
+ *
+ * 骨架走 [AppConfirmDialog]（2026-11-06 合并）：窗口淡入、`heightIn(max)` + 纵向滚动、
+ * 按钮配色三件事在公共件里各只有一处。本页只负责**正文**——设备 / 档位与预估 / 水温 /
+ * 加购 / 2 分钟保留期，是一列 `spacedBy(6.dp)` 的文字，所以用 content 版；
+ * 外层已经套好滚动，这里**不能**再套一层 `verticalScroll`（嵌套滚动会让长内容只滚一小段就停）。
+ *
+ * 确认键不染红（`danger = false`）：红色在这里读作「危险 / 删除」，而这一步是正常付款，
+ * 与快趣开锁、电费充值同口径。
+ */
 @Composable
 private fun OrderConfirmDialog(
     program: UjingProgramData,
@@ -710,81 +719,76 @@ private fun OrderConfirmDialog(
     } else {
         model.basePrice
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("确认下单") },
-        text = {
-            // 弹窗进出场动画必须挂在本弹窗窗口上：调用点落在内容槽第一行
-            DialogWindowFadeEffect()
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    buildString {
+    AppConfirmDialog(
+        title = "确认下单",
+        confirmLabel = "去支付",
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+        danger = false,
+        dismissLabel = "再想想",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                buildString {
+                    append(
+                        program.deviceTypeName.ifBlank {
+                            if (dryer) "烘干机" else "洗衣机"
+                        },
+                    )
+                    program.deviceNo?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
+                },
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                buildString {
+                    if (dryer) {
                         append(
-                            program.deviceTypeName.ifBlank {
-                                if (dryer) "烘干机" else "洗衣机"
-                            },
+                            UjingState.dryerModelTitle(
+                                modelName = model.workModelName,
+                                modelTimeMinutes = model.time,
+                                isDryer = true,
+                                hasAdditionDryTime = hasAdditionDryTime,
+                            ),
                         )
-                        program.deviceNo?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
-                    },
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+                        // 差价计价：标题只有温度模式名，时长单独交代
+                        if (hasAdditionDryTime && effectiveDryMinutes > 0) {
+                            append(" · ").append(effectiveDryMinutes).append(" 分钟")
+                        }
+                    } else {
+                        append(model.workModelName.ifBlank { "洗衣模式" })
+                        if (model.time > 0) {
+                            append(" · ").append(model.time).append(" 分钟")
+                        }
+                    }
+                    append(" · ¥").append(UjingState.fen2yuan(estimatedPriceFen))
+                    // 差价计价的金额按单价预估，最终以服务端/支付宝实付为准
+                    if (dryer && dryTimeMinutes != null) {
+                        append("（预估，以实付为准）")
+                    }
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            temperatureId?.let { id ->
                 Text(
-                    buildString {
-                        if (dryer) {
-                            append(
-                                UjingState.dryerModelTitle(
-                                    modelName = model.workModelName,
-                                    modelTimeMinutes = model.time,
-                                    isDryer = true,
-                                    hasAdditionDryTime = hasAdditionDryTime,
-                                ),
-                            )
-                            // 差价计价：标题只有温度模式名，时长单独交代
-                            if (hasAdditionDryTime && effectiveDryMinutes > 0) {
-                                append(" · ").append(effectiveDryMinutes).append(" 分钟")
-                            }
-                        } else {
-                            append(model.workModelName.ifBlank { "洗衣模式" })
-                            if (model.time > 0) {
-                                append(" · ").append(model.time).append(" 分钟")
-                            }
-                        }
-                        append(" · ¥").append(UjingState.fen2yuan(estimatedPriceFen))
-                        // 差价计价的金额按单价预估，最终以服务端/支付宝实付为准
-                        if (dryer && dryTimeMinutes != null) {
-                            append("（预估，以实付为准）")
-                        }
-                    },
+                    "水温：${UjingState.temperatureLabel(id)}",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                temperatureId?.let { id ->
-                    Text(
-                        "水温：${UjingState.temperatureLabel(id)}",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-                if (addDetergent || addDisinfectant) {
-                    val addons = listOfNotNull(
-                        "洗衣液".takeIf { addDetergent },
-                        "消毒液".takeIf { addDisinfectant },
-                    ).joinToString("、")
-                    Text(
-                        "投放：$addons（加购费用以支付宝实付金额为准）",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
+            }
+            if (addDetergent || addDisinfectant) {
+                val addons = listOfNotNull(
+                    "洗衣液".takeIf { addDetergent },
+                    "消毒液".takeIf { addDisinfectant },
+                ).joinToString("、")
                 Text(
-                    "下单后机器将为你保留 2 分钟，请在 2 分钟内完成支付；超时订单将自动取消。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    "投放：$addons（加购费用以支付宝实付金额为准）",
+                    style = MaterialTheme.typography.bodyMedium,
                 )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text("去支付") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("再想想") }
-        },
-    )
+            Text(
+                "下单后机器将为你保留 2 分钟，请在 2 分钟内完成支付；超时订单将自动取消。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+    }
 }

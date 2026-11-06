@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -34,7 +33,6 @@ import edu.jxslu.schedule.domain.UnlockResult
 import edu.jxslu.schedule.domain.cashPaidAmount
 import edu.jxslu.schedule.domain.calculateActualCost
 import edu.jxslu.schedule.domain.ticketPaidAmount
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -154,9 +152,11 @@ fun WaterEntrySheet(
         }
     }
 
+    // 两份详情弹窗共用 `WaterScreen.kt` 里的实现（同包 internal）：这里原本各有一份逐行
+    // 等价的私有副本，改字段要改两处，迟早分叉
     when (val d = detailItem) {
-        is UnlockFlowState.Failed -> EntryFailDetailDialog(item = d, onDismiss = { detailItem = null })
-        is UnlockResult -> EntryOrderDetailDialog(item = d, onDismiss = { detailItem = null })
+        is UnlockFlowState.Failed -> ErrorDetailDialog(item = d, onDismiss = { detailItem = null })
+        is UnlockResult -> OrderDetailDialog(item = d, onDismiss = { detailItem = null })
     }
 }
 
@@ -307,78 +307,3 @@ private fun clock(totalSeconds: Int): String {
     return "%02d:%02d".format(m, s)
 }
 
-/** 失败详情二级弹窗（与开水页 ErrorDetailDialog 同形态；那边私有，本地等价实现）。 */
-@Composable
-private fun EntryFailDetailDialog(item: UnlockFlowState.Failed, onDismiss: () -> Unit) {
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("失败详情") },
-        text = {
-            // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行才拿得到 Dialog 的 LocalView）
-            DialogWindowFadeEffect()
-            Column {
-                Text("失败步骤：${item.step}")
-                Spacer(Modifier.height(6.dp))
-                if (item.rawError.isNotBlank()) {
-                    Text(
-                        item.rawError,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                    )
-                    Spacer(Modifier.height(6.dp))
-                }
-                item.suggestions.forEach { s ->
-                    Spacer(Modifier.height(4.dp))
-                    Text("• $s", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("知道了") } },
-    )
-}
-
-/** 订单详情二级弹窗（与开水页 OrderDetailDialog 同形态，DESIGN §4.10 账单口径）。 */
-@Composable
-private fun EntryOrderDetailDialog(item: UnlockResult, onDismiss: () -> Unit) {
-    fun money(value: BigDecimal): String =
-        value.setScale(2, RoundingMode.HALF_UP).toPlainString()
-
-    @Composable
-    fun DetailRow(label: String, value: String) {
-        Row(modifier = Modifier.padding(vertical = 2.dp)) {
-            Text(
-                label,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                modifier = Modifier.width(64.dp),
-            )
-            Text(value, style = MaterialTheme.typography.bodySmall)
-        }
-    }
-
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("订单详情") },
-        text = {
-            // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行才拿得到 Dialog 的 LocalView）
-            DialogWindowFadeEffect()
-            Column {
-                DetailRow("订单号", item.orderNo)
-                DetailRow("原价", "¥${item.originPrice}")
-                ticketPaidAmount(item)?.takeIf { it > BigDecimal.ZERO }
-                    ?.let { DetailRow("小票支付", "¥${money(it)}") }
-                if (item.integralCost != "-") DetailRow("积分抵扣", item.integralCost)
-                item.otherPromotions.forEach { p ->
-                    DetailRow("其他优惠", p.discountAmount ?: "-")
-                }
-                cashPaidAmount(item)?.let { cash ->
-                    val channel = item.payTypeName?.let { "（$it）" } ?: ""
-                    DetailRow("现金支付", "¥${money(cash)}$channel")
-                }
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                DetailRow("本次花费", "¥${calculateActualCost(item)}")
-            }
-        },
-        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("关闭") } },
-    )
-}

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -80,9 +79,10 @@ import edu.jxslu.schedule.domain.cashPaidAmount
 import edu.jxslu.schedule.domain.ticketPaidAmount
 import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.AccountHeroCard
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
+import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.HeroActionButton
 import edu.jxslu.schedule.ui.common.MetricCell
@@ -386,64 +386,47 @@ fun WaterScreen(
 
     // 退出二次确认（2026-09-27）：顶栏图标就在返回键旁边，一次误触就得重新收短信才能回来
     if (confirmLogout) {
-        AlertDialog(
-            onDismissRequest = { confirmLogout = false },
-            title = { Text("退出胖乖登录？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "将清除本机保存的胖乖 Token 与开水订单快照。" +
-                        "今日页开水卡回到未登录态，重新登录需要再收一次短信验证码。",
-                )
+        AppConfirmDialog(
+            title = "退出胖乖登录？",
+            message = "将清除本机保存的胖乖 Token 与开水订单快照。" +
+                "今日页开水卡回到未登录态，重新登录需要再收一次短信验证码。",
+            confirmLabel = "退出登录",
+            onConfirm = {
+                confirmLogout = false
+                viewModel.logout()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmLogout = false
-                        viewModel.logout()
-                    },
-                ) { Text("退出登录") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmLogout = false }) { Text("取消") }
-            },
+            onDismiss = { confirmLogout = false },
+            // 清 Token 与订单快照不可撤销：确认键染红，和「取消」区分开
+            danger = true,
         )
     }
 
     // 充值前确认（2026-11-05）：钱进的是支付宝里的小程序账户，本应用只负责跳过去。
     // 原来这段口径写成卡片底下的小字，没人看；改成跳转前的确认弹窗，确认了才离开应用。
     if (confirmRecharge) {
-        AlertDialog(
-            onDismissRequest = { confirmRecharge = false },
-            title = { Text("前往支付宝充值？") },
-            text = {
-                Column {
-                    DialogWindowFadeEffect()
-                    Text("将跳到支付宝的「胖乖生活」小程序，钱进你在胖乖的账户。")
-                    Text(
-                        "小程序按支付宝的登录态进账号：先核对它的手机号与本页登录的一致，充错账户退不回来。",
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    Text(
-                        "充值与退款由胖乖官方负责，与本应用无关；由此造成的损失开发者不承担责任。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
+        AppConfirmDialog(
+            title = "前往支付宝充值？",
+            confirmLabel = "去充值",
+            onConfirm = {
+                confirmRecharge = false
+                openRecharge()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmRecharge = false
-                        openRecharge()
-                    },
-                ) { Text("去充值") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmRecharge = false }) { Text("取消") }
-            },
-        )
+            onDismiss = { confirmRecharge = false },
+            // 钱是付给胖乖的，本应用只跳转；不是危险动作，确认键保持主色
+            danger = false,
+        ) {
+            Text("将跳到支付宝的「胖乖生活」小程序，钱进你在胖乖的账户。")
+            Text(
+                "小程序按支付宝的登录态进账号：先核对它的手机号与本页登录的一致，充错账户退不回来。",
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Text(
+                "充值与退款由胖乖官方负责，与本应用无关；由此造成的损失开发者不承担责任。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
     }
 }
 
@@ -1262,65 +1245,65 @@ private fun toResult(item: OrderHistoryItem) = UnlockResult(
     tokenCoinDiscount = item.tokenCoinDiscount,
 )
 
+/**
+ * 失败详情（单按钮「知道了」）。
+ *
+ * 2026-11-06 起是本包**唯一实现**：`WaterEntrySheet` 里原本有一份逐行等价的私有副本
+ * （`EntryFailDetailDialog`，那边 KDoc 自己写着「与开水页同形态，本地等价实现」），
+ * 两份各改一处就会分叉。所以改成 `internal` 供同包直接调用，不再各自维护。
+ *
+ * 正文比入口弹层那份多一行 [UnlockFlowState.Failed.message]：两边都走这里之后，
+ * 入口弹层也显示这句人话，与「失败步骤 + 原始错误 + 建议」并列，信息只多不少。
+ */
 @Composable
-private fun ErrorDetailDialog(item: UnlockFlowState.Failed, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("失败详情") },
-        text = {
-            DialogWindowFadeEffect()
-            Column {
-                Text(item.message, style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "失败步骤：${item.step}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                )
-                if (item.rawError.isNotBlank() && item.rawError != item.message) {
-                    Text(
-                        "错误详情：${item.rawError}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                    )
-                }
-                item.suggestions.forEach { s ->
-                    Spacer(Modifier.height(4.dp))
-                    Text("• $s", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } },
-    )
+internal fun ErrorDetailDialog(item: UnlockFlowState.Failed, onDismiss: () -> Unit) {
+    AppInfoDialog(title = "失败详情", onDismiss = onDismiss, dismissLabel = "知道了") {
+        Text(item.message, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            "失败步骤：${item.step}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        )
+        if (item.rawError.isNotBlank() && item.rawError != item.message) {
+            Text(
+                "错误详情：${item.rawError}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            )
+        }
+        item.suggestions.forEach { s ->
+            Spacer(Modifier.height(4.dp))
+            Text("• $s", style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
+/**
+ * 订单详情（单按钮「关闭」，DESIGN §4.10 账单口径）。
+ *
+ * 同样是本包唯一实现：`WaterEntrySheet` 的 `EntryOrderDetailDialog` 已删（两份逐行相同，
+ * 连 `DetailRow` 的 64dp 标签宽与 0.55 透明度都一模一样）。改字段只改这一处。
+ */
 @Composable
-private fun OrderDetailDialog(item: UnlockResult, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("订单详情") },
-        text = {
-            DialogWindowFadeEffect()
-            Column {
-                DetailRow("订单号", item.orderNo)
-                DetailRow("原价", "¥${item.originPrice}")
-                // 账单构成（DESIGN §4.10 账单口径）：小票是账户余额，扣了就是花了；
-                // 「现金支付 ¥0.00」只代表没走在线支付，不叫「实付 0」
-                ticketPaidAmount(item)?.takeIf { it > BigDecimal.ZERO }
-                    ?.let { DetailRow("小票支付", "¥${money(it)}") }
-                if (item.integralCost != "-") DetailRow("积分抵扣", item.integralCost)
-                item.otherPromotions.forEach { p ->
-                    DetailRow("其他优惠", p.discountAmount ?: "-")
-                }
-                cashPaidAmount(item)?.let { cash ->
-                    val channel = item.payTypeName?.let { "（$it）" } ?: ""
-                    DetailRow("现金支付", "¥${money(cash)}$channel")
-                }
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                DetailRow("本次花费", "¥${calculateActualCost(item)}")
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-    )
+internal fun OrderDetailDialog(item: UnlockResult, onDismiss: () -> Unit) {
+    AppInfoDialog(title = "订单详情", onDismiss = onDismiss, dismissLabel = "关闭") {
+        DetailRow("订单号", item.orderNo)
+        DetailRow("原价", "¥${item.originPrice}")
+        // 账单构成（DESIGN §4.10 账单口径）：小票是账户余额，扣了就是花了；
+        // 「现金支付 ¥0.00」只代表没走在线支付，不叫「实付 0」
+        ticketPaidAmount(item)?.takeIf { it > BigDecimal.ZERO }
+            ?.let { DetailRow("小票支付", "¥${money(it)}") }
+        if (item.integralCost != "-") DetailRow("积分抵扣", item.integralCost)
+        item.otherPromotions.forEach { p ->
+            DetailRow("其他优惠", p.discountAmount ?: "-")
+        }
+        cashPaidAmount(item)?.let { cash ->
+            val channel = item.payTypeName?.let { "（$it）" } ?: ""
+            DetailRow("现金支付", "¥${money(cash)}$channel")
+        }
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        DetailRow("本次花费", "¥${calculateActualCost(item)}")
+    }
 }
 
 /** 金额统一显示两位小数（服务端金额字符串可能缺位）。 */

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -35,7 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.data.power.PowerSceneOption
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import me.rerere.hugeicons.HugeIcons
@@ -196,30 +195,26 @@ fun PowerRoomPickerSheet(
     if (confirmBind) {
         val room = state.pickedRoom?.name.orEmpty()
         val path = (state.breadcrumb + room).joinToString(" - ")
-        AlertDialog(
-            onDismissRequest = { if (!state.binding) confirmBind = false },
-            title = { Text("确认设置寝室") },
-            text = {
-                // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行才拿得到 Dialog 的 LocalView）
-                DialogWindowFadeEffect()
-                Text(
-                    "将把「$path」设为你的寝室房间。\n\n" +
-                        "设置会同步到缴费平台的「我的房间」，之后的电费查询与充值都以它为准。",
-                )
+        AppConfirmDialog(
+            title = "确认设置寝室",
+            confirmLabel = "确认绑定",
+            onConfirm = {
+                confirmBind = false
+                viewModel.bind()
             },
-            confirmButton = {
-                TextButton(
-                    enabled = !state.binding,
-                    onClick = {
-                        confirmBind = false
-                        viewModel.bind()
-                    },
-                ) { Text("确认绑定") }
-            },
-            dismissButton = {
-                TextButton(enabled = !state.binding, onClick = { confirmBind = false }) { Text("取消") }
-            },
-        )
+            onDismiss = { confirmBind = false },
+            // 绑定只是把房间号同步到平台，不花钱也不丢数据：确认键保持主色
+            danger = false,
+            // 请求在飞时两个键都按不动、遮罩与返回也一并挡掉（dismissEnabled 连
+            // onDismissRequest 一起挡）：只挡按钮不挡返回键，等于没挡，用户会以为按钮坏了
+            confirmEnabled = !state.binding,
+            dismissEnabled = !state.binding,
+        ) {
+            Text(
+                "将把「$path」设为你的寝室房间。\n\n" +
+                    "设置会同步到缴费平台的「我的房间」，之后的电费查询与充值都以它为准。",
+            )
+        }
     }
 }
 

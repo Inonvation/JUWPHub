@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -18,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,8 +36,8 @@ import edu.jxslu.schedule.domain.EbikeAutoReturn
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.ui.common.AppCardRow
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppPermissions
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SettingChoiceRow
 import edu.jxslu.schedule.ui.common.SettingItem
@@ -178,54 +176,40 @@ internal fun EbikeSettingsSheet(
 
     // 清除地图缓存：二次确认后才动。文案把"下次会重新下载"与"不影响账号/订单/车辆查询"
     // 都交代清楚——清缓存最容易被误解成"数据没了"（实现与红线见 .agents/rules/ebike.md）
+    //
+    // 排版走 ui/common 的 [AppConfirmDialog]。清理期间两个键都要真的按不动，且返回键 /
+    // 点遮罩也不能关窗（`dismissEnabled` 一并挡掉）——只禁按钮不禁返回键等于没禁，
+    // 用户会以为按钮坏了。
     if (showClearCache) {
         val usage = cacheUsage
-        AlertDialog(
-            onDismissRequest = { if (!clearingCache) showClearCache = false },
-            title = { Text("清除地图缓存？") },
-            text = {
-                // 过渡落在弹窗窗口自己的组合里（内容槽第一行）；放 AlertDialog 外面取到的是
-                // 页面窗口、挂不上本应用样式（等于没调用，见 ui-common.md）
-                DialogWindowFadeEffect()
-                Text(
-                    buildString {
-                        append("将删除离线地图瓦片")
-                        usage?.let { append("（${EbikeMapCache.sizeLabel(it.tileBytes)}）") }
-                        append("与停车点 / 禁停区数据")
-                        usage?.let { append("（${EbikeMapCache.sizeLabel(it.zoneBytes)}）") }
-                        append("。下次打开「附近单车地图」会重新下载；不影响账号、订单与车辆查询。")
-                    },
-                )
+        AppConfirmDialog(
+            title = "清除地图缓存？",
+            message = buildString {
+                append("将删除离线地图瓦片")
+                usage?.let { append("（${EbikeMapCache.sizeLabel(it.tileBytes)}）") }
+                append("与停车点 / 禁停区数据")
+                usage?.let { append("（${EbikeMapCache.sizeLabel(it.zoneBytes)}）") }
+                append("。下次打开「附近单车地图」会重新下载；不影响账号、订单与车辆查询。")
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        clearingCache = true
-                        scope.launch {
-                            val ok = EbikeMapCache.clear(context)
-                            cacheUsage = EbikeMapCache.measure(context)
-                            clearingCache = false
-                            showClearCache = false
-                            onNotice(
-                                if (ok) "已清除地图缓存" else "缓存没清干净，请稍后重试",
-                                if (ok) NoticeTone.Success else NoticeTone.Warning,
-                            )
-                        }
-                    },
-                    enabled = !clearingCache,
-                ) {
-                    Text(
-                        text = if (clearingCache) "清除中…" else "清除",
-                        color = MaterialTheme.colorScheme.error,
+            confirmLabel = if (clearingCache) "清除中…" else "清除",
+            confirmEnabled = !clearingCache,
+            dismissEnabled = !clearingCache,
+            // 会丢掉离线瓦片（下次要重下流量）：确认键用错误色，与「取消」区分开
+            danger = true,
+            onConfirm = {
+                clearingCache = true
+                scope.launch {
+                    val ok = EbikeMapCache.clear(context)
+                    cacheUsage = EbikeMapCache.measure(context)
+                    clearingCache = false
+                    showClearCache = false
+                    onNotice(
+                        if (ok) "已清除地图缓存" else "缓存没清干净，请稍后重试",
+                        if (ok) NoticeTone.Success else NoticeTone.Warning,
                     )
                 }
             },
-            dismissButton = {
-                TextButton(
-                    onClick = { showClearCache = false },
-                    enabled = !clearingCache,
-                ) { Text("取消") }
-            },
+            onDismiss = { showClearCache = false },
         )
     }
 }

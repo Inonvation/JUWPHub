@@ -20,15 +20,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -38,7 +34,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -81,11 +76,12 @@ import edu.jxslu.schedule.domain.EbikeRideCard
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.capabilities
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppHaptics
+import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.postNotice
@@ -1224,29 +1220,23 @@ fun RideScreen(
         )
     }
 
-    // 结束计时（本地计时专用，与「还车」是两个动作）
+    // 结束计时（本地计时专用，与「还车」是两个动作）。
+    // 排版走 ui/common 的 [AppConfirmDialog]：与用车确认同一套壳（窗口淡入、正文滚动兜底、
+    // 危险色确认键），这里只是标题/正文/两个键的文案不同。
     if (showEndTimerConfirm) {
-        AlertDialog(
-            onDismissRequest = { showEndTimerConfirm = false },
-            title = { Text("结束计时？") },
-            text = {
-                // 过渡落在弹窗窗口自己的组合里（内容槽第一行）；放 AlertDialog 外面取到的是
-                // 页面窗口、挂不上本应用样式（等于没调用，见 ui-common.md）
-                DialogWindowFadeEffect()
-                Text("结束后将清空免费时长计时，并撤掉通知栏上的倒计时与提醒。开车 / 还车仍在微信小程序里完成。")
+        AppConfirmDialog(
+            title = "结束计时？",
+            message = "结束后将清空免费时长计时，并撤掉通知栏上的倒计时与提醒。开车 / 还车仍在微信小程序里完成。",
+            confirmLabel = "结束计时",
+            onConfirm = {
+                showEndTimerConfirm = false
+                haptics.tap()
+                ebikeViewModel.onEndRide()
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    showEndTimerConfirm = false
-                    haptics.tap()
-                    ebikeViewModel.onEndRide()
-                }) {
-                    Text("结束计时", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEndTimerConfirm = false }) { Text("继续骑行") }
-            },
+            onDismiss = { showEndTimerConfirm = false },
+            // 清掉计时等于撤掉一条用户还在依赖的提醒：确认键用错误色，和「取消」区分开
+            danger = true,
+            dismissLabel = "继续骑行",
         )
     }
 
@@ -1290,22 +1280,19 @@ fun RideScreen(
 
     // 远程用车提醒（2026-10-24，每 20 次一次；只提醒不阻断，点「知道了」即关）。
     // 文案唯一出处 EbikeRemoteRide；触发源见 showRemoteRideNotice 的注释。
+    //
+    // 走 [AppInfoDialog] 而不是 [AppConfirmDialog]：这条是**通知**（只有一个「知道了」，
+    // 没有可拒绝的动作），确认框会凭空多渲染一个什么也不做的「取消」。
     if (showRemoteRideNotice) {
-        AlertDialog(
-            onDismissRequest = { showRemoteRideNotice = false },
-            title = { Text(EbikeRemoteRide.DIALOG_TITLE) },
-            text = {
-                // 过渡落在弹窗窗口自己的组合里（内容槽第一行，见 ui-common.md）
-                DialogWindowFadeEffect()
-                Text(
-                    text = EbikeRemoteRide.dialogText(remoteNoticeCount),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showRemoteRideNotice = false }) { Text("知道了") }
-            },
-        )
+        AppInfoDialog(
+            title = EbikeRemoteRide.DIALOG_TITLE,
+            onDismiss = { showRemoteRideNotice = false },
+        ) {
+            Text(
+                text = EbikeRemoteRide.dialogText(remoteNoticeCount),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
     }
 }
 /**
@@ -1343,10 +1330,17 @@ private fun KvcxConfirmHost(
     }
     // 勾选不记住：每次打开都从"没勾"开始——勾选是这一次的明确决定
     var skipNextTime by remember(action, carNum) { mutableStateOf(false) }
-    KvcxConfirmDialog(
-        dialog = dialog,
-        skipNextTime = skipNextTime,
-        onSkipChange = { skipNextTime = it },
+    // 排版走 ui/common 的 [AppConfirmDialog]：窗口淡入、正文最大 400dp + 纵向滚动、
+    // 危险色确认键、取消键都在那一份里（2026-11-06 把本页四份各抄一遍的壳收口）。
+    // 这里只写**正文**——用车确认的正文是**编号要点**（规格与文案唯一出处是
+    // `KvcxRideController.kvcxConfirmDialog`）：计费、核对车号、支付分出路各是一条独立
+    // 责任，糊成一段谁都不看。
+    //
+    // 为什么不保留一个 `KvcxConfirmDialog` 私有壳：它只有这一个调用点、只做参数搬运，
+    // 留着等于再养一份「弹窗长什么样」的知识。
+    AppConfirmDialog(
+        title = dialog.title,
+        confirmLabel = dialog.confirmLabel,
         onConfirm = {
             pending.value = null
             haptics.tap()
@@ -1377,7 +1371,48 @@ private fun KvcxConfirmHost(
         onDismiss = { pending.value = null },
         // 还车是花钱那一刻：确认键用错误色，与其它动作的主色区分开
         danger = action == KvcxAction.RETURN,
-    )
+    ) {
+        dialog.points.forEachIndexed { index, point ->
+            Row(modifier = Modifier.padding(bottom = 8.dp)) {
+                Text(
+                    text = "${index + 1}.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    modifier = Modifier.width(20.dp),
+                )
+                Text(text = point, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        // 「不再确认」只对 allowSkip 的动作渲染（当前只有开锁）：勾上之后弹出一行说明——
+        // 「免确认」意味着按一下就开始计费，这件事必须在用户做决定的那一刻讲清楚，
+        // 而不是等他下次误触才发现。
+        if (dialog.allowSkip) {
+            Spacer(Modifier.height(4.dp))
+            SkipCheckRow(
+                label = "以后开锁不再确认",
+                checked = skipNextTime,
+                onCheckedChange = { skipNextTime = it },
+            )
+            // 说明行的显隐走 Motion 四档（进场 reveal 220 / 退场 state 180）：
+            // AnimatedVisibility 的默认是 spring 参数，与同页其余过渡的曲线家族
+            // 脱节；高度逐帧变化时弹窗窗口跟着走，节奏必须收得住
+            AnimatedVisibility(
+                visible = skipNextTime,
+                enter = fadeIn(Motion.reveal()) +
+                    expandVertically(Motion.reveal()),
+                exit = fadeOut(Motion.state()) +
+                    shrinkVertically(Motion.state()),
+            ) {
+                Text(
+                    text = "关掉后点「开锁」就直接发指令并开始计费；" +
+                        "要恢复去「快趣出行设置 → 开锁与还车」打开「开锁前确认」。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+                )
+            }
+        }
+    }
 }
 
 /** 待确认的「没有可用骑行卡」提醒：动作、车号与正文（口径在 [EbikeRideCard]）。 */
@@ -1408,134 +1443,49 @@ private fun UnlockCardGateHost(
     val current = gate ?: return
     // 勾选不记忆：每次打开都从"没勾"开始——勾选是这一次的明确决定
     var skipToday by remember(current) { mutableStateOf(false) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("没有可用的骑行卡") },
-        text = {
-            // 弹窗过渡落在内容槽第一行（见 ui-common.md）
-            DialogWindowFadeEffect()
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 400.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                Text(text = current.message, style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { skipToday = !skipToday },
-                ) {
-                    Checkbox(checked = skipToday, onCheckedChange = { skipToday = it })
-                    Text("今日不再提醒", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(skipToday) }) { Text("继续开车") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-    )
+    // 排版与上面的用车确认同一套（[AppConfirmDialog]：淡入 / 长文滚动兜底 / 取消键），
+    // 差别只在正文——这里是单段说明 + 一个勾选框。
+    AppConfirmDialog(
+        title = "没有可用的骑行卡",
+        confirmLabel = "继续开车",
+        onConfirm = { onConfirm(skipToday) },
+        onDismiss = onDismiss,
+    ) {
+        Text(text = current.message, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(8.dp))
+        SkipCheckRow(
+            label = "今日不再提醒",
+            checked = skipToday,
+            onCheckedChange = { skipToday = it },
+        )
+    }
 }
 
 /**
- * 用车确认弹窗（开锁 / 重试开锁 / 还车共用一份排版）。
+ * 确认弹窗里的「整行可点」勾选行（两处共用：免确认 / 今日不再提醒）。
  *
- * 正文是**编号要点**（规格与文案在 `KvcxConfirm` / `kvcxConfirmDialog`）：三件事各有各的
- * 责任，糊成一段谁都不看。长文配 `heightIn(max)` + `verticalScroll`，小屏或大字体档位下
- * 按钮不会被挤出可视区（这一条是 `ui-common.md` 对确认型弹窗的硬要求）。
+ * 为什么整行可点而不是只有方框：勾选框本体只有 20dp 见方，点偏一点就没反应，
+ * 而这一勾是「以后不再确认」这类**有后果**的授权，点不中的代价是用户以为自己勾上了。
+ * 行高由 [Checkbox] 自带的最小交互尺寸撑到 48dp，所以整行既是命中区又是视觉基线，
+ * 不需要再手动补 padding（补了反而会把行撑到 48dp 以上、和弹窗正文对不齐）。
  *
- * [skipNextTime] 只对 [KvcxConfirm.allowSkip] 的动作渲染（当前只有开锁）：勾上之后弹出一行
- * 说明——「免确认」意味着按一下就开始计费，这件事必须在用户做决定的那一刻讲清楚，
- * 而不是等他下次误触才发现。勾选框整行可点（48dp 交互区，与充值免责声明那份同一手法）。
+ * 不要再各写一份：间距、基线、点击语义这三样一漂，两处弹窗就会不一致。
  */
 @Composable
-private fun KvcxConfirmDialog(
-    dialog: KvcxConfirm,
-    skipNextTime: Boolean,
-    onSkipChange: (Boolean) -> Unit,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-    danger: Boolean,
+private fun SkipCheckRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
 ) {
-    // 开锁 / 还车的弹窗开关不能瞬间抽动（2026-10-03 用户口径）：窗口层的
-    // 淡入放大 / 淡出收在这里，确认后动作区的 busy 态在这 190ms 淡出里露出来。
-    // **必须落在内容槽里**（放 AlertDialog 外面取到的是页面窗口、等于没调用，见 ui-common.md）
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(dialog.title) },
-        text = {
-            DialogWindowFadeEffect()
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 400.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                dialog.points.forEachIndexed { index, point ->
-                    Row(modifier = Modifier.padding(bottom = 8.dp)) {
-                        Text(
-                            text = "${index + 1}.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                            modifier = Modifier.width(20.dp),
-                        )
-                        Text(text = point, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-                if (dialog.allowSkip) {
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSkipChange(!skipNextTime) },
-                    ) {
-                        Checkbox(checked = skipNextTime, onCheckedChange = onSkipChange)
-                        Text(
-                            text = "以后开锁不再确认",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                    // 说明行的显隐走 Motion 四档（进场 reveal 220 / 退场 state 180）：
-                    // AnimatedVisibility 的默认是 spring 参数，与同页其余过渡的曲线家族
-                    // 脱节；高度逐帧变化时弹窗窗口跟着走，节奏必须收得住
-                    AnimatedVisibility(
-                        visible = skipNextTime,
-                        enter = fadeIn(Motion.reveal()) +
-                            expandVertically(Motion.reveal()),
-                        exit = fadeOut(Motion.state()) +
-                            shrinkVertically(Motion.state()),
-                    ) {
-                        Text(
-                            text = "关掉后点「开锁」就直接发指令并开始计费；" +
-                                "要恢复去「快趣出行设置 → 开锁与还车」打开「开锁前确认」。",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                            modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(
-                    text = dialog.confirmLabel,
-                    color = if (danger) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) },
+    ) {
+        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+        Text(text = label, style = MaterialTheme.typography.bodyMedium)
+    }
 }
 
 private const val DENIED_HINT = "已拒绝定位权限；可在系统设置里允许位置信息，或手动拖动地图找车"

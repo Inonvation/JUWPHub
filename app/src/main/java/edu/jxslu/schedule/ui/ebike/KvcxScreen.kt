@@ -9,16 +9,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -61,7 +57,8 @@ import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.ui.common.AccountHeroCard
 import edu.jxslu.schedule.ui.common.AppCard
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
+import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.MetricCell
@@ -443,49 +440,44 @@ private fun SumRow(label: String, value: String, onInfo: (() -> Unit)? = null) {
  *
  * 数字来自 [EbikeCardSavings]：开卡 260 次额度、每次最多省 ¥0.80、开卡 ¥18.80。
  * 这只是估算——真实扣费在快趣那边，所以最后一句必须写清「以快趣为准」。
+ *
+ * 排版走 ui/common 的 [AppInfoDialog]：这是**单键详情**，套确认框会凭空多一个
+ * 什么也不做的「取消」。内层 Column 只为 `spacedBy(6.dp)` 的行距，不承担滚动。
  */
 @Composable
 private fun SavingsDetailDialog(result: EbikeCardSavings.Result, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("骑行卡已省怎么算") },
-        text = {
-            DialogWindowFadeEffect()
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    AppInfoDialog(title = "骑行卡已省怎么算", onDismiss = onDismiss) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "按开卡额度 ${EbikeCardSavings.CARD_QUOTA} 次、每次最多省 " +
+                    "${EbikeRideStats.moneyText(EbikeCardSavings.PER_RIDE_CENTS)} 估算，不是快趣给的账单。",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = "已用 ${result.usedRides} 次 × " +
+                    "${EbikeRideStats.moneyText(EbikeCardSavings.PER_RIDE_CENTS)} = " +
+                    EbikeRideStats.moneyText(result.savedCents),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = "开卡成本 ${EbikeRideStats.moneyText(EbikeCardSavings.CARD_PRICE_CENTS)} → " +
+                    "净省 ${EbikeRideStats.moneyText(result.netCents)}",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (result.netCents < 0) {
                 Text(
-                    text = "按开卡额度 ${EbikeCardSavings.CARD_QUOTA} 次、每次最多省 " +
-                        "${EbikeRideStats.moneyText(EbikeCardSavings.PER_RIDE_CENTS)} 估算，不是快趣给的账单。",
+                    text = "还差 ${result.ridesToBreakEven} 次回本（每次按省 " +
+                        "${EbikeRideStats.moneyText(EbikeCardSavings.PER_RIDE_CENTS)} 算）。",
                     style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    text = "已用 ${result.usedRides} 次 × " +
-                        "${EbikeRideStats.moneyText(EbikeCardSavings.PER_RIDE_CENTS)} = " +
-                        EbikeRideStats.moneyText(result.savedCents),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    text = "开卡成本 ${EbikeRideStats.moneyText(EbikeCardSavings.CARD_PRICE_CENTS)} → " +
-                        "净省 ${EbikeRideStats.moneyText(result.netCents)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                if (result.netCents < 0) {
-                    Text(
-                        text = "还差 ${result.ridesToBreakEven} 次回本（每次按省 " +
-                            "${EbikeRideStats.moneyText(EbikeCardSavings.PER_RIDE_CENTS)} 算）。",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-                Text(
-                    text = "只算骑行卡覆盖的订单；没开卡时按 15 分钟 0.80 元起扣的部分不计入。以快趣为准。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("知道了") }
-        },
-    )
+            Text(
+                text = "只算骑行卡覆盖的订单；没开卡时按 15 分钟 0.80 元起扣的部分不计入。以快趣为准。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+    }
 }
 
 /**
@@ -548,7 +540,12 @@ private fun StatsSumRow(
     }
 }
 
-/** 超时费明细弹窗：口径逐行写清（次数数订单、单元数 15 分钟、只含骑行费）+ 按月分布 + 扫描诊断行。 */
+/**
+ * 超时费明细弹窗：口径逐行写清（次数数订单、单元数 15 分钟、只含骑行费）+ 按月分布 + 扫描诊断行。
+ *
+ * 排版走 ui/common 的 [AppInfoDialog]：单键详情，且正文的 `heightIn(max = 400.dp)` +
+ * 纵向滚动由它提供——这里**不再套第二层** `verticalScroll`（嵌套滚动会让长内容只滚一小段就停）。
+ */
 @Composable
 private fun StatsDetailDialog(
     summary: EbikeRideStats.Summary,
@@ -559,62 +556,47 @@ private fun StatsDetailDialog(
     scanLine: String?,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("超时费累计") },
-        text = {
-            // 过渡效果必须落在弹窗窗口自己的组合里（内容槽第一行），放外面取到的是页面窗口
-            DialogWindowFadeEffect()
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 400.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                EbikeRideStats.detailLines(summary, from.toString(), to.toString()).forEach { line ->
-                    Text(
-                        text = line,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(bottom = 6.dp),
-                    )
-                }
-                // 覆盖月份 + 月均：把「¥1245」换算成「每月 53 单 / ¥44」，和记忆对得上才算核实
-                coverage?.let { line ->
-                    Text(
-                        text = line,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(bottom = 6.dp),
-                    )
-                }
-                // 按月拆开（2026-11-05 用户要求「核实一下」）：总数对不上时，先看是哪个月离谱
-                if (months.isNotEmpty()) {
-                    Text(
-                        text = "按月（最近 ${months.size} 个月）",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
-                    )
-                    months.forEach { line ->
-                        Text(
-                            text = line,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(bottom = 2.dp),
-                        )
-                    }
-                }
-                scanLine?.let { line ->
-                    Text(
-                        text = line,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
-                }
+    AppInfoDialog(title = "超时费累计", onDismiss = onDismiss) {
+        EbikeRideStats.detailLines(summary, from.toString(), to.toString()).forEach { line ->
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
+        // 覆盖月份 + 月均：把「¥1245」换算成「每月 53 单 / ¥44」，和记忆对得上才算核实
+        coverage?.let { line ->
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
+        // 按月拆开（2026-11-05 用户要求「核实一下」）：总数对不上时，先看是哪个月离谱
+        if (months.isNotEmpty()) {
+            Text(
+                text = "按月（最近 ${months.size} 个月）",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
+            )
+            months.forEach { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(bottom = 2.dp),
+                )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("知道了") }
-        },
-    )
+        }
+        scanLine?.let { line ->
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+    }
 }
 
 // ── 骑行记录（服务端订单） ──
@@ -662,24 +644,17 @@ private fun LogoutRow(onLogout: () -> Unit) {
         Text("退出登录", color = MaterialTheme.colorScheme.error)
     }
     if (confirm) {
-        AlertDialog(
-            onDismissRequest = { confirm = false },
-            title = { Text("退出登录？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text("退出后本机凭证会被清除，再进本页需要重新输入手机号与密码；本机骑行记录不受影响。")
+        AppConfirmDialog(
+            title = "退出登录？",
+            message = "退出后本机凭证会被清除，再进本页需要重新输入手机号与密码；本机骑行记录不受影响。",
+            confirmLabel = "退出",
+            onConfirm = {
+                confirm = false
+                onLogout()
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirm = false
-                    onLogout()
-                }) {
-                    Text("退出", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirm = false }) { Text("取消") }
-            },
+            onDismiss = { confirm = false },
+            // 会清掉本机凭证（再进本页要重新输手机号 + 密码）：确认键用错误色
+            danger = true,
         )
     }
 }
@@ -689,43 +664,31 @@ private fun LogoutRow(onLogout: () -> Unit) {
 /**
  * 「骑行卡即将到期」提醒弹窗（DESIGN §4.32，2026-10-14）：资产查询发现卡券落在
  * 「到期前一天」窗口内时弹一次。明细与后果文案都从 [EbikeCardExpiry] 取（唯一出处），
- * 这里只排版；长文配 `heightIn(max)` + `verticalScroll`，小屏与大字体档位下按钮不被挤出。
+ * 这里只排版。
+ *
+ * 排版走 ui/common 的 [AppInfoDialog]：单键详情，长文的 `heightIn(max = 400.dp)` +
+ * 纵向滚动由它提供（小屏与大字体档位下按钮不会被挤出），这里不再套第二层。
  */
 @Composable
 private fun CardExpiryDialog(coupons: List<KqcxAuth.AssetCoupon>, onDismiss: () -> Unit) {
     val lines = remember(coupons) {
         EbikeCardExpiry.reminderLines(coupons, System.currentTimeMillis())
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("骑行卡即将到期") },
-        text = {
-            // 过渡效果必须落在弹窗窗口自己的组合里（内容槽第一行），放外面取到的是页面窗口
-            DialogWindowFadeEffect()
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 400.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                lines.forEach { line ->
-                    Text(
-                        text = line,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(bottom = 6.dp),
-                    )
-                }
-                Text(
-                    text = EbikeCardExpiry.REMINDER_NOTE,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("知道了") }
-        },
-    )
+    AppInfoDialog(title = "骑行卡即将到期", onDismiss = onDismiss) {
+        lines.forEach { line ->
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
+        Text(
+            text = EbikeCardExpiry.REMINDER_NOTE,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
 }
 
 // ── 未登录：表单 ──
@@ -804,20 +767,13 @@ private fun LoginSection(state: KvcxUiState, viewModel: KvcxViewModel) {
         TextButton(onClick = { showForgot = true }) { Text("忘记密码？") }
     }
     if (showForgot) {
-        AlertDialog(
-            onDismissRequest = { showForgot = false },
-            title = { Text("忘记或不知道密码") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "在微信里打开「快趣出行」小程序：登录页点「忘记密码」，用手机号 + 短信验证码重设；" +
-                        "登录后在「设置 → 修改密码」也能改。\n\n" +
-                        "密码默认加密保存在本机（可关闭「记住登录」）；不进云备份，请妥善保管。",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showForgot = false }) { Text("知道了") }
-            },
-        )
+        // 单键详情（只有「知道了」）：走 [AppInfoDialog]，套确认框会多一个无意义的「取消」
+        AppInfoDialog(title = "忘记或不知道密码", onDismiss = { showForgot = false }) {
+            Text(
+                "在微信里打开「快趣出行」小程序：登录页点「忘记密码」，用手机号 + 短信验证码重设；" +
+                    "登录后在「设置 → 修改密码」也能改。\n\n" +
+                    "密码默认加密保存在本机（可关闭「记住登录」）；不进云备份，请妥善保管。",
+            )
+        }
     }
 }
