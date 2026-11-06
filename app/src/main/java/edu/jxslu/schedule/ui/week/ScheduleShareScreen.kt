@@ -75,6 +75,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.BgScale
+import edu.jxslu.schedule.domain.LocalTimeLike
 import edu.jxslu.schedule.domain.ScheduleBackground
 import edu.jxslu.schedule.domain.ScheduleShare
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
@@ -605,8 +606,10 @@ private fun ShareBoard(
                             isTodayWeek = week == state.todayWeek,
                             todayDay = todayDay,
                             // 导出板不画时刻线（showNowLine = false），但入参类型是 State：
-                            // 传一个固定「现在」，板上的渲染与截图都不受 tick 影响
-                            now = rememberUpdatedState(state.now),
+                            // 传一个固定「现在」，板上的渲染与截图都不受 tick 影响。
+                            // 取当前时间而不是 state.now：后者已随 tick 拆分从状态里移除
+                            // （30 秒变一次的值待在状态快照里会让整页重组）。
+                            now = rememberUpdatedState(LocalTimeLike.now()),
                             // 导出图里不画「非本周灰态」与当前时刻线：那是屏幕上的辅助信息，
                             // 一张要发出去的图只该有这一周的课
                             showNonCurrentWeek = false,

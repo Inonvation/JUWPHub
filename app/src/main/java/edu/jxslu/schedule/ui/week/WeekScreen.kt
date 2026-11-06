@@ -50,9 +50,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -92,7 +92,7 @@ import edu.jxslu.schedule.domain.TimetablePrefs
 import edu.jxslu.schedule.ui.common.CourseDetailSheet
 import edu.jxslu.schedule.ui.common.CourseEditSheet
 import edu.jxslu.schedule.ui.common.ResumedTickerEffect
-import edu.jxslu.schedule.ui.common.DeleteConfirmDialog
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.GhostCourseCard
 import edu.jxslu.schedule.ui.common.GridCellStyle
@@ -116,6 +116,7 @@ import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
@@ -355,7 +356,8 @@ fun WeekScreen(
             }
     }
 
-    // 当前时刻线要跟着时间走；RESUMED 才 tick——退后台/灭屏不再每 30 秒重建整页 UiState
+    // 时刻线跟着时间走；RESUMED 才 tick（退后台/灭屏即停）。tick 只推 `WeekViewModel.now`，
+    // **不重建 UiState**——唯一例外是跨零点：那时顺带推一次「今天」，「本周」标记与今日列换天。
     ResumedTickerEffect(intervalMillis = 30_000L) { viewModel.refreshNow() }
 
     // 背景图文件不在磁盘上（清过数据、恢复备份不完整、目录被系统清过）：
@@ -380,16 +382,17 @@ fun WeekScreen(
     val dateFontSp = typeSpec.dateFontSp
     val headerMinDp = typeSpec.headerMinDp
 
-    // 「现在」以 State 形态下发（2026-11-06）：`WeekPage` 的入参里不再有 `now`，读取只在
-    // `NowLine` 那一小块。别改回普通参数——那会让 `now` 成为 `WeekPage` 的依赖。
-    // shortcut: 30 秒 tick 仍会重组 `WeekPage`（`WeekUiState` 每 tick 重建、List 是
-    // unstable），见 `WeekGrid.WeekPage` 的 `now` 参数注释；已兑现的收益是下面这些
-    // `remember`：那次重组不再重算 `buildGridLayout`、不再 parse 开学日、不再 new 格子样式。
-    val nowState = rememberUpdatedState(state.now)
+    // 「现在」由 ViewModel 的独立流（`WeekViewModel.now`）收成 `State`：**这一层只创建、不读取**。
+    // 一旦在这里读 `nowState.value`，30 秒 tick 就会让整个 WeekScreen 重组，白拆一场；
+    // 读取点只有 `WeekGrid.NowLine`，所以一次 tick 的代价 = 重画一条 1.5dp 的线。
+    // 也不能改回 `state.now`（已从 `WeekUiState` 里移走）：那是把 tick 重新绑回整页状态。
+    val nowState = produceState(viewModel.now.value, viewModel.now) {
+        viewModel.now.collect { value = it }
+    }
 
-    // 表头月份与格子样式同理：两者都只随「显示设置 / 当前周」变，而外层每 30 秒会重组一次。
-    // 每次重组都 `LocalDate.parse` 一遍开学日（weekDate → ScheduleCalculator.dateOf）是纯浪费；
-    // 格子样式是 `WeekPage` 的入参，每次 new 一个实例会让它的跳过判断失效。
+    // 表头月份与格子样式都只在「显示设置 / 当前周」变化时才算：它们读的 `state` 会因课程、
+    // 学期、偏好等任意数据变化而换新对象，而这些字段大多没动。`weekDate` 每次都要解析一遍
+    // 开学日；`GridCellStyle` 是 `WeekPage` 的入参，每次 new 一个实例会让它的跳过判断失效。
     val monthLabel = remember(state.semester, displayWeek) {
         weekDate(state.semester, displayWeek, 1)?.let { "${it.monthValue}月" }
     }
@@ -450,8 +453,8 @@ fun WeekScreen(
                 .padding(bottom = LocalBottomBarClearance.current),
         ) {
             // 网格几何只在「可用区 / 列数 / 用户尺寸档」变化时重算：`buildGridLayout` 每次要
-            // 分配两个 11 元素的 ArrayList，而外层每次 30 秒 tick 都会重组这一层——
-            // 不 remember 就是每分钟白算一遍（2026-11-06）。入参全是稳定值（Dp / Int / Float）。
+            // 分配两个 11 元素的 ArrayList，而这一层会因任意 `state` 变化（改课、切课表、
+            // 翻周、窗口尺寸）重组，几何多半没变。入参全是稳定值（Dp / Int / Float）。
             val layout = remember(
                 maxHeight,
                 maxWidth,
@@ -764,8 +767,11 @@ fun WeekScreen(
     }
 
     pendingDelete?.let { c ->
-        DeleteConfirmDialog(
-            courseName = c.name,
+        AppConfirmDialog(
+            title = "删除课程",
+            message = "确认删除「${c.name}」？",
+            confirmLabel = "删除",
+            danger = true,
             onConfirm = {
                 viewModel.delete(c)
                 pendingDelete = null

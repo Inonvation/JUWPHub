@@ -614,11 +614,6 @@ class DisplayPrefsStore(internal val context: Context) {
         context.displayDataStore.edit { it[KEY_TEXTBOOK_FETCHED_TERM] = term }
     }
 
-    /** 开水双击确认。全局项，默认双击防误触。 */
-    val waterRequireDoubleClick: Flow<Boolean> = context.displayDataStore.data.map { p ->
-        p[KEY_WATER_REQUIRE_DOUBLE_CLICK] ?: true
-    }
-
     /** 胖乖「打开软件自动签到」。全局项，**默认关**。 */
     val qiekjAutoSignIn: Flow<Boolean> = context.displayDataStore.data.map { p ->
         p[KEY_QIEKJ_AUTO_SIGN_IN] ?: false
@@ -1290,10 +1285,6 @@ class DisplayPrefsStore(internal val context: Context) {
     /** 启动页（DESIGN §3.3）。写的是用户的选择本身，不因为生活页此刻关着就改写它。 */
     suspend fun setStartPage(value: StartPage) {
         context.displayDataStore.edit { it[KEY_START_PAGE] = value.name }
-    }
-
-    suspend fun setWaterRequireDoubleClick(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_WATER_REQUIRE_DOUBLE_CLICK] = value }
     }
 
     suspend fun setQiekjAutoSignIn(value: Boolean) {

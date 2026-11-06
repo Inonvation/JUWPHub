@@ -68,11 +68,6 @@ data class DisplayPrefs(
      */
     val fontScaleLocked: Boolean = true,
     /**
-     * 开水按钮需双击确认。全局项，默认开：一键出水误触代价高，
-     * 双击挡单击误触；嫌麻烦可在「我的 → 胖乖生活」改回单击。
-     */
-    val waterRequireDoubleClick: Boolean = true,
-    /**
      * 胖乖「打开软件自动签到」。全局项，**默认关**。
      *
      * 只做每日签到，不碰任务/领奖；开启后每天首次回到前台检查一次，

@@ -9,13 +9,12 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * 教务导入抽象。M1/本阶段：QiangzhiJsxdImporter。
+ * 教务课表解析结果（理论课表与实验课表两个解析器共用）。
+ *
+ * 曾经有个 `CourseImporter` 接口（只有 `id`/`displayName` 两个属性）与
+ * `QiangzhiJsxdImporter` 空壳实现，2026-11-06 删除：全仓零引用，真正的分派在
+ * `OneClickImport` 里按「理论/实验」两条解析路径走，不需要一个只有名字的实现类。
  */
-interface CourseImporter {
-    val id: String
-    val displayName: String
-}
-
 sealed interface ImportParseResult {
     /**
      * [term] 是课表页学期下拉的当前选中项（如 2026-2027-1），即本次解析数据的实际学期；
@@ -461,9 +460,4 @@ object JwUrls {
     /** 是否门户域（`portal.juwp.edu.cn`）。 */
     fun isPortalHost(url: String?): Boolean =
         hostOf(url)?.let { it == "portal.juwp.edu.cn" || it.endsWith(".portal.juwp.edu.cn") } == true
-}
-
-class QiangzhiJsxdImporter : CourseImporter {
-    override val id: String = "qiangzhi_jsxd"
-    override val displayName: String = "强智正方课表（江西水利电力大学）"
 }

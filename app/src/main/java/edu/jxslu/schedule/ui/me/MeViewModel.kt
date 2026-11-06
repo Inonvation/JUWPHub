@@ -437,11 +437,6 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
         viewModelScope.launch { repo.setStartPage(page) }
     }
 
-    /** 开水双击确认（全局；默认双击防误触）。 */
-    fun setWaterRequireDoubleClick(value: Boolean) {
-        viewModelScope.launch { repo.setWaterRequireDoubleClick(value) }
-    }
-
     /** 胖乖「打开软件自动签到」（全局；默认关）。 */
     fun setQiekjAutoSignIn(value: Boolean) {
         viewModelScope.launch { repo.setQiekjAutoSignIn(value) }

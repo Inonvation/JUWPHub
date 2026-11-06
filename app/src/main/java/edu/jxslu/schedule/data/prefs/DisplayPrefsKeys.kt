@@ -27,7 +27,6 @@ internal val KEY_FLOATING_NAV_BAR = booleanPreferencesKey("floating_nav_bar")
         /** 百宝箱（DESIGN §4.47）：缺省 = true（今日页「+」里显示图片工具入口）。 */
 internal val KEY_TOOLBOX_ENABLED = booleanPreferencesKey("toolbox_enabled")
 internal val KEY_START_PAGE = stringPreferencesKey("start_page")
-internal val KEY_WATER_REQUIRE_DOUBLE_CLICK = booleanPreferencesKey("water_require_double_click")
 internal val KEY_QIEKJ_AUTO_SIGN_IN = booleanPreferencesKey("qiekj_auto_sign_in")
 internal val KEY_QIEKJ_AUTO_SIGN_IN_LAST_DATE = stringPreferencesKey("qiekj_auto_sign_in_last_date")
 internal val KEY_CALENDAR_REMINDER_MINUTES = intPreferencesKey("calendar_reminder_minutes")

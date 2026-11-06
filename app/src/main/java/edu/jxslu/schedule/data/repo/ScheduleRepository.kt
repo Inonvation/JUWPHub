@@ -83,7 +83,6 @@ class ScheduleRepository(
         val theme: ThemeMode,
         val dynamicColor: Boolean,
         val haptics: Boolean,
-        val waterDouble: Boolean,
         val qiekjAutoSignIn: Boolean,
     )
 
@@ -157,10 +156,9 @@ class ScheduleRepository(
             prefs.themeMode,
             prefs.dynamicColor,
             prefs.hapticsEnabled,
-            prefs.waterRequireDoubleClick,
             prefs.qiekjAutoSignIn,
-        ) { theme, dynamicColor, haptics, waterDouble, qiekjAutoSignIn ->
-            GlobalPrefs(theme, dynamicColor, haptics, waterDouble, qiekjAutoSignIn)
+        ) { theme, dynamicColor, haptics, qiekjAutoSignIn ->
+            GlobalPrefs(theme, dynamicColor, haptics, qiekjAutoSignIn)
         },
         // 共享单车切片（DESIGN §3.9）：三个流合成一层，再并入最外层 combine
         combine(
@@ -191,7 +189,6 @@ class ScheduleRepository(
             dynamicColor = global.dynamicColor,
             hapticsEnabled = global.haptics,
             fontScaleLocked = misc.fontScaleLocked,
-            waterRequireDoubleClick = global.waterDouble,
             qiekjAutoSignIn = global.qiekjAutoSignIn,
             ebikeAutoSave = ebike.autoSave,
             ebikeRecentIds = ebike.recentIds,
@@ -437,9 +434,6 @@ class ScheduleRepository(
 
     /** 字体缩放锁定（「固定字体大小」，默认开）。即时生效，无重启要求。 */
     suspend fun setFontScaleLocked(value: Boolean) = prefs.setFontScaleLocked(value)
-
-    /** 开水双击确认（全局，默认开）。 */
-    suspend fun setWaterRequireDoubleClick(value: Boolean) = prefs.setWaterRequireDoubleClick(value)
 
     /** 胖乖「打开软件自动签到」（全局，默认关）。 */
     suspend fun setQiekjAutoSignIn(value: Boolean) = prefs.setQiekjAutoSignIn(value)

@@ -153,17 +153,15 @@ internal fun WeekPage(
     isTodayWeek: Boolean,
     todayDay: Int,
     /**
-     * 「现在」。**以 `State` 下发而不是普通参数**（2026-11-06）。
+     * 「现在」。**以 `State` 下发而不是普通值**。
      *
-     * 兑现的是「不要把 `now` 读进 [WeekPage] 这一层」：读取发生在 [NowLine] 内部，于是父级
-     * 入参里没有 `now`，30 秒 tick 不会因为 `now` 变化而多一次失效。
+     * 契约：本层**只往下传、不读 `now.value`**。`WeekViewModel.now` 是独立于 `uiState` 的
+     * 流，30 秒 tick 不重建状态对象，所以本层的入参（同一份 `State` 实例）不变、可以跳过
+     * 重组，失效的只有真正读了 `now.value` 的 [NowLine]。
      *
-     * shortcut: **别指望「整页跳过重组」**——`WeekViewModel` 每个 tick 都会重建
-     * `WeekUiState`（`coursesInWeek` / `visibleDays` 各返回新 List，而 `List` 在 Compose 里
-     * 是 unstable），`WeekPage` 仍会每 30 秒重组一次。真要只重组时刻线，得把 `nowFlow`
-     * 从 `WeekUiState` 拆出去单独下发（2026-11-06 交叉复核；现在不值得动数据流）。
-     * 已兑现的收益在 [WeekScreen]：几何 / 月份 / 格子样式都 `remember` 住了，
-     * 那次重组不再重算 `buildGridLayout`、不再 parse 开学日。
+     * **别把 `now.value` 读进这一层**（例如先算「这节是否已过」再当参数传下去）：一读，
+     * 本层就成了依赖，整页重新组合，`State` 这层包装也就白做了。别处真要用「现在」，
+     * 就在那一处自己读 `now.value`，让那个 Composable 成为读取点。
      */
     now: State<LocalTimeLike>,
     showNonCurrentWeek: Boolean,
@@ -198,7 +196,7 @@ internal fun WeekPage(
         val pulledIn = cells.map { it.second }.filter { week !in it.weeks }.toSet()
         allCourses.filter { week !in it.weeks && it !in pulledIn }
     }
-    // 排序只跟源列表走：不 remember 的话每次重组（横滑、30s tick）都重排一遍。
+    // 排序只跟源列表走：不 remember 的话每次重组（横滑翻页、改课、切课表）都重排一遍。
     val sortedOtherWeekCourses = remember(otherWeekCourses) {
         otherWeekCourses.sortedWith(compareBy({ it.day }, { it.startSection }, { it.name }))
     }
@@ -210,7 +208,7 @@ internal fun WeekPage(
     }
     val todayVisible = isTodayWeek && todayDay in visibleDays
     // 表头日期：每周每列算一次就够（weekDate → dateOf 每次都要解析一遍开学日）。
-    // 外层每 30 秒 tick 都会重组到这里，不缓存就是每分钟 7 次 LocalDate.parse。
+    // 这一层会因任意 `state` 变化而重组，不缓存就是每次 7 遍 LocalDate.parse。
     val weekDates = remember(semester, week, visibleDays) {
         visibleDays.associateWith { weekDate(semester, week, it) }
     }
@@ -436,14 +434,11 @@ internal fun WeekPage(
 /**
  * 今日时刻线——**网格里唯一读「现在」的地方**。
  *
- * 单独成一个 Composable 是为了把 `now` 的读取关在这一层（2026-11-06）：`now` 以 `State`
- * 传入、读取发生在这一层，父级 [WeekPage] 的入参里没有 `now`，于是「`now` 变了」这件事
- * 只让这一块失效。
+ * 为什么单独成一个 Composable：`now` 以 `State` 传入、读取只发生在这一层，于是每 30 秒的
+ * tick 只让这条线重新组合，课程块 / 表头 / 空白格命中区都不参与。ViewModel 侧的 `now` 是
+ * 独立于 `uiState` 的流（tick 不重建状态对象）——两边配合才是「一次 tick 只重画一条线」。
  *
- * shortcut: 但 30 秒 tick 本身仍会让 [WeekPage] 重组一次——`WeekViewModel` 每个 tick 都
- * 重建 `WeekUiState`（新 List，unstable），见 [WeekPage] 的 `now` 参数注释。已兑现的收益
- * 是几何 / 月份 / 格子样式被 `remember` 住，那次重组不再重算布局与日期。**别把
- * `now.value` 读回 [WeekPage]**——那会让 `now` 成为父级依赖，连这点收益也没了。
+ * **别把 `now.value` 读回 [WeekPage]**：那会让父层成为依赖，整页跟着重组，这里的隔离白做。
  *
  * 终点收口到今日最后一节课：`cells` 已是覆盖 + 筛选后的口径，被筛掉的课不参与收口，
  * 避免「线还挂着、课却看不见」的错位。按**列**取课（不用 `dayLastEndMinutes` 的
