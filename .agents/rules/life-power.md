@@ -50,11 +50,15 @@
   **不挂 pointsApi**；它是签到前问「可得多少」，只在未签时 best-effort 调一次，失败不挡签到。
   **Y 来自 `doUserSignIn` 的 `totalIntegral`**（官方 d8 dump 里无人读这个字段，字段名出处是
   探针脚本读原始 JSON，别拿官方 dump 当反证）。手动「签到一次」不发提示（结果就在卡里）。
-- **「出水中」跨窗口口径**（2026-10-21）：`Graph.qiekjWatering`（`QiekjWateringStore`，落盘
+- **「出水中」跨窗口口径**（2026-10-21；展示层 2026-11-06 修）：`Graph.qiekjWatering`（`QiekjWateringStore`，落盘
   SharedPreferences + StateFlow）。`WaterViewModel.unlock()` 流程首次进入 `Working` 时 `begin`
   （设备名 / 起水时刻），结算 `Success`、流程失败、165 秒超时收尾时 `clear`；5 分钟未清视为
-  过期（进程死在流程中），store 读取时静默清除。今日页服务卡、侧栏高亮都订阅它——开水页与
-  今日页各持一份 ViewModel，`UnlockFlowState.Working` 只在各自 VM 内，靠它同步。
+  过期（进程死在流程中），store 读取时静默清除。**展示层另有一条更早的闸**：`isPastAutoClose`
+  （= `AUTO_CLOSE_SECONDS` 165 秒，服务端自动关阀时刻）之后今日页服务卡与侧栏高亮都不再算
+  「出水中」——流程不在本窗口时（页面被关 / 协程被取消 / VM 重建）没人清 store，只靠 5 分钟
+  过期会让水停了卡片还挂着（2026-11-06 用户报障）。改展示判据时 `ActiveServiceCard` 与
+  `MainActivity` 的 `ServiceActiveFlags` 一起改，别只动一处。今日页服务卡、侧栏高亮都订阅它——
+  开水页与今日页各持一份 ViewModel，`UnlockFlowState.Working` 只在各自 VM 内，靠它同步。
 - **登录态只有一份**（2026-09-27）：`QiekjRepository.loggedIn`（StateFlow，`saveToken` /
   `logout` 就地翻转）。今日页开水卡与开水页各持一份 `WaterViewModel`，**别在 VM 里另存布尔**：
   init 读它、`syncLoginState` 跟着它翻转（相等即跳过，否则本地登录路径会把余额/设备各刷两轮）。

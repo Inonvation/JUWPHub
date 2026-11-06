@@ -114,6 +114,13 @@ class WaterViewModel(
     private val unlockMutex = Mutex()
     private var unlockJob: Job? = null
     private var timerJob: Job? = null
+
+    /**
+     * 165 秒兜底。2026-11-06 起由 `onStep`（仓库的 IO 上下文）首次进入 Working 时启动，
+     * 写入在 IO、`cancelFlowJobs` 读取在主线程——加 `@Volatile` 保证取消看得到最新引用
+     * （漏取消只会多一个到点自检就退出的空 job，但仍不该留这个缝）。
+     */
+    @Volatile
     private var timeoutJob: Job? = null
 
     /** 当前这轮开水的手动结束开关（「结束用水」置位，仓库在轮询里看到就收尾）。 */
@@ -513,7 +520,10 @@ class WaterViewModel(
                     it.copy(flow = UnlockFlowState.PreChecking("准备开水"))
                 }
                 startTimer()
-                startTimeout()
+                // 165 秒兜底**不在这里起算**（2026-11-06）：它是服务端自动关阀窗口，
+                // 从「服务端确认出水」起算才对齐。PreChecking 慢（弱网十几秒）时旧写法会
+                // 提前收尾——水还在流，本地已经报「等待超时」并清了出水中登记；超过 165 秒
+                // 更糟：到点时 flow 还是 PreChecking，收尾检查落空，Working 阶段再无兜底。
                 try {
                     val result = repo.unlockDevice(
                         device,
@@ -525,6 +535,8 @@ class WaterViewModel(
                             // 服务端确认出水：登记到落盘会话（跨窗口展示的唯一真相源）。
                             // 只登记一次——后续 onStep 是同一轮出水的步骤推进，不重开计时。
                             sessionRegistered = true
+                            // 165 秒兜底从这一刻起算（与服务端关阀窗口同起点，见 unlock 注释）
+                            startTimeout()
                             wateringStore.begin(
                                 QiekjWateringSession(
                                     startedAtMillis = System.currentTimeMillis(),

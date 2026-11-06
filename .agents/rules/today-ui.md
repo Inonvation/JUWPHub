@@ -68,6 +68,8 @@
     「还车」走今日页本地的 `KvcxConfirmAlertDialog`（文案唯一出处仍是 `kvcxConfirmDialog`）。
   - 胖乖：**`Graph.qiekjWatering` 落盘会话**（`QiekjWateringStore`，2026-10-21）——`unlock()` 流程
     首次进入 Working 时 `begin`，结算 / 失败 / 165 秒超时收尾 `clear`；5 分钟未清按过期静默清除。
+    **展示层按服务端自动关阀时刻收行**（`isPastAutoClose`，165 秒，2026-11-06）：流程不在本窗口时
+    没人清 store，只靠 5 分钟过期会让水停了卡片还挂着「出水中」；侧栏高亮同一判据。
     它是跨窗口的唯一真相源（今日页与开水页各持一份 `WaterViewModel`，`Working` 只在各自 VM 里，
     互相看不见）。「结束开水」只在流程跑在**本窗口** VM 时可用（`waterCanStop`），否则行只展示 +
     点行进开水页（跨窗口结束没有对应的 VM 可调）。行落点 = 开水页。

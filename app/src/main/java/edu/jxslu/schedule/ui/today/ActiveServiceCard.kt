@@ -192,10 +192,11 @@ internal fun ActiveServiceCard(
     val waterExpired = remember(waterSession?.startedAtMillis) { mutableStateOf(false) }
     val freeRideVisible = freeRideStartAt != null && !freeRideExpired.value &&
         EbikeFreeRide.isActive(freeRideStartAt, System.currentTimeMillis())
-    // 胖乖：落盘会话未过期即「出水中」（store 已在读取时清掉过期残留；页面开着跨过
-    // 5 分钟线时由 WaterSlot 的时钟回调把它收掉）
+    // 胖乖：超过服务端自动关阀时刻（165 秒）即不再显示「出水中」（2026-11-06）。
+    // 流程正常时 Success / 超时收尾会先清 store；残留会话（流程不在本窗口 / 页面被关 /
+    // 协程被取消）只有 5 分钟过期兜底，水停了卡片还挂着——展示口径必须跟着关阀时刻走。
     val waterVisible = waterSession != null && !waterExpired.value &&
-        !waterSession.isStale(System.currentTimeMillis())
+        !waterSession.isPastAutoClose(System.currentTimeMillis())
     // 完成态要交代「刚结束的是哪台设备、用了多久」：数据消失后原对象就没了，留住最后一份
     val lastQzxyWatering = rememberLastValue(qzxyWatering)
     val lastWaterSession = rememberLastValue(waterSession)
@@ -386,7 +387,8 @@ private fun FreeRideSlot(
 }
 
 /**
- * 开水行：同上，秒级走时留在本行；超过 5 分钟（过期）回调 [onExpired] 撤行。
+ * 开水行：同上，秒级走时留在本行；超过服务端自动关阀时刻（165 秒）回调 [onExpired] 撤行
+ * （2026-11-06：此前按 5 分钟过期撤，水停了卡片还挂着「出水中」）。
  *
  * [session] 可为 null：会话成功后落盘 store 已清空，但完成态（[done]）还要在这条 Slot 里
  * 再亮 8 秒——Slot 若跟着会话一起卸载，退场就没有载体了（2026-10-29）。
@@ -403,9 +405,9 @@ private fun WaterSlot(
     onExpired: () -> Unit,
 ) {
     val now by rememberResumedSecondWhile(session?.startedAtMillis) { at ->
-        session != null && !session.isStale(at)
+        session != null && !session.isPastAutoClose(at)
     }
-    val active = session != null && !session.isStale(now)
+    val active = session != null && !session.isPastAutoClose(now)
     LaunchedEffect(active) { if (!active) onExpired() }
     val lastMode = rememberLastRowMode(active = active, done = done)
     AnimatedVisibility(visible = active || done, enter = EnterRow, exit = ExitRow) {

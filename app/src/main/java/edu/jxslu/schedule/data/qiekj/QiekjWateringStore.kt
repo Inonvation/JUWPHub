@@ -27,6 +27,17 @@ data class QiekjWateringSession(
     fun isStale(nowMillis: Long): Boolean = nowMillis - startedAtMillis >= STALE_MILLIS
 
     /**
+     * 是否已过服务端自动关阀时刻（[AUTO_CLOSE_SECONDS]，2026-11-06）。
+     *
+     * 到点后出水事实已经结束（结算可能仍在跑，账单由流程回报），**展示层不该再写
+     * 「出水中」**。此前展示只认 [isStale]（5 分钟），流程不在本窗口时（页面被关 /
+     * 协程被取消 / VM 重建）没人清 store，水停了卡片还挂到 5 分钟——用户报的
+     * 「开水后今日页仍显示出水中」就是这个。数据层的 5 分钟过期仍作兜底。
+     */
+    fun isPastAutoClose(nowMillis: Long): Boolean =
+        nowMillis - startedAtMillis >= AUTO_CLOSE_SECONDS * 1_000L
+
+    /**
      * 出水进度 0..1（2026-10-22，今日页服务卡用）：按服务端 [AUTO_CLOSE_SECONDS] 秒
      * 自动关阀兜底，超出按 1 封顶。与开水页 `WaterViewModel.AUTO_SETTLE_SECONDS` 同一口径。
      */

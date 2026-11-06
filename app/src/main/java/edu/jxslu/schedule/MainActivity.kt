@@ -1248,7 +1248,8 @@ internal fun JuwApp(
     val serviceActiveFlags = ServiceActiveFlags(
         ride = (drawerRideState.ride != null && drawerUseMode.capabilities().inAppRide) ||
             (drawerFreeRideStartAt > 0 && EbikeFreeRide.isActive(drawerFreeRideStartAt, System.currentTimeMillis())),
-        water = drawerQiekjWatering?.isStale(System.currentTimeMillis()) == false,
+        // 与今日页服务卡同一口径：过了服务端自动关阀时刻就不再算「出水中」（2026-11-06）
+        water = drawerQiekjWatering?.isPastAutoClose(System.currentTimeMillis()) == false,
         qzxy = drawerQzxyWatering != null,
         ujing = drawerUjingOrder?.let { !it.isTerminal } == true,
     )

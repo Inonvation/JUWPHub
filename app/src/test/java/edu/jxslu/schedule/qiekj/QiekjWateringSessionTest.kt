@@ -37,6 +37,16 @@ class QiekjWateringSessionTest {
     }
 
     @Test
+    fun pastAutoCloseAtServerThreshold() {
+        // 2026-11-06：展示层按服务端关阀时刻收行，不等 5 分钟的数据过期
+        val session = QiekjWateringSession(start, "2号开水机", null)
+        assertFalse(session.isPastAutoClose(start))
+        assertFalse(session.isPastAutoClose(start + QiekjWateringSession.AUTO_CLOSE_SECONDS * 1_000L - 1))
+        assertTrue(session.isPastAutoClose(start + QiekjWateringSession.AUTO_CLOSE_SECONDS * 1_000L))
+        assertTrue(session.isPastAutoClose(start + QiekjWateringSession.STALE_MILLIS))
+    }
+
+    @Test
     fun progressFractionTracksAutoClose() {
         val session = QiekjWateringSession(start, "2号开水机", null)
         assertEquals(0f, session.progressFraction(start))
