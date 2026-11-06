@@ -113,7 +113,13 @@ object QiangzhiScheduleParser {
                         "解析到 ${items.size} 条，但周次/节次/星期字段不完整（失败 $failed 条）",
                     )
                 } else {
-                    ImportParseResult.Success(courses, term = extractTermField(json))
+                    // 部分丢弃要如实报出来：模板改版后可能只坏一部分，静默「导入成功」
+                    // 会让用户以为全导进来了（`Success.note` 就是给这种提示留的）。
+                    ImportParseResult.Success(
+                        courses,
+                        term = extractTermField(json),
+                        note = if (failed > 0) "$failed 条因周次/节次/星期不完整已跳过" else null,
+                    )
                 }
             }
         } catch (e: Exception) {

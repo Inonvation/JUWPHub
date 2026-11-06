@@ -48,9 +48,11 @@ class SelectionRoundsStore(context: Context) {
 
     fun load(): Snapshot = store.readBlocking() ?: Snapshot()
 
-    fun save(snapshot: Snapshot) {
-        store.writeBlocking(snapshot)
-    }
+    /**
+     * 落盘并返回是否成功。调用方据它决定要不要推进「上次检查时间」：写失败却推进了，
+     * 下一轮会按旧快照判「轮次没变」，提醒静默失效一整轮。
+     */
+    fun save(snapshot: Snapshot): Boolean = store.writeBlocking(snapshot)
 
     companion object {
         private const val SNAPSHOT_FILE = "selection_rounds.json"

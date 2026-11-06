@@ -4,7 +4,6 @@ import edu.jxslu.schedule.domain.EbikeCardSavings
 import edu.jxslu.schedule.domain.KqcxAuth
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**

@@ -109,6 +109,11 @@ class JsonFileStore<T>(
             // 与合并前的 `runCatching` 同口径（吞 Throwable）：写缓存失败绝不能打断已经
             // 落库的业务。日志本身也包在 runCatching 里——诊断信息不许反过来改变控制流
             // （JVM 单测里 `android.util.Log` 是未 mock 的，直接调会抛）。
+            //
+            // 顺手删掉半成品 .tmp：writeText 中途失败（磁盘满）会留一个截断文件，
+            // 它既不被 [bytes] 统计、也不会被 [delete] 清掉，会永久占着空间
+            // （2026-11-06 复核）。
+            runCatching { File(file.parentFile, file.name + TMP_SUFFIX).delete() }
             if (tag != null) runCatching { Log.w(tag, "落盘失败 ${file.name}：${e.message}") }
             false
         }
@@ -117,9 +122,10 @@ class JsonFileStore<T>(
     /** 当前占用字节（缓存统计用）。**调用方负责 IO 线程**。 */
     fun bytes(): Long = file.length()
 
-    /** 删除文件（「清除缓存」用）。缓存删掉即失效，不需要额外状态。 */
+    /** 删除文件（「清除缓存」用）。缓存删掉即失效，不需要额外状态。残留的 .tmp 一并清。 */
     fun delete() {
         runCatching { file.delete() }
+        runCatching { File(file.parentFile, file.name + TMP_SUFFIX).delete() }
     }
 
     companion object {

@@ -722,8 +722,14 @@ class WenquRepository(
         }
         // 「已报名」这一族拒绝 = 目标状态已成立，按成功收尾（见 KDoc）。
         // 只在**本来会抛**的 envelope 上改判（status != 200），不碰正常成功路径。
+        //
+        // **必须再只读核对一次**（与上面 ambiguous 分支同口径）：话术表里「已报名」排在
+        // 「已满」之前，平台只要回一句同时含两者的文案（如「已报名人数已达上限」），
+        // 直接信就会把「名额满了、没报上」报成成功。`appliedNow` 取不到详情时回 null，
+        // 那种情况（核对不了）才按话术走。
         if (envelope.status != WenquEnvelope.STATUS_OK &&
-            WenquRules.isAlreadyAppliedMessage(envelope.msg)
+            WenquRules.isAlreadyAppliedMessage(envelope.msg) &&
+            appliedNow(activityId) != false
         ) {
             patchAfterApply(activityId)
             return@withContext

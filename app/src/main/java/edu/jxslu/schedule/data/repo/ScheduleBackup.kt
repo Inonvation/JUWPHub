@@ -23,6 +23,12 @@ import kotlinx.serialization.json.Json
 
 @Serializable
 data class CourseJson(
+    /**
+     * 课程行 id。**只写不读**（2026-11-06 复核登记）：导出时原样写出（与拾光互导的格式
+     * 兼容，删字段等于改格式），导入侧一律 `copy(id = 0L)` 归零——`CourseEntity` 是
+     * autoGenerate、`insertAll` 是 INSERT OR REPLACE，带着源设备的 id 进来会撞掉本机
+     * 另一张课表的行（审计 D1 那条 P0）。下一个人别以为导入会用它。
+     */
     val id: Long = 0,
     val name: String,
     val teacher: String = "",
@@ -61,7 +67,17 @@ data class CourseJson(
 @Serializable
 data class CourseExport(
     val courses: List<CourseJson> = emptyList(),
-    /** 数据所属学年学期（如 2026-2027-1），来自教务/脚本导出；旧文件或手工编辑没有则缺省。 */
+    /**
+     * 数据所属学年学期（如 2026-2027-1），来自教务/脚本导出；旧文件或手工编辑没有则缺省。
+     *
+     * **App 自己导出时不填这个字段**（2026-11-06 复核登记，是刻意的）：导入侧会把
+     * 文件里的 `term` 无条件写到**目标课表**上，而 App 导出的场景是「同一台机器 / 同一张
+     * 课表的整体备份」——把 term 带上，用户拿旧备份覆盖导入就会把当前课表的学期改成旧学期，
+     * 之后查教材 / 按学期过滤成绩全都会跑到错的那一学期。换机恢复时学期由重新导入教务
+     * 数据补齐（那次导入自带 term），所以这里不填不会丢东西。
+     * 只有脚本导出的文件（`scripts/out/courses.json`）带 term，那是「换机后没有教务数据」
+     * 的冷启动路径，需要它。
+     */
     val term: String? = null,
     /**
      * 成绩备份段（DESIGN §4.3/§4.15）：换机/重装随课表一起恢复。

@@ -59,9 +59,7 @@ class InternshipSnapshotStore(context: Context) {
      * 存下来页面才会如实显示（先例：SelectionRoundsStore 的「轮次快照允许存空」）；
      * 「宁旧勿空」的取舍在装载器（异常空不写、更新失败回退旧快照），不在这一层。
      */
-    fun save(snapshot: Snapshot) {
-        store.writeBlocking(snapshot)
-    }
+    fun save(snapshot: Snapshot): Boolean = store.writeBlocking(snapshot)
 
     companion object {
         private const val SNAPSHOT_FILE = "internship_bases.json"

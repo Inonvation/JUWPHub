@@ -132,13 +132,15 @@ class SelectionSync(
             if (reason != null) return RoundsResult.Failed(reason)
             val rounds = fetchRounds()
             val fetchedAt = nowMillis()
-            roundsStore.save(
+            // 写盘失败不推进检查时间：快照没更新却记下「刚查过」，下一轮会按旧轮次
+            // 判「没变化」，提醒静默失效一整轮。
+            val saved = roundsStore.save(
                 SelectionRoundsStore.Snapshot(
                     fetchedAt = fetchedAt,
                     rounds = rounds.map(SelectionRoundsStore::rowOf),
                 ),
             )
-            prefs.setSelectionRoundsCheckMillis(fetchedAt)
+            if (saved) prefs.setSelectionRoundsCheckMillis(fetchedAt)
             return RoundsResult.Updated(rounds = rounds, fetchedAt = fetchedAt)
         } catch (e: CancellationException) {
             throw e // 协程被取消，不能吞成失败

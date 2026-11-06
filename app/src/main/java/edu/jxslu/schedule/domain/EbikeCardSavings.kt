@@ -69,4 +69,3 @@ object EbikeCardSavings {
         return Result(usedRides.toInt(), quotaTotal, savedCents, netCents, toBreakEven)
     }
 }
-

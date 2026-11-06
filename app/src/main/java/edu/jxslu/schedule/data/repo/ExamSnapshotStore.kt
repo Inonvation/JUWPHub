@@ -34,10 +34,14 @@ class ExamSnapshotStore(context: Context) {
 
     fun load(): Snapshot = store.readBlocking() ?: Snapshot()
 
-    /** 空条目不写：一次「取到但为空」不该把上次有数的那份基线洗掉，宁旧勿空。 */
-    fun save(snapshot: Snapshot) {
-        if (snapshot.exams.isEmpty()) return
-        store.writeBlocking(snapshot)
+    /**
+     * 空条目不写：一次「取到但为空」不该把上次有数的那份基线洗掉，宁旧勿空。
+     * 返回是否真的落盘（空条目返回 true —— 那是有意的「不动」，不算失败）；
+     * 调用方据它决定要不要推进「上次检查时间」，否则写失败会让基线永远停在旧版本。
+     */
+    fun save(snapshot: Snapshot): Boolean {
+        if (snapshot.exams.isEmpty()) return true
+        return store.writeBlocking(snapshot)
     }
 
     companion object {

@@ -41,9 +41,12 @@ class ScheduleBaselineStore(context: Context) {
 
     fun load(): Snapshot = store.readBlocking() ?: Snapshot()
 
-    fun save(snapshot: Snapshot) {
-        store.writeBlocking(snapshot)
-    }
+    /**
+     * 落盘并返回是否成功。**调用方必须看返回值**：基线没写进去、却把「已阅指纹」
+     * 和「待处置差异」清掉，下一轮检查会拿旧基线比对，把用户刚处理完的变动
+     * 重新报一遍（合并时还会按旧指纹套到新课表上）。
+     */
+    fun save(snapshot: Snapshot): Boolean = store.writeBlocking(snapshot)
 
     companion object {
         private const val SNAPSHOT_FILE = "schedule_baseline.json"

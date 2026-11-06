@@ -147,8 +147,11 @@ class ExamSync(
             emptyList()
         }
 
-        snapshotStore.save(ExamSnapshotStore.Snapshot(term = term, exams = exams))
-        prefs.setExamAlertCheckMillis(nowMillis())
+        // 写盘失败不推进检查时间：基线没更新却记下「刚查过」，下一轮会拿旧基线比对，
+        // 把同一批变动重复报一遍。
+        if (snapshotStore.save(ExamSnapshotStore.Snapshot(term = term, exams = exams))) {
+            prefs.setExamAlertCheckMillis(nowMillis())
+        }
         // 收件箱留痕（DESIGN §4.38）：手动「更新」与周期检查同源，谁先发现都入箱。
         // 去重键 = 考试身份（courseNo|date），同一场考试反复 sync 只刷新那一条；
         // 时间/考场再变 = 内容刷新成最新状态，不堆历史消息。

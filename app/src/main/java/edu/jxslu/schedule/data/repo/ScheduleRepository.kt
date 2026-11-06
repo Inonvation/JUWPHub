@@ -198,6 +198,8 @@ class ScheduleRepository(
             floatingNavBar = shell.floatingNavBar,
             startPage = shell.startPage,
             // 遗留单开关也一并透出，与实际存储保持一致，免得读了它的人拿到陈旧值。
+            // **这个字段不能删**：它是导出格式（`TimetablePrefs`）的一部分，拾光侧可能读它；
+            // 删了镜像会让「用户关掉周末」在导出文件里永远写成 true（2026-11-06 复核）。
             showWeekend = p.showSaturday && p.showSunday,
             showSaturday = p.showSaturday,
             showSunday = p.showSunday,
@@ -318,9 +320,6 @@ class ScheduleRepository(
     suspend fun setShowSunday(value: Boolean) =
         updateViewPrefs { it.copy(showSunday = value, showWeekend = it.showSaturday && value) }
 
-    /** 兼容入口：老调用点一次改两天。新代码请用两个独立 setter。 */
-    suspend fun setShowWeekend(value: Boolean) =
-        updateViewPrefs { it.copy(showSaturday = value, showSunday = value, showWeekend = value) }
 
     suspend fun setShowAtSign(value: Boolean) = updateViewPrefs { it.copy(showAtSign = value) }
 
@@ -1102,7 +1101,11 @@ class ScheduleRepository(
         val store = baselineStore ?: return
         val term = db.timetableDao().getById(timetableId)?.term.orEmpty()
         val courses = getTimetableCourses(timetableId).filter { it.kind != CourseKind.Exam }
-        store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, courses, System.currentTimeMillis()))
+        // 写盘失败就**不要**清指纹与待处置差异：基线还停在旧版本，把差异清掉会让下一轮
+        // 检查拿旧基线比对、把用户刚处理完的变动重新报一遍（合并时还会按旧指纹套到新课表上）。
+        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, courses, System.currentTimeMillis()))) {
+            return
+        }
         prefs.setScheduleIgnoredFingerprint("")
         if (prefs.schedulePendingChanges()?.timetableId == timetableId) {
             prefs.setSchedulePendingChanges(null)
@@ -1112,7 +1115,9 @@ class ScheduleRepository(
     /** 用教务抓取结果直接建基线（检查首跑 / 换学期：此刻课表未动，教务现状即「一致状态」）。 */
     suspend fun saveScheduleBaseline(timetableId: Long, term: String, courses: List<Course>) {
         val store = baselineStore ?: return
-        store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, courses, System.currentTimeMillis()))
+        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, courses, System.currentTimeMillis()))) {
+            return
+        }
         prefs.setScheduleIgnoredFingerprint("")
     }
 
@@ -1120,8 +1125,10 @@ class ScheduleRepository(
     suspend fun clearScheduleBaseline(timetableId: Long) {
         val store = baselineStore ?: return
         if (store.load().timetableId == timetableId) {
-            store.save(ScheduleBaselineStore.Snapshot())
-            prefs.setSchedulePendingChanges(null)
+            // 同一条纪律：清差异要跟「基线真的清掉了」绑在一起
+            if (store.save(ScheduleBaselineStore.Snapshot())) {
+                prefs.setSchedulePendingChanges(null)
+            }
         }
     }
 
@@ -1159,7 +1166,9 @@ class ScheduleRepository(
             return
         }
         val after = ScheduleDiff.baselineAfter(current.courses.map { it.toCourse() }, entries)
-        store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, after, System.currentTimeMillis()))
+        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, after, System.currentTimeMillis()))) {
+            return
+        }
         prefs.setScheduleIgnoredFingerprint("")
         if (prefs.schedulePendingChanges()?.timetableId == timetableId) {
             prefs.setSchedulePendingChanges(null)
