@@ -261,11 +261,14 @@ launcher：选中车后先收地图，**今日页接住车号再开出码页**�
 | `Motion.state()` | 180ms | 选中、开关、展开/收起 | 一次操作对应一次可见变化 |
 | `Motion.reveal()` | 220ms | 内容出现、骨架→内容、错峰出现 | 新内容进场，眼睛要跟上（曲线用 decelerate） |
 | `Motion.page()` / `pageExit()` | 280ms | 页面级进出场、弹层升降、大块位移 | 换「在哪一页」，要交代方位 |
+| `Motion.exit()` / `revealExit()` | 90ms / 220ms | 淡出、内容消失（退场专用） | 退场要比进场快且急，曲线用 accelerate；`revealExit()` 给需要缩高度的退场 |
 
 曲线取 Material 3 emphasized 家族（手写 `CubicBezierEasing`，不用 `MaterialTheme.motionScheme`——
 那套在 material3 1.3 仍标 experimental 且只给 spec 不给曲线，调用点没法与 `animateColorAsState` 混用）。
-**新代码一律用这四档**，别再写字面量；确有例外（跟手、无限循环、非动画的超时上限）在调用点写
+**新代码一律用这几档**，别再写字面量；确有例外（跟手、无限循环、非动画的超时上限）在调用点写
 `// 例外：<原因>`。归并口径表在 `Motion.kt` 文件头。
+**退场别复用进场档**：`reveal()`/`page()` 带的是 decelerate（起步快、收尾慢），拿去做
+`fadeOut`/`shrinkVertically` 会「先猛地动一截再慢慢收」——退场一律 `exit()` / `revealExit()` / `pageExit()`。
 
 配套三条：
 
