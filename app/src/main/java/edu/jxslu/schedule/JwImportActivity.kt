@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import edu.jxslu.schedule.ui.common.LaunchGate
 import edu.jxslu.schedule.ui.jwvw.JwImportMode
 import edu.jxslu.schedule.ui.jwvw.JwImportScreen
 
@@ -76,6 +77,11 @@ class JwImportActivity : ComponentActivity() {
          *
          * [selectionRoundId]（选课模式）：登录后直达该轮次的「进入选课」页；
          * 空 = 落选课中心列表（轮次页）。
+         *
+         * **防连点按模式分槽**（2026-11-06）：`LaunchGate` 只挡「同一目标连续两次」，
+         * 所以 key 必须带 `mode`——用同一个 key 的话，「导入课表 → 立刻去导入成绩」
+         * 这两次相距不到 500ms 的合法操作会被吞掉第二次（U净 那次踩过同一个坑）。
+         * 双击同一入口则被挡住：多开一个窗口等于多一份 WebView + 一条 CAS 登录链。
          */
         fun start(
             context: Context,
@@ -83,6 +89,7 @@ class JwImportActivity : ComponentActivity() {
             startAtExam: Boolean = false,
             selectionRoundId: String? = null,
         ) {
+            if (!LaunchGate.allow("jw_import_${mode.name.lowercase()}")) return
             val intent = Intent(context, JwImportActivity::class.java)
                 .putExtra(EXTRA_MODE, mode.name)
                 .putExtra(EXTRA_START_EXAM, startAtExam)
@@ -94,8 +101,12 @@ class JwImportActivity : ComponentActivity() {
         /**
          * 只读打开一个教务网页，复用导入窗口的全部能力（电脑版 / 手机版、统一认证、
          * 返回先关弹层、错误态与 Cookie 回灌）。各业务页顶部的外链图标走这里。
+         *
+         * 防连点 key 带 [url]（2026-11-06）：同一个「网页核对」按钮双击要挡，
+         * 但一页里往往有好几个外链图标指向不同页面，按模式分槽会把它们串成同一个目标。
          */
         fun startBrowse(context: Context, title: String, url: String) {
+            if (!LaunchGate.allow("jw_import_browse:$url")) return
             val intent = Intent(context, JwImportActivity::class.java)
                 .putExtra(EXTRA_MODE, JwImportMode.Browse.name)
                 .putExtra(EXTRA_BROWSE_TITLE, title)

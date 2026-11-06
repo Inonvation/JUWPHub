@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.water
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -16,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.UnlockFlowState
+import edu.jxslu.schedule.ui.theme.Motion
 
 /** 状态区的动画分组键：同一组内的变化（「正在出水」每秒走字）不触发切换动画。 */
 enum class WaterFlowPhase { Idle, PreChecking, Working, Success, Failed }
@@ -45,7 +45,8 @@ fun WaterFlowStatusHost(
         targetState = flow,
         contentKey = { waterFlowPhase(it) },
         transitionSpec = {
-            fadeIn(animationSpec = tween(200)) togetherWith fadeOut(animationSpec = tween(160))
+            fadeIn(animationSpec = Motion.state()) togetherWith
+                fadeOut(animationSpec = Motion.state())
         },
         label = "water-flow-status",
         modifier = modifier,
@@ -82,7 +83,8 @@ fun WaterWorkingAction(
     AnimatedContent(
         targetState = action,
         transitionSpec = {
-            fadeIn(animationSpec = tween(180)) togetherWith fadeOut(animationSpec = tween(120))
+            fadeIn(animationSpec = Motion.state()) togetherWith
+                fadeOut(animationSpec = Motion.tap())
         },
         label = "water-working-action",
         modifier = modifier.fillMaxWidth(),

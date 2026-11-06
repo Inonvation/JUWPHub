@@ -1,12 +1,6 @@
 package edu.jxslu.schedule.ui.qzxy
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -49,6 +43,7 @@ import edu.jxslu.schedule.domain.QzxyWatering
 import edu.jxslu.schedule.domain.QzxyWateringFormat
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
+import edu.jxslu.schedule.ui.theme.Motion
 
 /**
  * 今日页点余额弹出的趣智校园开水面板（DESIGN §3.18）。
@@ -140,8 +135,8 @@ fun QzxyEntrySheet(
                 AnimatedContent(
                     targetState = balanceText,
                     transitionSpec = {
-                        fadeIn(animationSpec = tween(180)) togetherWith
-                            fadeOut(animationSpec = tween(120))
+                        fadeIn(animationSpec = Motion.state()) togetherWith
+                            fadeOut(animationSpec = Motion.tap())
                     },
                     label = "qzxy-sheet-balance",
                 ) { text ->
@@ -176,8 +171,8 @@ fun QzxyEntrySheet(
                 AnimatedContent(
                     targetState = sheetContentOf(state, loggedIn),
                     transitionSpec = {
-                        fadeIn(animationSpec = tween(200)) togetherWith
-                            fadeOut(animationSpec = tween(120))
+                        fadeIn(animationSpec = Motion.state()) togetherWith
+                            fadeOut(animationSpec = Motion.tap())
                     },
                     label = "qzxy-sheet-status",
                 ) { content ->

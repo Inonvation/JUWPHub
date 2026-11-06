@@ -11,6 +11,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,12 +41,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.GallerySaveResult
 import edu.jxslu.schedule.ui.common.ImageViewerDialog
+import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.saveBitmapToGallery
 import edu.jxslu.schedule.ui.common.shareFile
 import java.io.ByteArrayOutputStream
@@ -244,32 +251,58 @@ fun ToolboxPreview(
     }
 }
 
-/** 颜色圆点行（观感对齐主题配色弹层里的色点：圆 + 描边，选中套主色圈）。 */
+/**
+ * 颜色圆点行（观感对齐主题配色弹层里的色点：圆 + 描边，选中套主色圈）。
+ *
+ * [labels] 给读屏用（如「白」「黑」）；不给就退化成「颜色 1、颜色 2」。
+ */
 @Composable
 fun ColorDotRow(
     colors: List<Int>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
+    labels: List<String> = emptyList(),
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    val haptics = rememberAppHaptics()
+    // 命中区 36dp 而不是 48dp：色点行嵌在页面 16dp 边距 + AppCard 14dp 内距里，360dp 屏的实际
+    // 可用宽度是 360 − 32 − 28 = **300dp**（不是 328dp，2026-11-06 复核改正了这处算错的注释）。
+    // 8 个色点 × 48dp = 384dp 会被裁掉三个；× 40dp = 320dp 仍放不下最后一个（"灰"要靠横滑才看得见，
+    // 而横滑没有滚动条提示）；× 36dp = 288dp 稳放，又远好过原先 28dp 的圆点本体。
+    // shortcut: 色点数超过 8 个（或更窄的屏）时靠横向滚动兜底；真要更多色板就改成两行。
+    Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
         colors.forEachIndexed { index, color ->
             val selected = index == selectedIndex
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
-                    .background(Color(color))
-                    .border(
-                        width = if (selected) 3.dp else 1.dp,
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.outlineVariant
-                        },
-                        shape = CircleShape,
-                    )
-                    .clickable { onSelect(index) },
-            )
+                    .clickable(role = Role.RadioButton) {
+                        haptics.toggle()
+                        onSelect(index)
+                    }
+                    // 读屏要能说出「哪个颜色、是否选中」；原先连 role 都没有，只报一个可点方块
+                    .semantics {
+                        this.selected = selected
+                        contentDescription = labels.getOrNull(index) ?: "颜色 ${index + 1}"
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color(color))
+                        .border(
+                            width = if (selected) 3.dp else 1.dp,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.outlineVariant
+                            },
+                            shape = CircleShape,
+                        ),
+                )
+            }
         }
     }
 }

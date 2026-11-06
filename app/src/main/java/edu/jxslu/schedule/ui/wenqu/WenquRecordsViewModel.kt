@@ -7,6 +7,8 @@ import edu.jxslu.schedule.data.wenqu.WenquActivity
 import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.wenqu.WenquVolunteerRecord
 import edu.jxslu.schedule.data.wenqu.asActivity
+import edu.jxslu.schedule.ui.common.NoticeFeedback
+import edu.jxslu.schedule.ui.common.NoticeTone
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,7 +48,8 @@ class WenquRecordsViewModel(private val repo: WenquRepository) : ViewModel() {
         val applying: Boolean = false,
         /** 取消失败的原因（平台原话），留在弹层里——页面级提示会被弹层盖住。 */
         val detailActionError: String? = null,
-        val message: String? = null,
+        /** 一次性提示（Snackbar 消费）。失败必须走 [wenquNotice] 的 Warning，播报用默认 Info。 */
+        val message: NoticeFeedback? = null,
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -72,7 +75,11 @@ class WenquRecordsViewModel(private val repo: WenquRepository) : ViewModel() {
                 throw e
             } catch (e: Exception) {
                 _state.update {
-                    it.copy(loading = false, refreshing = false, message = e.message ?: "取数失败")
+                    it.copy(
+                        loading = false,
+                        refreshing = false,
+                        message = wenquNotice(e.message ?: "取数失败", NoticeTone.Warning),
+                    )
                 }
             }
         }
@@ -158,7 +165,7 @@ class WenquRecordsViewModel(private val repo: WenquRepository) : ViewModel() {
                         opened = null,
                         detail = null,
                         detailLoading = false,
-                        message = "已取消报名",
+                        message = wenquNotice("已取消报名"),
                     )
                 }
                 // 报名没了 → 记录列表要重取（走仓库的 force，别被 30 分钟缓存挡回去）

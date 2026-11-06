@@ -61,6 +61,7 @@ import edu.jxslu.schedule.ui.common.SettingChoiceRow
 import edu.jxslu.schedule.ui.common.decodeUriSampled
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.showNotice
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -166,63 +167,73 @@ fun StitchScreen(onBack: () -> Unit) {
         }
         busy = true
         scope.launch {
-            // 尺寸与 Uri 成对过滤：跳过读不出的一两张后，下标必须仍指向同一张图
-            val usable = withContext(Dispatchers.IO) {
-                uris.mapNotNull { uri -> readImageBounds(context, uri)?.let { uri to it } }
-            }
-            if (usable.size != uris.size) {
-                notice("有图片读不出来（已跳过）", NoticeTone.Warning)
-            }
-            if (usable.isEmpty()) {
-                notice("图片都读不出来，换个来源试试", NoticeTone.Error)
-                busy = false
-                return@launch
-            }
-            val sizes = usable.map { it.second }
-            // 智能模式：先规划裁剪（原图坐标）。宽度不一致 / 识别不出结论 → 退回直接拼接
-            // （高度不同不影响——长截图与普通截图混拼是常态）
-            var keeps: List<StitchScan.KeepRows>? = null
-            if (smart) {
-                keeps = if (!StitchScan.sameWidth(sizes)) {
-                    // 高度不同没关系（长截图 + 普通截图混拼是常态），宽度不同就真的没坐标系
-                    val widths = sizes.map { it.first }.distinct().joinToString(" / ")
-                    notice("这些图宽度不一致（$widths），这次按直接拼接", NoticeTone.Warning)
-                    null
-                } else {
-                    StitchSmart.plan(
-                        context = context,
-                        uris = usable.map { it.first },
-                        fullSizes = sizes,
-                        statusBarRowsFull = statusBarRows,
-                        tolerance = tolerance,
-                    ).also {
-                        if (it == null) {
-                            notice("没识别出可裁的重复内容，按直接拼接", NoticeTone.Info)
+            // busy 必须由 finally 兜底复位：解码/合成抛 OOM、SecurityException 时若逃逸出去，
+            // busy 会永久停在 true —— 返回键此后只会提示「正在保存」，整页变死页
+            try {
+                // 尺寸与 Uri 成对过滤：跳过读不出的一两张后，下标必须仍指向同一张图
+                val usable = withContext(Dispatchers.IO) {
+                    uris.mapNotNull { uri -> readImageBounds(context, uri)?.let { uri to it } }
+                }
+                if (usable.size != uris.size) {
+                    notice("有图片读不出来（已跳过）", NoticeTone.Warning)
+                }
+                if (usable.isEmpty()) {
+                    notice("图片都读不出来，换个来源试试", NoticeTone.Error)
+                    return@launch
+                }
+                val sizes = usable.map { it.second }
+                // 智能模式：先规划裁剪（原图坐标）。宽度不一致 / 识别不出结论 → 退回直接拼接
+                // （高度不同不影响——长截图与普通截图混拼是常态）
+                var keeps: List<StitchScan.KeepRows>? = null
+                if (smart) {
+                    keeps = if (!StitchScan.sameWidth(sizes)) {
+                        // 高度不同没关系（长截图 + 普通截图混拼是常态），宽度不同就真的没坐标系
+                        val widths = sizes.map { it.first }.distinct().joinToString(" / ")
+                        notice("这些图宽度不一致（$widths），这次按直接拼接", NoticeTone.Warning)
+                        null
+                    } else {
+                        StitchSmart.plan(
+                            context = context,
+                            uris = usable.map { it.first },
+                            fullSizes = sizes,
+                            statusBarRowsFull = statusBarRows,
+                            tolerance = tolerance,
+                        ).also {
+                            if (it == null) {
+                                notice("没识别出可裁的重复内容，按直接拼接", NoticeTone.Info)
+                            }
                         }
                     }
                 }
-            }
-            val rendered = withContext(Dispatchers.Default) {
-                ToolboxRenderer.stitchStreaming(
-                    sourceSizes = sizes,
-                    spacingPx = 0,
-                    keeps = keeps,
-                ) { index ->
-                    withContext(Dispatchers.IO) {
-                        decodeUriSampled(context, usable[index].first, StitchSourceLongSide)
+                val rendered = withContext(Dispatchers.Default) {
+                    ToolboxRenderer.stitchStreaming(
+                        sourceSizes = sizes,
+                        spacingPx = 0,
+                        keeps = keeps,
+                    ) { index ->
+                        withContext(Dispatchers.IO) {
+                            decodeUriSampled(context, usable[index].first, StitchSourceLongSide)
+                        }
                     }
                 }
-            }
-            if (keeps != null) {
-                val removed = sizes.sumOf { it.second } - keeps.sumOf { it.height }
-                if (removed > 0) {
-                    notice("智能拼接：去掉了 $removed 行重复内容", NoticeTone.Success)
+                if (keeps != null) {
+                    val removed = sizes.sumOf { it.second } - keeps.sumOf { it.height }
+                    if (removed > 0) {
+                        notice("智能拼接：去掉了 $removed 行重复内容", NoticeTone.Success)
+                    }
                 }
+                result = rendered
+                // 先解锁再滚：滚动动画期间不该继续拦返回键（finally 里那次只是兜底）
+                busy = false
+                // 结果在页顶，滚回去让用户立刻看到（长列表时页面停在下面）
+                scroll.animateScrollTo(0)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                notice("拼接失败：${e.message ?: "未知错误"}", NoticeTone.Error)
+            } finally {
+                busy = false
             }
-            result = rendered
-            busy = false
-            // 结果在页顶，滚回去让用户立刻看到（长列表时页面停在下面）
-            scroll.animateScrollTo(0)
         }
     }
 
@@ -234,18 +245,26 @@ fun StitchScreen(onBack: () -> Unit) {
         }
         busy = true
         scope.launch {
-            val fileName = ToolboxExport.fileName("拼接")
-            if (share) {
-                val error = ToolboxExport.share(context, bitmap, fileName)
-                if (error != null) notice(error, NoticeTone.Warning)
-            } else {
-                when (val saved = ToolboxExport.save(context, bitmap, fileName)) {
-                    is GallerySaveResult.Saved ->
-                        notice("已保存到相册", NoticeTone.Success)
-                    is GallerySaveResult.Failed -> notice(saved.message, NoticeTone.Error)
+            // 同 startStitch：写相册/分享失败会抛，busy 必须由 finally 复位
+            try {
+                val fileName = ToolboxExport.fileName("拼接")
+                if (share) {
+                    val error = ToolboxExport.share(context, bitmap, fileName)
+                    if (error != null) notice(error, NoticeTone.Warning)
+                } else {
+                    when (val saved = ToolboxExport.save(context, bitmap, fileName)) {
+                        is GallerySaveResult.Saved ->
+                            notice("已保存到相册", NoticeTone.Success)
+                        is GallerySaveResult.Failed -> notice(saved.message, NoticeTone.Error)
+                    }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                notice("保存失败：${e.message ?: "未知错误"}", NoticeTone.Error)
+            } finally {
+                busy = false
             }
-            busy = false
         }
     }
 

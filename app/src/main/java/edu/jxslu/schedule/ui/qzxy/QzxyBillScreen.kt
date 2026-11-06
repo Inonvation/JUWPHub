@@ -81,11 +81,14 @@ fun QzxyBillScreen(
         if (state.error == null && !state.loading && state.months.isNotEmpty() && groups.isEmpty()) {
             item { EmptyCard(title = emptyTitle(state.range), body = emptyBody(state.range)) }
         }
+        // 分组标题与卡片各是一个 item，键都带日期：换时段（今日/本周/本月/全部）或
+        // 刷新补齐新一天时整组进出场，而不是整列「啪」地重排
         groups.forEach { group ->
             item(key = "head-${group.key}") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .animateItem()
                         .padding(start = 4.dp, top = 6.dp, bottom = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -104,7 +107,7 @@ fun QzxyBillScreen(
                 }
             }
             item(key = "day-${group.key}") {
-                AppCard(contentPadding = PaddingValues(0.dp)) {
+                AppCard(modifier = Modifier.animateItem(), contentPadding = PaddingValues(0.dp)) {
                     group.bills.forEachIndexed { index, bill ->
                         if (index > 0) AppCardDivider()
                         BillRow(bill)

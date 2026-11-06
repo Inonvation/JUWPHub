@@ -254,6 +254,8 @@ private fun WindowEditDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isNew) "添加时段" else "编辑时段") },
         text = {
+            // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
+            DialogWindowFadeEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = label,

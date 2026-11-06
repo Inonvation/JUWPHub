@@ -50,6 +50,7 @@ import edu.jxslu.schedule.domain.CalendarSyncDefaults
 import edu.jxslu.schedule.domain.ScheduleExporter
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.AppPermissions
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
@@ -257,7 +258,11 @@ fun CalendarSettingsScreen(
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("删除已同步课程") },
-            text = { Text("将从手机日历中删除全部由 JUWPHub 同步的课程事件（不影响你自己添加的日程）。") },
+            text = {
+                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
+                DialogWindowFadeEffect()
+                Text("将从手机日历中删除全部由 JUWPHub 同步的课程事件（不影响你自己添加的日程）。")
+            },
             confirmButton = {
                 TextButton(
                     enabled = !busy,

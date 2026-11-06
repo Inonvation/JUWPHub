@@ -104,8 +104,6 @@ fun CampusCardSettingsScreen(
     onBack: () -> Unit,
     /** 跳消费流水页（DESIGN §4.19 B4/B5） */
     onOpenStatement: () -> Unit = {},
-    /** 跳付款码页（充值成功弹窗「查看付款码」直达） */
-    onOpenPayCode: () -> Unit = {},
     viewModel: CampusCardViewModel = viewModel(
         factory = CampusCardViewModel.Factory(LocalContext.current.applicationContext),
     ),
@@ -125,7 +123,9 @@ fun CampusCardSettingsScreen(
             snackbar.showNotice(
                 AppNoticeVisuals(
                     "暂未检测到到账——充值常有延迟，到账后「消费流水」会自动显示",
-                    tone = NoticeTone.Info,
+                    // 钱相关的不确定态用 Warning：这条是「没查到到账」，不是播报；
+                    // Info 的灰字在充值场景里会被读成「一切正常」
+                    tone = NoticeTone.Warning,
                 ),
             )
             viewModel.dismissArrival()
@@ -726,15 +726,13 @@ fun CampusCardSettingsScreen(
         )
     }
 
-    // 充值成功弹窗（共享组件， CampusRechargeUi.kt）；确认按钮直达付款码页
-    val arrived = arrivalState as? CampusCardViewModel.ArrivalState.Arrived
-    if (arrived != null) {
-        CampusArrivalDialog(
-            arrived = arrived,
-            onDismiss = { viewModel.dismissArrival() },
-            onOpenPayCode = onOpenPayCode,
-        )
-    }
+    // 到账弹窗**只由常驻的 RechargeHost 弹**（`ui/life/RechargeHost.kt`），本页不再重复弹。
+    // 为什么不能在这里也弹：本页是 SubpageActivity 里的另一个 CampusCardViewModel 实例，
+    // 两个实例各自跑一份到账轮询、各自持有自己的 ArrivalState——在这里弹一次、用户点掉，
+    // 回到主窗口 RechargeHost 那份仍是「未确认」，于是同一个到账会**再弹一次**。
+    // 而两个实例之间没有共享状态，谁先到账谁后到账不可控，只能让「弹」这件事只归常驻宿主。
+    // 本页保留「正在确认到账」弹窗与超时提示——那是「还没到账」的交代，
+    // 属于本页自己的轮询，不与宿主重复。
 
     // 「支付成功」：付款码页检测到扣款会自己退出，由共享宿主弹在退回来的这一页
     // （`CampusPayResultDialogHost`，2026-10-07 起本页与 MainActivity 根层共用一份实现）

@@ -34,6 +34,7 @@ import edu.jxslu.schedule.domain.UnlockResult
 import edu.jxslu.schedule.domain.cashPaidAmount
 import edu.jxslu.schedule.domain.calculateActualCost
 import edu.jxslu.schedule.domain.ticketPaidAmount
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -313,6 +314,8 @@ private fun EntryFailDetailDialog(item: UnlockFlowState.Failed, onDismiss: () ->
         onDismissRequest = onDismiss,
         title = { Text("失败详情") },
         text = {
+            // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行才拿得到 Dialog 的 LocalView）
+            DialogWindowFadeEffect()
             Column {
                 Text("失败步骤：${item.step}")
                 Spacer(Modifier.height(6.dp))
@@ -357,6 +360,8 @@ private fun EntryOrderDetailDialog(item: UnlockResult, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("订单详情") },
         text = {
+            // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行才拿得到 Dialog 的 LocalView）
+            DialogWindowFadeEffect()
             Column {
                 DetailRow("订单号", item.orderNo)
                 DetailRow("原价", "¥${item.originPrice}")

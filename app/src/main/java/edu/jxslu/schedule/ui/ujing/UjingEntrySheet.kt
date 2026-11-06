@@ -1,8 +1,6 @@
 package edu.jxslu.schedule.ui.ujing
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -37,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
+import edu.jxslu.schedule.ui.theme.Motion
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChevronRight
 import me.rerere.hugeicons.stroke.QrCodeScan
@@ -75,13 +74,13 @@ fun UjingEntrySheet(
             val liveOrder = order?.takeIf { !it.isTerminal }
             AnimatedVisibility(
                 visible = liveOrder != null,
-                enter = fadeIn(tween(220)) +
+                enter = fadeIn(Motion.reveal()) +
                     expandVertically(
-                        tween(220, easing = FastOutSlowInEasing),
+                        Motion.reveal(),
                         expandFrom = Alignment.Top,
                     ),
-                exit = fadeOut(tween(160)) +
-                    shrinkVertically(tween(160), shrinkTowards = Alignment.Top),
+                exit = fadeOut(Motion.state()) +
+                    shrinkVertically(Motion.state(), shrinkTowards = Alignment.Top),
             ) {
                 liveOrder?.let { UjingOrderStatusLine(it) }
             }

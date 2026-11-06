@@ -49,6 +49,7 @@ import edu.jxslu.schedule.data.wenqu.WenquSessionExpiredException
 import edu.jxslu.schedule.domain.WenquRules
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.reminder.ReminderVibration
+import edu.jxslu.schedule.ui.theme.rememberAnimationsEnabled
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -325,13 +326,8 @@ private fun DashCollapsedPill(
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             ) {
                 if (running) {
-                    val transition = rememberInfiniteTransition(label = "pillPulse")
-                    val alpha by transition.animateFloat(
-                        initialValue = 0.4f,
-                        targetValue = 1f,
-                        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
-                        label = "pillPulseAlpha",
-                    )
+                    // 静止态（系统关掉动画）也留一个清晰实心点：元素不消失，只是不再呼吸
+                    val alpha = rememberBreathAlpha()
                     Spacer(
                         Modifier
                             .size(7.dp)
@@ -481,16 +477,39 @@ private fun dashDoneTitle(state: WenquPreregDashState): String = when (state.suc
     null -> "已取消"
 }
 
+/**
+ * 「呼吸」点的周期：0.4 ↔ 1 往返一档 700ms（2026-11-06 动效口径）。
+ *
+ * 为什么不套 `Motion` 四档：那四档描述的是**一次性过渡**（按下 / 状态 / 出现 / 换页），
+ * 无限循环没有"结束"，套档位只会把 700 换成 90 或 180 这种明显过快的值。要调快慢改这里
+ * 一处——顶栏胶囊与「判定中」提示两个呼吸点共用（原来各写一个 700 字面量）。
+ */
+private const val BREATH_PERIOD_MS = 700
+
+/**
+ * 呼吸透明度。系统关掉动画（无障碍「移除动画」/ 开发者选项把「动画程序时长缩放」设 0）
+ * 时返回 1f：**元素保留、去掉循环**。
+ *
+ * 为什么必须自己判：`rememberInfiniteTransition` 不读 `ANIMATOR_DURATION_SCALE`，
+ * 用户明确关掉动画后它照转——屏幕上仍有东西一直在动，正是无障碍设置要避免的。
+ */
+@Composable
+private fun rememberBreathAlpha(): Float {
+    if (!rememberAnimationsEnabled()) return 1f
+    val transition = rememberInfiniteTransition(label = "breath")
+    val alpha by transition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(BREATH_PERIOD_MS), RepeatMode.Reverse),
+        label = "breathAlpha",
+    )
+    return alpha
+}
+
 @Composable
 private fun DashSpinnerLine(text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        val transition = rememberInfiniteTransition(label = "dashSpin")
-        val alpha by transition.animateFloat(
-            initialValue = 0.35f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
-            label = "dashSpinAlpha",
-        )
+        val alpha = rememberBreathAlpha()
         Spacer(
             Modifier
                 .size(10.dp)

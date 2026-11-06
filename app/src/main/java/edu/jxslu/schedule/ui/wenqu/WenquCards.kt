@@ -43,6 +43,11 @@ import edu.jxslu.schedule.ui.common.AppCard
  */
 @Composable
 internal fun WenquEntryCard(
+    /**
+     * 列表项动画（`animateItem()`）等由调用点给：卡片自己不知道在不在 LazyColumn 里。
+     * 与 [dimmed] 的压暗叠加，不是二选一。
+     */
+    modifier: Modifier = Modifier,
     badge: String,
     badgeColor: Color,
     title: String,
@@ -65,7 +70,7 @@ internal fun WenquEntryCard(
 ) {
     val highlightColor = MaterialTheme.colorScheme.primary
     AppCard(
-        modifier = if (dimmed) Modifier.alpha(0.62f) else Modifier,
+        modifier = modifier.then(if (dimmed) Modifier.alpha(0.62f) else Modifier),
         onClick = onClick,
         onClickLabel = onClickLabel,
     ) {
@@ -174,6 +179,7 @@ internal fun wenquStatusColor(status: Int): Color = when (status) {
 @Composable
 internal fun ActivityCard(
     activity: WenquActivity,
+    modifier: Modifier = Modifier,
     keyword: String = "",
     onClick: () -> Unit,
 ) {
@@ -185,6 +191,7 @@ internal fun ActivityCard(
         balanceNum = activity.balanceNum,
     )
     WenquEntryCard(
+        modifier = modifier,
         badge = WenquRules.statusLabel(activity.status),
         badgeColor = wenquStatusColor(activity.status),
         extraBadge = if (activity.applied) "已报名" else null,
@@ -219,10 +226,12 @@ internal fun ActivityCard(
 @Composable
 internal fun RecordCard(
     record: WenquVolunteerRecord,
+    modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
 ) {
     val score = WenquRules.hoursOf(record.score)
     WenquEntryCard(
+        modifier = modifier,
         badge = record.statusText,
         badgeColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
         title = record.title.ifBlank { "志愿服务活动" },

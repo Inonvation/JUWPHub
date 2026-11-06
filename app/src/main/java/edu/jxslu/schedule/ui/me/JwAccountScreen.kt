@@ -60,6 +60,7 @@ import edu.jxslu.schedule.domain.AccountMask
 import edu.jxslu.schedule.ui.common.AccountCard
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.rememberResumeTick
@@ -218,6 +219,8 @@ fun JwAccountScreen(onBack: () -> Unit) {
             onDismissRequest = { confirmLogout = false },
             title = { Text("退出教务登录？") },
             text = {
+                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
+                DialogWindowFadeEffect()
                 Text(
                     "将清除本机保存的学号与统一认证密码，自动续登随之失效。" +
                         "已导入的课表、成绩不受影响。",

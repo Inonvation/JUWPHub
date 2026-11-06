@@ -4,7 +4,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -43,6 +42,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -99,8 +99,10 @@ import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
+import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import androidx.compose.runtime.rememberCoroutineScope
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChevronLeft
@@ -752,8 +754,8 @@ private fun StatusCard(
             AnimatedContent(
                 targetState = statusContentOf(state),
                 transitionSpec = {
-                    fadeIn(animationSpec = tween(200)) togetherWith
-                        fadeOut(animationSpec = tween(120))
+                    fadeIn(animationSpec = Motion.state()) togetherWith
+                        fadeOut(animationSpec = Motion.tap())
                 },
                 label = "qzxy-status",
             ) { content ->
@@ -1110,7 +1112,11 @@ private fun DevicePickerSheet(
     onDismiss: () -> Unit,
 ) {
     val onSurface = MaterialTheme.colorScheme.onSurface
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // 选中设备后调用方直接把弹层从组合里摘掉，退场来不及播（"啪"地消失）。
+    // 先 hide() 播完再落状态，与 WaterScreen 的 DeviceSheet 同一口径。
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val dismiss = rememberSheetDismisser(sheetState, onDismiss)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1144,7 +1150,7 @@ private fun DevicePickerSheet(
                         selected = state.selected?.address.equals(bound.address, ignoreCase = true),
                         onClick = {
                             viewModel.selectBoundDevice(bound)
-                            onDismiss()
+                            dismiss {}
                         },
                         action = {
                             TextButton(onClick = { viewModel.unbindDevice(bound.address) }) {
@@ -1197,7 +1203,7 @@ private fun DevicePickerSheet(
                     selected = state.selected?.address == device.address,
                     onClick = {
                         viewModel.selectDevice(device)
-                        onDismiss()
+                        dismiss {}
                     },
                     action = {
                         if (alreadyBound) {

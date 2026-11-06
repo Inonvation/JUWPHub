@@ -51,6 +51,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.wenqu.WenquActivity
 import edu.jxslu.schedule.domain.WenquRules
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.EmptyHint
@@ -102,8 +103,9 @@ fun WenquGrabScreen(onBack: () -> Unit) {
     val listState = rememberLazyListState()
 
     LaunchedEffect(state.message) {
-        val message = state.message ?: return@LaunchedEffect
-        snackbar.showNotice(message)
+        val notice = state.message ?: return@LaunchedEffect
+        // 语气随消息一起来：失败/校验是 Warning，播报是 Info（2026-11-06 审计 §3.8）
+        snackbar.showNotice(AppNoticeVisuals(notice.text, tone = notice.tone))
         vm.consumeMessage()
     }
 

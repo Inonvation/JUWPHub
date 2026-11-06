@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.homework
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -67,6 +66,7 @@ import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SectionHeader
 import edu.jxslu.schedule.ui.common.courseTint
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.reminder.ClassReminder
 import kotlinx.coroutines.launch
@@ -157,7 +157,9 @@ fun HomeworkLibraryScreen(
                 item(key = "header") { SectionHeader("按课程") }
                 items(groups, key = { it.courseName }) { group ->
                     val courseItems = all.filter { it.courseName == group.courseName }
+                    // 分组会随作业增删出现/消失、按课程名插队：给位移动画，别的分组不会硬跳
                     HomeworkCourseCard(
+                        modifier = Modifier.animateItem(),
                         courseName = group.courseName,
                         subtitle = if (group.pending > 0) {
                             "${group.pending} 项未完成 / 共 ${group.total} 项"
@@ -224,6 +226,8 @@ fun HomeworkLibraryScreen(
  */
 @Composable
 internal fun HomeworkCourseCard(
+    /** 列表项动画（`animateItem()`）由调用点给：卡片自己不知道在不在 LazyColumn 里。 */
+    modifier: Modifier = Modifier,
     courseName: String,
     subtitle: String,
     items: List<Homework>,
@@ -238,7 +242,7 @@ internal fun HomeworkCourseCard(
     onImageClick: (String) -> Unit,
     onLinkClick: (String) -> Unit,
 ) {
-    AppCard(contentPadding = PaddingValues(0.dp)) {
+    AppCard(modifier = modifier, contentPadding = PaddingValues(0.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -266,7 +270,8 @@ internal fun HomeworkCourseCard(
                 )
             }
             if (onAdd != null) {
-                IconButton(onClick = onAdd, modifier = Modifier.size(32.dp)) {
+                // 48dp 而不是 32dp：分组头整行是可点的（展开/收起），按钮命中区太小会误触成展开
+                IconButton(onClick = onAdd, modifier = Modifier.size(48.dp)) {
                     Icon(
                         imageVector = HugeIcons.Add01,
                         contentDescription = "在 $courseName 新建作业",
@@ -287,8 +292,8 @@ internal fun HomeworkCourseCard(
 
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(animationSpec = tween(250)) + fadeIn(tween(250)),
-            exit = shrinkVertically(animationSpec = tween(200)) + fadeOut(tween(200)),
+            enter = expandVertically(animationSpec = Motion.reveal()) + fadeIn(Motion.reveal()),
+            exit = shrinkVertically(animationSpec = Motion.state()) + fadeOut(Motion.state()),
         ) {
             Column(modifier = Modifier.padding(bottom = 6.dp)) {
                 AppCardDivider()

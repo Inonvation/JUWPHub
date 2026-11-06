@@ -10,6 +10,8 @@ import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.wenqu.WenquVolunteerRecord
 import edu.jxslu.schedule.data.wenqu.mergeActivities
 import edu.jxslu.schedule.domain.WenquRules
+import edu.jxslu.schedule.ui.common.NoticeFeedback
+import edu.jxslu.schedule.ui.common.NoticeTone
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -136,8 +138,14 @@ class WenquViewModel(
         val busy: Boolean = false,
         /** 顶栏刷新进行中（用户显式强刷；缓存命中时它是唯一能看见的反馈）。 */
         val refreshing: Boolean = false,
-        /** 一次性提示（Snackbar 消费）。 */
-        val message: String? = null,
+        /**
+         * 一次性提示（Snackbar 消费）。
+         *
+         * 语气是提示的一部分（2026-11-06 审计 §3.8）：失败与表单校验必须走
+         * [wenquNotice] 的 `NoticeTone.Warning`，播报类用默认 Info——否则「取数失败」与
+         * 「报名成功」在屏幕上长得一样，用户分不出刚才那条是出了事还是做成了。
+         */
+        val message: NoticeFeedback? = null,
         /** 发码成功的时刻（驱动 5 分钟倒计时）；0 = 没发过。 */
         val codeSentAt: Long = 0L,
     ) {
@@ -347,7 +355,12 @@ class WenquViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            _state.update { it.copy(loading = false, message = e.message ?: "取数失败") }
+            _state.update {
+                it.copy(
+                    loading = false,
+                    message = wenquNotice(e.message ?: "取数失败", NoticeTone.Warning),
+                )
+            }
         }
     }
 
@@ -464,7 +477,11 @@ class WenquViewModel(
                 it.copy(
                     searchMatches = matches,
                     indexComplete = index?.complete == true,
-                    message = if (failed) "搜索失败，请稍后重试" else it.message,
+                    message = if (failed) {
+                        wenquNotice("搜索失败，请稍后重试", NoticeTone.Warning)
+                    } else {
+                        it.message
+                    },
                 )
             }
         }
@@ -613,7 +630,7 @@ class WenquViewModel(
                         applying = false,
                         detail = null,
                         detailLoading = false,
-                        message = "报名成功",
+                        message = wenquNotice("报名成功"),
                     )
                 }
             } catch (e: CancellationException) {
@@ -642,7 +659,7 @@ class WenquViewModel(
                         applying = false,
                         detail = null,
                         detailLoading = false,
-                        message = "已取消报名",
+                        message = wenquNotice("已取消报名"),
                     )
                 }
             } catch (e: CancellationException) {
@@ -666,22 +683,29 @@ class WenquViewModel(
     /** 手机号 + 密码登录。[rememberPassword] 默认开：密码一并加密存储，JWT 到期自动续期。 */
     fun login(phone: String, password: String, rememberPassword: Boolean = true) {
         if (!WenquRules.isValidPhone(phone)) {
-            _state.update { it.copy(message = "请输入 11 位手机号") }
+            _state.update {
+                it.copy(message = wenquNotice("请输入 11 位手机号", NoticeTone.Warning))
+            }
             return
         }
         if (!WenquRules.isValidPassword(password)) {
-            _state.update { it.copy(message = "请输入密码") }
+            _state.update { it.copy(message = wenquNotice("请输入密码", NoticeTone.Warning)) }
             return
         }
         viewModelScope.launch {
             _state.update { it.copy(busy = true) }
             try {
                 repo.login(phone.trim(), password, rememberPassword)
-                _state.update { it.copy(busy = false, message = "登录成功") }
+                _state.update { it.copy(busy = false, message = wenquNotice("登录成功")) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(busy = false, message = e.message ?: "登录失败") }
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        message = wenquNotice(e.message ?: "登录失败", NoticeTone.Warning),
+                    )
+                }
             }
         }
     }
@@ -689,7 +713,9 @@ class WenquViewModel(
     /** 发「重置密码」验证码；成功记下时刻驱动倒计时。 */
     fun sendCode(phone: String) {
         if (!WenquRules.isValidPhone(phone)) {
-            _state.update { it.copy(message = "请输入 11 位手机号") }
+            _state.update {
+                it.copy(message = wenquNotice("请输入 11 位手机号", NoticeTone.Warning))
+            }
             return
         }
         viewModelScope.launch {
@@ -697,12 +723,21 @@ class WenquViewModel(
             try {
                 repo.sendResetCode(phone.trim())
                 _state.update {
-                    it.copy(busy = false, codeSentAt = System.currentTimeMillis(), message = "验证码已发送")
+                    it.copy(
+                        busy = false,
+                        codeSentAt = System.currentTimeMillis(),
+                        message = wenquNotice("验证码已发送"),
+                    )
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(busy = false, message = e.message ?: "发送失败") }
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        message = wenquNotice(e.message ?: "发送失败", NoticeTone.Warning),
+                    )
+                }
             }
         }
     }
@@ -715,26 +750,33 @@ class WenquViewModel(
         rememberPassword: Boolean = true,
     ) {
         if (!WenquRules.isValidPhone(phone)) {
-            _state.update { it.copy(message = "请输入 11 位手机号") }
+            _state.update {
+                it.copy(message = wenquNotice("请输入 11 位手机号", NoticeTone.Warning))
+            }
             return
         }
         if (captcha.isBlank()) {
-            _state.update { it.copy(message = "请输入验证码") }
+            _state.update { it.copy(message = wenquNotice("请输入验证码", NoticeTone.Warning)) }
             return
         }
         if (!WenquRules.isValidPassword(password)) {
-            _state.update { it.copy(message = "请输入新密码") }
+            _state.update { it.copy(message = wenquNotice("请输入新密码", NoticeTone.Warning)) }
             return
         }
         viewModelScope.launch {
             _state.update { it.copy(busy = true) }
             try {
                 repo.setupPassword(phone.trim(), captcha.trim(), password, rememberPassword)
-                _state.update { it.copy(busy = false, message = "设置成功，已登录") }
+                _state.update { it.copy(busy = false, message = wenquNotice("设置成功，已登录")) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(busy = false, message = e.message ?: "设置失败") }
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        message = wenquNotice(e.message ?: "设置失败", NoticeTone.Warning),
+                    )
+                }
             }
         }
     }

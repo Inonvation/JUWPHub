@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.DefaultData
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.TimeSlotRules
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.TimeWheelDialog
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
@@ -132,6 +133,8 @@ fun TimeSlotEditorCard(
             onDismissRequest = { resetConfirm = false },
             title = { Text("恢复默认作息？") },
             text = {
+                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
+                DialogWindowFadeEffect()
                 Text(
                     "将把 11 个小节改回学校默认时间（08:30 起、每节 40 分钟），" +
                         "当前未保存的修改会丢弃。",

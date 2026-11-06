@@ -38,6 +38,7 @@ import edu.jxslu.schedule.data.repo.WenquCertStore
 import edu.jxslu.schedule.domain.WenquRules
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SettingItem
@@ -334,7 +335,11 @@ fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
         AlertDialog(
             onDismissRequest = { confirmingLogout = false },
             title = { Text("退出登录") },
-            text = { Text("退出后将清除本机保存的问渠凭证，工时卡片与活动列表都会隐藏。") },
+            text = {
+                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
+                DialogWindowFadeEffect()
+                Text("退出后将清除本机保存的问渠凭证，工时卡片与活动列表都会隐藏。")
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmingLogout = false

@@ -8,6 +8,8 @@ import edu.jxslu.schedule.data.wenqu.WenquActivity
 import edu.jxslu.schedule.data.wenqu.WenquGrabSpeed
 import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.domain.WenquRules
+import edu.jxslu.schedule.ui.common.NoticeFeedback
+import edu.jxslu.schedule.ui.common.NoticeTone
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -102,7 +104,8 @@ class WenquGrabViewModel(
         val detailLoading: Boolean = false,
         val detailUnavailable: Boolean = false,
         val detailActionError: String? = null,
-        val message: String? = null,
+        /** 一次性提示（Snackbar 消费）。失败必须走 [wenquNotice] 的 Warning，播报用默认 Info。 */
+        val message: NoticeFeedback? = null,
     ) {
         /**
          * 列表展示（2026-10-11 按用户实测反馈改）：
@@ -231,7 +234,9 @@ class WenquGrabViewModel(
         if (_state.value.phase == Phase.Checking) return
         val keyword = _state.value.keyword.trim()
         if (keyword.isBlank() && _state.value.pinnedId <= 0L) {
-            _state.update { it.copy(message = "先填要蹲的活动名，或盯一条活动") }
+            _state.update {
+                it.copy(message = wenquNotice("先填要蹲的活动名，或盯一条活动", NoticeTone.Warning))
+            }
             return
         }
         // 「被限制报名」不在这里拦：快照里的 isBlack 在缓存期内只升不降，
@@ -340,9 +345,9 @@ class WenquGrabViewModel(
                     _state.update {
                         it.copy(
                             message = if (freshPinned.applied) {
-                                "已报上名，自动取消盯着"
+                                wenquNotice("已报上名，自动取消盯着")
                             } else {
-                                "盯的活动不能再报名了，自动取消盯着"
+                                wenquNotice("盯的活动不能再报名了，自动取消盯着")
                             },
                         )
                     }
@@ -509,7 +514,7 @@ class WenquGrabViewModel(
                     it.copy(
                         applying = false,
                         hit = null,
-                        message = "报名成功",
+                        message = wenquNotice("报名成功"),
                     )
                 }
             } catch (e: CancellationException) {
@@ -598,7 +603,7 @@ class WenquGrabViewModel(
                         applying = false,
                         detail = null,
                         detailLoading = false,
-                        message = "报名成功",
+                        message = wenquNotice("报名成功"),
                     )
                 }
             } catch (e: CancellationException) {
@@ -624,7 +629,7 @@ class WenquGrabViewModel(
                         applying = false,
                         detail = null,
                         detailLoading = false,
-                        message = "已取消报名",
+                        message = wenquNotice("已取消报名"),
                     )
                 }
             } catch (e: CancellationException) {

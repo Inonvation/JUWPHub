@@ -198,8 +198,14 @@ fun StatementScreen(
                         )
                     }
 
+                    // 一天一组、组键是日期：换月 / 换筛选 / 刷新补齐新一天时整组进出场，
+                    // 否则整列会「啪」地重排（下拉刷新补到今天那笔时最明显）
                     else -> items(groups, key = { it.key }) { group ->
-                        DayGroupCard(group = group, onOpenDetail = { detail = it })
+                        DayGroupCard(
+                            group = group,
+                            onOpenDetail = { detail = it },
+                            modifier = Modifier.animateItem(),
+                        )
                     }
                 }
             }
@@ -427,8 +433,12 @@ private fun FilterRow(filter: StatementFilter, onSelect: (StatementFilter) -> Un
 
 /** 一天的流水：分组标题 + 一张装了当天全部行的卡（行间细线，比一行一张卡省纵向空间）。 */
 @Composable
-private fun DayGroupCard(group: DayGroup, onOpenDetail: (YktTurnoverEntity) -> Unit) {
-    Column {
+private fun DayGroupCard(
+    group: DayGroup,
+    onOpenDetail: (YktTurnoverEntity) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
         Text(
             text = group.label,
             style = MaterialTheme.typography.labelLarge,

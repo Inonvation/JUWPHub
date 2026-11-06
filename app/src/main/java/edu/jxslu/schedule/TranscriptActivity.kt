@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import edu.jxslu.schedule.ui.common.LaunchGate
 import edu.jxslu.schedule.ui.score.TranscriptScreen
 
 /**
@@ -39,7 +40,12 @@ class TranscriptActivity : ComponentActivity() {
     }
 
     companion object {
+        /**
+         * 防连点（2026-11-06）：成绩单窗口里有统一认证 WebView，双击会开出两份、
+         * 各自发起一条 CAS 登录，还会在后台跑两次 PDF 生成。
+         */
         fun start(context: Context) {
+            if (!LaunchGate.allow("transcript")) return
             context.startActivity(Intent(context, TranscriptActivity::class.java))
             applySubpageOpenTransition(context)
         }

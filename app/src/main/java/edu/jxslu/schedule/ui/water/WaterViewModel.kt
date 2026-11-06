@@ -483,6 +483,17 @@ class WaterViewModel(
 
     // ── 开水 ──
 
+    /**
+     * 开水整链：下单 → 出水 → 等设备回报结算。
+     *
+     * **取消不是失败**（2026-11-06 修）：用户退出页面 / Activity 被回收时 `viewModelScope`
+     * 被取消，那是「观察者没了」，不是这笔水的结论——服务端可能已经预扣、设备还在出水，
+     * 而账单只有流程回报才拿得到。所以取消必须 ① 原样抛出（吞掉会让协程以为正常收尾）；
+     * ② **不清** `wateringStore`（清了今日页/侧栏立刻显示「没在用」，用户回来最可能直接
+     * 再开一次 = 二次预扣）。记账留给 `QiekjWateringStore` 的过期兜底与下次进页的状态卡。
+     * 页面侧另有 `BackHandler` 在流程中拦返回（`WaterScreen.requestBack`），两条闸都要留：
+     * 前者挡得住「点返回」，挡不住系统回收。
+     */
     fun unlock() {
         val device = _uiState.value.selectedDevice ?: run {
             notice("请先选择设备", NoticeTone.Warning)
@@ -503,8 +514,12 @@ class WaterViewModel(
                 }
                 startTimer()
                 startTimeout()
-                runCatching {
-                    repo.unlockDevice(device, usePoints = _uiState.value.usePoints, stopSignal = signal) { step ->
+                try {
+                    val result = repo.unlockDevice(
+                        device,
+                        usePoints = _uiState.value.usePoints,
+                        stopSignal = signal,
+                    ) { step ->
                         val working = step.contains("等待") || step.contains("设备工作")
                         if (working && !sessionRegistered) {
                             // 服务端确认出水：登记到落盘会话（跨窗口展示的唯一真相源）。
@@ -535,7 +550,6 @@ class WaterViewModel(
                             )
                         }
                     }
-                }.onSuccess { result ->
                     cancelFlowJobs()
                     stopSignal = null
                     // 结算完成：出水中结束（迟到重投时再清一次是空操作）
@@ -552,7 +566,13 @@ class WaterViewModel(
                         runCatching { postWaterDoneInbox(result, device) }
                     }
                     refreshBalance()
-                }.onFailure { e ->
+                } catch (e: CancellationException) {
+                    // 页面 / Activity 退出：原样抛出，不当作失败收尾（理由见 unlock 的 KDoc）。
+                    // 尤其**不能**落到下面的 wateringStore.clear()——那会抹掉「出水中」的
+                    // 界面痕迹，而这笔水在服务端仍然成立。
+                    stopSignal = null
+                    throw e
+                } catch (e: Throwable) {
                     cancelFlowJobs()
                     stopSignal = null
                     // 流程失败（含手动结束未确认 / Token 失效）：本机的出水中登记一并收掉
@@ -688,6 +708,14 @@ class WaterViewModel(
         )
     }
 
+    /**
+     * 页面销毁只收本页临时态（计时 / 超时两个 Job 由 `viewModelScope` 一并取消）。
+     *
+     * **不许在这里清 `wateringStore`**（2026-11-06 定）：它是「服务端这笔水还在」的镜像，
+     * 不是本页的界面状态。页面被关掉时水可能还在流、账单还没读回来，清掉登记会让今日页
+     * 立刻显示「没在用」，用户回去最可能直接再开一次（二次预扣）。真正的清理由三处承担：
+     * 流程拿到结算结果、`finishWithoutSettlement` 收尾、`QiekjWateringStore` 的 5 分钟过期。
+     */
     override fun onCleared() {
         cancelFlowJobs()
         super.onCleared()

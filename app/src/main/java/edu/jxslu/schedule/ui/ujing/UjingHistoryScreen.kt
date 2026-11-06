@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.ujing
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -48,6 +47,7 @@ import edu.jxslu.schedule.data.ujing.UjingHistoryEntry
 import edu.jxslu.schedule.domain.UjingState
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -91,7 +91,7 @@ fun UjingHistoryScreen(onBack: () -> Unit = {}) {
         AnimatedContent(
             targetState = entries.isEmpty(),
             transitionSpec = {
-                fadeIn(tween(220)) togetherWith fadeOut(tween(160))
+                fadeIn(Motion.reveal()) togetherWith fadeOut(Motion.state())
             },
             label = "ujingHistory",
         ) { empty ->

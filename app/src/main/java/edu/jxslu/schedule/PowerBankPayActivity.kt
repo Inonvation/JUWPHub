@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import edu.jxslu.schedule.ui.common.LaunchGate
 import edu.jxslu.schedule.ui.life.PowerBankPayScreen
 
 /**
@@ -50,8 +51,15 @@ class PowerBankPayActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_URL = "url"
 
-        /** 打开收银台。[url] 由 `PowerRepository.bankCashier` 现取（一次性会话）。 */
+        /**
+         * 打开收银台。[url] 由 `PowerRepository.bankCashier` 现取（一次性会话）。
+         *
+         * 防连点（2026-11-06）：**不收 url 做 key**——url 是一次性会话，每次调用都不同，
+         * 带进 key 等于永远放行，双击会开出两个收银台窗口、下两笔单。这里按「收银台」
+         * 这一个目标分槽：500ms 内只开一个。
+         */
         fun start(context: Context, url: String) {
+            if (!LaunchGate.allow("power_bank_pay")) return
             val intent = Intent(context, PowerBankPayActivity::class.java)
                 .putExtra(EXTRA_URL, url)
             context.startActivity(intent)

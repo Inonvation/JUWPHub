@@ -68,6 +68,7 @@ import edu.jxslu.schedule.domain.ShortcutItem
 import edu.jxslu.schedule.domain.ShortcutOps
 import edu.jxslu.schedule.domain.ShortcutSettings
 import edu.jxslu.schedule.domain.Shortcuts
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -337,7 +338,11 @@ fun ShortcutSettingsScreen(
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text("删除快捷方式") },
-            text = { Text("删除「${item.name}」？此操作不可撤销。") },
+            text = {
+                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
+                DialogWindowFadeEffect()
+                Text("删除「${item.name}」？此操作不可撤销。")
+            },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.remove(item.id)
@@ -355,7 +360,11 @@ fun ShortcutSettingsScreen(
         AlertDialog(
             onDismissRequest = { confirmResetAll = false },
             title = { Text("恢复全部默认") },
-            text = { Text("所有快捷方式将恢复为 3 条预设，自定义条目会被移除，今日页开关重新打开。") },
+            text = {
+                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
+                DialogWindowFadeEffect()
+                Text("所有快捷方式将恢复为 3 条预设，自定义条目会被移除，今日页开关重新打开。")
+            },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.resetAll()
@@ -707,6 +716,8 @@ private fun InstalledAppPicker(
         onDismissRequest = onDismiss,
         title = { Text("选择应用") },
         text = {
+            // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
+            DialogWindowFadeEffect()
             Column {
                 OutlinedTextField(
                     value = search,

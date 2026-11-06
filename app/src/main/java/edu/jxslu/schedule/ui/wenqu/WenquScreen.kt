@@ -70,6 +70,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.domain.WenquRules
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
@@ -155,8 +156,10 @@ fun WenquScreen(
     val showBackToTop by remember { derivedStateOf { listState.firstVisibleItemIndex > 4 } }
 
     LaunchedEffect(state.message) {
-        val message = state.message ?: return@LaunchedEffect
-        snackbar.showNotice(message)
+        val notice = state.message ?: return@LaunchedEffect
+        // 语气随消息一起来：失败/校验是 Warning，播报是 Info。别在这里统一按 Info 发——
+        // 那样「取数失败」与「报名成功」长得一样（2026-11-06 审计 §3.8）
+        snackbar.showNotice(AppNoticeVisuals(notice.text, tone = notice.tone))
         vm.consumeMessage()
     }
 
@@ -405,8 +408,10 @@ fun WenquScreen(
                         }
 
                         else -> items(visible, key = { "act-${it.id}" }) { activity ->
+                            // 活动会随同步/筛选/排序增删与换位：给位移动画，列表不「跳一下」
                             ActivityCard(
                                 activity = activity,
+                                modifier = Modifier.animateItem(),
                                 keyword = state.keyword,
                                 onClick = { vm.openDetail(activity) },
                             )

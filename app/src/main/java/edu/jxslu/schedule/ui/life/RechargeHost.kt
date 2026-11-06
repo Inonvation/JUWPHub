@@ -329,7 +329,8 @@ fun RechargeHost(
             scope.postNotice(
                 snackbar,
                 "暂未检测到到账——充值常有延迟，到账后「消费流水」会自动显示",
-                NoticeTone.Info,
+                // 与设置页同一句、同一语气：钱相关的不确定态用 Warning，别用播报用的 Info
+                NoticeTone.Warning,
             )
             campusViewModel.dismissArrival()
         }

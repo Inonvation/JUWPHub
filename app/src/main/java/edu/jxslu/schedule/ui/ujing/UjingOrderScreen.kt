@@ -2,7 +2,6 @@ package edu.jxslu.schedule.ui.ujing
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -68,6 +67,7 @@ import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.SettingsNote
 import edu.jxslu.schedule.ui.common.SettingsSection
+import edu.jxslu.schedule.ui.theme.Motion
 
 /**
  * U净 下单页（DESIGN §3.23，2026-10-02 起）：扫码成功后的独立窗口。
@@ -449,12 +449,12 @@ private fun RadioDot(selected: Boolean, enabled: Boolean) {
     }
     val ring by animateColorAsState(
         targetValue = if (selected) accent else MaterialTheme.colorScheme.outline,
-        animationSpec = tween(180),
+        animationSpec = Motion.state(),
         label = "radioRing",
     )
     val fill by animateColorAsState(
         targetValue = if (selected) accent else Color.Transparent,
-        animationSpec = tween(180),
+        animationSpec = Motion.state(),
         label = "radioFill",
     )
     Box(
@@ -623,7 +623,7 @@ private fun OrderActionBar(
                     AnimatedContent(
                         targetState = summary,
                         transitionSpec = {
-                            fadeIn(tween(180)) togetherWith fadeOut(tween(180))
+                            fadeIn(Motion.state()) togetherWith fadeOut(Motion.state())
                         },
                         label = "ujingOrderSummary",
                     ) { current ->

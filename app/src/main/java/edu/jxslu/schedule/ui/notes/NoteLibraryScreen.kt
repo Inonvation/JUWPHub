@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.notes
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -60,6 +59,7 @@ import edu.jxslu.schedule.ui.common.SectionHeader
 import edu.jxslu.schedule.ui.common.courseTint
 import edu.jxslu.schedule.ui.common.epochMonthDay
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
@@ -141,7 +141,9 @@ fun NoteLibraryScreen(
             ) {
                 item(key = "header") { SectionHeader("按课程（点课程名展开/收起）") }
                 items(groups, key = { it.courseName }) { group ->
+                    // 分组会随笔记增删出现/消失、按课程名插队：给位移动画，别的分组不会硬跳
                     NoteGroupCard(
+                        modifier = Modifier.animateItem(),
                         group = group,
                         allNotes = notes,
                         courses = courses,
@@ -169,6 +171,8 @@ fun NoteLibraryScreen(
 
 @Composable
 private fun NoteGroupCard(
+    /** 列表项动画（`animateItem()`）由调用点给：卡片自己不知道在不在 LazyColumn 里。 */
+    modifier: Modifier = Modifier,
     group: NoteCourseGroup,
     allNotes: List<Note>,
     courses: List<Course>,
@@ -183,7 +187,7 @@ private fun NoteGroupCard(
         allNotes.filter { it.courseName == group.courseName }
     }
 
-    AppCard(contentPadding = PaddingValues(0.dp)) {
+    AppCard(modifier = modifier, contentPadding = PaddingValues(0.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -210,7 +214,8 @@ private fun NoteGroupCard(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 )
             }
-            IconButton(onClick = onAdd, modifier = Modifier.size(32.dp)) {
+            // 48dp 而不是 32dp：分组头整行是可点的（展开/收起），按钮命中区太小会误触成展开
+            IconButton(onClick = onAdd, modifier = Modifier.size(48.dp)) {
                 Icon(
                     imageVector = HugeIcons.Add01,
                     contentDescription = "在 ${group.courseName} 新建笔记",
@@ -230,8 +235,8 @@ private fun NoteGroupCard(
 
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(animationSpec = tween(250)) + fadeIn(tween(250)),
-            exit = shrinkVertically(animationSpec = tween(200)) + fadeOut(tween(200)),
+            enter = expandVertically(animationSpec = Motion.reveal()) + fadeIn(Motion.reveal()),
+            exit = shrinkVertically(animationSpec = Motion.state()) + fadeOut(Motion.state()),
         ) {
             Column {
                 AppCardDivider()

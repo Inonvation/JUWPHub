@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.ui.water
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -97,6 +99,7 @@ import edu.jxslu.schedule.ui.common.WaterUnlockButton
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
+import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.me.MeViewModel
 import java.math.BigDecimal
@@ -175,6 +178,29 @@ fun WaterScreen(
         }
     }
 
+    // 开阀与结算是一串「连平台 → 下单 → 出水 → 等设备回报账单」的动作，中途退出会把协程
+    // 掐断：服务端可能已经预扣，而账单只有流程回报才拿得到。处理期间拦一下返回，只提示不退出；
+    // 真卡住了流程会自己超时（出水 165 秒兜底 + OkHttp 总超时），之后按钮就回来了。
+    // **与趣智页同一口径**（`QzxyScreen.requestBack`）：系统返回与顶栏返回共用这一个闸门——
+    // 只拦顶栏的话，手势返回照样能把窗口关掉，等于没拦。
+    // 比趣智页多拦一个 `PreChecking`：那边 PreChecking 只是读设备，这边它已经开始下单了。
+    val flowInProgress = state.flow is UnlockFlowState.Working || state.flow is UnlockFlowState.PreChecking
+    val requestBack: () -> Unit = {
+        if (flowInProgress) {
+            scope.launch {
+                snackbar.showNotice(
+                    AppNoticeVisuals(
+                        "正在处理，等这一步跑完再退出（卡住的话它会自己超时）",
+                        tone = NoticeTone.Warning,
+                    ),
+                )
+            }
+        } else {
+            onBack()
+        }
+    }
+    BackHandler(enabled = flowInProgress) { requestBack() }
+
     // 充值在支付宝里完成，回到本页（ON_RESUME）时余额要重拉，否则还显示充值前的数。
     // 与趣智页（QzxyScreen）同一套 awaiting + ON_RESUME 模式；走 refresh() 让下拉指示器跟着转。
     var awaitingRecharge by remember { mutableStateOf(false) }
@@ -236,7 +262,8 @@ fun WaterScreen(
             TopAppBar(
                 title = { Text("胖乖生活") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    // 走 requestBack：流程进行中只提示不退出（见上面那个闸门）
+                    IconButton(onClick = requestBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
@@ -963,7 +990,11 @@ private fun DeviceSheet(
     onDismiss: () -> Unit,
 ) {
     val haptics = rememberAppHaptics()
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // 选完设备后调用方直接把 showDeviceSheet 置 false，弹层会被瞬间抽掉（无退场动画）。
+    // 这里先 hide() 播完退场再落状态，与 QzxyEntrySheet / WaterEntrySheet 同一口径。
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val dismiss = rememberSheetDismisser(sheetState, onDismiss)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
         ) {
@@ -999,7 +1030,7 @@ private fun DeviceSheet(
                         )
                         .clickable {
                             haptics.tap()
-                            onSelect(device)
+                            dismiss { onSelect(device) }
                         }
                         .padding(horizontal = 10.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1081,7 +1112,10 @@ private fun OrderListSheet(
 ) {
     // 进弹层按需拉一次服务端账单（VM 里已拉过就跳过，不会重复请求）
     LaunchedEffect(Unit) { onLoadServer() }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // 只补 sheetState（skipPartiallyExpanded）：弹层直接全展开，不会先停在半高再要用户往上拖。
+    // 行点击刻意不套 dismiss —— 点单笔是「在弹层上叠一层详情弹窗」，弹层要留着让用户接着翻下一笔。
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

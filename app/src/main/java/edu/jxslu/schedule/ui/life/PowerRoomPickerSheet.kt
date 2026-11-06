@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.data.power.PowerSceneOption
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import me.rerere.hugeicons.HugeIcons
@@ -199,6 +200,8 @@ fun PowerRoomPickerSheet(
             onDismissRequest = { if (!state.binding) confirmBind = false },
             title = { Text("确认设置寝室") },
             text = {
+                // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行才拿得到 Dialog 的 LocalView）
+                DialogWindowFadeEffect()
                 Text(
                     "将把「$path」设为你的寝室房间。\n\n" +
                         "设置会同步到缴费平台的「我的房间」，之后的电费查询与充值都以它为准。",

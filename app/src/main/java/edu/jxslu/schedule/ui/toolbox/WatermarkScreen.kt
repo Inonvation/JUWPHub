@@ -48,6 +48,7 @@ import edu.jxslu.schedule.ui.common.SettingChoiceRow
 import edu.jxslu.schedule.ui.common.decodeUriSampled
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.showNotice
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -170,25 +171,33 @@ fun WatermarkScreen(onBack: () -> Unit) {
         }
         busy = true
         scope.launch {
-            val bitmap = withContext(Dispatchers.Default) { renderFull(uri) }
-            if (bitmap == null) {
-                notice("读取图片失败，请重试", NoticeTone.Error)
-                busy = false
-                return@launch
-            }
-            val fileName = ToolboxExport.fileName("水印")
-            if (share) {
-                val error = ToolboxExport.share(context, bitmap, fileName)
-                if (error != null) notice(error, NoticeTone.Warning)
-            } else {
-                when (val result = ToolboxExport.save(context, bitmap, fileName)) {
-                    is GallerySaveResult.Saved ->
-                        notice("已保存到相册", NoticeTone.Success)
-                    is GallerySaveResult.Failed -> notice(result.message, NoticeTone.Error)
+            // busy 必须由 finally 兜底复位：渲染 OOM / 写相册抛异常时若逃逸出去，
+            // busy 会永久停在 true —— 返回键此后只会提示「正在处理」，整页变死页
+            try {
+                val bitmap = withContext(Dispatchers.Default) { renderFull(uri) }
+                if (bitmap == null) {
+                    notice("读取图片失败，请重试", NoticeTone.Error)
+                    return@launch
                 }
+                val fileName = ToolboxExport.fileName("水印")
+                if (share) {
+                    val error = ToolboxExport.share(context, bitmap, fileName)
+                    if (error != null) notice(error, NoticeTone.Warning)
+                } else {
+                    when (val result = ToolboxExport.save(context, bitmap, fileName)) {
+                        is GallerySaveResult.Saved ->
+                            notice("已保存到相册", NoticeTone.Success)
+                        is GallerySaveResult.Failed -> notice(result.message, NoticeTone.Error)
+                    }
+                }
+                bitmap.recycle()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                notice("保存失败：${e.message ?: "未知错误"}", NoticeTone.Error)
+            } finally {
+                busy = false
             }
-            bitmap.recycle()
-            busy = false
         }
     }
 
@@ -300,6 +309,8 @@ fun WatermarkScreen(onBack: () -> Unit) {
                         colors = WatermarkColors.map { it.second },
                         selectedIndex = colorIndex,
                         onSelect = { colorIndex = it },
+                        // 名字要传给读屏：只说「单选按钮」用户分不出是哪个颜色
+                        labels = WatermarkColors.map { it.first },
                     )
                 }
             }

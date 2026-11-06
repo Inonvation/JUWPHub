@@ -57,9 +57,10 @@ import me.rerere.hugeicons.stroke.Toolbox
 /**
  * 设置根页（DESIGN §3.3）：独立窗口里的入口页。
  *
- * 2026-11-01 重排为 7 节：外观与交互 → 功能 → 课表 → 提醒 → 桌面与日历 →
- * 数据与权限 → 关于。根页只做入口，不再有「功能 / 课表 / 提醒与桌面」
- * 这类中转 hub；每个入口最多一跳进到叶子页。支持开发归「关于」。
+ * 2026-11-01 重排为 7 节；2026-11-06 精简为 **6 节**：外观与功能 → 课表 → 提醒 →
+ * 桌面与日历 → 数据与权限 → 关于（原「外观与交互」单行分区并进「功能」，见下方注释）。
+ * 根页只做入口，不再有「功能 / 课表 / 提醒与桌面」这类中转 hub；每个入口最多一跳进到叶子页。
+ * 支持开发归「关于」。
  *
  * 进页仍会做一次「班级为空就补抓」的 ProfileSync（闸门在 `ProfileSyncRules`，
  * 每天最多一次、失败静默）——左侧栏那行身份（姓名 / 班级）靠它填。
@@ -121,16 +122,17 @@ fun SettingsScreen(
                 }
             }
 
-            SettingsSection(title = "外观与交互") {
+            // 2026-11-06 精简：原来「外观与交互」是独立分区，但只有一行、且**行标题与分区
+            // 标题一字不差**——同一屏出现两次「外观与交互」。`SettingsSection` 的 title 是
+            // 必填项（去掉标题就没法保留分区卡），所以并进下一节，标题改成「外观与功能」：
+            // 省一行、去掉一处重复，入口层级不变。
+            SettingsSection(title = "外观与功能") {
                 SettingItem(
                     title = "外观与交互",
                     subtitle = "主题 · 字体 · 触感 · 导航",
                     icon = HugeIcons.Palette,
                     onClick = { onOpen(SubpageScreen.APPEARANCE_SETTINGS) },
                 )
-            }
-
-            SettingsSection(title = "功能") {
                 SettingItem(
                     title = "天气",
                     subtitle = "今日页顶栏天气提示 · 数据来自 Open-Meteo",

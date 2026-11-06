@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.power.PowerEntryState
 import edu.jxslu.schedule.ui.common.AmountHeroText
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
@@ -318,6 +319,8 @@ private fun AmountStep(
             onDismissRequest = { confirm = false },
             title = { Text("确认充值金额？") },
             text = {
+                // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行才拿得到 Dialog 的 LocalView）
+                DialogWindowFadeEffect()
                 // 房间号**加粗**（2026-09-28 用户要求）：这一屏盖住了弹层头部的房间行，
                 // 而「充到哪个寝室」比「充多少」更容易错——一个房间一个电表，充错就是别人的。
                 // 房间号取不到（读数没回来）时不显示数字，宁缺勿错。

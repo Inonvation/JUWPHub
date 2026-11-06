@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,7 +74,13 @@ fun CourseDetailSheet(
     val weeksText = ScheduleCalculator.formatWeeks(course.weeks)
     val inThisWeek = currentWeek in course.weeks
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // 退场要走动画：调用方（课表页 / 今日页）在这四个回调里直接把 detailCourse 置 null，
+    // 弹层会瞬间从组合里被抽掉（"啪"地消失，2026-09-30 车号面板同款手感）。
+    // 这里统一先 hide() 播完退场，再落 onDismiss，最后才跑回调。
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val dismiss = rememberSheetDismisser(sheetState, onDismiss)
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -137,7 +144,7 @@ fun CourseDetailSheet(
                 ) {
                     if (onOpenNotes != null) {
                         OutlinedButton(
-                            onClick = onOpenNotes,
+                            onClick = { dismiss { onOpenNotes() } },
                             modifier = Modifier
                                 .weight(1f)
                                 .height(44.dp),
@@ -153,7 +160,7 @@ fun CourseDetailSheet(
                     }
                     if (onOpenHomework != null) {
                         OutlinedButton(
-                            onClick = onOpenHomework,
+                            onClick = { dismiss { onOpenHomework() } },
                             modifier = Modifier
                                 .weight(1f)
                                 .height(44.dp),
@@ -176,7 +183,7 @@ fun CourseDetailSheet(
             ) {
                 // 删除用浅底 + 错误色，编辑用实心主色：主次分明，也避免误触删除
                 Button(
-                    onClick = onDelete,
+                    onClick = { dismiss { onDelete() } },
                     modifier = Modifier
                         .weight(1f)
                         .height(44.dp),
@@ -188,7 +195,7 @@ fun CourseDetailSheet(
                     Text("删除")
                 }
                 Button(
-                    onClick = onEdit,
+                    onClick = { dismiss { onEdit() } },
                     modifier = Modifier
                         .weight(1f)
                         .height(44.dp),

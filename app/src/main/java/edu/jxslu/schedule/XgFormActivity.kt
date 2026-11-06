@@ -9,6 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import edu.jxslu.schedule.data.xg.XgForm
 import edu.jxslu.schedule.data.xg.XgUrls
 import edu.jxslu.schedule.ui.campus.XgFormScreen
+import edu.jxslu.schedule.ui.common.LaunchGate
 import edu.jxslu.schedule.ui.reminder.DormRepairReminder
 import kotlinx.coroutines.launch
 
@@ -66,7 +67,13 @@ class XgFormActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_FORM_ID = "form_id"
 
+        /**
+         * 防连点 key 带 [XgForm.id]（2026-11-06）：与 `JwImportActivity.start` 同一条口径
+         * ——`LaunchGate` 只挡「同一目标连续两次」，不按目标分槽就会把「关掉报修立刻去请假」
+         * 这类合法连开吞掉第二次。双击同一张表单仍被挡住（那会开出两个 WebView + 两条 CAS 链）。
+         */
         fun start(context: Context, form: XgForm) {
+            if (!LaunchGate.allow("xg_form_${form.id}")) return
             context.startActivity(
                 Intent(context, XgFormActivity::class.java)
                     .putExtra(EXTRA_FORM_ID, form.id),

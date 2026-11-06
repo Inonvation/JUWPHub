@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.domain.YktPayment
 import edu.jxslu.schedule.ui.common.AmountHeroText
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 
 /**
@@ -179,6 +180,8 @@ fun RechargeSheet(
             onDismissRequest = { confirmStep = false },
             title = { Text("确认充值金额？") },
             text = {
+                // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行才拿得到 Dialog 的 LocalView）
+                DialogWindowFadeEffect()
                 // 目标账户**加粗**（2026-09-28 用户要求）：充错账户是钱的事，二次确认这一屏
                 // 必须让「充到哪」比「充多少」更显眼。正式卡给卡号，电子账户给账户名——
                 // 卡号取不到（余额还没回来）就不显示数字，宁缺勿错。
@@ -228,6 +231,7 @@ fun CampusArrivalDialog(
         onDismissRequest = onDismiss,
         title = { Text("充值成功") },
         text = {
+            DialogWindowFadeEffect()
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 AmountHeroText("¥%.2f".format(arrived.orderFen / 100.0))
                 Text(
@@ -279,6 +283,7 @@ fun CampusPendingConfirmDialog(
         onDismissRequest = onDismiss,
         title = { Text("正在确认充值结果") },
         text = {
+            DialogWindowFadeEffect()
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 AmountHeroText("¥%.2f".format(orderFen / 100.0))
                 Text(
@@ -329,6 +334,7 @@ fun CampusPaymentDialog(
         onDismissRequest = onDismiss,
         title = { Text("支付成功") },
         text = {
+            DialogWindowFadeEffect()
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 // 大字金额：与趣智/骑行页的大号数字同族（AmountHeroText 唯一口径）
                 AmountHeroText("¥%.2f".format(payment.amountFen / 100.0))

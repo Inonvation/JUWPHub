@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -42,7 +41,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -75,18 +73,20 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.ui.common.AppCardDefaults
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.ujing.UjingHouseStore
 import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.domain.AccountMask
 import edu.jxslu.schedule.domain.ShortcutSettings
 import edu.jxslu.schedule.ui.campus.CampusCardViewModel
+import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.ShortcutLauncher
 import edu.jxslu.schedule.ui.common.ShortcutPinner
 import edu.jxslu.schedule.ui.common.ShortcutSheet
+import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
+import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -234,6 +234,16 @@ fun SideDrawerContent(
     onOpenPowerRecharge: () -> Unit,
     onOpenSettings: () -> Unit,
     onScan: () -> Unit,
+    /**
+     * 壳层提示通道（2026-11-06）：侧栏自己**不再建** `SnackbarHostState`。
+     *
+     * 为什么必须是外面这一份：侧栏是 300dp 宽的 Surface，自建宿主会被裁掉右侧；
+     * 更要紧的是全 App 其余 54 处都走 `AppSnackbarHost` + `showNotice`（语气图标、
+     * 「新提示顶掉旧提示」），侧栏用 M3 原生 `showSnackbar` 就是两套观感 + 排队语义
+     * ——用户在这里连点两次，第二条要等第一条过期才露面。
+     * 由 `MainActivity` 传壳层的 `shellSnackbar`（它的宿主挂在根层，不被侧栏裁）。
+     */
+    snackbar: SnackbarHostState,
 ) {
     val context = LocalContext.current
     val prefs = remember { Graph.displayPrefs(context) }
@@ -363,9 +373,13 @@ fun SideDrawerContent(
     // 「其他」分类的展开态（2026-11-01）：默认折叠，用户的显式选择落 DataStore。
     val shortcutOtherExpanded by prefs.shortcutOtherExpanded
         .collectAsStateWithLifecycle(initialValue = false)
-    val snackbar = remember { SnackbarHostState() }
+    // 提示走壳层那一份 [snackbar]（由 `MainActivity` 传 `shellSnackbar`）：
+    // 侧栏是 300dp 宽的 Surface，自建宿主会被裁、观感也与全 App 其余 54 处不同
+    // （M3 原生浮条近黑无图标、还是排队语义）。见 `AppNotice.postNotice` 的 KDoc。
     val scope = rememberCoroutineScope()
-    val notice: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
+    val notice: (String) -> Unit = { message ->
+        scope.postNotice(snackbar, message, NoticeTone.Warning)
+    }
 
     Box(
         Modifier
@@ -496,13 +510,6 @@ fun SideDrawerContent(
                 PaymentCodeEntry(onClick = onOpenPayCode)
             }
         }
-
-        SnackbarHost(
-            hostState = snackbar,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 88.dp),
-        )
     }
 
     if (showShortcutSheet) {
@@ -726,7 +733,10 @@ private fun WalletHero(
         Row(verticalAlignment = Alignment.CenterVertically) {
             AnimatedContent(
                 targetState = balanceText,
-                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+                // 进 state 档、退 tap 档：新内容淡入要看得清，旧内容让位要快——
+                // 两个方向同长会读成"两行字互相叠着糊一下"。这不是随手取的差值，
+                // 别把两者统一成同一档。
+                transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap()) },
                 label = "drawerBalance",
                 modifier = Modifier.weight(1f),
             ) { text ->
@@ -830,7 +840,7 @@ private fun WalletStat(
         Spacer(Modifier.width(6.dp))
         AnimatedContent(
             targetState = value,
-            transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+            transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap()) },
             label = "drawerWalletStat",
             modifier = Modifier.weight(1f),
         ) { text ->
@@ -1141,10 +1151,12 @@ private fun DrawerRow(
         targetValue = if (pressed) 0.985f else 1f,
         label = "drawerRowPress",
     )
-    // 高亮过渡与 AppCard.highlighted 同一族（180ms）：描边色 / 底色 / 描边宽三处一起动
+    // 高亮过渡与 AppCard.highlighted 同一族（都走 `Motion.state()`）：描边色 / 底色 / 描边宽
+    // 三处一起动。2026-11-06 归并到 Motion 之后不再引 `AppCardDefaults.HighlightTransitionMillis`
+    // ——那个常量现在只是它的别名，绕一层没有意义。
     val borderColor by animateColorAsState(
         targetValue = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
-        animationSpec = tween(AppCardDefaults.HighlightTransitionMillis),
+        animationSpec = Motion.state(),
         label = "drawerRowBorder",
     )
     val containerColor by animateColorAsState(
@@ -1153,7 +1165,7 @@ private fun DrawerRow(
         } else {
             Color.Transparent
         },
-        animationSpec = tween(AppCardDefaults.HighlightTransitionMillis),
+        animationSpec = Motion.state(),
         label = "drawerRowContainer",
     )
     Row(
@@ -1216,7 +1228,7 @@ private fun DrawerRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 AnimatedContent(
                     targetState = trailing,
-                    transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+                    transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.tap()) },
                     contentAlignment = Alignment.CenterEnd,
                     label = "drawerRowTrailing",
                 ) { text ->
