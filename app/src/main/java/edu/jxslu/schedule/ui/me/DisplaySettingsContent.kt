@@ -73,7 +73,8 @@ import me.rerere.hugeicons.stroke.ArrowDown01
  *
  * 排版纪律：**不放说明文字**——身后就是真实课表，效果即时可见，文字说明是冗余；
  * 行只留「标题 + 当前值」，面板保持低调，视线留在课表上。
- * 分组可折叠（[CollapsibleSection]），四组默认全展开。
+ * 分组可折叠（[CollapsibleSection]），**没动过的组默认收起、动过的组默认展开**：
+ * 面板默认只露五个标题，改过的设置下次打开就在眼前，不用滚。
  */
 @Composable
 fun DisplaySettingsContent(
@@ -118,7 +119,16 @@ fun DisplaySettingsContent(
         val lockedFollow = prefs.fontScaleLocked
         val followWord = if (lockedFollow) "默认" else "跟随"
         val systemFollowHint = if (lockedFollow) "默认" else "跟随系统"
-        CollapsibleSection(title = "字号") {
+        // 字号（5 项）。默认全为 null = 跟随基准，此时整组收起——面板默认只露标题，
+        // 用户想调哪一组就点哪一组，不必先滚过一屏没动过的滑块。
+        val fontsCustomized = listOf(
+            prefs.gridFontDp,
+            prefs.gridRoomDp,
+            prefs.gridTeacherDp,
+            prefs.gridRailDp,
+            prefs.gridDateDp,
+        ).any { it != null }
+        CollapsibleSection(title = "字号", initiallyExpanded = fontsCustomized) {
             GridFontSizeRow(
                 title = "课程名字号",
                 dp = prefs.gridFontDp,
@@ -169,7 +179,12 @@ fun DisplaySettingsContent(
             )
         }
 
-        CollapsibleSection(title = "布局尺寸") {
+        CollapsibleSection(
+            title = "布局尺寸",
+            initiallyExpanded = prefs.railWidthDp != TimetablePrefs.DefaultRailWidthDp ||
+                prefs.dayHeaderHeightDp != TimetablePrefs.DefaultDayHeaderHeightDp ||
+                prefs.rowHeightScale != 1f,
+        ) {
             SliderSettingRow(
                 title = "时间轴宽度",
                 valueText = dpLabel(
@@ -213,7 +228,10 @@ fun DisplaySettingsContent(
             )
         }
 
-        CollapsibleSection(title = "格子样式") {
+        CollapsibleSection(
+            title = "格子样式",
+            initiallyExpanded = prefs.cellRadiusDp != 6f || prefs.cellOpacity != 1f,
+        ) {
             SliderSettingRow(
                 title = "格子圆角",
                 valueText = dpLabel(prefs.cellRadiusDp.coerceIn(0f, 12f)),
@@ -300,7 +318,14 @@ fun DisplaySettingsContent(
 
         // 背景（DESIGN §4.21）：只铺课表页。没有图时不摆滑块——滑块拖了也没效果，
         // 摆在那儿只会让人以为坏了。
-        CollapsibleSection(title = "背景") {
+        // 没设过背景时保持展开：这一组里唯一的入口（选图）不能藏在折叠头后面。
+        CollapsibleSection(
+            title = "背景",
+            initiallyExpanded = prefs.bgImageName == null ||
+                prefs.bgImageOpacity != 1f ||
+                prefs.bgImageDim != 0f ||
+                prefs.bgImageBlur != 0f,
+        ) {
             BackgroundImageRow(
                 fileName = prefs.bgImageName,
                 importing = bgImporting,
@@ -386,14 +411,18 @@ fun DisplaySettingsContent(
  *
  * 用 AnimatedVisibility 而不是 if：展开/收起有过渡，且收起的组不参与组合，
  * 滚动列表高度随之收缩。标题行整行可点，命中区足够大。
- * 四组默认全展开（调用方不再传 initiallyExpanded）。
+ *
+ * [initiallyExpanded] 由调用方按「这一组是否被用户改过」算（默认值见各分组调用点）：
+ * 只在首次组合时取一次，之后用户自己折叠/展开的状态优先。
  */
 @Composable
 private fun CollapsibleSection(
     title: String,
+    initiallyExpanded: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    var expanded by rememberSaveable { mutableStateOf(true) }
+    // 初值只在首次组合时取一次：用户拖动滑块会让「是否动过」翻转，但那不该把组收起来
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
     Column {
         Row(
             modifier = Modifier

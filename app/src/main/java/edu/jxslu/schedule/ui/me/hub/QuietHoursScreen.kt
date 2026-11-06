@@ -6,9 +6,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -31,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -39,6 +43,7 @@ import edu.jxslu.schedule.domain.QuietWindow
 import edu.jxslu.schedule.domain.QuietWindows
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsNote
@@ -151,7 +156,7 @@ fun QuietHoursScreen(onBack: () -> Unit) {
     }
 
     editing?.let { current ->
-        WindowEditDialog(
+        WindowEditSheet(
             initial = current,
             isNew = current.id.isEmpty(),
             onSave = { saved ->
@@ -235,9 +240,47 @@ private fun windowText(window: QuietWindow): String {
     return "$start – $endText" + if (window.enabled) "" else " · 已停用"
 }
 
-/** 添加 / 编辑弹窗：名称 + 起止两个滚轮时间选择（「时:分」双滚轮，滚着点确定取当下值）。 */
+/**
+ * 添加 / 编辑时段：名称 + 起止两个滚轮时间选择（「时:分」双滚轮，滚着点确定取当下值）。
+ *
+ * ## 为什么是底部弹层而不是 `AlertDialog`（2026-11-06 改）
+ *
+ * 这个表单有输入框，而 `AlertDialog` 是**居中的对话框窗口**，不是给输入设计的：
+ *
+ * 1. 软键盘弹起时窗口被顶起，可用高度只剩一条缝，而 `AlertDialog` 的内容槽**没有滚动**——
+ *    两个时间行和「保存」直接被挤出可视区，用户只能按返回键退出（用户报的现象）；
+ * 2. 对话框窗口层的进出场（缩放 + 淡入）与键盘动画是两个系统在抢同一个窗口位置，
+ *    观感是弹窗被键盘顶得抖一下。
+ *
+ * 弹层走 [ImeAwareModalBottomSheet]，两件事它已经内建、这里不要自己拼：
+ * - `skipPartiallyExpanded = true`：键盘弹起后 M3 会造出半高锚点并 `animateTo` 过去，
+ *   底部按钮被键盘盖住（DESIGN §4.19 定位过同一现象，本容器已钉死）；
+ * - 退场「先收键盘、键盘收完再滑走」两段（并行收会因每帧重锚点把退场动画反复重启，
+ *   定位过程见 `ui/common/SheetDismissIme.kt` 文件头）。
+ *
+ * 内容里**不要再加 `Modifier.imePadding()`**：M3 的 `ModalBottomSheet` 已经给容器套了一层
+ * `imePadding()`（SheetDismissIme.kt 文件头「容器的父 Box」那段），再套一层等于把内容
+ * 顶高两次——键盘弹起时表单会整体跳到半屏之上，收键盘后又滑回去。
+ *
+ * ## 为什么按钮出口也走 `pendingDismiss`
+ *
+ * 「保存 / 取消」直接调 `onDismiss()` 会把弹层从组合里瞬间抽掉，退场动画根本来不及播
+ * （表现是"啪"地消失，2026-09-30 车号面板报过同款）。`pendingDismiss` 让这两条出口与
+ * 点遮罩走同一条序列：播完退场 → 落 `onDismiss` → 再执行保存。保存动作放在 `after` 里
+ * 还有一个必要原因：**保存会写 DataStore 并触发列表重组**，先关弹层再落数据，避免
+ * 「列表已经变了、弹层还挂着旧值」的中间帧。
+ *
+ * ## 为什么内层时间滚轮仍是 dialog
+ *
+ * [TimeWheelDialog] 是 `ui/common` 的共享组件（其它页面也在用），这里是**二次弹层**：
+ * 弹层里再叠一层 sheet 会有两套拖拽锚点与两个遮罩，且外层弹层的 `confirmValueChange`
+ * 会去询问「能不能 Hidden」，两层互相牵连。一次性的小选择器用 dialog 更稳，也保住了
+ * 「滚轮居中、点确定取当下值」的既有手感。打开滚轮前先 `clearFocus()` 收键盘，
+ * 否则键盘会把居中的滚轮顶起来（这一步用的是**弹层窗口**的 focus manager——
+ * 写在弹层内容里才是这一份，写在弹层外拿到的是页面窗口那份，收不动，见 SheetDismissIme.kt）。
+ */
 @Composable
-private fun WindowEditDialog(
+private fun WindowEditSheet(
     initial: QuietWindow,
     isNew: Boolean,
     onSave: (QuietWindow) -> Unit,
@@ -249,57 +292,80 @@ private fun WindowEditDialog(
     // null = 未在选时间；"start" / "end" = 当前在编辑哪一端
     var picking by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    // 内容请求的「带动画关闭」：非 null 时弹层先播退场，跑完再执行它（见上方 KDoc）
+    var pendingDismiss by remember { mutableStateOf<(() -> Unit)?>(null) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (isNew) "添加时段" else "编辑时段") },
-        text = {
-            // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
-            DialogWindowFadeEffect()
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = label,
-                    onValueChange = { label = it },
-                    label = { Text("名称（如 夜间休息）") },
-                    singleLine = true,
-                )
-                TimeRow(
-                    label = "开始",
-                    text = QuietWindows.clockText(startMinute),
-                    onClick = { picking = "start" },
-                )
-                TimeRow(
-                    label = "结束",
-                    text = QuietWindows.clockText(endMinute),
-                    onClick = { picking = "end" },
-                )
-                error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
+    ImeAwareModalBottomSheet(onDismiss = onDismiss, pendingDismiss = pendingDismiss) {
+        // 弹窗窗口的 focus manager：必须在弹层内容里取（外面取到的是页面窗口那份）
+        val focusManager = LocalFocusManager.current
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                // 小屏 + 大字号下三个字段 + 按钮会超过弹层可用高度，必须能滚
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = if (isNew) "添加时段" else "编辑时段",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            OutlinedTextField(
+                value = label,
+                onValueChange = { label = it },
+                label = { Text("名称（如 夜间休息）") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TimeRow(
+                label = "开始",
+                text = QuietWindows.clockText(startMinute),
                 onClick = {
-                    if (!QuietWindows.validate(startMinute, endMinute)) {
-                        error = "开始与结束不能相同"
-                        return@TextButton
-                    }
-                    onSave(
-                        initial.copy(
-                            id = if (isNew) "" else initial.id,
-                            label = label.trim().ifBlank { "自定义时段" },
-                            startMinute = startMinute,
-                            endMinute = endMinute,
-                        ),
-                    )
+                    // 先收键盘再开滚轮：键盘会把居中的 dialog 顶起来
+                    focusManager.clearFocus()
+                    picking = "start"
                 },
-            ) { Text("保存") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-    )
+            )
+            TimeRow(
+                label = "结束",
+                text = QuietWindows.clockText(endMinute),
+                onClick = {
+                    focusManager.clearFocus()
+                    picking = "end"
+                },
+            )
+            error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = { pendingDismiss = {} }) { Text("取消") }
+                TextButton(
+                    onClick = {
+                        if (!QuietWindows.validate(startMinute, endMinute)) {
+                            // 校验不过就**不关**弹层：错误行贴在两个时间行下方，用户改完再点保存
+                            error = "开始与结束不能相同"
+                            return@TextButton
+                        }
+                        pendingDismiss = {
+                            onSave(
+                                initial.copy(
+                                    id = if (isNew) "" else initial.id,
+                                    label = label.trim().ifBlank { "自定义时段" },
+                                    startMinute = startMinute,
+                                    endMinute = endMinute,
+                                ),
+                            )
+                        }
+                    },
+                ) { Text("保存") }
+            }
+        }
+    }
 
     picking?.let { which ->
         TimeWheelDialog(

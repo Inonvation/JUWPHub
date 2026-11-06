@@ -703,6 +703,34 @@ private fun ShortcutEditSheet(
 /**
  * 已安装应用选择器（DESIGN §3.8）：搜索 + 列表，点一下只填包名。
  * 不顺手填 Activity——启动页类名随版本可能变，用户需要直达时自己填更稳。
+ *
+ * ## 为什么是底部弹层而不是 `AlertDialog`（2026-11-06 改）
+ *
+ * 这里带搜索框。键盘一起来，`AlertDialog` 的窗口被顶起、可用高度只剩一条缝，而它的内容槽
+ * **没有滚动**：搜索框被顶到屏幕外、列表只剩半行、「关闭」也点不到——只能返回键退出。
+ * 弹层走 [ImeAwareModalBottomSheet]：`skipPartiallyExpanded = true` 钉死全高锚点（键盘弹起后
+ * M3 会造出半高锚点并 `animateTo` 过去），退场走「先收键盘、键盘收完再滑走」两段
+ * （定位过程见 `ui/common/SheetDismissIme.kt` 文件头）。
+ *
+ * ## 两个高度约束都不能省
+ *
+ * 1. 外层 `verticalScroll`：键盘占掉半屏时，标题/搜索框/列表/按钮加起来仍可能超过可用高度，
+ *    有这层才能把「关闭」滚进可视区（**不要**改用 `imePadding()`：M3 的 `ModalBottomSheet`
+ *    已经给容器套过一层，再套等于把内容顶高两次）；
+ * 2. 列表仍钉 `heightIn(max = 380.dp)`：`LazyColumn` 在**同方向无限约束**下会直接抛
+ *    「measured with infinity maximum height」，而外层已经是可滚的 Column——列表必须有界，
+ *    两层各自有界才滚得动（列表内到底后手势交给外层）。
+ *
+ * ## 出口也走 `pendingDismiss`
+ *
+ * 选完应用 / 点关闭直接置 `showPicker = false` 会把弹层从组合里瞬间抽掉，退场动画来不及播。
+ * `pendingDismiss` 让它与点遮罩走同一条序列：播完退场 → 落 `onDismiss` → 再 `onPick` 回填包名。
+ *
+ * ## 它现在是「弹层里的弹层」
+ *
+ * 调用点在 [ShortcutEditSheet] 的表单弹层里（两者是同一组合的兄弟节点，不是嵌套内容），
+ * 于是会短暂出现两层弹层：两个窗口各自算自己的锚点与 insets，互不干扰；比原来
+ * 「sheet 上盖一个 dialog」的好处是搜索框同样吃到 IME 两段退场。
  */
 @Composable
 private fun InstalledAppPicker(
@@ -712,96 +740,106 @@ private fun InstalledAppPicker(
     onPick: (InstalledApp) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("选择应用") },
-        text = {
-            // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
-            DialogWindowFadeEffect()
-            Column {
-                OutlinedTextField(
-                    value = search,
-                    onValueChange = onSearch,
-                    placeholder = { Text("搜索应用名或包名") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+    // 内容请求的「带动画关闭」：见上方 KDoc
+    var pendingDismiss by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    ImeAwareModalBottomSheet(onDismiss = onDismiss, pendingDismiss = pendingDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .navigationBarsPadding(),
+        ) {
+            Text(
+                text = "选择应用",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+            OutlinedTextField(
+                value = search,
+                onValueChange = onSearch,
+                placeholder = { Text("搜索应用名或包名") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            when {
+                apps == null -> Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                }
+
+                apps.isEmpty() -> Text(
+                    text = "没有读到已安装的应用",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 )
-                Spacer(Modifier.height(8.dp))
-                when {
-                    apps == null -> Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(120.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+
+                else -> {
+                    val filtered = apps.filter {
+                        it.label.contains(search, ignoreCase = true) ||
+                            it.pkg.contains(search, ignoreCase = true)
                     }
-
-                    apps.isEmpty() -> Text(
-                        text = "没有读到已安装的应用",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                    )
-
-                    else -> {
-                        val filtered = apps.filter {
-                            it.label.contains(search, ignoreCase = true) ||
-                                it.pkg.contains(search, ignoreCase = true)
-                        }
-                        if (filtered.isEmpty()) {
-                            Text(
-                                text = "没有匹配「$search」的应用",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                            )
-                        }
-                        LazyColumn(modifier = Modifier.heightIn(max = 380.dp)) {
-                            items(filtered, key = { it.pkg }) { app ->
-                                val iconBitmap = remember(app.pkg) {
-                                    drawableToBitmap(app.icon).asImageBitmap()
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        // 搜索过滤时列表项平滑重排/进出场，不整列硬跳
-                                        .animateItem()
-                                        .fillMaxWidth()
-                                        .clickable { onPick(app) }
-                                        .padding(vertical = 8.dp, horizontal = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Image(
-                                        bitmap = iconBitmap,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(34.dp),
+                    if (filtered.isEmpty()) {
+                        Text(
+                            text = "没有匹配「$search」的应用",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        )
+                    }
+                    LazyColumn(modifier = Modifier.heightIn(max = 380.dp)) {
+                        items(filtered, key = { it.pkg }) { app ->
+                            val iconBitmap = remember(app.pkg) {
+                                drawableToBitmap(app.icon).asImageBitmap()
+                            }
+                            Row(
+                                modifier = Modifier
+                                    // 搜索过滤时列表项平滑重排/进出场，不整列硬跳
+                                    .animateItem()
+                                    .fillMaxWidth()
+                                    .clickable { pendingDismiss = { onPick(app) } }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Image(
+                                    bitmap = iconBitmap,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(34.dp),
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = app.label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
-                                    Spacer(Modifier.width(10.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            text = app.label,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        Text(
-                                            text = app.pkg,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
+                                    Text(
+                                        text = app.pkg,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
                             }
                         }
                     }
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        },
-    )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = { pendingDismiss = {} }) { Text("关闭") }
+            }
+        }
+    }
 }
 
 class ShortcutSettingsViewModel(private val repo: ScheduleRepository) : ViewModel() {

@@ -176,14 +176,8 @@ fun SettingsScreen(
                     onClick = { onOpen(SubpageScreen.SCHEDULE_CHANGES) },
                 )
                 SettingItem(
-                    title = "AI 调课服务",
-                    subtitle = "服务地址 · 模型 · API Key · 教师名脱敏",
-                    icon = HugeIcons.AiBrain01,
-                    onClick = { onOpen(SubpageScreen.AI_SETTINGS) },
-                )
-                SettingItem(
                     title = "AI 调课",
-                    subtitle = "粘贴调课通知，由 AI 给出改动建议 · 需自备 API Key",
+                    subtitle = "粘贴调课通知，由 AI 给出改动建议 · 服务配置在页内 · 需自备 API Key",
                     icon = HugeIcons.AiBrain01,
                     onClick = { onOpen(SubpageScreen.AI_SCHEDULE) },
                 )
