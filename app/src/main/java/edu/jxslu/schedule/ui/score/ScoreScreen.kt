@@ -249,7 +249,9 @@ fun ScoreScreen(onBack: () -> Unit) {
                             listOf(ScoreRow.Header(term, list.size)) +
                                 ScoreCalculator.sort(list, sortMode).map { ScoreRow.Record(it) }
                         }
-                    groupByYear -> selectedGroup?.terms?.flatMap { term ->
+                    // `distinct()`：分组头的 LazyColumn key 是 `t:<学期>`，学年分组里若出现
+                    // 重复学期（服务端数据异常 / 学年映射重叠）会撞 key 直接抛异常
+                    groupByYear -> selectedGroup?.terms?.distinct()?.flatMap { term ->
                         val list = allByTerm[term].orEmpty()
                         listOf(ScoreRow.Header(term, list.size)) +
                             ScoreCalculator.sort(list, sortMode).map { ScoreRow.Record(it) }
@@ -314,12 +316,24 @@ fun ScoreScreen(onBack: () -> Unit) {
                             bottomPadding = 0.dp,
                         )
                     }
-                    // 不设自定义 key：同学期同课号可能有多行（补考/重修批次），任何业务键组合
-                    // 都可能撞 key 导致 LazyColumn 直接抛异常；本列表静态无重排，默认位置键即可
-                    items(rows) { row ->
+                    // key 用库里主键（`ScoreRecord.id` 是 Room 自增 PK，全表唯一），
+                    // 所以不再有「同课号多行撞 key」的顾虑——那是当初不设 key 的原因，
+                    // 现在键从数据库来，撞不上。有了 key 才能上 animateItem：
+                    // 切学期 / 换排序时逐行滑走，而不是整屏硬跳（2026-11-06 批 4-5）。
+                    items(
+                        rows,
+                        key = { row ->
+                            when (row) {
+                                is ScoreRow.Header -> "t:${row.term}"
+                                is ScoreRow.Record -> "s:${row.record.id}"
+                            }
+                        },
+                    ) { row ->
                         when (row) {
-                            is ScoreRow.Header -> TermSectionHeader(row.term, row.count)
-                            is ScoreRow.Record -> ScoreCard(row.record)
+                            is ScoreRow.Header ->
+                                TermSectionHeader(row.term, row.count, Modifier.animateItem())
+                            is ScoreRow.Record ->
+                                ScoreCard(row.record, Modifier.animateItem())
                         }
                     }
                     item {
@@ -478,19 +492,19 @@ private fun SummaryMetric(label: String, value: String, modifier: Modifier = Mod
 
 /** 学年内按学期分组的小节头：一门不落都看得出来源学期。 */
 @Composable
-private fun TermSectionHeader(term: String, count: Int) {
+private fun TermSectionHeader(term: String, count: Int, modifier: Modifier = Modifier) {
     Text(
         "$term · ${count}门",
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 6.dp),
+        modifier = modifier.padding(top = 6.dp),
     )
 }
 
 @Composable
-private fun ScoreCard(record: ScoreRecord) {
-    AppCard {
+private fun ScoreCard(record: ScoreRecord, modifier: Modifier = Modifier) {
+    AppCard(modifier = modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth(),

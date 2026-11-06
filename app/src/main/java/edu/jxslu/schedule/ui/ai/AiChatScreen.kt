@@ -7,7 +7,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -72,6 +71,7 @@ import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChevronRight
@@ -104,6 +104,11 @@ fun AiChatScreen(
     onOpenHistory: () -> Unit,
 ) {
     val context = LocalContext.current
+    // 注意 `Graph.aiApplyHistoryStore(context)` 的构造会同步读一次 filesDir 里的 JSON（上限 50 条）。
+    // 2026-11-06 审计 2-B 复核后**不动**：它不参与首帧（只服务应用/撤销/留痕同步），理论上可以
+    // 延后到协程里构造；但 (a) Graph 把它做成进程单例，整个进程只付一次，
+    // (b) 读盘在 `data/repo/AiApplyHistoryStore` 的构造里，延后就得把 provider 穿进 ViewModel
+    // 的三个调用点（apply / undo / 留痕刷新）。改面大、收益是一次几毫秒 —— 不值。
     val viewModel: AiChatViewModel = viewModel(
         factory = AiChatViewModel.Factory(
             Graph.repository(context),
@@ -246,8 +251,8 @@ fun AiChatScreen(
 
                 AnimatedVisibility(
                     visible = receiptStrip != null,
-                    enter = fadeIn(tween(220)) + expandVertically(tween(260)),
-                    exit = fadeOut(tween(160)) + shrinkVertically(tween(220)),
+                    enter = fadeIn(Motion.reveal()) + expandVertically(Motion.page()),
+                    exit = fadeOut(Motion.state()) + shrinkVertically(Motion.reveal()),
                 ) {
                     receiptStrip?.let { receipt ->
                         AiReceiptRow(
@@ -260,13 +265,13 @@ fun AiChatScreen(
 
                 AnimatedVisibility(
                     visible = work.phase != AiPhase.IDLE,
-                    enter = fadeIn(tween(220)) + expandVertically(tween(260)),
-                    exit = fadeOut(tween(180)) + shrinkVertically(tween(220)),
+                    enter = fadeIn(Motion.reveal()) + expandVertically(Motion.page()),
+                    exit = fadeOut(Motion.state()) + shrinkVertically(Motion.reveal()),
                 ) {
                     // 失败卡与提案卡切换也过一遍淡入淡出（重试、失败落定都走这里）
                     Crossfade(
                         targetState = work.phase == AiPhase.FAILED,
-                        animationSpec = tween(220),
+                        animationSpec = Motion.reveal(),
                         label = "aiResultSwitch",
                     ) { failed ->
                         if (failed) {

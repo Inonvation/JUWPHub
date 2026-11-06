@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.ai
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -61,6 +60,7 @@ import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.ChangeDetailLabels
 import edu.jxslu.schedule.ui.common.ScheduleChangeCard
 import edu.jxslu.schedule.ui.common.SkeletonBox
+import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Alert02
@@ -122,15 +122,15 @@ internal fun AiProposalCard(
         // 折叠 / 展开都过动画：应用成功自动收起、点摘要行展开，别硬切
         AnimatedVisibility(
             visible = work.collapsed,
-            enter = fadeIn(tween(200)) + expandVertically(tween(260)),
-            exit = fadeOut(tween(140)) + shrinkVertically(tween(200)),
+            enter = fadeIn(Motion.state()) + expandVertically(Motion.page()),
+            exit = fadeOut(Motion.state()) + shrinkVertically(Motion.state()),
         ) {
             CollapsedSummary(work, onToggleCollapsed, onUndo)
         }
         AnimatedVisibility(
             visible = !work.collapsed,
-            enter = fadeIn(tween(220)) + expandVertically(tween(300)),
-            exit = fadeOut(tween(180)) + shrinkVertically(tween(240)),
+            enter = fadeIn(Motion.reveal()) + expandVertically(Motion.page()),
+            exit = fadeOut(Motion.state()) + shrinkVertically(Motion.reveal()),
         ) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                 ProposalHeader(work, onToggleCollapsed)
@@ -317,8 +317,8 @@ private fun ProposalBody(
     val result = work.result
     val analyzing = work.phase == AiPhase.ANALYZING
     // 逐段出现 / 消失都过同一套动效：分析完成时结果不再是「啪」地整块冒出来
-    val enter = fadeIn(tween(220)) + expandVertically(tween(260))
-    val exit = fadeOut(tween(160)) + shrinkVertically(tween(220))
+    val enter = fadeIn(Motion.reveal()) + expandVertically(Motion.page())
+    val exit = fadeOut(Motion.state()) + shrinkVertically(Motion.reveal())
 
     // ---- 读图核对块：让用户能发现 OCR 错字（截图的唯一纠正机会）
     AnimatedVisibility(visible = !result?.readback.isNullOrBlank(), enter = enter, exit = exit) {
@@ -333,8 +333,8 @@ private fun ProposalBody(
     // ---- 分析中且还没有任何增量：骨架占位（几何近似成品，不出现假结论）
     AnimatedVisibility(
         visible = analyzing && work.isEmptyResult,
-        enter = fadeIn(tween(180)),
-        exit = fadeOut(tween(180)) + shrinkVertically(tween(220)),
+        enter = fadeIn(Motion.state()),
+        exit = fadeOut(Motion.state()) + shrinkVertically(Motion.reveal()),
     ) {
         Column {
             Spacer(Modifier.height(10.dp))
@@ -659,8 +659,8 @@ private fun ReasoningBlock(text: String, streaming: Boolean) {
         }
         AnimatedVisibility(
             visible = expanded,
-            enter = fadeIn(tween(200)) + expandVertically(tween(240)),
-            exit = fadeOut(tween(140)) + shrinkVertically(tween(200)),
+            enter = fadeIn(Motion.state()) + expandVertically(Motion.reveal()),
+            exit = fadeOut(Motion.state()) + shrinkVertically(Motion.state()),
         ) {
             Column {
                 Spacer(Modifier.height(6.dp))

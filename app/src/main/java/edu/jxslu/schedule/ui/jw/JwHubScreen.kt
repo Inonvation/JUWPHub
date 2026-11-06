@@ -55,6 +55,8 @@ import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
 import java.time.LocalDate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Analytics01
 import me.rerere.hugeicons.stroke.Book01
@@ -390,6 +392,12 @@ private data class JwHubStats(
     val schedule: String,
     val theoryShort: String,
     val labShort: String,
+    /**
+     * 考试快照是否已读回。false 时 [exams] / [examsShort] 是占位符「…」而不是
+     * 「暂无考试」——快照是磁盘文件，异步读，读到之前不能下「没有考试」的结论
+     * （2026-11-06 审计 2-B）。
+     */
+    val examLoaded: Boolean = true,
 )
 
 /**
@@ -414,14 +422,28 @@ private fun rememberJwHubStats(): JwHubStats {
         .collectAsStateWithLifecycle(initialValue = emptyMap())
 
     var term by remember { mutableStateOf<String?>(null) }
+    /**
+     * 考试快照（filesDir 里的 JSON）——**读盘必须离开主线程**（2026-11-06 审计 2-B）。
+     *
+     * 原实现是 `remember(resumeTick) { ExamSnapshotStore(context).load() }`：组合期同步读盘，
+     * 而且 `resumeTick` 每变一次（每次回到本页）就再读一次。
+     * 改成 LaunchedEffect + IO 之后首帧没有值，所以另配 [examSnapshotLoaded]：
+     * 读到之前「考试」两处显示占位符「…」，**不显示**「暂无考试」——后者是结论，
+     * 先显示再跳成「3 场」就是闪一下（这是不能为了干净引入的那种闪烁）。
+     */
+    var examSnapshot by remember { mutableStateOf<ExamSnapshotStore.Snapshot?>(null) }
+    var examSnapshotLoaded by remember { mutableStateOf(false) }
     LaunchedEffect(resumeTick) {
         term = runCatching { repo.currentTerm() }.getOrNull()
-    }
-    val examSnapshot = remember(resumeTick) {
-        runCatching { ExamSnapshotStore(context).load() }.getOrNull()
+        examSnapshot = withContext(Dispatchers.IO) {
+            runCatching { ExamSnapshotStore(context).load() }.getOrNull()
+        }
+        examSnapshotLoaded = true
     }
 
-    return remember(semester, courses, scoresByTerm, textbookTitles, term, examSnapshot) {
+    return remember(
+        semester, courses, scoresByTerm, textbookTitles, term, examSnapshot, examSnapshotLoaded,
+    ) {
         val today = LocalDate.now()
         val latestScoreTerm = scoresByTerm.entries
             .filter { it.value.isNotEmpty() }
@@ -444,12 +466,15 @@ private fun rememberJwHubStats(): JwHubStats {
         val exams = examSnapshot?.exams.orEmpty().filter { it.date.isNotBlank() }
         val upcoming = exams.filter { it.date >= today.toString() }
         val examText = when {
+            // 快照还没读回来：给占位符，不下「没有考试」的结论（见 examSnapshot 注释）
+            !examSnapshotLoaded -> "…"
             exams.isEmpty() -> "暂无考试"
             upcoming.isNotEmpty() ->
                 "${upcoming.size} 场 · 最近 ${upcoming.minOf { it.date }.substring(5)}"
             else -> "${exams.size} 场 · 均已结束"
         }
         val examsShort = when {
+            !examSnapshotLoaded -> "…"
             upcoming.isNotEmpty() -> "${upcoming.size} 场"
             exams.isNotEmpty() -> "${exams.size} 场"
             else -> "暂无"
@@ -491,6 +516,7 @@ private fun rememberJwHubStats(): JwHubStats {
                 .takeIf { it > 0 }?.let { "$it 条" } ?: "暂无",
             labShort = courses.count { it.kind == CourseKind.Lab }
                 .takeIf { it > 0 }?.let { "$it 条" } ?: "暂无",
+            examLoaded = examSnapshotLoaded,
         )
     }
 }

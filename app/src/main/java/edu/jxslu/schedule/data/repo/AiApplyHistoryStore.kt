@@ -53,7 +53,17 @@ class AiApplyHistoryStore(context: Context) {
     private val _state = MutableStateFlow(load())
     val state: StateFlow<List<AiApplyRecord>> = _state.asStateFlow()
 
-    /** 记一条应用（新记录在顶）。写盘落 IO 线程。 */
+    /**
+     * 记一条应用（新记录在顶）。写盘落 IO 线程。
+     *
+     * **本方法必须不抛**（2026-11-06 审计 A4 复核）。调用点在**落库事务之后**：
+     * 事务已经提交、课表与日期覆盖都改完了，这里再抛出去会让整次「应用」显示为失败 ——
+     * 用户以为没生效、再点一次，结果是**日期覆盖重复插入**（同一个 override 落两行，
+     * 撤销时按 id 只撤得掉一条）。
+     *
+     * 所以写盘失败只在内存里记着 + `Log.w` 留痕（见 [write]），不向上传播；
+     * 也别「顺手」把它改成会抛的实现（例如直接 `file.writeText`）。
+     */
     suspend fun append(record: AiApplyRecord) {
         write { upsertInto(it, record) }
     }

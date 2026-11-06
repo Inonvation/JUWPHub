@@ -101,6 +101,15 @@ class AiChatViewModel(
     val privacyAcknowledged: StateFlow<Boolean> = repo.aiPrivacyAcknowledged
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
+    /**
+     * 是否已配 Key。**构造期同步读，2026-11-06 审计复核后保留**。
+     *
+     * 读的是 EncryptedSharedPreferences（首次会走 Keystore 解密）。不能挪到协程里：
+     * 它决定首帧要不要显示「还没有配置 AI 服务」那张引导卡 —— 异步读会让引导卡先出现
+     * 再消失，比主线程读一次盘更刺眼。
+     * 成本可控：`AiCredentialStore.prefs` 是 `lazy`，`Graph.aiCredentialStore` 又是进程单例，
+     * 所以整个进程只在这里付一次；同一进程再进本页命中内存。
+     */
     private val _hasApiKey = MutableStateFlow(credentialStore.readApiKey() != null)
     val hasApiKey: StateFlow<Boolean> = _hasApiKey.asStateFlow()
 

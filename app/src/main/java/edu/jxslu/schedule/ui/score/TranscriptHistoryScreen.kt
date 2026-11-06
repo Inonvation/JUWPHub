@@ -47,6 +47,7 @@ import edu.jxslu.schedule.domain.TranscriptHistory
 import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -179,6 +180,7 @@ fun TranscriptHistoryScreen(onBack: () -> Unit) {
             onDismissRequest = { pendingDelete = null },
             title = { Text("删除这份成绩单？") },
             text = {
+                DialogWindowFadeEffect()
                 Text(
                     "「${TranscriptHistory.labelOf(entry.name)}」会从本机删除，删掉就要重新导出。",
                 )
@@ -206,7 +208,10 @@ fun TranscriptHistoryScreen(onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
             title = { Text("清空全部导出记录？") },
-            text = { Text("本机保存的 ${entries?.size ?: 0} 份成绩单都会被删除，需要时重新导出即可。") },
+            text = {
+                DialogWindowFadeEffect()
+                Text("本机保存的 ${entries?.size ?: 0} 份成绩单都会被删除，需要时重新导出即可。")
+            },
             confirmButton = {
                 TextButton(
                     onClick = {

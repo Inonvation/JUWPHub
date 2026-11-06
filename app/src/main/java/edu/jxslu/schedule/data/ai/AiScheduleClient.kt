@@ -9,9 +9,12 @@ import java.io.IOException
 import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
@@ -197,7 +200,13 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
             }
         })
         awaitClose { call.cancel() }
-    }.flowOn(Dispatchers.IO)
+        // **必须无界**（2026-11-06 审计 A1）：`readStream` 在 OkHttp 的线程上 `trySend`，
+        // 消费端在 Main。`callbackFlow` 默认容量 64，长输出时缓冲一满 `trySend` 就返回失败，
+        // 分片被静默丢掉 —— 表现是工具参数 JSON 半截、用户看到「已整理 0 处改动」，
+        // 真实原因是客户端截断，比服务端限流更难查。每轮输出只有几 KB，无内存风险。
+        // 不能改成「trySend 失败就重试/挂起」：读流是同步循环，挂起会阻塞 socket 读取。
+    }.buffer(Channel.UNLIMITED)
+        .flowOn(Dispatchers.IO)
 
     /**
      * 逐行读 SSE。三种增量分开吐；同时兜住三类「静默成功」的坑：
@@ -240,10 +249,10 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
             val delta = choice["delta"] as? JsonObject ?: continue
             (delta["reasoning_content"] as? JsonPrimitive)?.contentOrNull
                 ?.takeIf { it.isNotEmpty() }
-                ?.let { channel.trySend(StreamEvent.Reasoning(it)) }
+                ?.let { if (!emit(channel, StreamEvent.Reasoning(it))) return }
             (delta["content"] as? JsonPrimitive)?.contentOrNull
                 ?.takeIf { it.isNotEmpty() }
-                ?.let { channel.trySend(StreamEvent.Content(it)) }
+                ?.let { if (!emit(channel, StreamEvent.Content(it))) return }
             // **本函数最要紧的一行纪律**：不认识的 delta 一律 `continue`，绝不 `return`。
             // 2026-10-06 修复：此前「delta 里没有 tool_calls → return」会把整个流在第一条
             // 正文 / 思考 / finish 块就掐断——工具参数只收到零个分片，上层解析出空结果，
@@ -260,7 +269,7 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
                 if (functionName != null && functionName != AiScheduleTool.FUNCTION_NAME) continue
                 (function?.get("arguments") as? JsonPrimitive)?.contentOrNull
                     ?.takeIf { it.isNotEmpty() }
-                    ?.let { channel.trySend(StreamEvent.ToolArgs(it)) }
+                    ?.let { if (!emit(channel, StreamEvent.ToolArgs(it))) return }
             }
         }
         if (!sawEvent) {
@@ -270,6 +279,24 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
             )
         }
     }
+
+    /**
+     * 发一个增量。**不允许静默丢弃**（2026-11-06 审计 A1）。
+     *
+     * 背景：本函数在 OkHttp 的线程上跑，消费端在 Main。`callbackFlow` 默认容量 64，
+     * 长输出时缓冲一满 `trySend` 就返回失败且**没人看返回值**——分片被丢掉，工具参数
+     * 变成半截 JSON，用户看到「已整理 0 处改动 + 1 条提议已略过」，比服务端限流更难查。
+     *
+     * 两层防护：
+     * 1. [chatStream] 那条流带 `buffer(UNLIMITED)` —— 生产环境这里永远走非阻塞快路径；
+     * 2. 用 `trySendBlocking` 而不是 `trySend` —— 万一将来谁把缓冲调小，缓冲满时是**背压**
+     *    （读 socket 的线程等一等）而不是丢数据。
+     *
+     * 返回 false = 通道已关闭（用户点了「停止」，或上层取消），调用方应立即结束读流：
+     * 再往下读只是白烧额度。
+     */
+    private fun emit(channel: SendChannel<StreamEvent>, event: StreamEvent): Boolean =
+        channel.trySendBlocking(event).isSuccess
 
     /** 单测入口：与 [readStream] 同一实现，用 okio `Buffer` 直接喂 SSE 文本（JVM 可跑）。 */
     internal suspend fun readStreamForTest(source: BufferedSource, channel: SendChannel<StreamEvent>) {

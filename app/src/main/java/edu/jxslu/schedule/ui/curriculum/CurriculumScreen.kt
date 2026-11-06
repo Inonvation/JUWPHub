@@ -2,7 +2,6 @@ package edu.jxslu.schedule.ui.curriculum
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -62,6 +61,7 @@ import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
+import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.launch
 
 /**
@@ -224,6 +224,8 @@ fun CurriculumScreen(onBack: () -> Unit) {
                     courses = term.courses,
                     expanded = term.term in expanded,
                     onToggle = { toggleTerm(term.term, "term-${term.term}") },
+                    // 重新导入培养方案时学年/学期的分组会整批换掉，让它平滑进出
+                    modifier = Modifier.animateItem(),
                     onCourseClick = { detailCourse = it },
                 )
             }
@@ -317,10 +319,11 @@ private fun TermCard(
     expanded: Boolean,
     onToggle: () -> Unit,
     onCourseClick: (CurriculumCourse) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val haptics = rememberAppHaptics()
     val credit = courses.sumOf { it.credit ?: 0.0 }
-    AppCard(contentPadding = PaddingValues(0.dp)) {
+    AppCard(modifier = modifier, contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
@@ -349,7 +352,8 @@ private fun TermCard(
                 )
                 val arrowAngle by animateFloatAsState(
                     targetValue = if (expanded) 180f else 0f,
-                    animationSpec = tween(if (expanded) 250 else 200),
+                    // 展开慢一档（reveal）、收起快一档（state），与下面的 AnimatedVisibility 配对
+                    animationSpec = if (expanded) Motion.reveal() else Motion.state(),
                     label = "termArrow",
                 )
                 Icon(
@@ -361,8 +365,8 @@ private fun TermCard(
             }
             AnimatedVisibility(
                 visible = expanded,
-                enter = expandVertically(animationSpec = tween(250)) + fadeIn(tween(250)),
-                exit = shrinkVertically(animationSpec = tween(200)) + fadeOut(tween(200)),
+                enter = expandVertically(animationSpec = Motion.reveal()) + fadeIn(Motion.reveal()),
+                exit = shrinkVertically(animationSpec = Motion.state()) + fadeOut(Motion.state()),
             ) {
                 Column(
                     modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 12.dp),

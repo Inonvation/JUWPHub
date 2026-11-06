@@ -63,8 +63,10 @@ import edu.jxslu.schedule.ui.jwvw.JwImportMode
 import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
 import edu.jxslu.schedule.ui.reminder.ScoreAlertReminder
 import edu.jxslu.schedule.ui.reminder.SelectionAlertReminder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AddToList
 import me.rerere.hugeicons.stroke.ArrowRight01
@@ -103,8 +105,15 @@ fun SelectionScreen(onBack: () -> Unit) {
     // 已选课程入口行的副标题口径：null = Room 流首帧未到
     val allState by repo.observeAll().collectAsStateWithLifecycle(initialValue = null)
 
-    var rounds by remember { mutableStateOf(sync.cachedRounds()) }
-    var lastSyncAt by remember { mutableLongStateOf(sync.cachedFetchedAt()) }
+    // 轮次快照是 filesDir 里的一份 JSON：**读取必须离开主线程**（2026-11-06 审计 2-B）。
+    // 原实现把 `cachedRounds()` 放在 `remember` 的初值里 —— 那是组合期，等于主线程读盘；
+    // 现在初值给空，由下面那个 LaunchedEffect 在 IO 线程读回来。
+    // 代价是首帧没有数据，所以配一个 [snapshotLoaded]：读完之前轮次卡按「读取中」画，
+    // **不画**「当前没有开放的选课轮次」那段假结论（那才是会闪的那一下）。
+    var rounds by remember { mutableStateOf<List<SelectionRound>>(emptyList()) }
+    var lastSyncAt by remember { mutableLongStateOf(0L) }
+    /** 本地轮次快照是否已读回（false = 首帧，还没读到磁盘）。 */
+    var snapshotLoaded by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf<String?>(null) }
     var showIntervalPicker by remember { mutableStateOf(false) }
@@ -131,12 +140,18 @@ fun SelectionScreen(onBack: () -> Unit) {
         refreshing = true
         scope.launch {
             val outcome = sync.refresh(force = force)
-            rounds = sync.cachedRounds()
-            lastSyncAt = sync.cachedFetchedAt()
+            // 快照读取是文件 IO：`scope.launch` 默认就在 Main，必须显式换线程
+            val (cached, at) = withContext(Dispatchers.IO) {
+                sync.cachedRounds() to sync.cachedFetchedAt()
+            }
+            rounds = cached
+            lastSyncAt = at
+            snapshotLoaded = true
             refreshing = false
             lastError = outcome.failedReason
             // 轮次快照刚变过：重排提醒闹钟（开关关着时是撤销闹钟的空跑）
-            SelectionAlertReminder.scheduleNext(context)
+            // 它内部要读一次轮次快照（文件）+ 调 AlarmManager，别留在 Main
+            withContext(Dispatchers.IO) { SelectionAlertReminder.scheduleNext(context) }
             // 进页那次自动刷新**失败不进气泡**（轮次卡空态处说明）；手动「更新」才回报结果
             if (force) {
                 val results = outcome.results
@@ -153,6 +168,14 @@ fun SelectionScreen(onBack: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
+        // 先读本地快照（IO）再决定要不要打网络：缓存还新时 refresh 是零网络的空跑。
+        // 读不到也只当空快照（`cachedRounds()` 内部 runCatching 兜底），不会卡在「读取中」。
+        val (cached, at) = withContext(Dispatchers.IO) {
+            sync.cachedRounds() to sync.cachedFetchedAt()
+        }
+        rounds = cached
+        lastSyncAt = at
+        snapshotLoaded = true
         refresh(force = false)
     }
 
@@ -187,7 +210,10 @@ fun SelectionScreen(onBack: () -> Unit) {
                     target = target,
                     others = others,
                     now = now,
-                    syncing = refreshing,
+                    // 本地快照还没读回来也算「同步中」：按钮首帧就画「同步中…」，
+                    // 不先画「打开选课中心」再跳（2026-11-06 审计 2-B）
+                    syncing = refreshing || !snapshotLoaded,
+                    snapshotLoaded = snapshotLoaded,
                     lastSyncAt = lastSyncAt,
                     lastError = lastError,
                     onOpenCenter = { round ->
@@ -244,7 +270,8 @@ fun SelectionScreen(onBack: () -> Unit) {
                             prefs.setSelectionAlertEnabled(value)
                             // 清检查时刻 + 周期任务存废 + 即时核对都收在 onSettingsChanged
                             ScoreAlertReminder.onSettingsChanged(context)
-                            SelectionAlertReminder.scheduleNext(context)
+                            // 同上：scheduleNext 要读轮次快照（文件），别在 Main 上调
+                            withContext(Dispatchers.IO) { SelectionAlertReminder.scheduleNext(context) }
                             snackbar.showNotice(if (value) "已开启选课提醒" else "已关闭选课提醒")
                         }
                     },
@@ -285,6 +312,8 @@ private fun RoundsCard(
     others: List<SelectionRound>,
     now: Long,
     syncing: Boolean,
+    /** 本地快照是否已读回（首帧为 false，见调用点注释）。只影响「上次同步」那一行的措辞。 */
+    snapshotLoaded: Boolean,
     lastSyncAt: Long,
     lastError: String?,
     onOpenCenter: (SelectionRound?) -> Unit,
@@ -296,8 +325,15 @@ private fun RoundsCard(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
+            // 判据用 [snapshotLoaded] 而不是 [syncing]：手动刷新期间（syncing=true）轮次确实
+            // 可能是「没有开放」，那时不能改口说「正在读取」；只有还没读到磁盘时才说读取中。
+            // 首帧那句假结论（「当前没有开放的轮次」）就是靠这一条挡掉的（2026-11-06 审计 2-B）
             Text(
-                "当前没有开放的选课轮次（非选课期属正常）。选课开始后这里会显示轮次与时间。",
+                if (!snapshotLoaded) {
+                    "正在读取选课轮次…"
+                } else {
+                    "当前没有开放的选课轮次（非选课期属正常）。选课开始后这里会显示轮次与时间。"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 modifier = Modifier.padding(top = 4.dp),
@@ -349,7 +385,12 @@ private fun RoundsCard(
             )
         }
         Text(
-            if (lastSyncAt > 0) "上次同步 ${syncTimeLabel(lastSyncAt)}" else "尚未同步过",
+            when {
+                // 首帧还没读到磁盘：说「读取中」，不说「尚未同步过」（后者是结论，不是状态）
+                !snapshotLoaded -> "正在读取本地快照…"
+                lastSyncAt > 0 -> "上次同步 ${syncTimeLabel(lastSyncAt)}"
+                else -> "尚未同步过"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
             modifier = Modifier.padding(top = 6.dp),

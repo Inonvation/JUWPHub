@@ -2,7 +2,6 @@ package edu.jxslu.schedule.ui.scholar
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -78,6 +77,7 @@ import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
+import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.launch
 
 /**
@@ -358,6 +358,8 @@ fun ScholarScreen(onBack: () -> Unit) {
                 },
                 onShowAllCourses = { fullyExpanded = fullyExpanded + key },
                 onCourseClick = { detailCourse = it },
+                // 切维度 / 搜索过滤时分组会整批进出，让它平滑滑走而不是硬跳
+                modifier = Modifier.animateItem(),
             )
         }
 
@@ -504,10 +506,11 @@ private fun TotalsCard(totals: ScholarTotals) {
             Spacer(Modifier.height(10.dp))
             val ratio = (totals.earned / totals.required).coerceIn(0.0, 1.0).toFloat()
             // 进度条平滑到目标值（首次加载、切维度时都看得出在动）；旁边的文字用目标值，
-            // 免得数字跟着动画一路跳
+            // 免得数字跟着动画一路跳。原值 600ms 归到 page 档（见 Motion 归并表）：
+            // 这只是「内容出现」，不是手势跟手，600ms 让数字变化显得拖沓
             val animatedRatio by animateFloatAsState(
                 targetValue = ratio,
-                animationSpec = tween(600),
+                animationSpec = Motion.page(),
                 label = "creditProgress",
             )
             LinearProgressIndicator(
@@ -562,11 +565,12 @@ private fun GroupCard(
     onToggle: () -> Unit,
     onShowAllCourses: () -> Unit,
     onCourseClick: (ScholarCourse) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val haptics = rememberAppHaptics()
     // contentPadding = 0：点击区要铺满整张卡的宽度（含左右内边距），所以内边距移到
     // 点击区的里面，不然涟漪覆盖不到两侧那 14dp 的留白
-    AppCard(contentPadding = PaddingValues(0.dp)) {
+    AppCard(modifier = modifier, contentPadding = PaddingValues(0.dp)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -597,11 +601,11 @@ private fun GroupCard(
                 )
                 group.passed?.let { passed -> ResultTag(passed) }
                 // 箭头跟着展开态转。用动画而不是 `rotate(if (…) 180f else 0f)`：瞬变会让人
-                // 怀疑自己点没点上，尤其是明细还要 250ms 才铺开的那一下。
-                // 时长与下面 AnimatedVisibility 配对，展开慢一档、收起快一档（与笔记库同口径）
+                // 怀疑自己点没点上，尤其是明细还要慢一档才铺开的那一下。
+                // 时长与下面 AnimatedVisibility 配对，展开慢一档（reveal）、收起快一档（state）
                 val arrowAngle by animateFloatAsState(
                     targetValue = if (expanded) 180f else 0f,
-                    animationSpec = tween(if (expanded) 250 else 200),
+                    animationSpec = if (expanded) Motion.reveal() else Motion.state(),
                     label = "groupArrow",
                 )
                 Icon(
@@ -620,8 +624,8 @@ private fun GroupCard(
         }
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(animationSpec = tween(250)) + fadeIn(tween(250)),
-            exit = shrinkVertically(animationSpec = tween(200)) + fadeOut(tween(200)),
+            enter = expandVertically(animationSpec = Motion.reveal()) + fadeIn(Motion.reveal()),
+            exit = shrinkVertically(animationSpec = Motion.state()) + fadeOut(Motion.state()),
         ) {
             Column(
                 modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 12.dp),
@@ -635,8 +639,8 @@ private fun GroupCard(
                 val rest = courses.drop(preview.size)
                 AnimatedVisibility(
                     visible = rest.isNotEmpty(),
-                    enter = expandVertically(animationSpec = tween(250)) + fadeIn(tween(250)),
-                    exit = shrinkVertically(animationSpec = tween(200)) + fadeOut(tween(200)),
+                    enter = expandVertically(animationSpec = Motion.reveal()) + fadeIn(Motion.reveal()),
+                    exit = shrinkVertically(animationSpec = Motion.state()) + fadeOut(Motion.state()),
                 ) {
                     ShowRestRow(courseCount = rest.size, onClick = onShowAllCourses)
                 }

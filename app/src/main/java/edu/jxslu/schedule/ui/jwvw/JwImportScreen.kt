@@ -95,10 +95,12 @@ import edu.jxslu.schedule.data.session.NetworkHint
 import edu.jxslu.schedule.data.session.SessionStatus
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.CasLoginDialog
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.ImportTargetDialogHost
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.resolveImportTarget
 import edu.jxslu.schedule.ui.common.showNotice
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -221,6 +223,14 @@ fun JwImportScreen(
     var importDraft by remember { mutableStateOf<ImportDraft?>(null) }
     /** 弹窗里切换学期后的重爬进行中：期间「导入」禁用、学期行不可点。 */
     var termSwitching by remember { mutableStateOf(false) }
+    /**
+     * 切学期重爬的失败原因（非空 = 确认弹窗换成错误态，见 [switchTerm]）。
+     *
+     * 为什么需要单独一个状态：切学期失败时能用的两个出口（`statusNote` 状态条、错误浮层）
+     * 都铺在确认弹窗**底下**，用户看到的是「点了没反应」（2026-11-06 审计 J1）。
+     * 失败信息只能由弹窗自己渲染。
+     */
+    var termSwitchError by remember { mutableStateOf<TermSwitchFailure?>(null) }
     /** 一键导入的页面加载闸门：`loadUrl` 之后等目标页面加载完（或失败），见 [PageLoadGate]。 */
     var pageLoadGate by remember { mutableStateOf<PageLoadGate?>(null) }
     /** 考试导入的原始行 + 学期：确认弹窗选定目标课后按**目标课表**的开学日重映射（DESIGN §4.14）。 */
@@ -234,6 +244,10 @@ fun JwImportScreen(
     var emptyExamTerm by remember { mutableStateOf<String?>(null) }
     /** 成绩模式：待确认的导入（学期 → 条数），确认后按学期替换入库。 */
     var pendingScores by remember { mutableStateOf<List<Pair<String, List<edu.jxslu.schedule.domain.ScoreRecord>>>?>(null) }
+    /** 成绩写入进行中：期间弹窗不可关、按钮禁用（关掉也还在写，会让人以为没生效）。 */
+    var scoresImporting by remember { mutableStateOf(false) }
+    /** 成绩写入失败原因：非空时显示在弹窗正文里——**不关弹窗**，用户可原地重试。 */
+    var scoresError by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var pageState by remember { mutableStateOf<PageState>(PageState.Loading) }
     var statusNote by remember { mutableStateOf("正在打开学校统一身份认证登录…") }
@@ -666,6 +680,32 @@ fun JwImportScreen(
     }
 
     /**
+     * 打开页面失败时的原因（[runOneClickImport] 的返回值）。
+     *
+     * 优先取错误浮层的标题：那是 [JwImportDiagnosis] 给出的**具体**诊断（连接超时 / 教务返回
+     * 500 / 会话已失效），比状态条里那句「打开 X 超时」有用；没有错误态时才退回状态条
+     * ——超时路径只写状态条、不铺浮层（见 [openPageAndWait]）。
+     *
+     * `retryUrl` 非空 = 失败在认证链上（票据已消费 / 会话失效）：这时**光按弹窗里的「重试」
+     * 是修不好的**（它会重放同一个业务页、又被判成未登录），必须回入口重走一次认证。
+     * 出路写在原因后面，用户不用猜。
+     *
+     * 必须定义在 [runOneClickImport] **之前**：Kotlin 局部函数不能前向引用
+     * （`.agents/rules/import-jw.md`）。
+     */
+    fun pageOpenFailureReason(): String {
+        val error = pageState as? PageState.Error
+        if (error != null) {
+            return if (error.retryUrl != null) {
+                "${error.title}（需要重新走一次统一认证：关掉本弹窗后点右上角「刷新」）"
+            } else {
+                error.title
+            }
+        }
+        return statusNote.ifBlank { "页面没有打开" }
+    }
+
+    /**
      * 一键导入（DESIGN §4.4）：依次打开理论课表页与实验课表页，各抽一次，合成一批后弹一次
      * 识别结果，确认后写进同一张课表。
      *
@@ -678,10 +718,14 @@ fun JwImportScreen(
      * [forceTerm] 非空 = 确认弹窗里切换了学期（DESIGN §4.31 前置的学期选择）：带着
      * `xnxq01id` 参数强制重载理论页（此时不能沿用「已在理论页就不重载」的捷径——
      * 页面要渲染的就是这个学期的数据），实验页同样跟这个学期。
+     *
+     * 返回值 = **失败原因**（null = 已产出 [importDraft]）。存在的理由只有一个：确认弹窗里的
+     * 「切换学期」是唯一会在这里失败后还停在弹窗上的调用点，而 `statusNote` 与错误浮层都被
+     * 那个弹窗盖住，看不到（2026-11-06 审计 J1）。自动触发与手动按钮忽略返回值，行为不变。
      */
-    suspend fun runOneClickImport(forceTerm: String? = null) {
-        val wv = webView ?: return
-        if (busy) return
+    suspend fun runOneClickImport(forceTerm: String? = null): String? {
+        val wv = webView ?: return "页面还没准备好，请稍后重试"
+        if (busy) return "正在识别中，请稍候再试"
         // 自动触发与手动点击共用这一条「跑过了」的标记
         autoImportTried = true
         busy = true
@@ -693,7 +737,9 @@ fun JwImportScreen(
             // 没指定学期且已在理论课表页就不重复加载：用户可能自己在下拉里选了学期，
             // 重新加载会把这个选择打回教务默认，还白等一次页面加载
             if (theoryUrl != null || JwUrls.schedulePageKind(currentUrl) != JwSchedulePage.Theory) {
-                if (!openPageAndWait(theoryUrl ?: JwUrls.SCHEDULE_LIST, THEORY_URL_PART, "学期理论课表")) return
+                if (!openPageAndWait(theoryUrl ?: JwUrls.SCHEDULE_LIST, THEORY_URL_PART, "学期理论课表")) {
+                    return pageOpenFailureReason()
+                }
             }
             statusNote = "正在读取学期理论课表…"
             val theory = OneClickImport.theorySource(
@@ -701,7 +747,9 @@ fun JwImportScreen(
             )
 
             statusNote = "正在读取实验课表…"
-            if (!openPageAndWait(JwUrls.labScheduleUrl(forceTerm ?: theory.term), LAB_URL_PART, "实验课表")) return
+            if (!openPageAndWait(JwUrls.labScheduleUrl(forceTerm ?: theory.term), LAB_URL_PART, "实验课表")) {
+                return pageOpenFailureReason()
+            }
             val lab = OneClickImport.labSource(
                 unwrapJsString(evalJs(wv, SyjxScheduleParser.EXTRACT_JS)).orEmpty(),
             )
@@ -710,10 +758,13 @@ fun JwImportScreen(
             if (result.blocked != null) {
                 statusNote = result.blocked
                 snackbar.showNotice(result.blocked)
-                return
+                return result.blocked
             }
             statusNote = result.breakdown.joinToString("，") { (label, count) -> "$label $count 条" } +
                 "，确认后写入"
+            // 新草稿 = 新的一次识别结果：上一次切学期的失败态必须清掉，
+            // 否则下一轮导入会一开弹窗就顶着旧错误（termSwitchError 与 importDraft 是两个状态）
+            termSwitchError = null
             importDraft = ImportDraft(
                 result = ImportParseResult.Success(result.courses, term = result.term, note = result.note),
                 breakdown = result.breakdown,
@@ -721,8 +772,32 @@ fun JwImportScreen(
                 defaultMerge = true,
                 termOptions = result.termOptions,
             )
+            return null
         } finally {
             busy = false
+        }
+    }
+
+    /**
+     * 确认弹窗里「切换数据学期」：带着新学期参数重爬两张表（DESIGN §4.4）。
+     *
+     * 成功 = [importDraft] 被替换，弹窗按新数据重绘（学期行、分项条数、示例课名一起变）。
+     * 失败 = 原因落进 [termSwitchError]，由弹窗自己渲染成一行错误 + 「重试」——
+     * **不能只写 `statusNote` / 弹 snackbar**：那两个出口都在弹窗底下，用户看到的是
+     * 「点了没反应」（2026-11-06 审计 J1）。旧草稿保持不动，用户也可以直接按「导入」。
+     *
+     * 定义在 [runOneClickImport] 之后：Kotlin 局部函数不能前向引用。
+     */
+    fun switchTerm(opt: TermOption) {
+        if (termSwitching) return
+        // **不要在这里清 `termSwitchError`**：清了弹窗会先消失再（失败时）弹回来，用户点
+        // 「重试」只看到弹窗一闪。留着它，弹窗原地变成「重试中」并把两个按钮禁用；
+        // 重试成功时下面的 `else null` 才把它收掉（2026-11-06 交叉复核）。
+        termSwitching = true
+        scope.launch {
+            val failure = runOneClickImport(forceTerm = opt.value)
+            termSwitching = false
+            termSwitchError = failure?.let { TermSwitchFailure(opt, it) }
         }
     }
 
@@ -878,6 +953,11 @@ fun JwImportScreen(
                 append("，确认后写入")
             }
             pendingExamImport = rows to term
+            // 上一次「切换学期失败」的错误必须在这里清掉：切学期重爬期间用户可以把确认弹窗
+            // 关掉（取消/点遮罩没被 `switching` 拦住），重爬再失败时错误态被置上却没有弹窗
+            // 能显示它，会静默存着，直到用户下一次导入（比如这次导考试）才突然弹出来
+            // 「切换学期失败」——那时他根本不在切学期（2026-11-06 交叉复核）。
+            termSwitchError = null
             importDraft = ImportDraft(
                 ImportParseResult.Success(mapping.courses, term = term, note = estimateNote),
             )
@@ -970,6 +1050,9 @@ fun JwImportScreen(
             }
             val grouped = records.groupBy { it.term }.toSortedMap(compareByDescending { it })
             statusNote = "解析到 ${grouped.size} 个学期共 ${records.size} 条成绩，确认后写入"
+            // 新一批待写入数据 = 上一次写入的失败态作废（与课表侧的 termSwitchError 同一条纪律：
+            // 错误态必须跟着它所属的那批数据一起生灭，否则新弹窗一开就顶着旧错误）
+            scoresError = null
             pendingScores = grouped.entries.map { (term, list) -> term to list }
         } finally {
             busy = false
@@ -1575,6 +1658,19 @@ fun JwImportScreen(
     }
 
     importDraft?.let { draft ->
+        // 切学期失败 → 弹窗换成错误态（2026-11-06 审计 J1）。
+        // 与正常弹窗**互斥**：同一时刻只有一个 AlertDialog，用户不会看到两层压在一起；
+        // 关掉错误态就回到原草稿的确认弹窗（[importDraft] 从头到尾没动过）。
+        val switchFailure = termSwitchError
+        if (switchFailure != null) {
+            TermSwitchErrorDialog(
+                failure = switchFailure,
+                retrying = termSwitching,
+                onRetry = { switchTerm(switchFailure.term) },
+                onDismiss = { termSwitchError = null },
+            )
+            return@let
+        }
         val courses = draft.result.courses
         // 目标课表强制选择（DESIGN §4.9）：多课表之后「导到当前课表」不再是唯一合理解释，
         // 每次都让用户明确选目标（可新建）与覆盖/合并方式，避免静默覆盖正在用的数据
@@ -1585,16 +1681,10 @@ fun JwImportScreen(
             breakdown = draft.breakdown,
             availableTerms = draft.termOptions.takeIf { it.isNotEmpty() },
             switching = termSwitching,
-            onTermSelected = { opt ->
-                // 切学期 = 带着新学期参数重爬两张表（DESIGN §4.4）：
-                // 重爬成功时 importDraft 被替换（弹窗数据随之刷新），失败时保持原草稿
-                // （失败提示由 runOneClickImport 内部的错误浮层/状态条给出）
-                termSwitching = true
-                scope.launch {
-                    runOneClickImport(forceTerm = opt.value)
-                    termSwitching = false
-                }
-            },
+            // 切学期 = 带着新学期参数重爬两张表（DESIGN §4.4）。成功时 importDraft 被替换、
+            // 弹窗按新数据重绘；失败时原因落进 termSwitchError，由上面那个分支渲染——
+            // **不再**指望错误浮层/状态条（它们在弹窗底下，用户看不到）。
+            onTermSelected = { opt -> switchTerm(opt) },
             title = when {
                 // 一键导入：识别的来源是两张课表，分项条数在弹窗正文里逐项列出
                 draft.breakdown != null -> "识别到 ${courses.size} 条课次"
@@ -1676,6 +1766,8 @@ fun JwImportScreen(
             onDismiss = {
                 importDraft = null
                 pendingExamImport = null
+                // 失败态跟着草稿一起收：两个状态必须同生同灭，否则下次开弹窗会顶着旧错误
+                termSwitchError = null
             },
         )
     }
@@ -1688,6 +1780,7 @@ fun JwImportScreen(
             onDismissRequest = { emptyExamTerm = null },
             title = { Text("暂时没有考试安排") },
             text = {
+                DialogWindowFadeEffect()
                 Text(
                     "$term 教务还没有录入考试安排。教务通常考前数周才排考，" +
                         "过段时间再来查一次即可。",
@@ -1702,9 +1795,15 @@ fun JwImportScreen(
     pendingScores?.let { grouped ->
         val total = grouped.sumOf { it.second.size }
         AlertDialog(
-            onDismissRequest = { pendingScores = null },
+            onDismissRequest = {
+                if (!scoresImporting) {
+                    pendingScores = null
+                    scoresError = null
+                }
+            },
             title = { Text("确认导入成绩") },
             text = {
+                DialogWindowFadeEffect()
                 Column {
                     Text("将导入 ${grouped.size} 个学期共 $total 条成绩，相同学期的旧数据会被替换：")
                     Spacer(Modifier.height(8.dp))
@@ -1720,24 +1819,71 @@ fun JwImportScreen(
                             )
                         }
                     }
+                    // 失败原因写在**弹窗正文里**：写库失败时弹窗不关，用户能原地重试。
+                    // 换成气泡/返回上一页都不行——前者被弹窗盖住，后者等于把「一次都没写成」
+                    // 说成「已导入」（2026-11-06 审计 J3）。
+                    scoresError?.let { message ->
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "写入失败：$message",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Text(
+                            "这次导入一个学期都没写进去，可以原地重试。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        )
+                    }
                 }
             },
             confirmButton = {
                 TextButton(
+                    enabled = !scoresImporting,
                     onClick = {
-                        val pending = grouped
-                        pendingScores = null
+                        // 整批一个事务（`ScoreRepository.replaceTerms`）：要么全部学期都换，
+                        // 要么一行都不动——不会留下「前几个学期已更新」的半套数据，
+                        // 也不会让异常冒到组合作用域把进程带走（2026-11-06 审计 J3）。
+                        scoresError = null
+                        scoresImporting = true
                         scope.launch {
-                            pending.forEach { (term, list) -> scoreRepo.replaceTerm(term, list) }
+                            try {
+                                scoreRepo.replaceTerms(grouped)
+                            } catch (e: CancellationException) {
+                                // 取消（关窗 / 退出）必须原样抛：事务自己回滚，
+                                // 吞掉它会把「用户走了」变成一条假的失败提示
+                                scoresImporting = false
+                                throw e
+                            } catch (e: Throwable) {
+                                scoresImporting = false
+                                scoresError = e.message?.takeIf { it.isNotBlank() } ?: "数据库写入异常"
+                                return@launch
+                            }
+                            scoresImporting = false
+                            pendingScores = null
                             // 终态反馈与课表导入同一口径：气泡落在返回的那一页（DESIGN §3.3）
-                            JwImportResultBus.publish("已导入 ${pending.size} 个学期共 $total 条成绩")
+                            JwImportResultBus.publish("已导入 ${grouped.size} 个学期共 $total 条成绩")
                             onBack()
                         }
                     },
-                ) { Text("导入") }
+                ) {
+                    Text(
+                        when {
+                            scoresImporting -> "写入中…"
+                            scoresError != null -> "重试"
+                            else -> "导入"
+                        },
+                    )
+                }
             },
             dismissButton = {
-                TextButton(onClick = { pendingScores = null }) { Text("取消") }
+                TextButton(
+                    enabled = !scoresImporting,
+                    onClick = {
+                        pendingScores = null
+                        scoresError = null
+                    },
+                ) { Text("取消") }
             },
         )
     }
@@ -1857,6 +2003,16 @@ private data class ImportDraft(
 )
 
 /**
+ * 切学期失败的入参（[JwImportScreen] 的 `termSwitchError`）。
+ *
+ * 记住**是哪个学期**失败：重试直接用它，不让用户在下拉里再选一遍（失败一次已经够烦）。
+ */
+private data class TermSwitchFailure(
+    val term: TermOption,
+    val reason: String,
+)
+
+/**
  * 落回主界面后那条气泡的文案（[JwImportResultBus]，DESIGN §3.3）。
  *
  * 一句话说清三件事：导了几门、覆盖还是合并、导到哪张表。[timetableName] 读不到时省掉那一截
@@ -1959,6 +2115,59 @@ private fun ErrorOverlay(
         Spacer(Modifier.height(16.dp))
         TextButton(onClick = onRetry) { Text("重试") }
     }
+}
+
+/**
+ * 切学期失败的弹窗态（2026-11-06 审计 J1）。
+ *
+ * 为什么不是给 [ImportTargetDialogHost] 加一个 `error` 参数：那个组件在 `ui/common`，
+ * 是教务 / JSON / 剪贴板 / 考试四条导入路径共用的；为一个只有教务会传的状态再扩一次
+ * 公共签名（`switching` 已经是先例）会把「导入确认」这个通用弹窗绑死到教务的重爬流程上。
+ * 这里用「同一个位置换一个弹窗」实现，用户视线不动、原因可见、重试直达。
+ *
+ * 两个按钮的分工：
+ * - **重试**：用**当初失败的那个学期**重爬（[TermSwitchFailure.term]），不让用户重选一遍；
+ * - **返回导入**：回到原草稿的确认弹窗——旧学期的识别结果一直在，可以直接导入它，
+ *   也可以在那里重新点学期下拉（原有入口没被拿掉）。
+ */
+@Composable
+private fun TermSwitchErrorDialog(
+    failure: TermSwitchFailure,
+    retrying: Boolean,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!retrying) onDismiss() },
+        title = { Text("切换学期失败") },
+        text = {
+            DialogWindowFadeEffect()
+            Column {
+                Text(
+                    "没能读到「${failure.term.text}」的课表：",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    failure.reason,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "当前仍显示原来那个学期的识别结果；可以直接导入它，或重试。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onRetry, enabled = !retrying) { Text("重试") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !retrying) { Text("返回导入") }
+        },
+    )
 }
 
 /**

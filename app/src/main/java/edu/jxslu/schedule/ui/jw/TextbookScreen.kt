@@ -98,7 +98,8 @@ fun TextbookScreen(onBack: () -> Unit) {
             }
         }
         items(groups.entries.toList(), key = { it.key }) { (course, list) ->
-            AppCard(contentPadding = PaddingValues(0.dp)) {
+            // 切学期后整份清单会被替换，逐门卡平滑进出（key 是课程名，见上）
+            AppCard(modifier = Modifier.animateItem(), contentPadding = PaddingValues(0.dp)) {
                 Column(
                     Modifier
                         .fillMaxWidth()

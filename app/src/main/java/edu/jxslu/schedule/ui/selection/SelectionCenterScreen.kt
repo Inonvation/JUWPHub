@@ -455,6 +455,8 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
                             busy = course.id in submitting,
                             onSelect = { confirmSubmit = course },
                             onDrop = { confirmDrop = course },
+                            // 重新匹配 / 换轮次后这一组课程会整批换掉，逐条平滑进出
+                            modifier = Modifier.animateItem(),
                         )
                     }
                 }
@@ -559,6 +561,8 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
                         busy = course.id in submitting,
                         onSelect = { confirmSubmit = course },
                         onDrop = { confirmDrop = course },
+                        // 筛选（只看已选 / 属性）会让条目逐条进出，这里最需要它
+                        modifier = Modifier.animateItem(),
                     )
                 }
 
@@ -794,8 +798,9 @@ private fun CourseCard(
     busy: Boolean,
     onSelect: () -> Unit,
     onDrop: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    AppCard {
+    AppCard(modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 course.name,

@@ -22,8 +22,16 @@ import kotlinx.coroutines.withContext
  * AI 服务配置页（DESIGN §4.39）的状态容器。
  *
  * 地址 / 模型 / 脱敏走 DataStore（经 Repository 单流）；**API Key 走
- * [AiCredentialStore] 加密存储**，不进 DataStore。首帧真值同 MeViewModel 的
- * 模式（`runBlocking { first() }`），避免开关先按默认渲染再跳一次。
+ * [AiCredentialStore] 加密存储**，不进 DataStore。
+ *
+ * **首帧真值必须同步拿到**（同 MeViewModel 的口径）：这 6 个值直接决定开关与选中项怎么画，
+ * 用默认值先渲染一次再跳过去，用户看到的是「开关自己动了一下」——这是明确要避免的。
+ * 所以构造期读一次 [AiSettingsInitial] 快照。
+ *
+ * 2026-11-06 审计 2-A：原先 6 个 `stateIn(...)` 各自 `runBlocking { first() }`，等于 6 段
+ * 主线程阻塞；现在收成**一段**（[initial]）。DataStore 的首次读盘只发生一次（之后走内存），
+ * 所以真正的收益是「6 次阻塞段 → 1 次」而不是「少读 5 次盘」。
+ * 不改的选项：把 `initialValue` 换成硬编码默认值 + 首帧后刷新 —— 那就是上面说的闪一下，不做。
  */
 class AiSettingsViewModel(
     private val repo: ScheduleRepository,
@@ -31,26 +39,29 @@ class AiSettingsViewModel(
     private val client: AiScheduleClient,
 ) : ViewModel() {
 
+    /** 构造期唯一一次阻塞读（见类注释）；后面 6 条流都以它为 `initialValue`。 */
+    private val initial: AiSettingsInitial = runBlocking { AiSettingsInitial.read(repo) }
+
     val baseUrl: StateFlow<String> = repo.aiBaseUrl.stateIn(
-        viewModelScope, SharingStarted.Eagerly, runBlocking { repo.aiBaseUrl.first() },
+        viewModelScope, SharingStarted.Eagerly, initial.baseUrl,
     )
 
     val model: StateFlow<String> = repo.aiModel.stateIn(
-        viewModelScope, SharingStarted.Eagerly, runBlocking { repo.aiModel.first() },
+        viewModelScope, SharingStarted.Eagerly, initial.model,
     )
 
     val maskTeacher: StateFlow<Boolean> = repo.aiMaskTeacher.stateIn(
-        viewModelScope, SharingStarted.Eagerly, runBlocking { repo.aiMaskTeacher.first() },
+        viewModelScope, SharingStarted.Eagerly, initial.maskTeacher,
     )
 
     /** 思考档位（none / low / high / max）。 */
     val thinkingEffort: StateFlow<String> = repo.aiThinkingEffort.stateIn(
-        viewModelScope, SharingStarted.Eagerly, runBlocking { repo.aiThinkingEffort.first() },
+        viewModelScope, SharingStarted.Eagerly, initial.thinkingEffort,
     )
 
     /** 是否在 AI 调课页显示思考过程。 */
     val showReasoning: StateFlow<Boolean> = repo.aiShowReasoning.stateIn(
-        viewModelScope, SharingStarted.Eagerly, runBlocking { repo.aiShowReasoning.first() },
+        viewModelScope, SharingStarted.Eagerly, initial.showReasoning,
     )
 
     /**
@@ -60,9 +71,18 @@ class AiSettingsViewModel(
      * [AiScheduleConfig.looksVisionModel] 只用于在配置页提示「看着像视觉模型」。
      */
     val supportsImage: StateFlow<Boolean> = repo.aiSupportsImage.stateIn(
-        viewModelScope, SharingStarted.Eagerly, runBlocking { repo.aiSupportsImage.first() },
+        viewModelScope, SharingStarted.Eagerly, initial.supportsImage,
     )
 
+    /**
+     * API Key（**构造期同步读**，2026-11-06 审计复核后保留）。
+     *
+     * 它决定「API Key」那一行的副标题是「已配置」还是「未配置」——异步读会让它先显示
+     * 「未配置」再跳成「已配置」，这是本页最容易被当成 bug 的一处闪烁。
+     * 成本可控：`AiCredentialStore.prefs` 是 `lazy`（Keystore 只在首次解密时初始化），
+     * `Graph.aiCredentialStore` 又是进程单例 → 整个进程只付一次。
+     * **不能改成 `LaunchedEffect` / `viewModelScope.launch`**：见上，首帧就要真值。
+     */
     private val _apiKey = MutableStateFlow(credentialStore.readApiKey())
     val apiKey: StateFlow<String?> = _apiKey.asStateFlow()
 
@@ -131,5 +151,34 @@ class AiSettingsViewModel(
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
             AiSettingsViewModel(repo, credentialStore, client) as T
+    }
+}
+
+/**
+ * 配置页 6 个偏好的首帧快照（2026-11-06 审计 2-A）。
+ *
+ * 存在的唯一目的：把 6 段 `runBlocking { first() }` 收成 1 段（见 [AiSettingsViewModel] 类注释）。
+ * 读顺序无关紧要——6 条流背后是同一个 DataStore，首次读盘只发生一次，其余命中内存。
+ * 放在 ViewModel 文件里而不是 Repository：这是**这一个页面**的首帧需求，
+ * 不属于数据层契约（`data/repo` 也不该为一个 UI 的构造期阻塞新增 API）。
+ */
+private data class AiSettingsInitial(
+    val baseUrl: String,
+    val model: String,
+    val maskTeacher: Boolean,
+    val thinkingEffort: String,
+    val showReasoning: Boolean,
+    val supportsImage: Boolean,
+) {
+    companion object {
+        /** 只允许在构造期调用一次（调用方用 `runBlocking` 包着）。 */
+        suspend fun read(repo: ScheduleRepository): AiSettingsInitial = AiSettingsInitial(
+            baseUrl = repo.aiBaseUrl.first(),
+            model = repo.aiModel.first(),
+            maskTeacher = repo.aiMaskTeacher.first(),
+            thinkingEffort = repo.aiThinkingEffort.first(),
+            showReasoning = repo.aiShowReasoning.first(),
+            supportsImage = repo.aiSupportsImage.first(),
+        )
     }
 }

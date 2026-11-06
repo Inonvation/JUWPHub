@@ -47,6 +47,9 @@ fun SelectionConfirmDialog(
             )
         },
         text = {
+            // 必须在弹窗内容槽里调用：这里 `LocalView` 才是 DialogLayout，才拿得到 dialog window
+            // （原先写在 `AlertDialog(…)` 外面 → 拿到的是页面窗口，窗口动画从来没生效过）
+            DialogWindowFadeEffect()
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -145,7 +148,6 @@ fun SelectionConfirmDialog(
             ) { Text("取消") }
         },
     )
-    DialogWindowFadeEffect()
 }
 
 @Composable

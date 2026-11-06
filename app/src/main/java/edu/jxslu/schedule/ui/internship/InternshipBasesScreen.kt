@@ -190,8 +190,10 @@ private fun BaseList(
         }
         groups.forEach { (category, list) ->
             item { CategoryHeader(category, list.size) }
-            items(list) { base ->
-                BaseCard(base = base, onClick = { onClick(base) })
+            // key 用教务内部 id（`InternshipBase.id` 的 KDoc 写明「仅作列表身份」）：
+            // 重新抓取后整份清单会被替换，有稳定 key 才能逐条平滑进出
+            items(list, key = { it.id }) { base ->
+                BaseCard(base = base, onClick = { onClick(base) }, modifier = Modifier.animateItem())
             }
         }
         item {
@@ -217,9 +219,9 @@ private fun CategoryHeader(title: String, count: Int) {
 }
 
 @Composable
-private fun BaseCard(base: InternshipBase, onClick: () -> Unit) {
+private fun BaseCard(base: InternshipBase, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val haptics = rememberAppHaptics()
-    AppCard {
+    AppCard(modifier = modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

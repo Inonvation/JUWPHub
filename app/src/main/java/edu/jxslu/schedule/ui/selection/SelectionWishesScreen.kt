@@ -244,6 +244,8 @@ fun SelectionWishesScreen(onBack: () -> Unit) {
                         },
                         onClick = { editing = wish },
                         onDelete = { deleting = wish },
+                        // 增删 / 改优先级都会重排：这一列是真正逐条变化的那种列表
+                        modifier = Modifier.animateItem(),
                     )
                 }
                 item {
@@ -314,8 +316,9 @@ private fun WishCard(
     onOpenCenter: () -> Unit,
     onClick: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    AppCard(onClick = onClick) {
+    AppCard(modifier = modifier, onClick = onClick) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 wish.nameKeyword,
@@ -411,6 +414,7 @@ private fun WishEditDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial.id.isEmpty()) "添加预选课程" else "编辑预选课程") },
         text = {
+            DialogWindowFadeEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = name,

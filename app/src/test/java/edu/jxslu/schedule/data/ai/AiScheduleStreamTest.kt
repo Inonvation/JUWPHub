@@ -1,7 +1,10 @@
 package edu.jxslu.schedule.data.ai
 
 import edu.jxslu.schedule.data.ai.AiScheduleClient.StreamEvent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import okio.Buffer
@@ -108,5 +111,31 @@ class AiScheduleStreamTest {
             read(sseOf("""{"choices":[{"delta":{"content":"半截"},"finish_reason":"length"}]}"""))
         }.exceptionOrNull()
         assertTrue(ex is AiScheduleClient.AiHttpException)
+    }
+
+    /**
+     * 2026-11-06 审计 A1：读流侧 `trySend` 不看返回值，缓冲一满就**静默丢分片** ——
+     * 工具参数变成半截 JSON，用户看到「已整理 0 处改动」，真实原因是客户端截断。
+     *
+     * 这条用例故意把容量压到 1（远小于 40 个分片）、消费端每收一条等一下：
+     * 读流侧必须**背压**（`trySendBlocking`），不能丢。上面的 `read()` 用的是
+     * UNLIMITED 通道，永远照不出这个 bug。
+     */
+    @Test
+    fun `消费端慢时分片一个都不丢`() = runBlocking {
+        val sse = sseOf(*Array(40) { """{"choices":[{"delta":{"content":"c$it"}}]}""" })
+        val channel = Channel<StreamEvent>(capacity = 1)
+        val producer = launch(Dispatchers.IO) {
+            AiScheduleClient.create().readStreamForTest(Buffer().apply { writeUtf8(sse) }, channel)
+            channel.close()
+        }
+        val got = mutableListOf<String>()
+        while (true) {
+            val event = channel.receiveCatching().getOrNull() ?: break
+            got += (event as StreamEvent.Content).delta
+            delay(2)
+        }
+        producer.join()
+        assertEquals((0 until 40).map { "c$it" }, got)
     }
 }

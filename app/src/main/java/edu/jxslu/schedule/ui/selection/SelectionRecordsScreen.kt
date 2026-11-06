@@ -49,6 +49,7 @@ import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.domain.CourseSelection
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.showNotice
@@ -213,7 +214,10 @@ fun SelectionRecordsScreen(onBack: () -> Unit) {
                     }
                 } else {
                     item { TermHeader(term = selectedTerm.orEmpty(), rows = rows) }
-                    items(rows, key = { it.id }) { row -> SelectionCard(row) }
+                    items(rows, key = { it.id }) { row ->
+                        // 同步后整学期记录会被替换：key 是选课记录 id，逐条平滑进出
+                        SelectionCard(row, Modifier.animateItem())
+                    }
                 }
             }
         }
@@ -224,6 +228,7 @@ fun SelectionRecordsScreen(onBack: () -> Unit) {
             onDismissRequest = { showTermPicker = false },
             title = { Text("加载其他学期") },
             text = {
+                DialogWindowFadeEffect()
                 LazyColumn(Modifier.heightIn(max = 380.dp)) {
                     items(moreTerms, key = { it }) { term ->
                         Text(
@@ -300,8 +305,8 @@ private fun TermHeader(term: String, rows: List<CourseSelection>) {
 
 /** 一条选课记录（卡面语言与成绩卡/考试卡一致：左主信息、右侧学分）。 */
 @Composable
-private fun SelectionCard(row: CourseSelection) {
-    AppCard {
+private fun SelectionCard(row: CourseSelection, modifier: Modifier = Modifier) {
+    AppCard(modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 row.name,
