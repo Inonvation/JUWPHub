@@ -134,6 +134,30 @@ class PowerPayTest {
         assertNull(PowerPayModels.bankCashierUrlFrom("""{"code":500,"msg":"未知异常，请联系管理员"}"""))
     }
 
+    /**
+     * 聚合收银台的 6230 分支把 `jsonStr` 交给原生桥（payload 取自 2026-11-06 真实
+     * `gatewayPay` 响应）。拼出来的就是农行手机版收银台；用户要的那一页。
+     */
+    @Test
+    fun abcCashierUrlFromBridgePayload() {
+        val payload = """{"param":{"abcTokenID":"17939862043565516333","downloadUrl":"http://mobile.abchina.com/download/clientDownload/zh_CN/MB_Index.aspx","returnUrl":"https://yktpay.juwp.edu.cn/payment/charges/frontNotify/2611060300005001370000501275"},"primaryKey":"synjones.ecampus.pay.abc"}"""
+        assertEquals(
+            "https://mobile.abchina.com/mpaynew/mpay/index?TOKEN=17939862043565516333",
+            PowerPayModels.abcCashierUrlFromBridge(payload),
+        )
+    }
+
+    /** 别的渠道 / 坏 payload 一律不处理：不猜 URL，也不让桥抛异常打断页面。 */
+    @Test
+    fun abcCashierUrlFromBridgeRejectsOthers() {
+        assertNull(PowerPayModels.abcCashierUrlFromBridge(null))
+        assertNull(PowerPayModels.abcCashierUrlFromBridge(""))
+        assertNull(PowerPayModels.abcCashierUrlFromBridge("not-json"))
+        assertNull(PowerPayModels.abcCashierUrlFromBridge("""{"primaryKey":"synjones.ecampus.pay.wechat","param":{"abcTokenID":"1"}}"""))
+        assertNull(PowerPayModels.abcCashierUrlFromBridge("""{"primaryKey":"synjones.ecampus.pay.abc","param":{}}"""))
+        assertNull(PowerPayModels.abcCashierUrlFromBridge("""{"primaryKey":"synjones.ecampus.pay.abc"}"""))
+    }
+
     /** 渠道标识是实测值，改错 = 打到别的支付方式的接口上。 */
     @Test
     fun channelConstantsMatchMeasuredPayList() {

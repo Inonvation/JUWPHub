@@ -341,7 +341,18 @@ POST https://charge.juwp.edu.cn/blade-pay/pay          # 注意路径在根域�
 3. 弹层落「等待支付结果」步：从内嵌页回到 App 自动查一次单（`rememberResumeTick`）、
    另有手动「检查到账」；只有 `order.status=1` 才进「支付成功，已确认扣款」，没查到只说
    「银行侧回调可能有延迟」——不编成功、也不报成失败。
-4. **慢响应与重试**（2026-11-06）：`paystep=2` 生成收银台会话会慢到 20s 以上（PC 端同请求
+4. **农行支付走原生桥**（2026-11-06 实测）：选「农行缴电费专用」后页面收到
+   `respCode=6230`，把 `obj.extendParams.jsonStr` 交给宿主 App 的原生桥
+   （`window.AndroidFunc.SynObject(jsonStr)`），自己不跳转。实测 payload：
+   `{"param":{"abcTokenID":"…","downloadUrl":"…","returnUrl":"…"},"primaryKey":"synjones.ecampus.pay.abc"}`；
+   `abcTokenID` 即农行 H5 收银台的 `TOKEN`（`mobile.abchina.com/mpaynew/mpay/index?TOKEN=…`，
+   打开就是「身份验证 / 商户名称 / 订单编号 / 订单金额 / 手机号 → 验证码」那一页）。
+   所以 `PowerBankPayScreen` 注入 `AndroidFunc`（`CashierBridge`）：解析 payload → 拼 URL →
+   同一 WebView 打开；解析失败静默返回（桥抛异常会落进页面的 iOS 分支、打断 promise 链）。
+   **R8 必须 keep 这个类**（`app/proguard-rules.pro`），否则只有 release 包卡在「加载中」。
+   另一条排错口径：农行下单走 `POST /payment/orders/{transactionId}/gatewayPay`，
+   而 `/payment/orders/{tx}` 只服务带 `payAcctId` 的渠道（打错会 403，看起来像权限问题）。
+5. **慢响应与重试**（2026-11-06）：`paystep=2` 生成收银台会话会慢到 20s 以上（PC 端同请求
    1.5s、平台网关上限 60s），共享 OkHttp 的 20s 读超时会把它误报成「网络不给力」。
    `PowerClient.create` 单独放宽到读 45s / 写 30s / 总 60s；若仍失败，`openBankCashier`
    保留已建的订单号，金额步给「重新打开支付页」——同一单再取一条会话，不重复下单。

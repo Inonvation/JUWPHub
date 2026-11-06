@@ -284,6 +284,43 @@ fun orderStateFrom(raw: String): PowerOrderState? = runCatching {
         }
     }.getOrDefault(false)
 
+    /**
+     * 收银台页 **6230 分支**交给原生桥的 `jsonStr` → 农行手机版收银台 URL（2026-11-06 实测）。
+     *
+     * 聚合收银台选「农行缴电费专用」后，页面并不自己跳转：`pay()` 收到
+     * `respCode=6230` 就把 `obj.extendParams.jsonStr` 交给**宿主 App 的原生桥**
+     * （`window.AndroidFunc.SynObject(jsonStr)`），由 App 去拉起农行的支付。浏览器里没有这个桥，
+     * 页面会一直停在「加载中」——这就是用户报的「选农行一直卡加载」。
+     *
+     * 实测 payload（`POST /payment/orders/{tx}/gatewayPay` 的真实响应）：
+     * ```
+     * {"param":{"abcTokenID":"17939862043565516333",
+     *           "downloadUrl":"http://mobile.abchina.com/download/…",
+     *           "returnUrl":"https://yktpay.juwp.edu.cn/payment/charges/frontNotify/…"},
+     *  "primaryKey":"synjones.ecampus.pay.abc"}
+     * ```
+     * `param.abcTokenID` 就是农行 H5 收银台的 `TOKEN`（实测打开 `mobile.abchina.com/mpaynew/
+     * mpay/index?TOKEN=…` 直接就是「身份验证 / 商户名称 江西水利电力大学 / 订单编号 / 订单金额 /
+     * 手机号 → 验证码」那一页）。所以桥里把 URL 拼出来、交给同一个 WebView 打开即可。
+     *
+     * 只认 `primaryKey` 含 `abc` 的 payload，且必须带 `abcTokenID`；别的银行/渠道一律返回 null
+     * （宁可不处理，也不把猜出来的 URL 交给内嵌页）。
+     */
+    fun abcCashierUrlFromBridge(payload: String?): String? = runCatching {
+        val text = payload?.trim().orEmpty()
+        if (text.isEmpty()) return@runCatching null
+        val obj = json.parseToJsonElement(text).jsonObject
+        val primaryKey = (obj["primaryKey"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        if (!primaryKey.contains("abc", ignoreCase = true)) return@runCatching null
+        val token = ((obj["param"] as? JsonObject)?.get("abcTokenID") as? JsonPrimitive)
+            ?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return@runCatching null
+        ABC_MOBILE_CASHIER + URLEncoder.encode(token, "UTF-8")
+    }.getOrNull()
+
+    /** 农行手机版收银台入口（K 码支付：手机号 → 短信验证码），`TOKEN` 由平台现发。 */
+    private const val ABC_MOBILE_CASHIER = "https://mobile.abchina.com/mpaynew/mpay/index?TOKEN="
+
     /** 收银台可能给的两个 HTML 键（老形状 `paysubmit`，新形状 `paymentcashierStr`）。 */
     private val CASHIER_HTML_KEYS = listOf("paysubmit", "qrFormUrl", "paymentcashierStr")
 

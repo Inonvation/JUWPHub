@@ -6,6 +6,7 @@ import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -45,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import edu.jxslu.schedule.data.power.PowerPayModels
 import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import me.rerere.hugeicons.HugeIcons
@@ -143,6 +145,8 @@ fun PowerBankPayScreen(
                         FrameLayout(ctx).apply {
                             val wv = WebView(ctx).apply {
                                 configureForBankPay()
+                                // 收银台页选农行后会把支付参数交给原生桥（见 CashierBridge）
+                                installCashierBridge()
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldOverrideUrlLoading(
                                         view: WebView?,
@@ -318,6 +322,44 @@ private fun WebView.configureForBankPay() {
     isVerticalScrollBarEnabled = true
     CookieManager.getInstance().setAcceptCookie(true)
     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+}
+
+/**
+ * 深链页交给原生桥的名字。聚合收银台的 `pay()` 在 `respCode=6230` 时会调
+ * `window.AndroidFunc.SynObject(jsonStr)`（见 `PowerPayModels.abcCashierUrlFromBridge` 的
+ * KDoc）——没有这个对象时页面抛异常、`加载中` 永不消失，这就是「选农行一直卡加载」的真因。
+ */
+private const val CASHIER_BRIDGE_NAME = "AndroidFunc"
+
+/**
+ * 收银台页的原生桥（2026-11-06，只做一件事：把农行支付页打开）。
+ *
+ * **边界不变**：不读页面输入、不注入脚本、不落盘。桥收到的只有平台自己生成的
+ * `jsonStr`（含农行 `abcTokenID`），解析出的 URL 交给**同一个 WebView** 打开；
+ * 解析不出来就静默返回（页面会自己清掉「加载中」），绝不抛异常——
+ * 抛异常会落进页面的 iOS 分支，反而把它的 promise 链打断。
+ *
+ * 注意：JS 桥方法跑在 WebView 的后台线程，`loadUrl` 必须 post 回主线程。
+ */
+internal class CashierBridge(private val webView: WebView) {
+
+    @JavascriptInterface
+    fun SynObject(payload: String?) = openAbc(payload)
+
+    @JavascriptInterface
+    fun SynJSNative(payload: String?) = openAbc(payload)
+
+    private fun openAbc(payload: String?) {
+        val target = PowerPayModels.abcCashierUrlFromBridge(payload) ?: return
+        webView.post { runCatching { webView.loadUrl(target) } }
+        Unit
+    }
+}
+
+/** 装上桥（页面调用的是 `window.AndroidFunc.SynObject`）。 */
+@SuppressLint("JavascriptInterface")
+private fun WebView.installCashierBridge() {
+    addJavascriptInterface(CashierBridge(this), CASHIER_BRIDGE_NAME)
 }
 
 /** 收银台页面用的移动 UA（与 `PowerClient` 里那份同类；`; wv` 必须没有）。 */

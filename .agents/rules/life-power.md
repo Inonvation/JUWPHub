@@ -307,7 +307,24 @@
   ③ **链接现取现用**：一次性会话（老形状的 TOKEN、新形状的 ticket），「重新打开」是重新
   `paystep=2` 取新的，别缓存复用；回到商户域（`charge.juwp.edu.cn`）即关内嵌页，
   剩下的交给等待步查单。
-  ④ **平台慢响应不等于网络故障**（2026-11-06 实测）：`paystep=2` 生成收银台会话会慢到
+  ④ **农行支付要过原生桥**（2026-11-06 实测，**别删**）：聚合收银台选「农行缴电费专用」
+  确认支付后，页面并不自己跳转——它拿到 `respCode=6230` 就把 `jsonStr` 交给宿主 App：
+  `window.AndroidFunc.SynObject(jsonStr)`（本页 UA 不含 `Synjones-E-Campus`，走 else 分支）。
+  `jsonStr` 实测是
+  `{"param":{"abcTokenID":"…","downloadUrl":"…","returnUrl":"…"},"primaryKey":"synjones.ecampus.pay.abc"}`，
+  `abcTokenID` 就是农行 H5 收银台的 `TOKEN`（`https://mobile.abchina.com/mpaynew/mpay/index?TOKEN=…`
+  ——「身份验证 / 商户 / 订单编号 / 订单金额 / 手机号 → 验证码」那一页）。
+  所以 `PowerBankPayScreen` 注入了 `AndroidFunc`（`CashierBridge`）：解析 payload → 拼 URL →
+  同一个 WebView 打开。**没有这个桥，页面会抛异常、`加载中` 永不消失**（页面自己的错误处理
+  还会把 302/403 一起吞成「加载中」，排查时别只看网络）。三条纪律：
+  ① 桥方法**绝不抛异常**（抛了会落进页面的 iOS 分支、打断它的 promise 链），解析不出来就静默返回；
+  ② 只认 `primaryKey` 含 `abc` 的 payload 且必须带 `abcTokenID`，别的渠道不猜；
+  ③ R8 必须 keep（`app/proguard-rules.pro` 里两条 `CashierBridge` 规则）——不 keep 只有 release
+  包才复现「选农行一直卡加载」。
+  排查手法：`POST https://yktpay.juwp.edu.cn/payment/orders/{transactionId}/gatewayPay`（带
+  `token` 头与表单 `payTicket`/`payPrdCode=A33`）能拿到 6230 原文；注意 `/payment/orders/{tx}`
+  是给带 `payAcctId` 的渠道用的，农行走的是 `/gatewayPay`。
+  ⑤ **平台慢响应不等于网络故障**（2026-11-06 实测）：`paystep=2` 生成收银台会话会慢到
   20s 以上（同一条请求 PC 端 1.5s，平台网关上限 60s），共享 OkHttp 的 20s 读超时会把
   它报成「网络不给力」。`PowerClient.create` 已单独放宽到读 45s / 写 30s / 总 60s；
   `openBankCashier` 失败时保留 `orderId`，金额步出现「重新打开支付页」——**同一单重试，

@@ -65,3 +65,12 @@
 
 -keepattributes RuntimeVisibleAnnotations,AnnotationDefault
 -dontnote kotlinx.serialization.**
+
+# ── 电费收银台的原生桥（2026-11-06）────────────────────────────────────────────
+# 聚合收银台页面在 respCode=6230 时调 window.AndroidFunc.SynObject(jsonStr)，由 App 去开
+# 农行支付页。R8 看不到 JS 侧的调用方，不 keep 会把这个类/方法删掉或改名——运行期页面
+# 直接 TypeError，表现为「选农行一直卡加载中」，而且只有 release 包才复现。
+-keep class edu.jxslu.schedule.ui.life.CashierBridge { *; }
+-keepclassmembers class edu.jxslu.schedule.ui.life.CashierBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}
