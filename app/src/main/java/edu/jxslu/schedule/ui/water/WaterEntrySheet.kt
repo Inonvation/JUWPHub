@@ -46,6 +46,10 @@ import java.math.RoundingMode
  *
  * 按钮固定单击（用户拍板）：点余额 → 弹窗 → 点开水已是明确意图链，
  * 全局「点击方式」偏好只对开水页大按钮生效。
+ *
+ * 「结束用水」自 2026-11-06 起走 [WaterViewModel.endSessionLocally]：点下即结束本地这一轮
+ * （停计时、清「出水中」、归 Idle）并收起面板——平台没有可靠的在线判据，误触开水时设备
+ * 可能根本没出水，不能把用户扣在「正在结束用水…」上等回报；迟到的账单照常落卡。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -129,7 +133,9 @@ fun WaterEntrySheet(
                 is UnlockFlowState.Working -> WaterWorkingAction(
                     canEndSession = workingFlow != null &&
                         workingFlow.elapsedSeconds >= WaterViewModel.END_SESSION_MIN_SECONDS,
-                    onEndSession = onEndSession,
+                    // 「结束用水」= 软件层面结束本轮 + 收起面板（2026-11-06 用户口径）：
+                    // 不等设备回报；先播退场动画再落状态，免得面板在退场途中闪回待机内容
+                    onEndSession = { dismiss { onEndSession() } },
                     stopping = workingFlow?.stopping == true,
                 )
                 // 完成 = 这次开水到此为止：先播面板退场动画，再归位流程态并收页

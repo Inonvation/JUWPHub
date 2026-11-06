@@ -15,6 +15,7 @@ import edu.jxslu.schedule.data.qiekj.TokenExpiredException
 import edu.jxslu.schedule.data.qiekj.UnlockException
 import edu.jxslu.schedule.data.qiekj.UnlockStopSignal
 import edu.jxslu.schedule.data.qiekj.UnlockStoppedException
+import edu.jxslu.schedule.data.qiekj.shouldReportFlowFailure
 import edu.jxslu.schedule.data.session.SessionExpiryStore
 import edu.jxslu.schedule.domain.UnlockFlowState
 import edu.jxslu.schedule.domain.UnlockResult
@@ -27,6 +28,7 @@ import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.widget.WaterWidgetSync
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -125,6 +127,16 @@ class WaterViewModel(
 
     /** 当前这轮开水的手动结束开关（「结束用水」置位，仓库在轮询里看到就收尾）。 */
     private var stopSignal: UnlockStopSignal? = null
+
+    /**
+     * 本轮是否已在**软件层面**结束（2026-11-06 面板「结束用水」，见 [endSessionLocally]）。
+     * 置位后仓库的步骤回执不再改界面；迟到的失败 / 未确认静默收尾
+     * （[shouldReportFlowFailure]），结算成功仍照常落 Success——账单照样显示。
+     * 每次 [unlock] 重新置 false。
+     */
+    @Volatile
+    private var endedLocally = false
+
     private var codeSentAt = 0L
 
     private val _uiState = MutableStateFlow(
@@ -508,9 +520,15 @@ class WaterViewModel(
         }
         // 每次开水新建一个手动结束开关（「结束用水」用）；上一轮的作废
         val signal = UnlockStopSignal()
-        stopSignal = signal
+        val previous = unlockJob
         unlockJob = viewModelScope.launch {
+            // 上一轮在面板上「结束用水」后可能还挂着后台等账单：新一轮先收掉它再开，
+            // 否则 Mutex 被占着，这次的「开水」会点了没反应（那笔账单走平台账单）。
+            previous?.cancelAndJoin()
             if (!unlockMutex.tryLock()) return@launch
+            // 上一轮的本地结束标记不能带到新一轮（迟到回报只认本轮）
+            endedLocally = false
+            stopSignal = signal
             // 本轮是否已登记「出水中」：**不能用 store 非空来挡**——上一轮残留会话
             // （页面被关、VM 已清、5 分钟内未过期）会把新一轮的起水时刻挡掉，
             // 今日页卡片显示的会是上一轮的旧起点。登记标记跟着本轮流程走。
@@ -530,6 +548,9 @@ class WaterViewModel(
                         usePoints = _uiState.value.usePoints,
                         stopSignal = signal,
                     ) { step ->
+                        // 面板已「结束用水」（endSessionLocally）：步骤回执不再改界面——
+                        // 计时停了、面板收了，不能把 Working 又写回来
+                        if (endedLocally) return@unlockDevice
                         val working = step.contains("等待") || step.contains("设备工作")
                         if (working && !sessionRegistered) {
                             // 服务端确认出水：登记到落盘会话（跨窗口展示的唯一真相源）。
@@ -546,7 +567,8 @@ class WaterViewModel(
                             )
                         }
                         _uiState.update { s ->
-                            s.copy(
+                            // 与「结束用水」撞车时以后者为准（回执在 IO 线程，标记是 volatile 的）
+                            if (endedLocally) s else s.copy(
                                 flow = if (working) {
                                     // 保留 elapsedSeconds 与 stopping：onStep 会重建 Working，
                                     // 不带上 stopping 会把「正在结束用水」态冲掉
@@ -568,6 +590,8 @@ class WaterViewModel(
                     wateringStore.clear()
                     _uiState.update {
                         it.copy(
+                            // 本机结束后才迟到的结算：账单照样落卡（2026-11-06 用户口径），
+                            // 面板下次打开能看到这一笔
                             flow = UnlockFlowState.Success(result),
                             orderHistory = repo.orderHistory(),
                         )
@@ -591,6 +615,12 @@ class WaterViewModel(
                     wateringStore.clear()
                     if (e is TokenExpiredException) {
                         handleTokenExpired()
+                        return@launch
+                    }
+                    // 面板已在本机结束：后台收尾失败 / 未确认不再打扰（账单以平台为准），
+                    // 只静默刷一次余额（这次会话可能已经扣了小票）
+                    if (!shouldReportFlowFailure(endedLocally)) {
+                        refreshBalance()
                         return@launch
                     }
                     // 手动结束：仓库会先请求平台远程关阀再等回报；等不到就按「未确认用水」收尾
@@ -626,12 +656,40 @@ class WaterViewModel(
      *
      * 这里**不取消协程**：收尾由仓库完成，取消会连结算路径一起掐掉。
      * 立即把 flow 置 stopping 态（禁用按钮 + 走字），别让用户以为没点上。
+     *
+     * 这是**开水页 / 今日页服务卡**的口径（页面里能一直看到「正在结束用水」）；
+     * 弹层上那颗按钮走 [endSessionLocally]（2026-11-06 用户口径），点下即收面板。
      */
     fun endSession() {
         val flow = _uiState.value.flow
         if (flow !is UnlockFlowState.Working || flow.stopping) return
         stopSignal?.request()
         _uiState.update { it.copy(flow = flow.copy(stopping = true)) }
+    }
+
+    /**
+     * 弹层上的「结束用水」（2026-11-06 用户口径）：**在软件层面结束这一轮**，不等设备回报。
+     *
+     * 为什么不等：平台没有可靠的在线判据（`trade/check_device_status` 已于 2026-10-16 删除），
+     * 误触开水时设备可能根本没出水，等下去只会把用户扣在弹窗里看「正在结束用水…」。
+     *
+     * 做四件事：① 置位 [UnlockStopSignal]——仓库下一轮仍会 best-effort 请求远程关阀
+     * （机型支持时才发，见 `shouldRequestRemoteEnd`）；② 停计时与 165 秒兜底；
+     * ③ 清「出水中」登记（今日页服务卡 / 侧栏高亮立刻撤）；④ 状态归 [UnlockFlowState.Idle]，
+     * 弹层由调用方收起（先播退场动画再调这里）。
+     *
+     * **不取消后台协程**：设备真的出水时，迟到的结算照常建单落卡（账单照样显示）；
+     * 迟到的失败 / 未确认静默收尾（[shouldReportFlowFailure]）。下一次 [unlock] 会先收掉
+     * 这条后台观察——那笔账单以平台账单为准。
+     */
+    fun endSessionLocally() {
+        val flow = _uiState.value.flow
+        if (flow !is UnlockFlowState.Working || flow.stopping) return
+        stopSignal?.request()
+        endedLocally = true
+        cancelTimerOnly()
+        wateringStore.clear()
+        _uiState.update { it.copy(flow = UnlockFlowState.Idle) }
     }
 
     private fun startTimer() {

@@ -777,6 +777,15 @@ Graph.kt                     增 qiekjRepository(context) 单例
    「请在设备上点击『结束』」；两条路都继续轮询，设备回报结束（`status==5` + 单号）照常
    建单读账单。只有「平台已受理但 20 秒没回报」才抛 `UnlockStoppedException`
    → Idle + 提示，不建单。开水页与今日页开水面板共用 `ui/water/WaterFlowControls.kt`。
+   **面板上的「结束用水」在软件层面结束**（2026-11-06 用户拍板）：平台没有可靠的在线判据
+   （决策 7 的 `check_device_status` 已删），误触开水时设备可能根本没出水，不能把用户扣在
+   「正在结束用水…」等设备回报。点下即 `WaterViewModel.endSessionLocally()`——置
+   `UnlockStopSignal`（仓库仍 best-effort 关阀、继续轮询）、停计时与 165s 兜底、清
+   `QiekjWateringStore`（服务卡与侧栏高亮立刻撤）、flow 归 Idle，面板播完退场再收。
+   **后台轮询不取消**：设备真出水时迟到的结算照常建单落卡（账单照样显示），迟到的失败 /
+   未确认由 `shouldReportFlowFailure` 静默；下一次 `unlock()` 先 `cancelAndJoin` 上一轮观察
+   （否则 Mutex 被占、开水点不动）。开水页与今日页服务卡的「结束开水」仍是 `endSession()`
+   （stopping 态、等设备回报 20 秒），两套别混用。
    同一批实测还改掉了两条话术：165s 兜底不再说「已自动关闭并结算」（设备断电时根本走不到建单，
    说结算是假话），改说「设备未回报结束，实际用量以平台账单为准」。
 5. **轮询**：`goods/water/sync` 等 `workStatus==2`，1s 间隔、上限 300 次，放 repository suspend +
@@ -818,7 +827,9 @@ goods/latestUsed(categoryCode=5) 取设备
 → goods/water/unlock(skuId, promotions, token)       启动出水；promotions 两套常量 JSON
   （带积分 / 不带积分，按设置开关选择）
 → 轮询 goods/water/sync（1s × ≤300，workStatus==2 为出水中）
-   └─ 用户点「结束用水」→ 机型支持才发 goods/endWater(goodsId)（best-effort）→ 继续等 status==5
+   └─ 用户点「结束用水」→ 只置 UnlockStopSignal（面板层同时停计时、清登记、收面板；
+      开水页 / 服务卡转 stopping 等回报）→ 机型支持才发 goods/endWater(goodsId)（best-effort）
+      → 继续等 status==5
 → order/afterPay/creating(orderNo)  创建后付订单（orderNo 取 sync.identify ?: unlock.orderNo）
 → order/detail(orderId)             取真实账单（字段语义见下方「账单口径」，2026-09-20 实测回填）
 → 写本地订单快照 OrderHistoryStore

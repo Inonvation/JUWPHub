@@ -1755,7 +1755,7 @@ private fun WaterEntrySheetHost(
         onUnlock = { viewModel.unlock() },
         onDismissFlow = { viewModel.dismissFlow() },
         onToggleUsePoints = { viewModel.toggleUsePoints() },
-        onEndSession = { viewModel.endSession() },
+        onEndSession = { viewModel.endSessionLocally() },
         onDismiss = onDismiss,
     )
 }

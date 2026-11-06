@@ -20,6 +20,7 @@ import edu.jxslu.schedule.data.qiekj.decodeObjectOrNull
 import edu.jxslu.schedule.data.qiekj.decodePrimitiveTextOrNull
 import edu.jxslu.schedule.data.qiekj.isSessionFinished
 import edu.jxslu.schedule.data.qiekj.noDataPollAction
+import edu.jxslu.schedule.data.qiekj.shouldReportFlowFailure
 import edu.jxslu.schedule.data.qiekj.shouldRequestRemoteEnd
 import edu.jxslu.schedule.data.qiekj.shouldSettleOnManualStop
 import edu.jxslu.schedule.domain.PromotionLine
@@ -298,6 +299,14 @@ class QiekjModelsTest {
         // 还在出水 → 未确认收尾
         assertFalse(shouldSettleOnManualStop(SyncData(status = 1, workStatus = 2, identify = "NO")))
         assertFalse(shouldSettleOnManualStop(null))
+    }
+
+    @Test
+    fun 面板结束用水_迟到的失败不再报到界面() {
+        // 2026-11-06 用户口径：面板「结束用水」点下即在软件层面结束（停计时 / 收面板），
+        // 不等设备回报——设备真的出水时迟到的结算照常落账单，失败 / 未确认则静默收尾
+        assertFalse(shouldReportFlowFailure(endedLocally = true))
+        assertTrue(shouldReportFlowFailure(endedLocally = false))
     }
 
     // ── 轮询无 data 的处置（2026-10-09 实测：设备侧结算后 sync 回 code=0 / data=null） ──

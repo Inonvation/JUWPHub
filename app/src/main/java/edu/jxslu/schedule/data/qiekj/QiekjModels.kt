@@ -171,6 +171,18 @@ fun shouldSettleOnManualStop(sync: SyncData?): Boolean =
     isSessionFinished(sync) && !sync?.identify.isNullOrBlank()
 
 /**
+ * 面板上「结束用水」已在**软件层面**结束后，仓库迟到的失败结果还要不要报到界面
+ * （2026-11-06 用户口径）。
+ *
+ * 平台没有可靠的在线判据（`trade/check_device_status` 已于 2026-10-16 删除），
+ * 误触开水时设备可能根本没出水——面板的「结束用水」不能等设备回报，点下即结束本地
+ * 这一轮（停计时、清「出水中」登记、收面板）。但后台轮询不取消：设备真的出水时，
+ * 迟到的**结算成功**照常建单落卡（账单照样显示）；**失败 / 未确认必须静默**，
+ * 别把「设备未回报」这类错误卡再弹回已经结束的人面前。
+ */
+fun shouldReportFlowFailure(endedLocally: Boolean): Boolean = !endedLocally
+
+/**
  * 轮询里 sync 无 data 时的处置（2026-10-09 实测）。
  *
  * 设备侧点「结算」后平台关闭会话，`goods/water/sync` 会回

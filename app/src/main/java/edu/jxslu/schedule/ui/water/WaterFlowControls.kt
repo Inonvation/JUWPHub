@@ -60,6 +60,8 @@ private enum class WaterEndAction { Waiting, Endable, Stopping }
  * 出水中的动作位（2026-10-05 用户拍板，开水页与今日页开水面板共用）：
  * 出水满 [WaterViewModel.END_SESSION_MIN_SECONDS] 秒前是禁用的「开水进行中…」，
  * 之后**原地**换成可点的「结束用水」；点下后转禁用的「正在结束用水…」等设备回报。
+ * 今日页 / 侧栏的弹层不走这条：那里的结束是软件层结束、点下即收面板（2026-11-06，
+ * 见 [WaterViewModel.endSessionLocally]），只有开水页与今日页服务卡还会停在「结束中」。
  *
  * 切换交给 [AnimatedContent] 的淡入淡出与自带尺寸动画：早先把按钮塞在状态区里，
  * 5 秒一到整块内容往下长一截，看着像弹窗突然变了（用户反馈）。
