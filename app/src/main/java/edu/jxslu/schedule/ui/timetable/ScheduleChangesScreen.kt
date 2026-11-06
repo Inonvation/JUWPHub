@@ -13,7 +13,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -49,8 +48,8 @@ import edu.jxslu.schedule.domain.ScheduleDiff
 import edu.jxslu.schedule.domain.SchedulePendingChanges
 import edu.jxslu.schedule.domain.scheduleApplySummary
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.ScheduleChangeGroupCard
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
@@ -415,22 +414,16 @@ fun ScheduleChangesScreen(
     }
 
     if (confirmingIgnore) {
-        AlertDialog(
-            onDismissRequest = { confirmingIgnore = false },
-            title = { Text("忽略这些差异？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "忽略后本轮不再提醒；基线保持不变，教务课表与你课表的差异仍然存在，" +
-                        "教务再出新变化时会连同这些一起重新提醒。",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = ::ignoreAll) { Text("忽略") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingIgnore = false }) { Text("取消") }
-            },
+        // 纯文案两键 → 公共件。忽略后本轮不再提醒，差异本身还在，但这条动作不可撤回，
+        // 故 danger = true（确认键用错误色，和「取消」区分开）。
+        AppConfirmDialog(
+            title = "忽略这些差异？",
+            message = "忽略后本轮不再提醒；基线保持不变，教务课表与你课表的差异仍然存在，" +
+                "教务再出新变化时会连同这些一起重新提醒。",
+            confirmLabel = "忽略",
+            onConfirm = ::ignoreAll,
+            onDismiss = { confirmingIgnore = false },
+            danger = true,
         )
     }
 }

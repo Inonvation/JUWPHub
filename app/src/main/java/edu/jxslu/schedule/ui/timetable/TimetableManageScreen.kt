@@ -54,7 +54,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.domain.Timetable
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -275,26 +277,19 @@ fun TimetableManageScreen(
     }
 
     deleteTarget?.let { t ->
-        AlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = { Text("删除课表「${t.name}」？") },
-            text = {
-                Text(
-                    "将删除该课表的全部课程与设置（不可撤销）。\n" +
-                        "课程数：${state.counts[t.id] ?: 0}",
-                )
+        // 纯文案两键 → 公共件（窗口淡入 / 长文滚动 / 危险色只有那一份实现）。
+        // 删除课表连带整张表的课程与设置，属真丢数据，故 danger = true。
+        AppConfirmDialog(
+            title = "删除课表「${t.name}」？",
+            message = "将删除该课表的全部课程与设置（不可撤销）。\n" +
+                "课程数：${state.counts[t.id] ?: 0}",
+            confirmLabel = "删除",
+            onConfirm = {
+                viewModel.delete(t.id)
+                deleteTarget = null
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.delete(t.id)
-                        deleteTarget = null
-                    },
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
-            },
+            onDismiss = { deleteTarget = null },
+            danger = true,
         )
     }
 }
@@ -448,6 +443,14 @@ private fun Badge(text: String, color: androidx.compose.ui.graphics.Color) {
     )
 }
 
+/**
+ * 新建 / 重命名课表的输入弹窗。
+ *
+ * **不迁到 `ui/common/ConfirmDialog.kt`**：那个公共件只提供「纯文案」与「自定义正文」两种
+ * 确认框，正文槽里的内容会被套进 `verticalScroll`——输入框放进滚动容器后，聚焦时键盘
+ * 弹出、光标定位都不可靠（同 `ImeAwareModalBottomSheet` 那套问题的缩小版）。含输入框的
+ * 弹窗要自己的键盘/焦点口径，故保留自建 `AlertDialog`。
+ */
 @Composable
 private fun NameDialog(
     title: String,
@@ -463,6 +466,9 @@ private fun NameDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+            // 窗口淡入必须放在弹窗自己的内容槽里（见 ui/common/DialogWindowFade.kt）：
+            // 本弹窗含输入框、不走 AppConfirmDialog，但进出场动画与滚动容器无关，仍然要挂。
+            DialogWindowFadeEffect()
             OutlinedTextField(
                 value = initial,
                 onValueChange = onValueChange,

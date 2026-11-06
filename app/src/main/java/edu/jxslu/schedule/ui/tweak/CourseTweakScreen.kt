@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -59,6 +58,7 @@ import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.TweakMode
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.domain.compactPosition
@@ -247,41 +247,32 @@ fun CourseTweakScreen(
 
     if (confirmOpen) {
         val purgedCount = state.to.courses.count { it.weeks.size <= 1 }
-        AlertDialog(
-            onDismissRequest = { confirmOpen = false },
-            title = { Text("确认${state.mode.label}？") },
-            text = {
-                Text(
-                    buildString {
-                        append("${dateText(state.fromDate)}（${state.from.courses.size} 门）→ ")
-                        append("${dateText(state.toDate)}（${state.to.courses.size} 门）\n\n")
-                        when (state.mode) {
-                            TweakMode.Overwrite -> {
-                                append("目标日期当周的课程将被清空")
-                                if (state.to.courses.isNotEmpty()) {
-                                    append("（其中 $purgedCount 门课只在这一周有课，将被整门删除）")
-                                }
-                                append("，随后放入源日期的课程。不可撤销。")
-                            }
-                            TweakMode.Exchange -> {
-                                append("两个日期的课程将互换位置，不可撤销。")
-                            }
-                            TweakMode.Merge -> Unit
+        AppConfirmDialog(
+            title = "确认${state.mode.label}？",
+            message = buildString {
+                append("${dateText(state.fromDate)}（${state.from.courses.size} 门）→ ")
+                append("${dateText(state.toDate)}（${state.to.courses.size} 门）\n\n")
+                when (state.mode) {
+                    TweakMode.Overwrite -> {
+                        append("目标日期当周的课程将被清空")
+                        if (state.to.courses.isNotEmpty()) {
+                            append("（其中 $purgedCount 门课只在这一周有课，将被整门删除）")
                         }
-                    },
-                )
+                        append("，随后放入源日期的课程。不可撤销。")
+                    }
+                    TweakMode.Exchange -> {
+                        append("两个日期的课程将互换位置，不可撤销。")
+                    }
+                    TweakMode.Merge -> Unit
+                }
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmOpen = false
-                        viewModel.execute()
-                    },
-                ) { Text("执行", color = MaterialTheme.colorScheme.error) }
+            confirmLabel = "执行",
+            danger = true,
+            onConfirm = {
+                confirmOpen = false
+                viewModel.execute()
             },
-            dismissButton = {
-                TextButton(onClick = { confirmOpen = false }) { Text("取消") }
-            },
+            onDismiss = { confirmOpen = false },
         )
     }
 }

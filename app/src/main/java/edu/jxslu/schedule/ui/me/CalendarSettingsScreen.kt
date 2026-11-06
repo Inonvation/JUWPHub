@@ -14,16 +14,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -48,9 +45,9 @@ import edu.jxslu.schedule.data.calendar.CalendarSyncer
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.domain.CalendarSyncDefaults
 import edu.jxslu.schedule.domain.ScheduleExporter
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.AppPermissions
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
@@ -255,26 +252,18 @@ fun CalendarSettingsScreen(
     }
 
     if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("删除已同步课程") },
-            text = {
-                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
-                DialogWindowFadeEffect()
-                Text("将从手机日历中删除全部由 JUWPHub 同步的课程事件（不影响你自己添加的日程）。")
+        AppConfirmDialog(
+            title = "删除已同步课程",
+            message = "将从手机日历中删除全部由 JUWPHub 同步的课程事件（不影响你自己添加的日程）。",
+            confirmLabel = "删除",
+            danger = true,
+            // 删除期间按键要按不动，否则连点会重复发起系统日历的批量删除
+            confirmEnabled = !busy,
+            onConfirm = {
+                showDeleteConfirm = false
+                viewModel.deleteSynced(context)
             },
-            confirmButton = {
-                TextButton(
-                    enabled = !busy,
-                    onClick = {
-                        showDeleteConfirm = false
-                        viewModel.deleteSynced(context)
-                    },
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
-            },
+            onDismiss = { showDeleteConfirm = false },
         )
     }
 

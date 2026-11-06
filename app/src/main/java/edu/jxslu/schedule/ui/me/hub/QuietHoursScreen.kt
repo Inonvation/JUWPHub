@@ -15,7 +15,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,7 +41,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.QuietWindow
 import edu.jxslu.schedule.domain.QuietWindows
 import edu.jxslu.schedule.ui.common.AppCard
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.SettingItem
@@ -173,26 +172,16 @@ fun QuietHoursScreen(onBack: () -> Unit) {
     }
 
     deleting?.let { target ->
-        AlertDialog(
-            onDismissRequest = { deleting = null },
-            title = { Text("删除这个时段？") },
-            text = {
-                // 弹窗进出场动画：必须在弹窗窗口自己的组合里（内容槽第一行）。
-                // 写在 AlertDialog 外面拿到的是页面窗口，与不调用等价（ui-common.md）。
-                DialogWindowFadeEffect()
-                Text("「${target.label}」将从列表里移除；预置时段删除后也可重新添加。")
+        AppConfirmDialog(
+            title = "删除这个时段？",
+            message = "「${target.label}」将从列表里移除；预置时段删除后也可重新添加。",
+            confirmLabel = "删除",
+            danger = true,
+            onConfirm = {
+                deleting = null
+                persist(windowsState.orEmpty().filterNot { it.id == target.id })
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    deleting = null
-                    persist(windowsState.orEmpty().filterNot { it.id == target.id })
-                }) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleting = null }) { Text("取消") }
-            },
+            onDismiss = { deleting = null },
         )
     }
 }

@@ -13,7 +13,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -24,7 +23,6 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,8 +36,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.ImportTargetDialogHost
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.importPreviewNote
@@ -182,28 +180,17 @@ fun DataSettingsScreen(
     }
 
     if (showClearConfirm) {
-        AlertDialog(
-            onDismissRequest = { showClearConfirm = false },
-            title = { Text("确认清空全部课程？") },
-            text = {
-                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
-                DialogWindowFadeEffect()
-                Text(
-                    "将删除当前课表「${state.timetableName.ifBlank { "—" }}」中的全部课程。\n" +
-                        "清空后提示条消失前可撤销；请重新从教务导入或从 JSON 恢复。",
-                )
+        AppConfirmDialog(
+            title = "确认清空全部课程？",
+            message = "将删除当前课表「${state.timetableName.ifBlank { "—" }}」中的全部课程。\n" +
+                "清空后提示条消失前可撤销；请重新从教务导入或从 JSON 恢复。",
+            confirmLabel = "清空",
+            danger = true,
+            onConfirm = {
+                showClearConfirm = false
+                viewModel.clearCourses()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showClearConfirm = false
-                        viewModel.clearCourses()
-                    },
-                ) { Text("清空", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearConfirm = false }) { Text("取消") }
-            },
+            onDismiss = { showClearConfirm = false },
         )
     }
 }

@@ -30,7 +30,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -68,7 +67,7 @@ import edu.jxslu.schedule.domain.ShortcutItem
 import edu.jxslu.schedule.domain.ShortcutOps
 import edu.jxslu.schedule.domain.ShortcutSettings
 import edu.jxslu.schedule.domain.Shortcuts
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -335,45 +334,32 @@ fun ShortcutSettingsScreen(
     }
 
     pendingDelete?.let { item ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("删除快捷方式") },
-            text = {
-                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
-                DialogWindowFadeEffect()
-                Text("删除「${item.name}」？此操作不可撤销。")
+        AppConfirmDialog(
+            title = "删除快捷方式",
+            message = "删除「${item.name}」？此操作不可撤销。",
+            confirmLabel = "删除",
+            danger = true,
+            onConfirm = {
+                viewModel.remove(item.id)
+                editing = null
+                pendingDelete = null
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.remove(item.id)
-                    editing = null
-                    pendingDelete = null
-                }) { Text("删除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
-            },
+            onDismiss = { pendingDelete = null },
         )
     }
 
     if (confirmResetAll) {
-        AlertDialog(
-            onDismissRequest = { confirmResetAll = false },
-            title = { Text("恢复全部默认") },
-            text = {
-                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
-                DialogWindowFadeEffect()
-                Text("所有快捷方式将恢复为 3 条预设，自定义条目会被移除，今日页开关重新打开。")
+        AppConfirmDialog(
+            title = "恢复全部默认",
+            message = "所有快捷方式将恢复为 3 条预设，自定义条目会被移除，今日页开关重新打开。",
+            confirmLabel = "恢复",
+            // 覆盖用户自己排过的整组快捷方式，属「真会丢数据」
+            danger = true,
+            onConfirm = {
+                viewModel.resetAll()
+                confirmResetAll = false
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.resetAll()
-                    confirmResetAll = false
-                }) { Text("恢复") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmResetAll = false }) { Text("取消") }
-            },
+            onDismiss = { confirmResetAll = false },
         )
     }
 }

@@ -97,6 +97,7 @@ fun NoticeDialog(
         onDismissRequest = { if (!locked) onDismiss() },
         title = { Text(title) },
         text = {
+            DialogWindowFadeEffect()
             Column(
                 modifier = Modifier
                     .heightIn(max = LegalTextMaxHeight)
@@ -191,6 +192,7 @@ fun LicensesDialog(onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("开源许可") },
         text = {
+            DialogWindowFadeEffect()
             Column(
                 modifier = Modifier
                     .heightIn(max = LegalTextMaxHeight)

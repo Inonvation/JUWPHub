@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,9 +59,9 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.LocalTimeLike
 import edu.jxslu.schedule.domain.buildTodayState
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.PermissionRow
 import edu.jxslu.schedule.ui.common.SettingsSection
@@ -940,28 +939,16 @@ private fun IntroDialog(
     onAdd: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("把 JUWPHub 放上桌面") },
-        text = {
-            // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
-            DialogWindowFadeEffect()
-            Text(
-                text = "课表：小到 2×2 看下一节，拖到 4×4 变本周课表。\n\n" +
-                    "校园卡 · 电费：桌面看余额与电费，点卡片出示付款码。\n\n" +
-                    "小组件上下课自动更新；页面下方可开启更及时的后台刷新（可选）。",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        },
-        confirmButton = {
-            if (canPin) {
-                TextButton(onClick = onAdd) { Text("现在添加") }
-            } else {
-                TextButton(onClick = onDismiss) { Text("知道了") }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("稍后") }
-        },
+    AppConfirmDialog(
+        title = "把 JUWPHub 放上桌面",
+        message = "课表：小到 2×2 看下一节，拖到 4×4 变本周课表。\n\n" +
+            "校园卡 · 电费：桌面看余额与电费，点卡片出示付款码。\n\n" +
+            "小组件上下课自动更新；页面下方可开启更及时的后台刷新（可选）。",
+        // 桌面不允许直接加小组件时（启动器不支持 pin 请求）主键退化成「知道了」，
+        // 与「稍后」同义——宁可两键都关窗，也不留一个点了没反应的主键
+        confirmLabel = if (canPin) "现在添加" else "知道了",
+        onConfirm = { if (canPin) onAdd() else onDismiss() },
+        onDismiss = onDismiss,
+        dismissLabel = "稍后",
     )
 }

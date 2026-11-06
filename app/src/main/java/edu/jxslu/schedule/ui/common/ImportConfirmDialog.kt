@@ -125,6 +125,7 @@ fun ImportTargetDialogHost(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+            DialogWindowFadeEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (!term.isNullOrBlank()) {
                     val termPicker = availableTerms != null && onTermSelected != null

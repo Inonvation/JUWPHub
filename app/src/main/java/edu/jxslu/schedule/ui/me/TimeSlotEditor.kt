@@ -8,12 +8,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,7 +25,7 @@ import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.DefaultData
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.TimeSlotRules
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.TimeWheelDialog
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
@@ -129,28 +127,18 @@ fun TimeSlotEditorCard(
     }
 
     if (resetConfirm) {
-        AlertDialog(
-            onDismissRequest = { resetConfirm = false },
-            title = { Text("恢复默认作息？") },
-            text = {
-                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
-                DialogWindowFadeEffect()
-                Text(
-                    "将把 11 个小节改回学校默认时间（08:30 起、每节 40 分钟），" +
-                        "当前未保存的修改会丢弃。",
-                )
+        AppConfirmDialog(
+            title = "恢复默认作息？",
+            message = "将把 11 个小节改回学校默认时间（08:30 起、每节 40 分钟），" +
+                "当前未保存的修改会丢弃。",
+            confirmLabel = "恢复默认",
+            // 覆盖用户已经调过的整张作息表，属「真会丢数据」，确认键用 error 色
+            danger = true,
+            onConfirm = {
+                resetConfirm = false
+                onReset()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        resetConfirm = false
-                        onReset()
-                    },
-                ) { Text("恢复默认") }
-            },
-            dismissButton = {
-                TextButton(onClick = { resetConfirm = false }) { Text("取消") }
-            },
+            onDismiss = { resetConfirm = false },
         )
     }
 }

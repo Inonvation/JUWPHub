@@ -14,7 +14,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,9 +41,9 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.AiApplyRecord
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
@@ -160,27 +159,19 @@ fun AiHistoryScreen(onBack: () -> Unit) {
     }
 
     confirming?.let { record ->
-        AlertDialog(
-            onDismissRequest = { confirming = null },
-            title = { Text("撤销这次应用？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "会把这次应用的改动倒回（课表与日期覆盖在同一事务里）。" +
-                        "应用之后你手动改过的行会跳过，事后如实报条数。",
-                )
+        // 骨架走 AppConfirmDialog（2026-11-06 统一）。`danger = true` 只把确认键染成 error 色
+        // ——撤销会倒回本机已落库的改动，属于「会丢东西」的动作；文案一字未改。
+        AppConfirmDialog(
+            title = "撤销这次应用？",
+            message = "会把这次应用的改动倒回（课表与日期覆盖在同一事务里）。" +
+                "应用之后你手动改过的行会跳过，事后如实报条数。",
+            confirmLabel = "撤销",
+            onConfirm = {
+                confirming = null
+                viewModel.undoFromUi(record)
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirming = null
-                        viewModel.undoFromUi(record)
-                    },
-                ) { Text("撤销") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirming = null }) { Text("取消") }
-            },
+            onDismiss = { confirming = null },
+            danger = true,
         )
     }
 }

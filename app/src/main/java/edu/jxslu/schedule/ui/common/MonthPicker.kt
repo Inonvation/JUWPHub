@@ -114,6 +114,7 @@ fun MonthPickerDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+            DialogWindowFadeEffect()
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

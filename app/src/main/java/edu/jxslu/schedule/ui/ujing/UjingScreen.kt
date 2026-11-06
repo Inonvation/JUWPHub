@@ -77,6 +77,7 @@ import edu.jxslu.schedule.domain.UjingState
 import edu.jxslu.schedule.ui.common.AccountHeroCard
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
@@ -413,48 +414,34 @@ fun UjingScreen(
     }
     state.order?.let { order ->
         if (confirmCancelOrder) {
-            AlertDialog(
-                onDismissRequest = { confirmCancelOrder = false },
-                title = { Text("取消订单") },
-                text = {
-                    // 弹窗进出场动画必须挂在本弹窗窗口上：调用点要落在内容槽第一行，
-                    // 写在 AlertDialog 外面拿到的是页面窗口（死代码，见 DialogWindowFadeEffect）
-                    DialogWindowFadeEffect()
-                    Text("取消「${order.modelName}」并释放机器？未支付订单取消不产生费用。")
+            AppConfirmDialog(
+                title = "取消订单",
+                message = "取消「${order.modelName}」并释放机器？未支付订单取消不产生费用。",
+                confirmLabel = "取消订单",
+                onConfirm = {
+                    confirmCancelOrder = false
+                    viewModel.cancelOrder()
                 },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            confirmCancelOrder = false
-                            viewModel.cancelOrder()
-                        },
-                    ) { Text("取消订单") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { confirmCancelOrder = false }) { Text("保留") }
-                },
+                onDismiss = { confirmCancelOrder = false },
+                // 未支付订单取消不产生费用、也不丢任何数据：确认键保持主色
+                danger = false,
+                // 语气原样：「保留」比「取消」更贴「这一单别退」
+                dismissLabel = "保留",
             )
         }
     }
     houseToRemove?.let { house ->
-        AlertDialog(
-            onDismissRequest = { houseToRemove = null },
-            title = { Text("删除洗衣房") },
-            text = {
-                DialogWindowFadeEffect()
-                Text("从看板中删除「${house.name}」？不会影响 U净 账号里的任何数据。")
+        AppConfirmDialog(
+            title = "删除洗衣房",
+            message = "从看板中删除「${house.name}」？不会影响 U净 账号里的任何数据。",
+            confirmLabel = "删除",
+            onConfirm = {
+                viewModel.removeHouse(house)
+                houseToRemove = null
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.removeHouse(house)
-                        houseToRemove = null
-                    },
-                ) { Text("删除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { houseToRemove = null }) { Text("取消") }
-            },
+            onDismiss = { houseToRemove = null },
+            // 只是从本机看板移除（重新添加即可），但「删除」与「取消」必须一眼分得开
+            danger = true,
         )
     }
     if (state.noticeVisible) {
@@ -1221,22 +1208,17 @@ private fun LogoutRow(onLogout: () -> Unit) {
         Text("退出登录", color = MaterialTheme.colorScheme.error)
     }
     if (confirm) {
-        AlertDialog(
-            onDismissRequest = { confirm = false },
-            title = { Text("退出登录") },
-            text = {
-                DialogWindowFadeEffect()
-                Text("退出后需要重新用短信验证码登录。确定退出？")
+        AppConfirmDialog(
+            title = "退出登录",
+            message = "退出后需要重新用短信验证码登录。确定退出？",
+            confirmLabel = "退出",
+            onConfirm = {
+                confirm = false
+                onLogout()
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirm = false
-                    onLogout()
-                }) { Text("退出") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirm = false }) { Text("取消") }
-            },
+            onDismiss = { confirm = false },
+            // 清掉 Token 与会话、下次要重新收短信：不可撤销，确认键染红
+            danger = true,
         )
     }
 }
@@ -1303,6 +1285,16 @@ private fun HousePickerSheet(state: UjingUiState, viewModel: UjingViewModel) {
 /**
  * 使用须知（DESIGN §4.37）：首次弹出锁 3 秒，确认后一周内不再弹
  * （与充值免责声明同一种"先知情再使用"的口径，正文见 [NoticeItems]）。
+ *
+ * **为什么不并入 `AppConfirmDialog` / `AppInfoDialog`**（2026-11-06 收尾批逐条核过）：
+ * 这是**声明类**弹窗，不是确认类——三条语义公共件都表达不了：
+ * ① 唯一键的文案是**每秒变的倒计时**（「知道了（3 秒）」→「知道了」），公共件的
+ *    `dismissLabel` 是静态 String；
+ * ② 锁定期间**点遮罩 / 返回键也不许走**（`onDismissRequest = { if (!locked) onConfirm() }`），
+ *    公共件的 `dismissEnabled` 只能挡「取消键 + onDismissRequest」，挡不了「解锁后点遮罩
+ *    视为已读」这个正向语义；
+ * ③ 确认即落盘（`onNoticeConfirmed` 写 seenAt），是「同意」，不是「关闭」。
+ * 硬套只会把「锁 3 秒」或「点遮罩算已读」其中一条静默改掉。
  */
 @Composable
 private fun UjingNoticeDialog(onConfirm: () -> Unit) {

@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,7 +47,7 @@ import edu.jxslu.schedule.SubpageActivity
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.local.InboxMessageEntity
 import edu.jxslu.schedule.ui.common.AppCard
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.SkeletonBox
 import java.time.Instant
 import java.time.LocalDate
@@ -217,25 +216,18 @@ fun InboxScreen(onBack: () -> Unit) {
     }
 
     if (confirmingDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmingDelete = false },
-            title = { Text("删除所选消息？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "将删除选中的 ${selection.orEmpty().size} 条消息。" +
-                        "若同一事件后续又有更新（如余额持续偏低），会以新消息重新出现。",
-                )
+        AppConfirmDialog(
+            title = "删除所选消息？",
+            message = "将删除选中的 ${selection.orEmpty().size} 条消息。" +
+                "若同一事件后续又有更新（如余额持续偏低），会以新消息重新出现。",
+            confirmLabel = "删除",
+            // 消息删除后不可恢复（同事件再有更新才会重新出现），确认键用 error 色
+            danger = true,
+            onConfirm = {
+                confirmingDelete = false
+                deleteSelected()
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmingDelete = false
-                    deleteSelected()
-                }) { Text("删除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingDelete = false }) { Text("取消") }
-            },
+            onDismiss = { confirmingDelete = false },
         )
     }
 }

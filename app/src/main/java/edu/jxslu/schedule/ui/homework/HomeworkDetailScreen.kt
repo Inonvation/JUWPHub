@@ -68,6 +68,7 @@ import edu.jxslu.schedule.domain.removeImageRef
 import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
@@ -550,31 +551,23 @@ fun HomeworkDetailScreen(
     }
 
     if (showDelete) {
-        AlertDialog(
-            onDismissRequest = { showDelete = false },
-            title = { Text("删除这条作业？") },
-            text = {
-                // 弹窗进出场动画：必须在弹窗窗口自己的组合里（内容槽第一行）。
-                DialogWindowFadeEffect()
-                Text("删除后无法恢复（详情里的图片会一并清理）。")
+        AppConfirmDialog(
+            title = "删除这条作业？",
+            message = "删除后无法恢复（详情里的图片会一并清理）。",
+            confirmLabel = "删除",
+            danger = true,
+            onConfirm = {
+                showDelete = false
+                deleteHomework()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDelete = false
-                        deleteHomework()
-                    },
-                ) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDelete = false }) { Text("取消") }
-            },
+            onDismiss = { showDelete = false },
         )
     }
 
     if (showDiscard) {
+        // 不套 AppConfirmDialog：两个键都不是「取消」——「放弃」丢弃改动返回，「保存」先写盘再返回，
+        // 而点外部/返回键只是关窗留在本页。三个出口三种语义，硬套得把「点外部」另塞进 onTapOutside，
+        // 后人只改 dismissLabel 就会把「保存」变成「什么都不做」（.agents/rules/ui-common.md：双出口不迁）。
         AlertDialog(
             onDismissRequest = { showDiscard = false },
             title = { Text("放弃未保存的修改？") },

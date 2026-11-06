@@ -880,11 +880,13 @@ private fun OnboardingSyncResultDialog(
     onConsume: () -> Unit,
     onOpenSubpage: (SubpageScreen) -> Unit,
 ) {
-    DialogWindowFadeEffect()
     AlertDialog(
         onDismissRequest = onConsume,
         title = { Text("同步完成") },
         text = {
+            // 必须放在弹窗内容槽里：写在 AlertDialog 外面时 LocalView 是页面窗口，
+            // 动画挂到了页面上（等于没挂），弹窗仍是瞬间出现 / 抽掉。
+            DialogWindowFadeEffect()
             Column {
                 OnboardingSyncLine(
                     ok = outcome.scheduleOk,

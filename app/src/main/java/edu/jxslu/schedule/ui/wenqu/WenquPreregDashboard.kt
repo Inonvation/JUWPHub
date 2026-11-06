@@ -47,6 +47,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.MainActivity
 import edu.jxslu.schedule.data.wenqu.WenquSessionExpiredException
 import edu.jxslu.schedule.domain.WenquRules
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.reminder.ReminderVibration
 import edu.jxslu.schedule.ui.theme.rememberAnimationsEnabled
@@ -355,6 +356,13 @@ private fun DashCollapsedPill(
     }
 }
 
+/**
+ * 蹲点进度面板（不是确认框）。
+ *
+ * 不套 [AppConfirmDialog]：主键在「取消 / 重试（5 发） / 完成」之间按状态切换，取消键位是
+ * 「手动报名 + 关闭/收起」两个按钮——两处都不是「一个确认 + 一个取消」，套公共件会直接丢按钮。
+ * 正文是多段状态行 + 进度条，属于面板而不是一段文案，所以保留自建。
+ */
 @Composable
 private fun WenquPreregDashboardDialog(
     state: WenquPreregDashState,
@@ -446,27 +454,18 @@ private fun WenquPreregDashboardDialog(
         },
     )
     if (confirmCancel) {
-        AlertDialog(
-            onDismissRequest = { confirmCancel = false },
-            title = { Text("取消这次自动抢？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    text = "取消后不再自动提交。若正在提交的那一发已在平台生效，" +
-                        "活动详情页会显示「已报名」，不会丢失名额。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
+        AppConfirmDialog(
+            title = "取消这次自动抢？",
+            message = "取消后不再自动提交。若正在提交的那一发已在平台生效，" +
+                "活动详情页会显示「已报名」，不会丢失名额。",
+            confirmLabel = "确认取消",
+            // 「继续抢」是原来的取消键语气，不是「取消这次取消」——保住原文案
+            dismissLabel = "继续抢",
+            onConfirm = {
+                confirmCancel = false
+                scope.launch { WenquPreregReminder.cancel(context) }
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmCancel = false
-                    scope.launch { WenquPreregReminder.cancel(context) }
-                }) { Text("确认取消") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmCancel = false }) { Text("继续抢") }
-            },
+            onDismiss = { confirmCancel = false },
         )
     }
 }

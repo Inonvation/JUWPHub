@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -29,7 +28,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -59,8 +57,8 @@ import edu.jxslu.schedule.data.session.WebViewCookieBridge
 import edu.jxslu.schedule.domain.AccountMask
 import edu.jxslu.schedule.ui.common.AccountCard
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.rememberResumeTick
@@ -215,35 +213,24 @@ fun JwAccountScreen(onBack: () -> Unit) {
     }
 
     if (confirmLogout) {
-        AlertDialog(
-            onDismissRequest = { confirmLogout = false },
-            title = { Text("退出教务登录？") },
-            text = {
-                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
-                DialogWindowFadeEffect()
-                Text(
-                    "将清除本机保存的学号与统一认证密码，自动续登随之失效。" +
-                        "已导入的课表、成绩不受影响。",
-                )
+        AppConfirmDialog(
+            title = "退出教务登录？",
+            message = "将清除本机保存的学号与统一认证密码，自动续登随之失效。" +
+                "已导入的课表、成绩不受影响。",
+            confirmLabel = "退出并清除",
+            danger = true,
+            onConfirm = {
+                confirmLogout = false
+                // logout 现在挂起：清 WebView cookie 要切主线程（桥内部处理）。
+                // 清完再返回，状态卡重读时看到的才是真的「未登录」
+                scope.launch {
+                    cas.logout()
+                    // 换账号后不要把上一位用户的报修记录留在今日页（DESIGN §4.49）
+                    Graph.dormRepairStore(context).clear()
+                    onBack()
+                }
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmLogout = false
-                        // logout 现在挂起：清 WebView cookie 要切主线程（桥内部处理）。
-                        // 清完再返回，状态卡重读时看到的才是真的「未登录」
-                        scope.launch {
-                            cas.logout()
-                            // 换账号后不要把上一位用户的报修记录留在今日页（DESIGN §4.49）
-                            Graph.dormRepairStore(context).clear()
-                            onBack()
-                        }
-                    },
-                ) { Text("退出并清除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmLogout = false }) { Text("取消") }
-            },
+            onDismiss = { confirmLogout = false },
         )
     }
 }

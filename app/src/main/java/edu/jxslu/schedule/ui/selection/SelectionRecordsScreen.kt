@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,7 +17,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -28,7 +26,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,8 +45,8 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.domain.CourseSelection
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.showNotice
@@ -224,31 +221,28 @@ fun SelectionRecordsScreen(onBack: () -> Unit) {
     }
 
     if (showTermPicker) {
-        AlertDialog(
-            onDismissRequest = { showTermPicker = false },
-            title = { Text("加载其他学期") },
-            text = {
-                DialogWindowFadeEffect()
-                LazyColumn(Modifier.heightIn(max = 380.dp)) {
-                    items(moreTerms, key = { it }) { term ->
-                        Text(
-                            term,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    showTermPicker = false
-                                    loadTerm(term)
-                                }
-                                .padding(vertical = 12.dp),
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showTermPicker = false }) { Text("关闭") }
-            },
-        )
+        // 单键（「关闭」）+ 可选列表 → AppInfoDialog（2026-11-06 统一）。
+        // 列表由 LazyColumn 改成普通 Column：公共件的外层已经纵向滚动，LazyColumn 套在里面
+        // 会和外层抢滚动手势；学期条目只有个位数，不需要虚拟化。
+        AppInfoDialog(
+            title = "加载其他学期",
+            onDismiss = { showTermPicker = false },
+            dismissLabel = "关闭",
+        ) {
+            moreTerms.forEach { term ->
+                Text(
+                    term,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            showTermPicker = false
+                            loadTerm(term)
+                        }
+                        .padding(vertical = 12.dp),
+                )
+            }
+        }
     }
 }
 

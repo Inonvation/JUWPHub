@@ -68,6 +68,7 @@ fun CasLoginDialog(
         onDismissRequest = { if (!busy) onSkip() },
         title = { Text(title) },
         text = {
+            DialogWindowFadeEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     description,

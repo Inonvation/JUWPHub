@@ -35,12 +35,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.TextButton
 // M3 1.3.0 的下拉刷新不在 material3 根包，而在 pulltorefresh 子包
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
@@ -102,7 +100,6 @@ import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.common.ShortcutLauncher
 import edu.jxslu.schedule.ui.common.ShortcutPinner
 import edu.jxslu.schedule.ui.common.ShortcutSheet
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.ebike.EbikeFreeRideReminder
 import edu.jxslu.schedule.ui.ebike.EbikeScanActivity
 import edu.jxslu.schedule.ui.ebike.KvcxAction
@@ -442,28 +439,21 @@ fun TodayScreen(
     // 通知，误触代价是「骑行中不再提醒免费额度」——值得一次确认。
     var pendingEndFreeRide by remember { mutableStateOf(false) }
     if (pendingEndFreeRide) {
-        AlertDialog(
-            onDismissRequest = { pendingEndFreeRide = false },
-            title = { Text("结束免费计时？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "只在你已经还车时使用。结束本机的免费时长计时，" +
-                        "同时撤掉倒计时提醒与通知栏倒计时。",
-                )
+        // 纯文案两键 → 公共件。**不给 danger**：这里不删任何数据，代价只是本机不再提醒
+        // 免费额度（还能重新开），红色确认键会把日常操作说成危险动作。
+        AppConfirmDialog(
+            title = "结束免费计时？",
+            message = "只在你已经还车时使用。结束本机的免费时长计时，" +
+                "同时撤掉倒计时提醒与通知栏倒计时。",
+            confirmLabel = "结束计时",
+            onConfirm = {
+                serviceHaptics.tap()
+                pendingEndFreeRide = false
+                scope.launch {
+                    runCatching { EbikeFreeRideReminder.endRide(context) }
+                }
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    serviceHaptics.tap()
-                    pendingEndFreeRide = false
-                    scope.launch {
-                        runCatching { EbikeFreeRideReminder.endRide(context) }
-                    }
-                }) { Text("结束计时") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingEndFreeRide = false }) { Text("取消") }
-            },
+            onDismiss = { pendingEndFreeRide = false },
         )
     }
 

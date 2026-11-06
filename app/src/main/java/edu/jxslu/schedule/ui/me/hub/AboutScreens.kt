@@ -16,15 +16,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -57,11 +54,11 @@ import edu.jxslu.schedule.domain.NoticeConsent
 import edu.jxslu.schedule.domain.RechargeDisclaimer
 import edu.jxslu.schedule.domain.UpdateManifest
 import edu.jxslu.schedule.startActivityOutsideApp
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DisclaimerDialog
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.LicensesDialog
 import edu.jxslu.schedule.ui.common.NoticeDialog
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -564,36 +561,21 @@ fun PermissionsStorageScreen(
     }
 
     if (showClearCache) {
-        AlertDialog(
-            onDismissRequest = { if (!clearingCache) showClearCache = false },
-            title = { Text("清理缓存？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    buildString {
-                        append("将删除网页缓存与登录状态、离线地图瓦片、崩溃记录、校历图片等临时数据")
-                        cacheBytes?.let { append("（共 ").append(EbikeMapCache.sizeLabel(it)).append("）") }
-                        append("。不影响课表成绩、笔记作业、账号密码等数据；下次打开教务网页需要重新登录。")
-                    },
-                )
+        AppConfirmDialog(
+            title = "清理缓存？",
+            message = buildString {
+                append("将删除网页缓存与登录状态、离线地图瓦片、崩溃记录、校历图片等临时数据")
+                cacheBytes?.let { append("（共 ").append(EbikeMapCache.sizeLabel(it)).append("）") }
+                append("。不影响课表成绩、笔记作业、账号密码等数据；下次打开教务网页需要重新登录。")
             },
-            confirmButton = {
-                TextButton(
-                    onClick = { runClearCache() },
-                    enabled = !clearingCache,
-                ) {
-                    Text(
-                        text = if (clearingCache) "清理中…" else "清理",
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showClearCache = false },
-                    enabled = !clearingCache,
-                ) { Text("取消") }
-            },
+            // 清理进行中主键变「清理中…」并连同取消键一起禁用。dismissEnabled = false 时
+            // 公共件把点外部/返回键也一并挡掉，与原来 onDismissRequest 里的 if (!clearingCache) 等价
+            confirmLabel = if (clearingCache) "清理中…" else "清理",
+            confirmEnabled = !clearingCache,
+            dismissEnabled = !clearingCache,
+            danger = true,
+            onConfirm = { runClearCache() },
+            onDismiss = { showClearCache = false },
         )
     }
 }

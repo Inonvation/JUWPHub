@@ -61,6 +61,7 @@ fun RechargeDisclaimerDialog(
         onDismissRequest = { if (!locked) onDismiss() },
         title = { Text("充值免责声明", textAlign = TextAlign.Center) },
         text = {
+            DialogWindowFadeEffect()
             Column(
                 modifier = Modifier
                     .heightIn(max = 420.dp)

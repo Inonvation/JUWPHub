@@ -33,7 +33,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
@@ -42,7 +41,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -93,7 +91,7 @@ import edu.jxslu.schedule.ui.common.CourseDetailSheet
 import edu.jxslu.schedule.ui.common.CourseEditSheet
 import edu.jxslu.schedule.ui.common.ResumedTickerEffect
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.GhostCourseCard
 import edu.jxslu.schedule.ui.common.GridCellStyle
 import edu.jxslu.schedule.ui.common.GridCourseCard
@@ -800,69 +798,60 @@ fun WeekScreen(
 /** 覆盖详情弹窗：日期 + 类型 + 原有安排 + 实际安排 + 说明（DESIGN §4.40）。 */
 @Composable
 private fun OverrideInfoDialog(detail: ScheduleOverrides.Detail, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
+    // 单键详情 → 公共件的 AppInfoDialog（不是 AppConfirmDialog：那会凭空多出一个
+    // 什么也不做的「取消」）。滚动与最大高度已由公共件正文槽套好，这里只补段间距。
+    AppInfoDialog(
+        title = buildString {
+            val date = detail.date
+            if (date != null) {
+                append(date.monthValue).append("月").append(date.dayOfMonth).append("日 ")
+            }
+            append("周").append(DAY_NAMES.getOrNull(detail.day - 1) ?: detail.day.toString())
+            append(" · 第 ").append(detail.week).append(" 周")
+        },
+        onDismiss = onDismiss,
+        dismissLabel = "知道了",
+    ) {
+        Column(
+            Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Text(
-                buildString {
-                    val date = detail.date
-                    if (date != null) {
-                        append(date.monthValue).append("月").append(date.dayOfMonth).append("日 ")
-                    }
-                    append("周").append(DAY_NAMES.getOrNull(detail.day - 1) ?: detail.day.toString())
-                    append(" · 第 ").append(detail.week).append(" 周")
+                if (detail.suspended) "放假 · 教学活动暂停" else "补课 · 按别天的课表上课",
+                style = MaterialTheme.typography.titleSmall,
+                color = if (detail.suspended) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.primary
                 },
             )
-        },
-        text = {
-            DialogWindowFadeEffect()
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 360.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+            detail.source?.let { source ->
                 Text(
-                    if (detail.suspended) "放假 · 教学活动暂停" else "补课 · 按别天的课表上课",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = if (detail.suspended) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
+                    "照搬 第 ${source.week} 周" +
+                        (DAY_NAMES.getOrNull(source.day - 1)?.let { "周$it" } ?: "") +
+                        " 的教学安排",
+                    style = MaterialTheme.typography.bodyMedium,
                 )
-                detail.source?.let { source ->
-                    Text(
-                        "照搬 第 ${source.week} 周" +
-                            (DAY_NAMES.getOrNull(source.day - 1)?.let { "周$it" } ?: "") +
-                            " 的教学安排",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-                OverrideCourseGroup(
-                    label = "原有安排",
-                    courses = detail.originalCourses,
-                    emptyText = "这天本来没有课",
-                )
-                OverrideCourseGroup(
-                    label = "实际安排",
-                    courses = detail.effectiveCourses,
-                    emptyText = "这天不上课",
-                )
-                if (detail.note.isNotBlank()) {
-                    Text(
-                        detail.note,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    )
-                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("知道了") }
-        },
-    )
+            OverrideCourseGroup(
+                label = "原有安排",
+                courses = detail.originalCourses,
+                emptyText = "这天本来没有课",
+            )
+            OverrideCourseGroup(
+                label = "实际安排",
+                courses = detail.effectiveCourses,
+                emptyText = "这天不上课",
+            )
+            if (detail.note.isNotBlank()) {
+                Text(
+                    detail.note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+        }
+    }
 }
 
 @Composable

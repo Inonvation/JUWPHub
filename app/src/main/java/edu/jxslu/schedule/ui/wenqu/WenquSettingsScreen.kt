@@ -10,7 +10,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -19,7 +18,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,9 +34,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.repo.WenquCertStore
 import edu.jxslu.schedule.domain.WenquRules
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SettingItem
@@ -332,26 +330,19 @@ fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
     }
 
     if (confirmingLogout) {
-        AlertDialog(
-            onDismissRequest = { confirmingLogout = false },
-            title = { Text("退出登录") },
-            text = {
-                // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
-                DialogWindowFadeEffect()
-                Text("退出后将清除本机保存的问渠凭证，工时卡片与活动列表都会隐藏。")
+        AppConfirmDialog(
+            title = "退出登录",
+            message = "退出后将清除本机保存的问渠凭证，工时卡片与活动列表都会隐藏。",
+            confirmLabel = "退出",
+            danger = true,
+            onConfirm = {
+                confirmingLogout = false
+                Graph.wenqu(context).logout()
+                // 退完直接回问渠页——那一页订阅着登录态，此刻已经是登录表单了；
+                // 留在设置页只会看到一张空的「已登录手机号」
+                onBack()
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmingLogout = false
-                    Graph.wenqu(context).logout()
-                    // 退完直接回问渠页——那一页订阅着登录态，此刻已经是登录表单了；
-                    // 留在设置页只会看到一张空的「已登录手机号」
-                    onBack()
-                }) { Text("退出") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingLogout = false }) { Text("取消") }
-            },
+            onDismiss = { confirmingLogout = false },
         )
     }
 }

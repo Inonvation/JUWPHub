@@ -26,7 +26,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,7 +59,7 @@ import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.session.SessionStatus
 import edu.jxslu.schedule.data.session.WebViewCookieBridge
 import edu.jxslu.schedule.domain.capabilities
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.StaggeredReveal
@@ -415,25 +414,15 @@ fun AccountsHubScreen(
     }
 
     if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text("清除全部凭证？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "将退出教务、一卡通、胖乖生活、趣智校园、U净、快趣出行、问渠，" +
-                        "并删除本机保存的密码、会话与 AI Key。此操作不可撤销；" +
-                        "各平台账号本身不受影响。",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { clearAll() }) {
-                    Text("全部清除", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmClear = false }) { Text("取消") }
-            },
+        AppConfirmDialog(
+            title = "清除全部凭证？",
+            message = "将退出教务、一卡通、胖乖生活、趣智校园、U净、快趣出行、问渠，" +
+                "并删除本机保存的密码、会话与 AI Key。此操作不可撤销；" +
+                "各平台账号本身不受影响。",
+            confirmLabel = "全部清除",
+            danger = true,
+            onConfirm = { clearAll() },
+            onDismiss = { confirmClear = false },
         )
     }
 }

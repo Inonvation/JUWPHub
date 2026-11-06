@@ -17,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,9 +44,9 @@ import edu.jxslu.schedule.data.jw.PtworkTranscript
 import edu.jxslu.schedule.domain.TranscriptEntry
 import edu.jxslu.schedule.domain.TranscriptHistory
 import edu.jxslu.schedule.ui.common.AppCardRow
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -176,57 +175,42 @@ fun TranscriptHistoryScreen(onBack: () -> Unit) {
     }
 
     pendingDelete?.let { entry ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("删除这份成绩单？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "「${TranscriptHistory.labelOf(entry.name)}」会从本机删除，删掉就要重新导出。",
-                )
+        // 骨架走 AppConfirmDialog（2026-11-06 统一）；`danger = true` 只染确认键颜色。
+        // 删除动作与文案一字未改：删掉就要重新导出，这是用户唯一能感知的后果。
+        AppConfirmDialog(
+            title = "删除这份成绩单？",
+            message = "「${TranscriptHistory.labelOf(entry.name)}」会从本机删除，删掉就要重新导出。",
+            confirmLabel = "删除",
+            onConfirm = {
+                val name = entry.name
+                pendingDelete = null
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) { store.delete(name) }
+                    notify(if (ok) "已删除" else "删除失败", if (ok) NoticeTone.Success else NoticeTone.Error)
+                    refresh()
+                }
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val name = entry.name
-                        pendingDelete = null
-                        scope.launch {
-                            val ok = withContext(Dispatchers.IO) { store.delete(name) }
-                            notify(if (ok) "已删除" else "删除失败", if (ok) NoticeTone.Success else NoticeTone.Error)
-                            refresh()
-                        }
-                    },
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
-            },
+            onDismiss = { pendingDelete = null },
+            danger = true,
         )
     }
 
     if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text("清空全部导出记录？") },
-            text = {
-                DialogWindowFadeEffect()
-                Text("本机保存的 ${entries?.size ?: 0} 份成绩单都会被删除，需要时重新导出即可。")
+        // 同上：清空是「本机全删」，danger 只改颜色，文案与计数口径（entries?.size ?: 0）不动。
+        AppConfirmDialog(
+            title = "清空全部导出记录？",
+            message = "本机保存的 ${entries?.size ?: 0} 份成绩单都会被删除，需要时重新导出即可。",
+            confirmLabel = "清空",
+            onConfirm = {
+                confirmClear = false
+                scope.launch {
+                    val removed = withContext(Dispatchers.IO) { store.deleteAll() }
+                    notify("已清空 $removed 份", NoticeTone.Success)
+                    refresh()
+                }
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmClear = false
-                        scope.launch {
-                            val removed = withContext(Dispatchers.IO) { store.deleteAll() }
-                            notify("已清空 $removed 份", NoticeTone.Success)
-                            refresh()
-                        }
-                    },
-                ) { Text("清空", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmClear = false }) { Text("取消") }
-            },
+            onDismiss = { confirmClear = false },
+            danger = true,
         )
     }
 }

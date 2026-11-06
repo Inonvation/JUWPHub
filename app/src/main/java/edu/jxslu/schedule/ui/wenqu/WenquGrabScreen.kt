@@ -517,6 +517,9 @@ private fun clockText(millis: Long): String =
  *
  * 「先看看」打开活动详情（详情里仍有报名入口）；「关闭」之后活动已经在列表里，
  * 随时能点开。报名失败的原因留在弹窗里（页面级提示会被弹窗盖住，同详情弹层的口径）。
+ *
+ * 不套 `AppConfirmDialog`：取消键位是**两个并排按钮**（「先看看」走详情、「关闭」留在列表），
+ * 公共件只留一个 `dismissLabel`，硬塞会把「先看看」这条入口丢掉。
  */
 @Composable
 private fun WenquGrabHitDialog(

@@ -22,7 +22,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,7 +30,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -48,8 +46,8 @@ import androidx.core.content.ContextCompat
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.ScoreAlertDefaults
 import edu.jxslu.schedule.domain.ScoreSortMode
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsNote
 import edu.jxslu.schedule.ui.common.SettingsSection
@@ -230,62 +228,54 @@ fun ScoreSettingsScreen(onBack: () -> Unit) {
     }
 
     if (clearDialogOpen && clearTerm != null) {
-        AlertDialog(
-            onDismissRequest = { clearDialogOpen = false },
-            title = { Text("清空学期成绩？") },
-            text = {
-                DialogWindowFadeEffect()
-                Column {
-                    Text(
-                        "选择要清空的学期：",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        terms.forEach { term ->
-                            FilterChip(
-                                selected = term == clearTerm,
-                                onClick = { clearTerm = term },
-                                label = { Text(term) },
-                            )
-                        }
+        // 骨架走 AppConfirmDialog（2026-11-06 统一）。正文多段（说明 + 学期胶囊 + 后果说明）
+        // 用 content 版，外层已套滚动；学期胶囊是**横向**滚动，与纵向不冲突，保留原样。
+        // `danger = true` 只把确认键染成 error 色（清空会删掉整学期成绩），文案与判定一字未改。
+        AppConfirmDialog(
+            title = "清空学期成绩？",
+            confirmLabel = "删除",
+            onConfirm = {
+                val term = clearTerm
+                clearDialogOpen = false
+                if (term != null) {
+                    scope.launch {
+                        val result = runCatching { scoreRepo.deleteTerm(term) }
+                        snackbar.showNotice(
+                            if (result.isSuccess) "已清空「$term」的成绩"
+                            else "清空失败，请稍后重试",
+                        )
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "将删除「${clearTerm.orEmpty()}」的全部成绩记录；需要时可重新从教务导入。",
-                        style = MaterialTheme.typography.bodySmall,
+                }
+            },
+            onDismiss = { clearDialogOpen = false },
+            danger = true,
+        ) {
+            Text(
+                "选择要清空的学期：",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                terms.forEach { term ->
+                    FilterChip(
+                        selected = term == clearTerm,
+                        onClick = { clearTerm = term },
+                        label = { Text(term) },
                     )
                 }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val term = clearTerm
-                        clearDialogOpen = false
-                        if (term != null) {
-                            scope.launch {
-                                val result = runCatching { scoreRepo.deleteTerm(term) }
-                                snackbar.showNotice(
-                                    if (result.isSuccess) "已清空「$term」的成绩"
-                                    else "清空失败，请稍后重试",
-                                )
-                            }
-                        }
-                    },
-                ) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { clearDialogOpen = false }) { Text("取消") }
-            },
-        )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "将删除「${clearTerm.orEmpty()}」的全部成绩记录；需要时可重新从教务导入。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
     }
 }
 

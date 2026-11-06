@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,7 +45,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.ujing.UjingHistoryEntry
 import edu.jxslu.schedule.domain.UjingState
 import edu.jxslu.schedule.ui.common.AppCard
-import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import java.text.SimpleDateFormat
@@ -119,23 +118,17 @@ fun UjingHistoryScreen(onBack: () -> Unit = {}) {
         }
     }
     if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text("清空账单") },
-            text = {
-                // 弹窗进出场动画挂在本弹窗窗口上（内容槽第一行）
-                DialogWindowFadeEffect()
-                Text("将删除本机保存的全部 ${entries.size} 笔账单记录，不影响订单本身。")
+        AppConfirmDialog(
+            title = "清空账单",
+            message = "将删除本机保存的全部 ${entries.size} 笔账单记录，不影响订单本身。",
+            confirmLabel = "清空",
+            onConfirm = {
+                confirmClear = false
+                store.clear()
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmClear = false
-                    store.clear()
-                }) { Text("清空") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmClear = false }) { Text("取消") }
-            },
+            onDismiss = { confirmClear = false },
+            // 本机账单删了找不回来（订单还在服务端，但这份留档是唯一的）：确认键染红
+            danger = true,
         )
     }
 }

@@ -53,6 +53,7 @@ import edu.jxslu.schedule.domain.SelectionRounds
 import edu.jxslu.schedule.domain.SelectionWish
 import edu.jxslu.schedule.domain.SelectionWishes
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.EmptyHint
@@ -76,6 +77,10 @@ import kotlinx.coroutines.withContext
  * 录清单最常见的错是这门课其实已经选过/课表里已有，不用等接口，纯本机数据就能拦一道。
  *
  * 只在本机保存（DataStore JSON，口径同快捷方式）。
+ *
+ * **删除预选的确认弹窗（2026-11-06）只换了骨架**（自建 `AlertDialog` → `AppConfirmDialog`）：
+ * 本页紧挨着教务选课流程，弹窗这一层任何判定/文案变化都会被误读成「选课行为变了」，
+ * 所以文案、`danger`、确认/取消的动作**逐字保留**，只让公共件接管淡入、滚动兜底与 48dp 按钮。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -275,31 +280,18 @@ fun SelectionWishesScreen(onBack: () -> Unit) {
     }
 
     deleting?.let { target ->
-        AlertDialog(
-            onDismissRequest = { deleting = null },
-            title = { Text("删除这条预选？") },
-            text = {
-                // 弹窗进出场动画：必须在弹窗窗口自己的组合里（内容槽第一行）。
-                // 写在 AlertDialog 外面拿到的是页面窗口，与不调用等价（ui-common.md）。
-                DialogWindowFadeEffect()
-                Text("「${target.nameKeyword}」将从清单里移除。")
+        // 骨架走 AppConfirmDialog（2026-11-06）。`danger = true` 只把确认键染成 error 色
+        // （删除会丢掉用户填的关键词与优先级）；判定条件与文案一字未改。
+        AppConfirmDialog(
+            title = "删除这条预选？",
+            message = "「${target.nameKeyword}」将从清单里移除。",
+            confirmLabel = "删除",
+            onConfirm = {
+                deleting = null
+                persist(wishesState.orEmpty().filterNot { it.id == target.id })
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        deleting = null
-                        persist(wishesState.orEmpty().filterNot { it.id == target.id })
-                    },
-                    modifier = Modifier.heightIn(min = 44.dp),
-                ) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleting = null }, modifier = Modifier.heightIn(min = 44.dp)) {
-                    Text("取消")
-                }
-            },
+            onDismiss = { deleting = null },
+            danger = true,
         )
     }
 }

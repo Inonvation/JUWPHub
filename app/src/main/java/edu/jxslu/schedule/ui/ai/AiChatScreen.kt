@@ -62,6 +62,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.repo.AiImageStore
 import edu.jxslu.schedule.ui.common.AppCardRow
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
@@ -344,25 +345,18 @@ fun AiChatScreen(
         )
     }
 
-    // ---- 首次隐私确认（声明类弹窗走 M3 AlertDialog + 统一进出场）
+    // ---- 首次隐私确认：**两键决策**（同意并分析 / 取消），骨架走 AppConfirmDialog
+    // （2026-11-06 统一）：窗口淡入、正文滚动兜底、48dp 按钮都归公共件。
+    // 正文是声明式长文案，但形态是「要么同意要么取消」——不是单键须知，所以不用 AppInfoDialog。
     if (privacyPrompt) {
-        AlertDialog(
-            onDismissRequest = viewModel::dismissPrivacyPrompt,
-            title = { Text("使用前确认") },
-            text = {
-                DialogWindowFadeEffect()
-                Text(
-                    "使用「AI 调课」时，当前课表的课程名 / 时间 / 周次 / 地点、" +
-                        "你粘贴的通知与图片会发送到「配置」里填写的服务。" +
-                        "不会发送学号、姓名或其它学期的数据；教师名可在配置里脱敏。此确认只出现一次。",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = viewModel::confirmPrivacyAndAnalyze) { Text("同意并分析") }
-            },
-            dismissButton = {
-                TextButton(onClick = viewModel::dismissPrivacyPrompt) { Text("取消") }
-            },
+        AppConfirmDialog(
+            title = "使用前确认",
+            message = "使用「AI 调课」时，当前课表的课程名 / 时间 / 周次 / 地点、" +
+                "你粘贴的通知与图片会发送到「配置」里填写的服务。" +
+                "不会发送学号、姓名或其它学期的数据；教师名可在配置里脱敏。此确认只出现一次。",
+            confirmLabel = "同意并分析",
+            onConfirm = viewModel::confirmPrivacyAndAnalyze,
+            onDismiss = viewModel::dismissPrivacyPrompt,
         )
     }
 
