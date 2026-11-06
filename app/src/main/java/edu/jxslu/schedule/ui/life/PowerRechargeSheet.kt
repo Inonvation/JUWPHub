@@ -344,16 +344,18 @@ private fun AcceptedStep(
     when (entryStatus) {
         // 2026-09-29 事故（三笔「支付成功」的订单永远没入账）后，扣款与入账分开报：
         // 入账位有结论就说结论，还在处理就如实说「处理中」，失败就明说找管理员。
-        PowerEntryState.ENTERED -> EntryLine("电量已入账。")
-        PowerEntryState.PENDING -> EntryLine("电量入账处理中——稍后在左侧栏钱包查看电费，或到「缴费账单」核对。")
+        // 2026-11-06 用户订正：平台记账 ≠ 电表读数已更新——到账常见 1–3 小时延迟，
+        // 所以这里不写「电量已入账」这类看起来钱已经变成电的话。
+        PowerEntryState.ENTERED -> EntryLine("平台已记账；电量到账通常有 1–3 小时延迟，稍后回来看剩余电量。")
+        PowerEntryState.PENDING -> EntryLine("电量入账处理中（通常 1–3 小时）——稍后在左侧栏钱包查看电费，或到「缴费账单」核对。")
         PowerEntryState.FAILED -> Text(
             text = "扣款已成功，但电量入账失败——请联系缴费平台管理员处理。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
         )
-        // 入账位没查到：维持原口径的通用提示
+        // 入账位没查到：只说时延，不替平台保证结果
         null -> Text(
-            text = "电费读数可能有几分钟延迟；稍后重新展开左侧栏即可看到最新剩余电量。",
+            text = "电费到账通常有 1–3 小时延迟；稍后重新展开左侧栏即可看到最新剩余电量。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         )
