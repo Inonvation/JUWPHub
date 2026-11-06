@@ -12,9 +12,9 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -65,7 +65,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -75,12 +78,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import edu.jxslu.schedule.data.prefs.DisplayPrefs
+import edu.jxslu.schedule.data.repo.AppShellPrefs
 import edu.jxslu.schedule.data.qiekj.QiekjAutoSignInRunner
 import edu.jxslu.schedule.ui.reminder.QiekjSignInNoticeBus
 import edu.jxslu.schedule.ui.reminder.QiekjSignInNoticeHost
@@ -99,6 +104,7 @@ import edu.jxslu.schedule.ui.reminder.DormRepairReminder
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -125,6 +131,7 @@ import edu.jxslu.schedule.ui.water.WaterEntrySheet
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.ui.theme.JuwTheme
+import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import edu.jxslu.schedule.ui.today.TodayScreen
 import edu.jxslu.schedule.ui.water.WaterViewModel
@@ -226,9 +233,12 @@ class MainActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
         // 首次配置引导（DESIGN §3.16）：只服务新安装——老用户没有 onboarding_seen 键，
-        // 不弹引导，只在「我的」页显示登录状态卡。阻塞读一次，与 resolveStartRouteBlocking
-        // 同一模式（读一次就定，不让它跟 Flow 变）。引导是不透明全屏窗口，主界面照常
-        // setContent 也看不到底下，用户感知就是「打开就是引导」。
+        // 不弹引导，只在「我的」页显示登录状态卡。读一次就定，不让它跟 Flow 变。
+        // **这里是整个启动链上唯一一次真读盘**（2026-11-06 收口）：它顺带把
+        // `displayDataStore` 读热，后面 `JuwRoot` 的主题快照与悬浮栏直接吃
+        // [startupSnapshotBlocking] 的缓存，不再各起一次 `runBlocking`。
+        // 引导是不透明全屏窗口，主界面照常 setContent 也看不到底下，用户感知就是
+        // 「打开就是引导」。
         val startedOnboarding = savedInstanceState == null && shouldShowOnboarding()
         if (startedOnboarding) {
             OnboardingActivity.start(this)
@@ -403,22 +413,53 @@ private data class ThemeSnapshot(
 private var themeSnapshot: ThemeSnapshot? = null
 
 /**
- * 启动期一次性预载的显示偏好（2026-10-02，体检第三批；终审修正）。
+ * 启动期一次性预载的显示偏好 + 首启标记（2026-10-02 立，2026-11-06 收口）。
  *
- * 主线程上同步读 DataStore 的点位原本有三个（主题快照 / 悬浮栏 / 启动路由），各自
- * `runBlocking { ... .first() }`——**首次**读盘是真磁盘 IO，三份就是主线程上的三次串行。
- * 合并成「第一次需要时读一整份 [DisplayPrefs]」后，**只有悬浮栏**继续吃这份缓存
- * （它本来就是「重启生效」的冻结语义）；**主题**由 [themeSnapshot] 的每窗口回写垫首帧；
- * **启动页**改回每次真读（[resolveStartRouteBlocking]）——它的 KDoc 承诺「重开窗口就
- * 取当时的偏好」，进程级缓存会把这语义退化成重启生效，收益差异只剩一次内存读。
+ * 主线程上同步读 DataStore 的点位原本是**三处独立的 `runBlocking { ….first() }`**
+ * （首启标记 / 主题快照 / 悬浮栏）。首次读盘是真磁盘 IO，而其中最要命的一处
+ * （[shouldShowOnboarding]）发生在 `setContent` **之前**，等于把整个 `displayDataStore`
+ * 文件的首读压在首帧前的主线程上。
+ *
+ * 现在把「显示偏好 + `onboarding_seen`」放进**同一个 `runBlocking`**——两个键同属一份
+ * `displayDataStore`，一次读完。主题快照与悬浮栏都吃这份缓存
+ * （前者每窗口回写垫首帧，后者本来就是「重启生效」的冻结语义）。
+ *
+ * shortcut: 真实收益是**少两次 `runBlocking` + 两次 Flow 收集**（µs 级），不是「少两次磁盘读」
+ * ——旧版 `shouldShowOnboarding()` 那一读就已经是整份 DataStore 的冷读，后面两处本来吃缓存
+ * （2026-11-06 交叉复核纠正了这条注释原来的说法）。**已知行为差异**：debug 包走完引导后
+ * 在同一进程里重建 `MainActivity`，快照里 `onboardingSeen` 还是 false，引导会再弹一次；
+ * release 被 `isFreshInstall` 挡住，不受影响。
+ *
+ * **启动页仍单独真读**（[resolveStartRouteBlocking]）：它的 KDoc 承诺「重开窗口就取
+ * 当时的偏好」，进程级缓存会把这语义退化成「重启生效」。那是唯一剩下的主线程读，
+ * 且此时 DataStore 已热在内存里、不碰磁盘——不值得为省它换掉一个已文档化的语义。
  */
-private var startupPrefs: DisplayPrefs? = null
+private data class StartupSnapshot(
+    val prefs: DisplayPrefs,
+    /** `onboarding_seen`。读失败时按 `true`（= 不弹引导），见 [shouldShowOnboarding]。 */
+    val onboardingSeen: Boolean,
+)
 
-private fun startupPrefsBlocking(): DisplayPrefs = startupPrefs ?: runCatching {
-    runBlocking { Graph.repository(Graph.appContext).displayPrefs.first() }
-}.getOrDefault(DisplayPrefs()).also { startupPrefs = it }
+/** 进程级快照。**只在主线程访问**：三个调用点都在 `onCreate` / 首帧组合里，无需同步。 */
+private var startupSnapshot: StartupSnapshot? = null
 
-private fun readThemeSnapshotBlocking(): ThemeSnapshot = startupPrefsBlocking().let {
+private fun startupSnapshotBlocking(): StartupSnapshot = startupSnapshot ?: runCatching {
+    runBlocking {
+        // 两次 runCatching 分开：偏好读失败不该把 onboarding_seen 一起拖成默认值。
+        val prefs = runCatching {
+            Graph.repository(Graph.appContext).displayPrefs.first()
+        }.getOrDefault(DisplayPrefs())
+        // 读不到就当作「已走过引导」：宁可不引导，也不要在老用户机器上凭空冒出一段
+        // 引导（与 isFreshInstall 读不到安装信息时返回 false 是同一条保守口径）。
+        val seen = runCatching {
+            Graph.displayPrefs(Graph.appContext).onboardingSeen.first()
+        }.getOrDefault(true)
+        StartupSnapshot(prefs, seen)
+    }
+}.getOrDefault(StartupSnapshot(DisplayPrefs(), onboardingSeen = true))
+    .also { startupSnapshot = it }
+
+private fun readThemeSnapshotBlocking(): ThemeSnapshot = startupSnapshotBlocking().prefs.let {
     ThemeSnapshot(it.themeMode, it.dynamicColor, it.themePalette, it.fontScaleLocked)
 }
 
@@ -498,7 +539,7 @@ private fun ProvideFixedFontScale(locked: Boolean, content: @Composable () -> Un
  */
 private var floatingNavBarEffective: Boolean? = null
 
-private fun resolveFloatingNavBarBlocking(): Boolean = startupPrefsBlocking().floatingNavBar
+private fun resolveFloatingNavBarBlocking(): Boolean = startupSnapshotBlocking().prefs.floatingNavBar
 
 /**
  * 解析启动页（设置 → 应用 → 外观与交互 → 启动页，DESIGN §3.3）。
@@ -510,9 +551,10 @@ private fun resolveFloatingNavBarBlocking(): Boolean = startupPrefsBlocking().fl
  * （退回桌面再来、从最近任务划掉重进）也能立刻生效——比悬浮导航栏那个进程级
  * [floatingNavBarEffective] 更贴合「启动页」的语义。
  *
- * 终审修正（2026-10-02）：保持**每次真读**、不走 [startupPrefsBlocking] 进程缓存——
+ * 终审修正（2026-10-02）：保持**每次真读**、不走 [startupSnapshotBlocking] 进程缓存——
  * 缓存会让「重开窗口生效」退化成「重启生效」。DataStore 首读后全走内存缓存，
- * 这里的成本只剩内存读。
+ * 这里的成本只剩内存读（2026-11-06 起它是启动期**唯一**剩下的主线程读，见
+ * [startupSnapshotBlocking]）。
  *
  * 旧版「生活 / 我的」启动页选择落回今日页：那两个 Tab 已删除（设置里也不显示），
  * 再落在没有入口的 Tab 上用户连怎么返回都找不到。判据与设置页选中态共用 [StartPage.effectivePage]。
@@ -523,29 +565,22 @@ private fun resolveStartRouteBlocking(): String = runBlocking {
 }
 
 /**
- * 首启引导是否已经走过（DESIGN §3.16）。
- *
- * 只认 `onboarding_seen` 这一个键，不认「有没有课表」——导入过课表又清空过的用户
- * 不该被重新引导一遍。
- *
- * `onboarding_seen` 不在 [DisplayPrefs] 数据类里（它是 store 的独立键），单独走一次
- * DataStore 读——此时主题快照已把 DataStore 热进内存缓存，这次读只碰内存，无磁盘 IO。
- */
-private fun onboardingSeenBlocking(): Boolean = runBlocking {
-    Graph.displayPrefs(Graph.appContext).onboardingSeen.first()
-}
-
-/**
  * 这次启动要不要弹首启引导（DESIGN §3.16）。
  *
  * 两个条件：`onboarding_seen` 还没写过（没走完过），且**不是覆盖升级**。
+ * 前者只认 `onboarding_seen` 这一个键，不认「有没有课表」——导入过课表又清空过的
+ * 用户不该被重新引导一遍。
+ *
+ * 值来自 [StartupSnapshot]（与显示偏好同一次 `runBlocking` 读出）。这里**不再**单独
+ * 起一次 `runBlocking`：那一次原本排在 `setContent` 之前，会独自触发整个 DataStore
+ * 文件的首读（见 [startupSnapshotBlocking] 的 KDoc）。
  *
  * **debug 包只看前一个条件**：开发与验收时反复覆盖安装，`isFreshInstall` 永远是 false，
  * 引导就再也弹不出来了，只能靠卸载重装——那是给自己找麻烦。release 才需要「老用户
  * 不打扰」这条保护，所以只在那里判安装时间。
  */
 private fun shouldShowOnboarding(): Boolean {
-    if (onboardingSeenBlocking()) return false
+    if (startupSnapshotBlocking().onboardingSeen) return false
     if (BuildConfig.DEBUG) return true
     return isFreshInstall(Graph.appContext)
 }
@@ -646,6 +681,31 @@ private val FloatingBarBottomMargin = 12.dp
  */
 private const val CardShrink = 0.06f
 
+/** 主卡在抽屉完全展开时的圆角上限（2026-10-20 第二版定的 24dp，观感不要动）。 */
+private val CardCornerRadius = 24.dp
+
+/** 主卡在抽屉完全展开时的阴影上限（同上）。 */
+private val CardShadowElevation = 12.dp
+
+/**
+ * 圆角的量化档数：0…[CardCornerSteps] 共 N+1 个 [RoundedCornerShape]，组合期建一次。
+ *
+ * 为什么量化而不是逐帧 `RoundedCornerShape(24.dp * eased)`：那个写法在
+ * `graphicsLayer` 的绘制 lambda 里**每帧新建一个形状对象**。按 1dp 一档后，形状对象变成
+ * 组合期建好的常量数组，绘制 lambda 里只剩一次下标 + 一次乘法，一帧少一次小对象分配；
+ * 台阶 ≤1dp（280ms 里每档约 12ms），肉眼不可见。
+ *
+ * shortcut: 收益就到此为止——**别**指望「outline 取值次数下降」：`graphicsLayer` 的 shape
+ * 本来就是逐帧读，一次 spring 落定约 20~25 帧，量化前后差别可以忽略（2026-11-06 交叉复核
+ * 纠正了这条注释原来的说法）。真正可感的是**拖动期间**（`draggable` 每帧都在改 eased），
+ * 若哪天这条路径不热了，退回逐帧 `RoundedCornerShape(24.dp * eased)` 两行也完全正确。
+ *
+ * **不要图省事把 shape 改成常量 `RoundedCornerShape(24.dp)`**：主卡是 `fillMaxSize()`，
+ * 静止态（eased == 0）会裁掉屏幕四个角、露出后层的 `surfaceContainerLow`，
+ * 观感就是屏幕上凭空多四个圆角缺口。
+ */
+private const val CardCornerSteps = 24
+
 /** 侧栏展开时余额静默刷新的节流窗口：用户反复开关侧栏不会连发两轮请求。 */
 private const val SIDE_BALANCE_REFRESH_TTL_MILLIS = 60_000L
 
@@ -667,9 +727,9 @@ private val FloatingPillHeight = 64.dp
 private val PlainBottomBarHeight = 80.dp
 
 /**
- * 悬浮胶囊底栏（DESIGN §4.22，2026-09-22 按用户给的参考形态改）。
+ * 悬浮胶囊底栏（DESIGN §4.22，2026-09-22 按用户给的参考形态改；2026-11-06 换指示器）。
  *
- * 全圆角 + 阴影 + 半透明底；选中态三重信号：淡主色底块 + 图标微放大 +
+ * 全圆角 + 阴影 + 半透明底；选中态三重信号：**一个**淡主色底块 + 图标微放大 +
  * 图标/文字颜色加深（用户 2026-09-22 追加：原先只靠颜色，切页辨识度不够）。
  *
  * 底色用 `surfaceContainer` 而不是 `surface`：浅色主题下 `surface` 与页面底色几乎同色，
@@ -677,6 +737,21 @@ private val PlainBottomBarHeight = 80.dp
  *
  * 不用 M3 的 `NavigationBar`：它是按整宽 80dp 设计的，胶囊要的是另一套几何
  * （高度 64dp、外侧留白、圆角 50%）。
+ *
+ * ## 为什么指示器画在 `drawBehind` 里，而不是 `graphicsLayer { translationX }`
+ *
+ * 2026-11-06 之前是三格**各自** `animateColorAsState` 亮起——读起来是「三个格子分别点灯」，
+ * 不是「一个指示器滑过去」。改成单一底块后，位移有两条路：
+ *
+ * - `graphicsLayer { translationX = … }`：需要一个**额外的** `Box` 当底块，而它的宽度
+ *   得等于「胶囊宽 / 3」——胶囊高度是内容撑出来的，只能再套一层 `matchParentSize()` +
+ *   `BoxWithConstraints` 才拿得到槽宽，等于多一个布局节点 + 一次子组合；
+ * - `drawBehind`：在 `Row` 自己的绘制阶段按 `size.width / tabs.size` 画一个圆角矩形。
+ *   零额外节点、零额外组合，动画值在 draw lambda 里读（**只失效绘制，不触发重组、
+ *   不动布局**），与 `ui/common/Skeleton.kt` 的流光同一范式。
+ *
+ * 两条路都不改布局，但后者更省，所以选它。**不要**退回 `Modifier.offset`——那是每帧
+ * 走布局阶段。
  */
 @Composable
 private fun FloatingNavBarPill(
@@ -685,7 +760,23 @@ private fun FloatingNavBarPill(
     onSelect: (BottomTab) -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
-    val haptics = rememberAppHaptics()
+    // 选中槽位。-1 = 这一帧还不知道在哪（`currentRoute` 为 null）。
+    val selectedIndex = tabs.indexOfFirst { it.route == currentRoute }
+    val indicator = remember { Animatable(0f) }
+    // 首帧 `currentRoute` 还是 null（Scaffold 先组合 bottomBar、后组合 NavHost），
+    // 此时不能落位：否则拿到真路由时会看到指示器从「今日」滑到启动页。
+    // 第一次拿到真槽位直接 snap，之后才走动画。
+    var placed by remember { mutableStateOf(false) }
+    LaunchedEffect(selectedIndex) {
+        if (selectedIndex < 0) return@LaunchedEffect
+        if (placed) {
+            indicator.animateTo(selectedIndex.toFloat(), Motion.state())
+        } else {
+            indicator.snapTo(selectedIndex.toFloat())
+            placed = true
+        }
+    }
+    val indicatorColor = colorScheme.primary.copy(alpha = 0.12f)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(percent = 50),
@@ -696,32 +787,39 @@ private fun FloatingNavBarPill(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 6.dp),
+                .padding(horizontal = 6.dp, vertical = 6.dp)
+                // 指示器画在子节点**之下**（drawBehind 先于内容绘制）；圆角取半个行高，
+                // 与胶囊本身的 `percent = 50` 同形。
+                .drawBehind {
+                    if (tabs.isEmpty()) return@drawBehind
+                    val slot = size.width / tabs.size
+                    drawRoundRect(
+                        color = indicatorColor,
+                        topLeft = Offset(indicator.value * slot, 0f),
+                        size = Size(slot, size.height),
+                        cornerRadius = CornerRadius(size.height / 2f),
+                    )
+                },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             tabs.forEach { tab ->
                 val selected = currentRoute == tab.route
-                // 选中 = 淡主色底块 + 加深。颜色渐变过渡，切页时不会「啪」地跳一下
+                // 颜色与图标缩放仍是**每格各自**的：它们是"这一格是否选中"的状态交代，
+                // 跟着指示器走反而会让未选中的格子读不出变化。
                 val contentColor by animateColorAsState(
                     targetValue = if (selected) colorScheme.onSurface else colorScheme.onSurfaceVariant,
-                    animationSpec = tween(TabFadeMillis),
+                    animationSpec = Motion.state(),
                     label = "navItemColor",
-                )
-                val itemBackground by animateColorAsState(
-                    targetValue = if (selected) colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
-                    animationSpec = tween(TabFadeMillis),
-                    label = "navItemBackground",
                 )
                 val iconScale by animateFloatAsState(
                     targetValue = if (selected) 1.18f else 1f,
-                    animationSpec = tween(TabFadeMillis),
+                    animationSpec = Motion.state(),
                     label = "navItemIconScale",
                 )
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(percent = 50))
-                        .background(itemBackground)
                         // 用 selectable 而不是 clickable：TalkBack 要能读出「已选中的标签页」
                         .selectable(
                             selected = selected,
@@ -759,13 +857,14 @@ private fun FloatingNavBarPill(
 // NavHost 现在只承载三个平级 tab：短促交叉淡入淡出，横向滑动感会误导层级。
 // 设置类二级页已全部改为 SubpageActivity 独立窗口（底栏不可达），
 // 它们的进出场动画是 Activity 级 overridePendingTransition（右侧推入/退出），不在这里。
+//
+// 时长统一走 `Motion.state()`（2026-11-06）：原先这里是 `TabFadeMillis = 180`，而课表页
+// 背景层的淡入淡出引的是同一个常量、理由写着「两处必须同频」——这就是「一个值在两处
+// 各自记一遍」的典型。归到 Motion 之后，"同频"由同一个 spec 工厂保证，不再靠注释提醒。
 
-/** Tab 交叉淡入淡出的时长（毫秒）。课表页背景层的淡入淡出也用它，两处必须同频。 */
-private const val TabFadeMillis = 180
+private fun tabEnter(): EnterTransition = fadeIn(Motion.state())
 
-private fun tabEnter(): EnterTransition = fadeIn(tween(TabFadeMillis))
-
-private fun tabExit(): ExitTransition = fadeOut(tween(TabFadeMillis))
+private fun tabExit(): ExitTransition = fadeOut(Motion.state())
 
 /**
  * 首启引导后台同步的结果弹窗（DESIGN §4.17 / §4.29，2026-10-04）：登录后课表、成绩、
@@ -906,6 +1005,15 @@ internal fun JuwApp(
         )
     }
     DrawerBackHandler(drawer)
+    // 抽屉主卡的圆角与阴影（见 [CardCornerSteps] 的 KDoc）：形状在组合期一次建好，
+    // 阴影只留一个「最大 px」——下面那个每帧都跑的绘制 lambda 里只剩乘法，
+    // 不再逐帧 new RoundedCornerShape、也不再逐帧做 Dp→px 换算。
+    val cardCornerShapes = remember {
+        List(CardCornerSteps + 1) { i ->
+            RoundedCornerShape(CardCornerRadius * (i.toFloat() / CardCornerSteps))
+        }
+    }
+    val cardShadowMaxPx = with(drawerDensity) { CardShadowElevation.toPx() }
     // 从侧栏钱包发起充值：不再是「跳一个页面」，只落一个待办，壳层 RechargeHost
     // 直接弹对应充值弹层；弹层关掉就结束，不离开当前 Tab。
     var pendingRecharge by remember { mutableStateOf<RechargeKind?>(null) }
@@ -1003,8 +1111,11 @@ internal fun JuwApp(
     // 显示设置唯一入口 = 课表页顶栏眼睛图标，「我的」侧属重复入口，
     // 对应的 Channel 链路（displaySettingsRequests → WeekScreen）一并移除。
 
-    val backStack by navController.currentBackStackEntryAsState()
-    val currentRoute = backStack?.destination?.route
+    // 当前路由（Tab 判据）**不在这里读**：`currentBackStackEntryAsState()` 读的是 State，
+    // 读在哪一层，哪一层就在切 tab 时重组——放在 `JuwApp` 体里会让整个壳层（含 28 参数的
+    // `SideDrawerContent`）跟着重算一遍。两个消费点各自调 [currentRouteOrNull]，切 tab 只
+    // 重组底栏与背景层两个小作用域。代价是多挂一个 OnDestinationChangedListener
+    // （NavController 内部就是个回调列表，可忽略）。
 
     // 胖乖 ViewModel 挂 Activity 作用域：今日页快捷入口与开水页（独立窗口）各自持有，
     // 这里这份供今日页直接触发 unlock 时使用
@@ -1284,6 +1395,8 @@ internal fun JuwApp(
                     drawer.close()
                     startQuickScan()
                 },
+                // 侧栏的提示走壳层这一份（宿主挂在根层，不会被 300dp 的侧栏裁掉）
+                snackbar = shellSnackbar,
             )
         }
         Surface(
@@ -1298,8 +1411,14 @@ internal fun JuwApp(
                     scaleX = scale
                     scaleY = scale
                     translationX = drawerMaxOffsetPx * p - (1f - scale) * size.width / 2f
-                    shape = RoundedCornerShape(24.dp * eased)
-                    shadowElevation = (12.dp * eased).toPx()
+                    // 圆角与阴影只在「动起来」时才有值：eased == 0 时形状是 0dp（按整屏
+                    // 矩形绘制）、阴影 0，静止态没有裁角也没有离屏层。形状取组合期预建
+                    // 好的量化档、阴影是「常量 px × eased」——这个 lambda 每帧都跑，
+                    // 里面不再新建任何对象（见 [CardCornerSteps] 的 KDoc）。
+                    shape = cardCornerShapes[
+                        (eased * CardCornerSteps).roundToInt().coerceIn(0, CardCornerSteps)
+                    ]
+                    shadowElevation = cardShadowMaxPx * eased
                     clip = true
                 }
                 .draggable(
@@ -1329,13 +1448,14 @@ internal fun JuwApp(
             // 收起来反而会让 NavHost 的 padding 变化、网格重排。
             AnimatedVisibility(
                 visible = !floatingNavBar || bottomBarVisible,
-                enter = fadeIn(tween(TabFadeMillis)),
-                exit = fadeOut(tween(TabFadeMillis)),
+                enter = fadeIn(Motion.state()),
+                exit = fadeOut(Motion.state()),
             ) {
                 AppBottomBar(
                     floating = floatingNavBar,
                     tabs = tabs,
-                    currentRoute = currentRoute,
+                    // 在这里读而不是在 JuwApp 体里读：作用域收到底栏（见上方那条注释）
+                    currentRoute = navController.currentRouteOrNull(),
                     onSelect = { tab ->
                         haptics.tap()
                         navController.navigate(tab.route) {
@@ -1361,24 +1481,15 @@ internal fun JuwApp(
             // 只画课表 Tab：其余两页是不透明底，图本来也露不出来，但底栏在它们那儿是半透明的，
             // 不挡住就会从底栏透出来，与「背景只铺课表页」的约定冲突。
             //
-            // 显隐必须与 NavHost 的转场**同频**（都用 TabFadeMillis）：写成
-            // `if (currentRoute == Routes.WEEK)` 时，导航一发出目的地就变了，而课表页还要淡出
+            // 显隐必须与 NavHost 的转场**同频**（都用 `Motion.state()`）：写成
+            // `if (route == Routes.WEEK)` 时，导航一发出目的地就变了，而课表页还要淡出
             // 180ms——用户看到的就是「图先没、页再走」。这里让两者一起淡出/淡入。
-            AnimatedVisibility(
-                visible = currentRoute == Routes.WEEK,
-                enter = fadeIn(tween(TabFadeMillis)),
-                exit = fadeOut(tween(TabFadeMillis)),
-                modifier = Modifier.matchParentSize(),
-            ) {
-                ScheduleBackgroundLayer(
-                    fileName = shellPrefs?.bgImageName,
-                    opacity = shellPrefs?.bgImageOpacity ?: 1f,
-                    dim = shellPrefs?.bgImageDim ?: 0f,
-                    blur = shellPrefs?.bgImageBlur ?: 0f,
-                    scale = shellPrefs?.bgImageScale ?: BgScale.Fill,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
+            //
+            // 整块收进 [WeekBackgroundLayer] 而不是在这里写 `visible = …currentRouteOrNull()…`：
+            // `AnimatedVisibility` 的实参在**谁的作用域里求值，谁就订阅路由变化**，
+            // 写在 `JuwApp` 体里等于壳层每次切 tab 都重组（2026-11-06 交叉复核修正——
+            // 上一版只把底栏那处收窄了，这处漏了）。
+            WeekBackgroundLayer(navController = navController, shellPrefs = shellPrefs)
             CompositionLocalProvider(
                 LocalBottomBarClearance provides bottomBarClearance,
                 LocalBottomBarVisibleRequest provides bottomBarVisibleRequest,
@@ -1678,6 +1789,51 @@ private fun DrawerBackHandler(drawer: StackedDrawerState) {
     // 只读布尔量：progress 是 Animatable 的逐帧状态，放进 enabled 会让这里每帧重组。
     BackHandler(enabled = drawer.isVisible) { drawer.close() }
 }
+
+/**
+ * 课表页背景层（只在课表 Tab 显示，DESIGN §4.21/§4.22）。
+ *
+ * 单独成一个 Composable 的唯一理由是**作用域**：`currentRouteOrNull()` 读的是 State，
+ * 读在哪一层、哪一层就在切 tab 时重组。写成 `JuwApp` 体里的
+ * `AnimatedVisibility(visible = …)` 会让整个壳层（含 28 参数的 `SideDrawerContent`）
+ * 跟着重算——2026-11-06 交叉复核发现上一版只收窄了底栏那处，这里漏了。
+ */
+@Composable
+private fun WeekBackgroundLayer(
+    navController: NavHostController,
+    shellPrefs: AppShellPrefs?,
+) {
+    AnimatedVisibility(
+        visible = navController.currentRouteOrNull() == Routes.WEEK,
+        enter = fadeIn(Motion.state()),
+        exit = fadeOut(Motion.state()),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        ScheduleBackgroundLayer(
+            fileName = shellPrefs?.bgImageName,
+            opacity = shellPrefs?.bgImageOpacity ?: 1f,
+            dim = shellPrefs?.bgImageDim ?: 0f,
+            blur = shellPrefs?.bgImageBlur ?: 0f,
+            scale = shellPrefs?.bgImageScale ?: BgScale.Fill,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * 当前路由（Tab 判据）。**只能在真正需要它的那个小作用域里调用**。
+ *
+ * 为什么不做成 `JuwApp` 里的一个 `val`（2026-11-06）：`currentBackStackEntryAsState()`
+ * 返回的是 State，读在哪一层，哪一层就订阅它——读在 `JuwApp` 体里意味着每切一次 tab
+ * 都让整个壳层重算（`tabs` 列表、底栏净空、以及 28 个参数的 `SideDrawerContent`）。
+ * 两个消费点（底栏 / 背景层）各自调用，订阅就各自落在那两个小作用域上。
+ *
+ * 代价是多挂一个 `OnDestinationChangedListener`（NavController 内部是个回调列表，
+ * 两次订阅的开销可忽略）；换来的是壳层在切 tab 时不参与重组。
+ */
+@Composable
+private fun NavHostController.currentRouteOrNull(): String? =
+    currentBackStackEntryAsState().value?.destination?.route
 
 object Routes {
     const val TODAY = "today"

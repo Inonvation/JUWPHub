@@ -3,7 +3,6 @@ package edu.jxslu.schedule.ui.today
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.data.prefs.DisplayPrefs
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
@@ -29,14 +28,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.time.LocalDate
 import java.time.LocalDateTime
 
@@ -238,12 +235,6 @@ class TodayViewModel(
         val courses: List<Course>,
         val overrides: List<ScheduleOverride>,
     )
-
-    /**
-     * 卡片开关的首帧初值。开关独立于 [ready] 门闸（那管的是 Room 派生状态），
-     * DataStore 的真值必然晚于首帧；构造时阻塞读一次真值当初值。
-     */
-    private val initialPrefs: DisplayPrefs = runBlocking { repo.displayPrefs.first() }
 
     /**
      * 今日页校园卡付款码卡开关（DESIGN §3.10）。默认关（涉及凭证与资金），

@@ -7,7 +7,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -60,7 +59,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.Graph
@@ -99,6 +101,7 @@ import edu.jxslu.schedule.ui.ebike.BikeLocator
 import edu.jxslu.schedule.ui.ebike.EbikeScanActivity
 import edu.jxslu.schedule.ui.ebike.LocateResult
 import edu.jxslu.schedule.ui.ebike.showNotice
+import edu.jxslu.schedule.ui.theme.Motion
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -116,9 +119,9 @@ import me.rerere.hugeicons.stroke.Refresh
 /** 订单进行中且页面可见时的轮询间隔（与 ViewModel 口径一致，只在 UI 侧用）。 */
 private const val ORDER_POLL_INTERVAL_MILLIS = 15_000L
 
-/** 页面区块的出现 / 退出过渡时长（全页统一，别在各处各写一个数）。 */
-private const val SectionEnterMillis = 220
-private const val SectionExitMillis = 160
+// 页面区块的出现 / 退出过渡不再各留一份毫秒常量：统一走 `ui/theme/Motion.kt` 的四档
+// （出现 = reveal 220ms 减速曲线，退出 = state 180ms）。原先这里是 220 / 160 两个私有常量，
+// 与「胖乖水控」「趣智」两张页面各写各的数——同一种「区块进场」在三个页面三个时长。
 
 /** 记录卡默认展示的账单条数（更早的走「查看全部」进历史账单页）。 */
 private const val RecentRecordCount = 3
@@ -203,9 +206,12 @@ fun UjingScreen(
     val historyStore = remember { Graph.ujingHistory(context) }
     val history by historyStore.state.collectAsStateWithLifecycle()
 
-    // 一次性提示（登录成功、会话过期、看板错误等）
+    // 一次性提示（会话过期、看板错误等）。**语气按 Warning**：这条通道当前唯一的来源是
+    // `UjingViewModel.handleFailure` 的会话失效（`SessionExpiryStore.NOTICE_TEXT`），
+    // 属于「你要处理一下」而不是「告知你一件事」——旧实现一律用 Info，看起来像播报。
+    // 若以后真要发纯信息类事件，给 Channel 带上 tone，别在调用点再写死。
     LaunchedEffect(Unit) {
-        viewModel.events.collect { message -> showNotice(scope, snackbar, message, NoticeTone.Info) }
+        viewModel.events.collect { message -> showNotice(scope, snackbar, message, NoticeTone.Warning) }
     }
     // 一次性导航：识别成功 → 独立下单页
     LaunchedEffect(Unit) {
@@ -217,13 +223,29 @@ fun UjingScreen(
         if (!scanRaw.isNullOrBlank()) viewModel.onQrScanned(scanRaw)
     }
 
-    // 订单进行中且页面可见时的 15 秒轮询（离开页面即随组合取消；无后台轮询，红线见 §4.37）。
-    // 走 silent 刷新：不置 busy、不弹错误——后台轮询不该每 15 秒把按钮闪成加载圈。
+    // 订单进行中且页面可见时的 15 秒轮询（红线 §4.37：**不后台轮询**）。
+    // 2026-11-06 修：原来只用 `LaunchedEffect + while` 包，而组合**不随 `onStop` 拆**——
+    // 退到后台 / 锁屏 / 进支付宝时循环照跑，后台每 15 秒打一次第三方平台（U净 对高频请求
+    // 会限流数十分钟），正是红线禁止的形状。改 `repeatOnLifecycle(RESUMED)`：灭屏或切后台
+    // 立刻停，回前台立刻续。
+    // 回前台**补一拍**（首次进入除外）：退后台那段时间可能正好是「洗完 / 启动完成 / 支付到账」
+    // 发生的时候，等 15 秒才刷新会让用户先看到旧状态。首次进入不补，是因为
+    // `UjingViewModel` 的 loggedIn 收集器进页已经对过一次表（UjingViewModel.kt:171-172），
+    // 再补就是同一秒两次请求。
+    // shortcut: 用「首次 RESUMED 跳过」而不是时间戳判新鲜，因为进页那一刻拿不到
+    // 「这次刷新是不是刚发生」；等 ViewModel 提供 lastRefreshedAt 再换（现在不值得加状态）。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var polledOnce by remember(state.order?.orderId) { mutableStateOf(false) }
     LaunchedEffect(state.order?.orderId, state.order?.isTerminal) {
         val order = state.order ?: return@LaunchedEffect
-        while (isActive && !order.isTerminal) {
-            delay(ORDER_POLL_INTERVAL_MILLIS)
-            viewModel.refreshOrder(silent = true)
+        if (order.isTerminal) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            if (polledOnce) viewModel.refreshOrder(silent = true)
+            polledOnce = true
+            while (isActive) {
+                delay(ORDER_POLL_INTERVAL_MILLIS)
+                viewModel.refreshOrder(silent = true)
+            }
         }
     }
 
@@ -303,8 +325,7 @@ fun UjingScreen(
         AnimatedContent(
             targetState = state.loggedIn,
             transitionSpec = {
-                fadeIn(tween(SectionEnterMillis, easing = FastOutSlowInEasing)) togetherWith
-                    fadeOut(tween(SectionExitMillis))
+                fadeIn(Motion.reveal()) togetherWith fadeOut(Motion.state())
             },
             label = "ujingAuth",
         ) { loggedIn ->
@@ -330,14 +351,14 @@ fun UjingScreen(
                     // ③ 在案订单（唯一一张英雄卡；出现 / 退场各有过渡）
                     AnimatedVisibility(
                         visible = liveOrder != null,
-                        enter = fadeIn(tween(SectionEnterMillis)) +
+                        enter = fadeIn(Motion.reveal()) +
                             expandVertically(
-                                tween(SectionEnterMillis, easing = FastOutSlowInEasing),
+                                Motion.reveal(),
                                 expandFrom = Alignment.Top,
                             ),
-                        exit = fadeOut(tween(SectionExitMillis)) +
+                        exit = fadeOut(Motion.state()) +
                             shrinkVertically(
-                                tween(SectionExitMillis),
+                                Motion.state(),
                                 shrinkTowards = Alignment.Top,
                             ),
                     ) {
@@ -528,13 +549,20 @@ private fun MetricsSection(state: UjingUiState, onRefresh: () -> Unit) {
 
 @Composable
 private fun LoginSection(state: UjingUiState, viewModel: UjingViewModel) {
-    // 60 秒冷却倒计时：只按发码时刻算，页面在就 tick、页面走就停；
-    // 冷却归零（或压根没发过码）就停循环——不然进页即永久每秒唤醒重组
+    // 60 秒冷却倒计时：只按发码时刻算，冷却归零（或压根没发过码）就停循环——
+    // 不然进页即永久每秒唤醒重组。
+    // 2026-11-06 加 `repeatOnLifecycle`：原来只随组合停，而组合不随 `onStop` 拆，
+    // 发完码立刻切后台的话这 60 秒仍在后台每秒重组（与订单轮询同一个坑）。
+    val owner = LocalLifecycleOwner.current
     val now by produceState(initialValue = System.currentTimeMillis(), key1 = state.codeSentAt) {
         val deadline = state.codeSentAt + 60_000L
-        while (state.codeSentAt > 0L && System.currentTimeMillis() < deadline) {
-            value = System.currentTimeMillis()
-            delay(1_000)
+        if (state.codeSentAt > 0L && System.currentTimeMillis() < deadline) {
+            owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (System.currentTimeMillis() < deadline) {
+                    value = System.currentTimeMillis()
+                    delay(1_000)
+                }
+            }
         }
         value = System.currentTimeMillis()
     }
@@ -960,16 +988,22 @@ private fun OrderHero(
     onDismiss: () -> Unit,
 ) {
     // 本地每秒 tick：剩余 = 快照 remainSeconds −（现在 − 快照时刻），只对运行中订单有意义；
-    // 终态订单倒计时没有意义，不再每秒唤醒（刷新必写新 snapshotAt，状态翻转时本 tick 会重启）
+    // 终态订单倒计时没有意义，不再每秒唤醒（刷新必写新 snapshotAt，状态翻转时本 tick 会重启）。
+    // 2026-11-06 加 `repeatOnLifecycle`：洗涤中订单最长 40 分钟，原来退后台 / 锁屏后仍在
+    // 每秒重组（组合不随 `onStop` 拆）——与「不后台轮询」同一口径，只在前台走秒。
     val terminal = order.isTerminal
+    val owner = LocalLifecycleOwner.current
     val now by produceState(
         initialValue = System.currentTimeMillis(),
         key1 = order.snapshotAt,
         key2 = terminal,
     ) {
-        while (!terminal) {
-            value = System.currentTimeMillis()
-            delay(1_000)
+        if (terminal) return@produceState
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                value = System.currentTimeMillis()
+                delay(1_000)
+            }
         }
     }
     val running = order.status == "40" && !terminal
@@ -1039,6 +1073,10 @@ private fun OrderHero(
             val target = (
                 1f - remainSeconds.coerceAtLeast(0).toFloat() / order.durationSeconds
                 ).coerceIn(0f, 1f)
+            // 例外：这是**进度条按 1 秒一次的 tick 补间**，时长要盖住两次 tick 之间的空档，
+            // 且必须保持线性（曲线一弯，每秒一格就会读出「一顿一顿」的脉动）。
+            // 四档里最长 280ms 只盖住 1 秒的 28%，套上去反而更像跳格；这里按「数据节奏」
+            // 而不是「用户动作」定长，是全 App 唯一这样的动画。
             val progress by animateFloatAsState(
                 targetValue = target,
                 animationSpec = tween(durationMillis = 400, easing = LinearOutSlowInEasing),
@@ -1132,14 +1170,20 @@ private fun OrderHero(
 @Composable
 internal fun UjingOrderStatusLine(order: UjingOrderSnapshot, modifier: Modifier = Modifier) {
     val running = order.status == "40"
+    // 与订单卡同一口径（2026-11-06）：只在前台走秒。这一份还被今日页 U净 弹窗复用，
+    // 而今日页的组合是常驻的——不挂生命周期就会在后台每秒重组整个弹窗子树。
+    val owner = LocalLifecycleOwner.current
     val now by produceState(
         initialValue = System.currentTimeMillis(),
         key1 = order.snapshotAt,
         key2 = running,
     ) {
-        while (running) {
-            value = System.currentTimeMillis()
-            delay(1_000)
+        if (!running) return@produceState
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                value = System.currentTimeMillis()
+                delay(1_000)
+            }
         }
     }
     val remain = UjingState.liveRemainSeconds(order.status, order.remainSeconds, order.snapshotAt, now)

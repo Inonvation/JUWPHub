@@ -95,49 +95,86 @@ class CampusCardViewModel(
 
     // ---- 余额提醒（DESIGN §3.13）：默认关；两个来源各自独立，但共用同一份凭证 ----
 
-    // 余额提醒初值阻塞读真值（同 [MeViewModel] 2026-09-28 的修法）：stateIn 初值若写
-    // false/默认阈值，开过提醒的用户进设置页开关会先按关渲染、真值到达后再跳。
-    // DataStore 读过一次后常驻内存，这里只是再收一次缓存。
+    /**
+     * 余额提醒的 6 个初值快照（2026-11-06）。
+     *
+     * **为什么初值还要阻塞读真值**（同 `MeViewModel.initialPrefs` 2026-09-28 的修法）：
+     * `stateIn` 的初值就是首帧读到的值，而 DataStore 的第一份数据必然晚于首帧——初值写
+     * `false` / 默认阈值的话，开过提醒的用户进设置页会先按「关」渲染、真值到达后再跳一次。
+     * 这个意图不能丢，所以读盘留在构造期。
+     *
+     * **为什么合成一次而不是六个 `runBlocking`**：本 VM 挂在常驻的 `RechargeHost` 上
+     * （MainActivity 壳层无条件组合），构造期就在**主线程**上。原来 6 个独立 `runBlocking`
+     * = 6 次 park 主线程 + 6 个收集器各自去等同一份 `displayDataStore.data`；
+     * 合成一次只 park 一次、只起一轮收集。别退回六个：那不是「更清晰」，是把同一份快照
+     * 重复等了六遍。
+     *
+     * 残留风险：这一次读盘仍在主线程（冷启动首次初始化 DataStore 时才有实际 IO，
+     * 之后走内存缓存）。要彻底消除得让 `DisplayPrefsStore` 提供内存快照或同步读取口，
+     * 那属于 `data/prefs` 的改动，不在本次范围。
+     * shortcut: 单次阻塞读 + 6 个 stateIn，等 `data/prefs` 出快照 API 后改用它。
+     */
+    private data class AlertDefaults(
+        val powerEnabled: Boolean,
+        val powerYuan: Int,
+        val yktEnabled: Boolean,
+        val yktYuan: Int,
+        val powerIntervalHours: Int,
+        val yktIntervalHours: Int,
+    )
+
+    /** 6 个提醒初值一次读齐；下面六个 `stateIn` 只从这里取初值。 */
+    private val alertDefaults: AlertDefaults = runBlocking {
+        AlertDefaults(
+            powerEnabled = prefs.powerAlertEnabled.first(),
+            powerYuan = prefs.powerAlertYuan.first(),
+            yktEnabled = prefs.yktAlertEnabled.first(),
+            yktYuan = prefs.yktAlertYuan.first(),
+            powerIntervalHours = prefs.powerAlertIntervalHours.first(),
+            yktIntervalHours = prefs.yktAlertIntervalHours.first(),
+        )
+    }
+
     val powerAlertEnabled: StateFlow<Boolean> = prefs.powerAlertEnabled
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            runBlocking { prefs.powerAlertEnabled.first() },
+            alertDefaults.powerEnabled,
         )
 
     val powerAlertYuan: StateFlow<Int> = prefs.powerAlertYuan
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            runBlocking { prefs.powerAlertYuan.first() },
+            alertDefaults.powerYuan,
         )
 
     val yktAlertEnabled: StateFlow<Boolean> = prefs.yktAlertEnabled
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            runBlocking { prefs.yktAlertEnabled.first() },
+            alertDefaults.yktEnabled,
         )
 
     val yktAlertYuan: StateFlow<Int> = prefs.yktAlertYuan
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            runBlocking { prefs.yktAlertYuan.first() },
+            alertDefaults.yktYuan,
         )
 
     val powerAlertIntervalHours: StateFlow<Int> = prefs.powerAlertIntervalHours
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            runBlocking { prefs.powerAlertIntervalHours.first() },
+            alertDefaults.powerIntervalHours,
         )
 
     val yktAlertIntervalHours: StateFlow<Int> = prefs.yktAlertIntervalHours
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            runBlocking { prefs.yktAlertIntervalHours.first() },
+            alertDefaults.yktIntervalHours,
         )
 
     fun setPowerAlertEnabled(value: Boolean) {

@@ -47,7 +47,6 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.SubpageActivity
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.local.InboxMessageEntity
-import edu.jxslu.schedule.domain.InboxRules
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.SkeletonBox
@@ -150,6 +149,13 @@ fun InboxScreen(onBack: () -> Unit) {
                 list == null -> SkeletonList()
                 list.isEmpty() -> EmptyState()
                 else -> {
+                    // 时间分段（「今天 / 昨天 / 本周 / 更早」，InboxRules.timeGroupOf）：
+                    // 列表本身按 createdAt 倒序。**分组头先算成独立 item**（[inboxListItems]），
+                    // 不在 items 的内容 lambda 里推进可变变量——那个 lambda 只为可见项、
+                    // 按滚动/复用顺序执行，用变量记「上一条的桶」会让分组头重复或缺失。
+                    val zone = remember { ZoneId.systemDefault() }
+                    val today = LocalDate.now(zone)
+                    val rows = remember(list, zone, today) { inboxListItems(list, zone, today) }
                     LazyColumn(
                         modifier = Modifier
                             .weight(1f)
@@ -157,31 +163,26 @@ fun InboxScreen(onBack: () -> Unit) {
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        // 时间分段（「今天 / 昨天 / 本周 / 更早」，InboxRules.timeGroupOf）：
-                        // 列表本身按 createdAt 倒序，逐条与上一条比桶、换桶插头。
-                        // key 带前缀防止消息 id 与分组头 key 撞车。
-                        val zone = ZoneId.systemDefault()
-                        val today = LocalDate.now(zone)
-                        var lastGroup: InboxRules.TimeGroup? = null
-                        items(list, key = { "msg-${it.id}" }) { msg ->
-                            val group = InboxRules.timeGroupOf(
-                                Instant.ofEpochMilli(msg.createdAt),
-                                zone,
-                                today,
-                            )
-                            if (group != lastGroup) {
-                                GroupHeader(label = group.label)
-                                lastGroup = group
+                        items(rows, key = { it.key }) { item ->
+                            when (item) {
+                                is InboxListItem.Header -> GroupHeader(label = item.group.label)
+                                // 收件箱会增删（标记已读不清行、批量删除会整段消失）：位移与淡入
+                                // 淡出交给 animateItem，否则删一条时下面整列硬跳一截。
+                                is InboxListItem.Message -> MessageRow(
+                                    modifier = Modifier.animateItem(),
+                                    msg = item.msg,
+                                    selecting = selection != null,
+                                    checked = item.msg.id in selection.orEmpty(),
+                                    onClick = {
+                                        if (selection != null) {
+                                            toggleSelected(item.msg.id)
+                                        } else {
+                                            openMessage(item.msg)
+                                        }
+                                    },
+                                    onLongClick = { selection = setOf(item.msg.id) },
+                                )
                             }
-                            MessageRow(
-                                msg = msg,
-                                selecting = selection != null,
-                                checked = msg.id in selection.orEmpty(),
-                                onClick = {
-                                    if (selection != null) toggleSelected(msg.id) else openMessage(msg)
-                                },
-                                onLongClick = { selection = setOf(msg.id) },
-                            )
                         }
                     }
                     if (selection != null) {
@@ -260,9 +261,11 @@ private fun MessageRow(
     checked: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val unread = msg.readAt == null
     AppCard(
+        modifier = modifier,
         onClick = onClick,
         onClickLabel = msg.title,
         onLongClick = onLongClick,

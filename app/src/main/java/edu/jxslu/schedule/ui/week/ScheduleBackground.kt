@@ -175,14 +175,21 @@ internal fun ScheduleBackgroundLayer(
         value = loadScheduleBackground(context, fileName, targetLongSidePx)
     }
     val bitmap = image ?: return
+    // 页面底色：MainActivity 那层 Surface 用的就是它，所以 scrim 用它才与旧版 Image alpha 等价
+    val pageBackground = MaterialTheme.colorScheme.background
 
     Box(modifier) {
+        // 图画满不透明，**不挂 `Modifier.alpha`**（2026-11-06）：整屏 Image 带一层非 1 的
+        // alpha 会给这个节点常驻一个离屏合成层（用户把不透明度滑到 15% 也一样），
+        // 而「变淡」这件事完全可以用一层 scrim 等价表达——
+        // `a*img + (1-a)*B` 正是 `Image(alpha = a)` 压在底色 B 上的结果，
+        // 所以下面按 `1 - opacity` 铺一层页面底色，观感与旧实现逐像素一致（不是「图发灰」：
+        // 发灰是拿黑色压，这里压的是**页面底色**，与图片自己淡下去同一个方向）。
         when (scale) {
             BgScale.Fill -> Image(
                 bitmap = bitmap,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                alpha = opacity,
                 modifier = Modifier.fillMaxSize(),
             )
 
@@ -190,7 +197,6 @@ internal fun ScheduleBackgroundLayer(
                 bitmap = bitmap,
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
-                alpha = opacity,
                 modifier = Modifier.fillMaxSize(),
             )
 
@@ -206,7 +212,6 @@ internal fun ScheduleBackgroundLayer(
                             srcSize = src,
                             dstOffset = IntOffset(x, y),
                             dstSize = src,
-                            alpha = opacity,
                             filterQuality = FilterQuality.None,
                         )
                         x += bitmap.width
@@ -214,6 +219,14 @@ internal fun ScheduleBackgroundLayer(
                     y += bitmap.height
                 }
             }
+        }
+        // 不透明度：用页面底色压回去（等价于旧版的 Image alpha），见上面的说明
+        if (opacity < 1f) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(pageBackground.copy(alpha = 1f - opacity.coerceIn(0f, 1f))),
+            )
         }
         // 压暗遮罩：亮图上白色课名与时间轴读不出来，靠它把对比度拉回来。
         // 铺在图片之上、网格之下——网格的文字不吃这层灰。

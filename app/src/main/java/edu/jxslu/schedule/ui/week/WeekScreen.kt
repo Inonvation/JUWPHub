@@ -52,6 +52,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -97,6 +98,8 @@ import edu.jxslu.schedule.ui.common.GhostCourseCard
 import edu.jxslu.schedule.ui.common.GridCellStyle
 import edu.jxslu.schedule.ui.common.GridCourseCard
 import edu.jxslu.schedule.ui.common.ImportTargetDialogHost
+import edu.jxslu.schedule.ui.common.importPreviewNote
+import edu.jxslu.schedule.ui.common.importSuccessText
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.LocalBottomBarVisibleRequest
@@ -206,7 +209,9 @@ fun WeekScreen(
         when (val r = repo.importJson(text, merge, targetId)) {
             is ImportResult.Success -> snackbar.showNotice(
                 AppNoticeVisuals(
-                    if (merge) "合并完成：新增 ${r.added} / 文件共 ${r.total}" else "已覆盖导入 ${r.total} 门课",
+                    // 只报课程数会让用户以为「只动了课表」：备份文件还会整体替换成绩 / 教材 /
+                    // 笔记 / 作业。文案与弹窗的 note 同源（ui/common/BackupImportText.kt）。
+                    importSuccessText(r),
                     tone = NoticeTone.Success,
                 ),
             )
@@ -375,6 +380,43 @@ fun WeekScreen(
     val dateFontSp = typeSpec.dateFontSp
     val headerMinDp = typeSpec.headerMinDp
 
+    // 「现在」以 State 形态下发（2026-11-06）：`WeekPage` 的入参里不再有 `now`，读取只在
+    // `NowLine` 那一小块。别改回普通参数——那会让 `now` 成为 `WeekPage` 的依赖。
+    // shortcut: 30 秒 tick 仍会重组 `WeekPage`（`WeekUiState` 每 tick 重建、List 是
+    // unstable），见 `WeekGrid.WeekPage` 的 `now` 参数注释；已兑现的收益是下面这些
+    // `remember`：那次重组不再重算 `buildGridLayout`、不再 parse 开学日、不再 new 格子样式。
+    val nowState = rememberUpdatedState(state.now)
+
+    // 表头月份与格子样式同理：两者都只随「显示设置 / 当前周」变，而外层每 30 秒会重组一次。
+    // 每次重组都 `LocalDate.parse` 一遍开学日（weekDate → ScheduleCalculator.dateOf）是纯浪费；
+    // 格子样式是 `WeekPage` 的入参，每次 new 一个实例会让它的跳过判断失效。
+    val monthLabel = remember(state.semester, displayWeek) {
+        weekDate(state.semester, displayWeek, 1)?.let { "${it.monthValue}月" }
+    }
+    val cellStyle = remember(
+        state.cellRadiusDp,
+        state.cellOpacity,
+        state.cellCenterH,
+        state.cellCenterV,
+        state.showTeacher,
+        state.showCellBorder,
+        roomFontSp,
+        teacherFontSp,
+        state.showAtSign,
+    ) {
+        GridCellStyle(
+            cornerRadiusDp = state.cellRadiusDp,
+            opacity = state.cellOpacity,
+            centerHorizontal = state.cellCenterH,
+            centerVertical = state.cellCenterV,
+            showTeacher = state.showTeacher,
+            showBorder = state.showCellBorder,
+            roomFontSp = roomFontSp,
+            teacherFontSp = teacherFontSp,
+            showAtSign = state.showAtSign,
+        )
+    }
+
     Scaffold(
         // 底色透明（DESIGN §4.22）：背景图由 JuwApp 铺在外层 Scaffold 之下（要盖到状态栏与底栏），
         // 本页的 Surface 若不透明就会把它整块盖住。不透明底只由外层 Scaffold 提供，不会露出窗口底。
@@ -407,18 +449,32 @@ fun WeekScreen(
                 // 背景图不受影响——它在窗口层，照旧铺到屏幕底（§4.22）。
                 .padding(bottom = LocalBottomBarClearance.current),
         ) {
-            val layout = buildGridLayout(
-                maxHeight = maxHeight,
-                maxWidth = maxWidth,
-                sectionCount = sectionCount,
-                dayCount = days,
-                rowHeightScale = state.rowHeightScale,
-                railWidth = state.railWidthDp.dp,
-                // 表头高度用户值与「装得下两行日期文字」的下限取大：用户把表头拖小、
-                // 日期字号拉大时兜底防截断。只抬高渲染值，不改写存储值（滑块位置不动）。
-                // 下限同时是显示设置弹层里滑块的动态起点（见 headerMinDp），两端一致
-                dayHeaderHeight = maxOf(state.dayHeaderHeightDp.dp, headerMinDp.dp),
-            )
+            // 网格几何只在「可用区 / 列数 / 用户尺寸档」变化时重算：`buildGridLayout` 每次要
+            // 分配两个 11 元素的 ArrayList，而外层每次 30 秒 tick 都会重组这一层——
+            // 不 remember 就是每分钟白算一遍（2026-11-06）。入参全是稳定值（Dp / Int / Float）。
+            val layout = remember(
+                maxHeight,
+                maxWidth,
+                sectionCount,
+                days,
+                state.rowHeightScale,
+                state.railWidthDp,
+                state.dayHeaderHeightDp,
+                headerMinDp,
+            ) {
+                buildGridLayout(
+                    maxHeight = maxHeight,
+                    maxWidth = maxWidth,
+                    sectionCount = sectionCount,
+                    dayCount = days,
+                    rowHeightScale = state.rowHeightScale,
+                    railWidth = state.railWidthDp.dp,
+                    // 表头高度用户值与「装得下两行日期文字」的下限取大：用户把表头拖小、
+                    // 日期字号拉大时兜底防截断。只抬高渲染值，不改写存储值（滑块位置不动）。
+                    // 下限同时是显示设置弹层里滑块的动态起点（见 headerMinDp），两端一致
+                    dayHeaderHeight = maxOf(state.dayHeaderHeightDp.dp, headerMinDp.dp),
+                )
+            }
             val fitsOneScreen = layout.gridHeight + layout.dayHeaderHeight <= maxHeight
 
             val body: @Composable () -> Unit = {
@@ -432,8 +488,7 @@ fun WeekScreen(
                         TimeRail(
                             layout = layout,
                             slots = state.slots,
-                            monthLabel = weekDate(state.semester, displayWeek, 1)
-                                ?.let { "${it.monthValue}月" },
+                            monthLabel = monthLabel,
                             railFontSp = railFontSp,
                             dateFontSp = dateFontSp,
                         )
@@ -455,19 +510,9 @@ fun WeekScreen(
                             overrides = state.overrides,
                             isTodayWeek = week == state.todayWeek,
                             todayDay = todayDay,
-                            now = state.now,
+                            now = nowState,
                             showNonCurrentWeek = state.showNonCurrentWeek,
-                            cellStyle = GridCellStyle(
-                                cornerRadiusDp = state.cellRadiusDp,
-                                opacity = state.cellOpacity,
-                                centerHorizontal = state.cellCenterH,
-                                centerVertical = state.cellCenterV,
-                                showTeacher = state.showTeacher,
-                                showBorder = state.showCellBorder,
-                                roomFontSp = roomFontSp,
-                                teacherFontSp = teacherFontSp,
-                                showAtSign = state.showAtSign,
-                            ),
+                            cellStyle = cellStyle,
                             showNowLine = state.showNowLine,
                             showGridLines = state.showGridLines,
                             dateFontSp = dateFontSp,
@@ -582,40 +627,30 @@ fun WeekScreen(
             todayWeek = state.todayWeek,
             totalWeeks = totalWeeks,
             weeksWithCourses = weeksWithCourses,
-            onPickWeek = { week ->
-                pickerOpen = false
-                viewModel.setWeek(week)
-            },
-            onBackToCurrentWeek = {
-                pickerOpen = false
-                viewModel.goToToday()
-            },
+            // 动作里**不再自己置 `pickerOpen = false`**：弹层内部的 rememberSheetDismisser 会
+            // 先播退场动画、再落 onDismiss（= 关面板），最后才跑这里给的动作。自己置 false 会
+            // 把弹层从组合里瞬间抽掉，退场动画又变回硬切（2026-11-06）。
+            onPickWeek = { week -> viewModel.setWeek(week) },
+            onBackToCurrentWeek = { viewModel.goToToday() },
             timetableName = state.timetableName,
-            onSwitchTimetable = {
-                pickerOpen = false
-                switchOpen = true
-            },
+            onSwitchTimetable = { switchOpen = true },
             onDismiss = { pickerOpen = false },
         )
     }
 
     if (importOpen) {
+        // 同 picker：退场由弹层内的 rememberSheetDismisser 负责，这里只给「关掉之后做什么」
         ImportEntrySheet(
             onManualAdd = {
-                importOpen = false
                 editing = null
                 editorOpen = true
             },
             onJsonImport = {
-                importOpen = false
                 jsonLauncher.launch(
                     arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"),
                 )
             },
-            onJwImport = {
-                importOpen = false
-                onOpenJwImport()
-            },
+            onJwImport = { onOpenJwImport() },
             onDismiss = {
                 importOpen = false
             },
@@ -625,17 +660,10 @@ fun WeekScreen(
     if (shareOpen) {
         ShareEntrySheet(
             onSyncCalendar = { startCalendarSync() },
-            onExportCsv = {
-                shareOpen = false
-                csvLauncher.launch("JUWPHub课表_$fileDateTag.csv")
-            },
-            onExportJson = {
-                shareOpen = false
-                jsonExportLauncher.launch("JUWPHub课表_$fileDateTag.json")
-            },
+            onExportCsv = { csvLauncher.launch("JUWPHub课表_$fileDateTag.csv") },
+            onExportJson = { jsonExportLauncher.launch("JUWPHub课表_$fileDateTag.json") },
             onShareImage = {
-                // 先关弹层再开二级页：弹层是独立窗口，盖在二级页之上会挡住它
-                shareOpen = false
+                // 退场动画播完、弹层状态已落之后才开二级页：弹层是独立窗口，盖在二级页之上会挡住它
                 SubpageActivity.start(
                     context,
                     SubpageScreen.SCHEDULE_SHARE,
@@ -654,6 +682,9 @@ fun WeekScreen(
             term = preview.term,
             defaultMerge = false,
             repo = repo,
+            // 备份文件里除了课表还可能带成绩 / 教材 / 笔记 / 作业 / 调休，导入会整体替换它们
+            // （合并模式也会替换成绩这类全局归属的数据）。弹窗必须先说清，否则是静默覆盖。
+            note = importPreviewNote(preview),
             onConfirm = { target, merge ->
                 val text = pendingJsonText
                 jsonPreview = null
@@ -678,14 +709,8 @@ fun WeekScreen(
         TimetableSwitchSheet(
             timetables = state.timetables,
             currentTimetableId = state.currentTimetableId,
-            onSelect = { id ->
-                switchOpen = false
-                viewModel.selectTimetable(id)
-            },
-            onOpenManage = {
-                switchOpen = false
-                onOpenTimetableManage()
-            },
+            onSelect = { id -> viewModel.selectTimetable(id) },
+            onOpenManage = { onOpenTimetableManage() },
             onDismiss = { switchOpen = false },
         )
     }

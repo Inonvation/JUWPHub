@@ -36,9 +36,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -62,6 +62,7 @@ import edu.jxslu.schedule.domain.LocalTimeLike
 import edu.jxslu.schedule.domain.buildTodayState
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.PermissionRow
 import edu.jxslu.schedule.ui.common.SettingsSection
@@ -160,6 +161,13 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
 
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    // 四张尺寸预览**共用这一份**快照（2026-11-06 审计 §3.1）。
+    // 改之前每个 `PreviewTile` 自己调 `rememberPreviewSnapshot()`：4 份快照、4 个 30 秒定时器、
+    // 4 次 `buildTodayState` + `buildWidgetWeek`（整周网格）全跑在主线程上。提到页顶算一次，
+    // 四个预览传同一个 State——内容与刷新节奏不变（仍是 30 秒一档），只是不再乘 4。
+    // **不要**把它挪回 `PreviewTile` 里（那是「按尺寸各算一份」的老写法），也**不要**在这里
+    // `by` 解包：页级读值会让整页每 30 秒重组一次。
+    val previewSnapshot = rememberPreviewSnapshot()
     // 添加失败（桌面不支持应用内添加）的提示出口，走全 App 统一卡片
     val showNotice: (String) -> Unit = { message ->
         scope.launch {
@@ -259,6 +267,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                         size = WidgetPreviewSize.Small,
                         label = "紧凑",
                         caption = "日期 + 正在上 / 下一节",
+                        snapshot = previewSnapshot,
                     )
                     Spacer(Modifier.width(12.dp))
                     FormGridItem(
@@ -266,6 +275,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                         size = WidgetPreviewSize.Wide,
                         label = "横条",
                         caption = "焦点课课名更宽，地名全显示",
+                        snapshot = previewSnapshot,
                     )
                 }
                 Spacer(Modifier.height(12.dp))
@@ -275,6 +285,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                         size = WidgetPreviewSize.Tall,
                         label = "竖条",
                         caption = "焦点课 + 今日剩余",
+                        snapshot = previewSnapshot,
                     )
                     Spacer(Modifier.width(12.dp))
                     FormGridItem(
@@ -282,6 +293,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                         size = WidgetPreviewSize.Large,
                         label = "大方",
                         caption = "摘要 + 本周课表（今天 / 明天列高亮）",
+                        snapshot = previewSnapshot,
                     )
                 }
                 Spacer(Modifier.height(6.dp))
@@ -673,50 +685,55 @@ private fun LauncherNoteRow() {
  *
  * 与 widget 侧的差别只有一处：**周网格直接构建**（不按尺寸跳过），
  * 因为四张预览里有一张就是周网格档。渲染仍走 `forSize`，与桌面所见同源。
+ *
+ * 返回 `State` 而不是快照本身，是因为四张预览**共用**这一份（2026-11-06 审计 §3.1：
+ * 改之前每个 `PreviewTile` 各调一次本函数，= 4 份快照 + 4 个 30 秒定时器 + 4 遍
+ * `buildTodayState`/`buildWidgetWeek` 全压在主线程）。把 `.value` 的读取留在
+ * `PreviewTile` 里，30 秒一跳就只重组那四格；调用处**不要** `by` 解包——在页级读值
+ * 会让整页每 30 秒跟着重组一次，白拿开销。
  */
 @Composable
-private fun rememberPreviewSnapshot(): WidgetSnapshot? {
+private fun rememberPreviewSnapshot(): State<WidgetSnapshot?> {
     val context = LocalContext.current
     val repo = remember { Graph.repository(context) }
-    var tick by remember { mutableStateOf(0) }
+    val snapshot = remember { mutableStateOf<WidgetSnapshot?>(null) }
+    // 先算再等：进页立刻有内容，之后每 30 秒一档（与改之前的刷新节奏一致）
     LaunchedEffect(Unit) {
         while (true) {
+            snapshot.value = runCatching {
+                val semester = repo.semester.first()
+                val slots = repo.timeSlots.first()
+                val courses = repo.courses.first()
+                val overrides = repo.overridesFor()
+                val prefs = repo.displayPrefs.first()
+                val today = LocalDate.now()
+                val now = LocalTimeLike.now()
+                val state = buildTodayState(semester, slots, courses, today, now, overrides)
+                val week = if (state.inTerm) state.week else 1
+                val highlight = state.focus?.day
+                    ?: state.tomorrowDay.takeIf { state.tomorrowVisible }
+                buildWidgetSnapshot(
+                    state,
+                    buildWidgetWeek(
+                        courses = courses,
+                        week = week,
+                        showSaturday = prefs.showSaturday,
+                        showSunday = prefs.showSunday,
+                        filter = prefs.courseFilter,
+                        highlightDay = highlight,
+                        slots = slots,
+                        semester = semester,
+                        overrides = overrides,
+                        now = now,
+                        markNow = state.focus != null || state.remaining.isNotEmpty(),
+                        nowDay = state.day,
+                    ),
+                )
+            }.getOrNull()
             delay(30_000)
-            tick++
         }
     }
-    return produceState<WidgetSnapshot?>(initialValue = null, tick) {
-        value = runCatching {
-            val semester = repo.semester.first()
-            val slots = repo.timeSlots.first()
-            val courses = repo.courses.first()
-            val overrides = repo.overridesFor()
-            val prefs = repo.displayPrefs.first()
-            val today = LocalDate.now()
-            val now = LocalTimeLike.now()
-            val state = buildTodayState(semester, slots, courses, today, now, overrides)
-            val week = if (state.inTerm) state.week else 1
-            val highlight = state.focus?.day
-                ?: state.tomorrowDay.takeIf { state.tomorrowVisible }
-            buildWidgetSnapshot(
-                state,
-                buildWidgetWeek(
-                    courses = courses,
-                    week = week,
-                    showSaturday = prefs.showSaturday,
-                    showSunday = prefs.showSunday,
-                    filter = prefs.courseFilter,
-                    highlightDay = highlight,
-                    slots = slots,
-                    semester = semester,
-                    overrides = overrides,
-                    now = now,
-                    markNow = state.focus != null || state.remaining.isNotEmpty(),
-                    nowDay = state.day,
-                ),
-            )
-        }.getOrNull()
-    }.value
+    return snapshot
 }
 
 /** 2×2 网格里的一格预览：缩略图在上、名称与说明在下（不是可添加条目，纯形态参考）。 */
@@ -726,9 +743,10 @@ private fun FormGridItem(
     size: WidgetPreviewSize,
     label: String,
     caption: String,
+    snapshot: State<WidgetSnapshot?>,
 ) {
     Column(modifier) {
-        PreviewTile(size)
+        PreviewTile(size, snapshot)
         Spacer(Modifier.height(6.dp))
         Text(
             text = label,
@@ -748,8 +766,7 @@ private fun FormGridItem(
 
 /** 迷你预览：按该档实测 dp 走同一套 [widgetMetricsFor] 分档；课表为空时给占位文案。 */
 @Composable
-private fun PreviewTile(size: WidgetPreviewSize) {
-    val snapshot = rememberPreviewSnapshot()
+private fun PreviewTile(size: WidgetPreviewSize, snapshot: State<WidgetSnapshot?>) {
     val (w, h) = when (size) {
         WidgetPreviewSize.Small -> 84.dp to 84.dp
         WidgetPreviewSize.Wide -> 116.dp to 58.dp
@@ -764,7 +781,8 @@ private fun PreviewTile(size: WidgetPreviewSize) {
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
             .padding(7.dp),
     ) {
-        val model = snapshot?.forSize(widgetMetricsFor(size.widthDp, size.heightDp))
+        // 读 `.value` 只发生在这里（PreviewTile 的重组范围），页级不读，30 秒一跳不拖整页
+        val model = snapshot.value?.forSize(widgetMetricsFor(size.widthDp, size.heightDp))
         if (model == null) {
             Text(
                 text = "课表\n为空",
@@ -926,6 +944,8 @@ private fun IntroDialog(
         onDismissRequest = onDismiss,
         title = { Text("把 JUWPHub 放上桌面") },
         text = {
+            // 内容槽第一行：弹窗窗口自己的组合里才挂得上本应用样式（放 AlertDialog 外是死代码）
+            DialogWindowFadeEffect()
             Text(
                 text = "课表：小到 2×2 看下一节，拖到 4×4 变本周课表。\n\n" +
                     "校园卡 · 电费：桌面看余额与电费，点卡片出示付款码。\n\n" +

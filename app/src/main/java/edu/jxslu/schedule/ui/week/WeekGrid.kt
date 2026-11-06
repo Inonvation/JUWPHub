@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -151,7 +152,20 @@ internal fun WeekPage(
     overrides: List<ScheduleOverride>,
     isTodayWeek: Boolean,
     todayDay: Int,
-    now: LocalTimeLike,
+    /**
+     * 「现在」。**以 `State` 下发而不是普通参数**（2026-11-06）。
+     *
+     * 兑现的是「不要把 `now` 读进 [WeekPage] 这一层」：读取发生在 [NowLine] 内部，于是父级
+     * 入参里没有 `now`，30 秒 tick 不会因为 `now` 变化而多一次失效。
+     *
+     * shortcut: **别指望「整页跳过重组」**——`WeekViewModel` 每个 tick 都会重建
+     * `WeekUiState`（`coursesInWeek` / `visibleDays` 各返回新 List，而 `List` 在 Compose 里
+     * 是 unstable），`WeekPage` 仍会每 30 秒重组一次。真要只重组时刻线，得把 `nowFlow`
+     * 从 `WeekUiState` 拆出去单独下发（2026-11-06 交叉复核；现在不值得动数据流）。
+     * 已兑现的收益在 [WeekScreen]：几何 / 月份 / 格子样式都 `remember` 住了，
+     * 那次重组不再重算 `buildGridLayout`、不再 parse 开学日。
+     */
+    now: State<LocalTimeLike>,
     showNonCurrentWeek: Boolean,
     cellStyle: GridCellStyle,
     showNowLine: Boolean,
@@ -195,6 +209,11 @@ internal fun WeekPage(
         cells.map { (day, course) -> day to course.startSection }.toSet()
     }
     val todayVisible = isTodayWeek && todayDay in visibleDays
+    // 表头日期：每周每列算一次就够（weekDate → dateOf 每次都要解析一遍开学日）。
+    // 外层每 30 秒 tick 都会重组到这里，不缓存就是每分钟 7 次 LocalDate.parse。
+    val weekDates = remember(semester, week, visibleDays) {
+        visibleDays.associateWith { weekDate(semester, week, it) }
+    }
 
     Column(Modifier.fillMaxSize()) {
         // ---- 星期表头（WakeUp 式：周几取单字，下挂日期；今日整列加粗深色 + 一块底色，
@@ -211,7 +230,7 @@ internal fun WeekPage(
             visibleDays.forEach { day ->
                 val label = dayLabels[day - 1]
                 val isToday = todayVisible && day == todayDay
-                val date = weekDate(semester, week, day)
+                val date = weekDates[day]
                 // 日期覆盖的两种标记（§4.40）：放假 = 这天没课；补课 = 这天上了别天的课
                 val suspended = ScheduleOverrides.isSuspended(plan, week, day)
                 val followed = ScheduleOverrides.followedFrom(plan, week, day) != null
@@ -401,52 +420,83 @@ internal fun WeekPage(
 
             // ---- 当前时刻线（显示设置可关）。列号同样走 visibleDays 下标。
             if (todayVisible && showNowLine) {
-                val todayColumn = ScheduleCalculator.columnOf(visibleDays, todayDay) ?: 0
-                // 终点收口到今日最后一节课：cells 已是覆盖 + 筛选后的口径，
-                // 被筛掉的课不参与收口，避免「线还挂着、课却看不见」的错位。
-                // 按**列**取课（不用 dayLastEndMinutes 的 `it.day == day`）——调休那天
-                // 画的是借来的课，它们自己的 day 不是今天
-                val dayEnd = remember(cells, slots, todayDay) {
-                    cells.filter { it.first == todayDay }
-                        .mapNotNull { ScheduleCalculator.courseEndMinutes(slots, it.second) }
-                        .maxOrNull()
-                }
-                nowMarker(slots, layout, now, dayEnd)?.let { marker ->
-                    Box(
-                        Modifier
-                            .offset(x = layout.dayWidth * todayColumn, y = marker.offsetY)
-                            .width(layout.dayWidth)
-                            .height(1.5.dp)
-                            .drawBehind {
-                                if (marker.inBreak) {
-                                    // 课间画虚线：位置贴在行边界上，虚线提示「这不在上课」
-                                    val y = size.height / 2f
-                                    drawLine(
-                                        color = primary,
-                                        start = Offset(0f, y),
-                                        end = Offset(size.width, y),
-                                        strokeWidth = size.height,
-                                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(7f, 5f)),
-                                    )
-                                } else {
-                                    drawRect(primary)
-                                }
-                            },
-                    )
-                    Box(
-                        Modifier
-                            .offset(
-                                x = layout.dayWidth * todayColumn - 3.5.dp,
-                                y = marker.offsetY - 2.5.dp,
-                            )
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(if (marker.inBreak) primary.copy(alpha = 0.55f) else primary),
-                    )
-                }
+                NowLine(
+                    slots = slots,
+                    layout = layout,
+                    visibleDays = visibleDays,
+                    todayDay = todayDay,
+                    cells = cells,
+                    now = now,
+                )
             }
         }
     }
+}
+
+/**
+ * 今日时刻线——**网格里唯一读「现在」的地方**。
+ *
+ * 单独成一个 Composable 是为了把 `now` 的读取关在这一层（2026-11-06）：`now` 以 `State`
+ * 传入、读取发生在这一层，父级 [WeekPage] 的入参里没有 `now`，于是「`now` 变了」这件事
+ * 只让这一块失效。
+ *
+ * shortcut: 但 30 秒 tick 本身仍会让 [WeekPage] 重组一次——`WeekViewModel` 每个 tick 都
+ * 重建 `WeekUiState`（新 List，unstable），见 [WeekPage] 的 `now` 参数注释。已兑现的收益
+ * 是几何 / 月份 / 格子样式被 `remember` 住，那次重组不再重算布局与日期。**别把
+ * `now.value` 读回 [WeekPage]**——那会让 `now` 成为父级依赖，连这点收益也没了。
+ *
+ * 终点收口到今日最后一节课：`cells` 已是覆盖 + 筛选后的口径，被筛掉的课不参与收口，
+ * 避免「线还挂着、课却看不见」的错位。按**列**取课（不用 `dayLastEndMinutes` 的
+ * `it.day == day`）——调休那天画的是借来的课，它们自己的 `day` 不是今天。
+ */
+@Composable
+private fun NowLine(
+    slots: List<TimeSlot>,
+    layout: GridLayout,
+    visibleDays: List<Int>,
+    todayDay: Int,
+    cells: List<Pair<Int, Course>>,
+    now: State<LocalTimeLike>,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val todayColumn = ScheduleCalculator.columnOf(visibleDays, todayDay) ?: 0
+    val dayEnd = remember(cells, slots, todayDay) {
+        cells.filter { it.first == todayDay }
+            .mapNotNull { ScheduleCalculator.courseEndMinutes(slots, it.second) }
+            .maxOrNull()
+    }
+    val marker = nowMarker(slots, layout, now.value, dayEnd) ?: return
+    Box(
+        Modifier
+            .offset(x = layout.dayWidth * todayColumn, y = marker.offsetY)
+            .width(layout.dayWidth)
+            .height(1.5.dp)
+            .drawBehind {
+                if (marker.inBreak) {
+                    // 课间画虚线：位置贴在行边界上，虚线提示「这不在上课」
+                    val y = size.height / 2f
+                    drawLine(
+                        color = primary,
+                        start = Offset(0f, y),
+                        end = Offset(size.width, y),
+                        strokeWidth = size.height,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(7f, 5f)),
+                    )
+                } else {
+                    drawRect(primary)
+                }
+            },
+    )
+    Box(
+        Modifier
+            .offset(
+                x = layout.dayWidth * todayColumn - 3.5.dp,
+                y = marker.offsetY - 2.5.dp,
+            )
+            .size(7.dp)
+            .clip(CircleShape)
+            .background(if (marker.inBreak) primary.copy(alpha = 0.55f) else primary),
+    )
 }
 
 @Composable
