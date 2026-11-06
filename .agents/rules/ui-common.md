@@ -235,6 +235,17 @@
     （外层已经套好，嵌套滚动会让长内容只滚一小段就停）。
   - 单按钮的详情/错误提示用 `AppInfoDialog`：套 `AppConfirmDialog` 会凭空多出一个
     什么也不做的「取消」。开水页与开水入口弹层里那两份逐行相同的详情弹窗即此例。
+  - **覆盖范围（2026-11-06 第三轮收尾后）**：页面级手写 `AlertDialog` 已清零，
+    `ui/{campus,water,qzxy,life,ebike,ujing,me,notes,homework,inbox,tweak,wenqu,timetable,week,today,ai,selection,score}` 的纯文案确认/提示框全部走这两个实现。
+    **保留手写的只有四类**，改动前先确认自己不是这四类：
+    ① 正文里含输入框（`TimetableManageScreen.NameDialog`、`SelectionWishesScreen` 预选编辑、
+    免扰时段的时间滚轮）——公共件正文槽会套 `verticalScroll`，输入框进滚动容器后聚焦时
+    键盘与光标定位不可靠；
+    ② 双出口语义不同（笔记/作业的「放弃未保存的修改」＝放弃/保存/点外部三种去向，
+    `AiChatScreen` 的图片提示＝取消位其实是「去开启图片识别」）；
+    ③ 声明类（`NoticeDialog` 那一套，见下）；
+    ④ 取消键位不是单个按钮（问渠「蹲到了」是两个并排按钮、蹲点主面板的主键按状态三态切换）。
+    这四类如果只是「少了窗口淡入」，补 `DialogWindowFadeEffect()` 即可，不用迁骨架。
 - 声明类弹窗（用户须知 / 免责声明 / 充值风险）仍走 `NoticeDialog` 那一套（见下），
   不套 `AppConfirmDialog`：它们有锁秒数、同意落盘、不同意出口这些额外语义。
 - 纯确认/声明类弹窗（无输入）不走 `ImeAwareModalBottomSheet`（那是含输入框弹层的专属
@@ -274,7 +285,12 @@
   **快趣出行那 5 处已挪进内容槽（2026-10-14）**；**其余 16 处外置旧写法已于 2026-10-18
   全量移正**（AiChat / WheelPicker / WaterScreen / QzxyScreen / WeekScreen / InboxScreen 等），
   并补齐 8 处从未调用过的（笔记与作业详情的删除/放弃、清空成绩、删除预选、免扰时段）。
-  校验方式：DialogWindowFadeEffect() 的下一行若是 AlertDialog( 即为死代码，当前剩余 **0 处**。
+  校验方式：DialogWindowFadeEffect() 的下一行若是 AlertDialog( 即为死代码，当前剩余 **0 处**
+  （2026-11-06 又抓到一处：`MainActivity.kt` 的 `OnboardingSyncResultDialog` 写在
+  composable 体里、`AlertDialog` 之前，已挪进 `text` 槽）。
+  **`ui/common` 里那几个自己就是 `AlertDialog` 的实现也要挂**（2026-11-06 补齐
+  `CasLoginDialog` / `ImportConfirmDialog` / `LegalDialogs` 两份 / `MonthPicker` /
+  `RechargeDisclaimerDialog`）：它们与业务弹窗是同一个窗口，不挂一样是瞬间出现。
   新弹窗一律按「内容槽第一行」写。首启「全部跳过」确认弹窗（`OnboardingScreen`）
   已是正确写法可参照。
   material3 升到 1.4.0（弹窗自带进出场动画）后，调用点可整体删掉。
