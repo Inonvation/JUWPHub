@@ -869,6 +869,8 @@ promotionList[].promotionType / discountAmount / subsidyAmount
   「积分 X · 约可抵扣 ¥Y」直接用它（`BalanceData.pointsDeductText`），**不在本地算比例**。
   语义由社区饮水脚本（3ryng1um/qiekj）注释交叉确认——我们自己的 debug 落盘只覆盖
   开水五端点，没有余额样本。为 0 / 解析失败时不显示后缀。
+  胖乖页「账户资产」的积分列同样用它（2026-11-07 用户要求：那一栏要显示预估可抵扣的金额），
+  展示成说明行「约可抵扣 ¥Y」；取不到 / 折算为 0 时退回「可抵水费」，不显示 ¥0.00。
 - 本地快照同步存 `realPrice` / `payTypeName` / `tokenCoinDiscount`（可空，默认 null 兼容旧快照）。
 
 **UI 接入**

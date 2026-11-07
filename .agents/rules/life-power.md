@@ -37,6 +37,17 @@
   → `signin/doUserSignIn`；`doUserSignIn` 的 `code=33001` 是今天已签。自动签到每天首次
   回到前台触发一次，成功才写日期，失败下次打开还能重试（`QiekjAutoSignInRunner` /
   `QiekjAutoSignInRules`）。验证码、风控、付费都不绕过。
+- **签到行的「已签到」来自服务端，不是本地状态（2026-11-07 修）**：进页 / 登录 / 下拉刷新
+  各问一次 `signin/todaySignIn`（`QiekjRepository.isSignedInToday` → `WaterUiState.signInTodaySigned`），
+  已签则副行「今天已签到」、按钮置灰「已签到」。**别退回只看 `signInResult`**：自动签到在主
+  窗口 `onResume` 就跑完（`QiekjAutoSignInRunner`），签到页的 `runDailySignIn` 从没被点过，
+  那个字段永远空——用户报的「开自动签到、签成功了，进账户页还显示『签到』」就是这么来的。
+  判定失败保持 null（未知），按钮照常可点：真签过服务端回 33001，由签到动作自己报，别猜。
+  手动签完一并置 `signInTodaySigned = true`（幂等已签也算签过）。
+- **「账户资产」积分列显示折算金额（2026-11-07 用户要求）**：说明行写「约可抵扣 ¥Y」，取
+  `BalanceData.pointsDeductText`（服务端 `integralAmount` 直给，别算比例，见「积分折算」条）；
+  取不到 / 折算为 0 退回「可抵水费」，不显示「¥0.00」。三列窄，`MetricCell` 说明行是
+  `maxLines=1` + 省略号，再加字先量宽度。
 - **自动签到成功提示（2026-10-24）**：自动签到静默完成，用户感知不到——本次真签到成功
   （非「今天已签」幂等）在主窗口发一条**底部提示卡**（App 统一 Snackbar 通道，非系统通知
   ——用户当即改的口径），正文自带前缀：「胖乖签到成功：今日 +X 积分，当前 Y 积分」。

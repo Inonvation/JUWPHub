@@ -158,6 +158,19 @@ class QiekjRepository(
     }
 
     /**
+     * 今天是否已签到（`signin/todaySignIn` 的只读判定，2026-11-07）。
+     *
+     * 签到页进页 / 登录 / 下拉刷新各问一次，用它把签到行摆成「已签到」：自动签到在主窗口
+     * `onResume` 就跑完了，页面自己从没点过签到，光看本地状态永远是「签到」。
+     * 判定失败照常抛（Token 失效由调用方统一处理），不在这里猜结论。
+     */
+    suspend fun isSignedInToday(): Boolean {
+        val resp = pointsApi.todaySignIn(requireToken())
+        resp.throwIfFailed()
+        return resp.data.decodeObjectOrNull(TodaySignInData.serializer())?.isSignIn == true
+    }
+
+    /**
      * 每日签到（2026-10-23）：只做签到 + 余额，不碰任务/领奖。
      *
      * - `signin/todaySignIn` 先判今天是否已签；

@@ -83,6 +83,12 @@ data class WaterUiState(
     val signInRunning: Boolean = false,
     val signInResult: QiekjDailySignInResult? = null,
     val signInError: String? = null,
+    /**
+     * 今天是否已签到（服务端 `signin/todaySignIn` 的判定）：null = 还没问过 / 问失败。
+     * 自动签到在主窗口 onResume 就跑完了，本页的 [signInResult] 永远是空——不向服务端问
+     * 一次，签到行会一直显示「签到」（2026-11-07 用户报障）。
+     */
+    val signInTodaySigned: Boolean? = null,
 )
 
 sealed interface WaterEvent {
@@ -172,6 +178,7 @@ class WaterViewModel(
         if (autoLoad && _uiState.value.loggedIn) {
             refreshBalance()
             refreshDevices()
+            refreshSignInState()
         }
     }
 
@@ -187,6 +194,7 @@ class WaterViewModel(
             }
             refreshBalance()
             refreshDevices()
+            refreshSignInState()
         } else {
             cancelFlowJobs()
             _uiState.update { WaterUiState() }
@@ -337,6 +345,38 @@ class WaterViewModel(
     }
 
     /**
+     * 今天是否已签到（`signin/todaySignIn` 只读，2026-11-07）。
+     *
+     * 自动签到在主窗口 onResume 完成，签到页自己从没点过签到，[WaterUiState.signInResult]
+     * 是空的——不问一次服务端，签到行会一直显示「签到」。进页、登录、下拉刷新各问一次，
+     * 拿到 true 就把行摆成「已签到」并禁掉按钮。
+     *
+     * 失败保持「未知」（null）：按钮照常可点，真签过的话服务端回 33001，由签到动作自己
+     * 报「今天已签」，不在这里猜。Token 失效照常清登录态。
+     */
+    fun refreshSignInState() {
+        if (!_uiState.value.loggedIn) return
+        // 进页 / 登录 / 下拉可能同一拍触发：在途时不再叠第二条
+        if (signInStateJob?.isActive == true) return
+        signInStateJob = viewModelScope.launch {
+            runCatching { repo.isSignedInToday() }
+                .onSuccess { signed ->
+                    _uiState.update {
+                        // 判定为已签就把上一次的失败文案收掉：否则会出现「红色失败行 + 已签到按钮」
+                        it.copy(signInTodaySigned = signed, signInError = if (signed) null else it.signInError)
+                    }
+                }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    if (error is TokenExpiredException) handleTokenExpired()
+                }
+        }
+    }
+
+    /** 签到状态查询的 Job（在途去重，见 [refreshSignInState]）。 */
+    private var signInStateJob: Job? = null
+
+    /**
      * 每日签到：只跑签到，不碰任务/领奖。重复点由仓库层幂等处理
      * （服务端返回 33001 按「今天已签」展示）。成功后顺手把余额推给桌面小组件。
      */
@@ -350,6 +390,8 @@ class WaterViewModel(
                     it.copy(
                         signInRunning = false,
                         signInResult = result,
+                        // 走到这里就说明今天签过了（真签与幂等已签两条路都算）
+                        signInTodaySigned = true,
                         balance = result.balance ?: it.balance,
                         balanceLoaded = it.balanceLoaded || result.balance != null,
                     )
@@ -444,6 +486,8 @@ class WaterViewModel(
         _uiState.update { it.copy(refreshing = true) }
         val balanceJob = refreshBalance()
         val devicesJob = refreshDevices()
+        // 签到状态不参与指示器：它是只读小请求，回来就更新签到行（在途去重见 refreshSignInState）
+        refreshSignInState()
         balanceJob.join()
         devicesJob.join()
         if (_uiState.value.loggedIn) {

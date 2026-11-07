@@ -138,6 +138,21 @@ class QiekjModelsTest {
     }
 
     @Test
+    fun todaySignIn_未签到与空data都按未签读() {
+        // 页面进页拿它摆「已签到」态（QiekjRepository.isSignedInToday）：只有明确的
+        // isSignIn=true 才算已签，false / 0 / 空 data 一律按未签，别把「没问出来」当签过
+        fun signedOf(raw: String): Boolean =
+            QiekjJson.json.decodeFromString<ApiEnvelope<JsonElement>>(raw).data
+                .decodeObjectOrNull(TodaySignInData.serializer())?.isSignIn == true
+
+        assertEquals(false, signedOf("""{"code":0,"data":{"isSignIn":false}}"""))
+        assertEquals(false, signedOf("""{"code":0,"data":{"isSignIn":0}}"""))
+        assertEquals(false, signedOf("""{"code":0,"data":""}"""))
+        assertEquals(false, signedOf("""{"code":0,"data":{}}"""))
+        assertEquals(true, signedOf("""{"code":0,"data":{"isSignIn":true}}"""))
+    }
+
+    @Test
     fun signInActivity_id裸数字按字符串读() {
         val data = QiekjJson.json.decodeFromString<ApiEnvelope<SignInActivityData>>(
             """{"code":0,"data":{"id":900001}}""",

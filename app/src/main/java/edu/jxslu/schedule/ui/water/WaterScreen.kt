@@ -624,7 +624,10 @@ private fun AccountMetricsSection(state: WaterUiState) {
             MetricCell(
                 label = "积分",
                 value = balance?.pointsText ?: "—",
-                caption = "可抵水费",
+                // 预估可抵扣金额（2026-11-07 用户要求）：服务端 `integralAmount` 直给的折算
+                // 值（见 BalanceData.pointsDeductText），不在本地算兑换比例；取不到或折算
+                // 为 0 时退回原文案
+                caption = balance?.pointsDeductText?.let { "约可抵扣 ¥$it" } ?: "可抵水费",
                 modifier = Modifier.weight(1f),
             )
             MetricCell(
@@ -646,6 +649,10 @@ private fun AccountMetricsSection(state: WaterUiState) {
  *
  * 只做签到，不碰任务/领奖（2026-10-23 用户授权范围）；「打开软件自动签到」默认关闭，
  * 开启后只在每天首次前台检查一次，已签到就不再请求。手动按钮与自动签到共用同一条链路。
+ *
+ * 「已签到」看 [WaterUiState.signInTodaySigned]（服务端 `signin/todaySignIn`，2026-11-07）：
+ * 自动签到在主窗口就完成了，本页的 [WaterUiState.signInResult] 是空的，只看它会把
+ * 已经签过的号一直显示成「签到」。判定为已签后按钮置灰，避免多打一次注定 33001 的写请求。
  */
 @Composable
 private fun SignInSection(
@@ -654,6 +661,7 @@ private fun SignInSection(
     onRun: () -> Unit,
     onSetAutoSignIn: (Boolean) -> Unit,
 ) {
+    val signedToday = state.signInTodaySigned == true
     SettingsSection(title = "签到与偏好") {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -664,7 +672,7 @@ private fun SignInSection(
                 Text(
                     text = state.signInError
                         ?: state.signInResult?.signInText
-                        ?: "每天一次，积分可在开水时抵扣",
+                        ?: if (signedToday) "今天已签到" else "每天一次，积分可在开水时抵扣",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (state.signInError != null) {
                         MaterialTheme.colorScheme.error
@@ -676,8 +684,14 @@ private fun SignInSection(
                 )
             }
             Spacer(Modifier.width(10.dp))
-            TextButton(onClick = onRun, enabled = !state.signInRunning) {
-                Text(if (state.signInRunning) "签到中…" else "签到")
+            TextButton(onClick = onRun, enabled = !state.signInRunning && !signedToday) {
+                Text(
+                    when {
+                        state.signInRunning -> "签到中…"
+                        signedToday -> "已签到"
+                        else -> "签到"
+                    },
+                )
             }
         }
         SettingsDivider()
