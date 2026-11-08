@@ -12,7 +12,7 @@
 |----|------|
 | 入口 | `mipmap-anydpi-v26/ic_launcher.xml`。manifest 只有 `android:icon`，没有 `roundIcon`；minSdk 26 → 没有 legacy 位图那一套 |
 | 背景层 | `@color/ic_launcher_background` = `#FFFFFF`。跟着源图的底走：图形内部有白色留白，底色换别的会露馅 |
-| 前景层 | `drawable-{m,h,xh,xxh,xxxh}dpi/ic_launcher_foreground.png`（108/162/216/324/432px = 108dp 画布） |
+| 前景层 | `drawable-{m,h,xh,xxh,xxxh}dpi/ic_launcher_foreground.webp`（108/162/216/324/432px = 108dp 画布；**无损** WebP——有损会在桌面大图标上出色带） |
 | monochrome | 复用前景的透明度通道（书本 + 叶瓣 + 星形的剪影），没另画矢量 |
 | 重新生成 | `tools/app-icon/make_foreground.py`，源图 `tools/app-icon/source.png` 一并入库；换图或改尺寸重跑脚本，超限尺寸脚本自带断言 |
 

@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""从方形图标源图（白底蓝色日历 + 水滴）生成自适应图标前景层 PNG。
+"""从方形图标源图（白底蓝色日历 + 水滴）生成自适应图标前景层 WebP（无损）。
 
 用法（仓库根目录）：
     .venv-scraper\\Scripts\\python.exe tools\\app-icon\\make_foreground.py
     # 可选：--src 换源图、--glyph-dp 换图形大小、--out 换输出根目录
     # 控制台是 GBK 时中文输出会花屏，前面加 PYTHONIOENCODING=utf-8
 
-为什么要有这个脚本：`res/drawable-*/ic_launcher_foreground.png` 是位图，不是矢量
-（源图是蓝色渐变，复刻成 VectorDrawable 要手写渐变节点，收益不抵风险）。位图没法在
+为什么要有这个脚本：`res/drawable-*/ic_launcher_foreground.webp` 是位图（无损 WebP），
+不是矢量（源图是蓝色渐变，复刻成 VectorDrawable 要手写渐变节点，收益不抵风险）。位图没法在
 仓库里"看见"生成的规则，源图大小或图形尺寸一变就得整体重导，所以把提取与缩放口径
 固化成脚本，连同源图一起入库。
 
@@ -104,8 +104,9 @@ def main():
         d = os.path.join(args.res, "drawable-" + name)
         os.makedirs(d, exist_ok=True)
         fg = foreground(glyph, ink_w, ink_h, args.glyph_dp, scale)
-        p = os.path.join(d, "ic_launcher_foreground.png")
-        fg.save(p)
+        p = os.path.join(d, "ic_launcher_foreground.webp")
+        # 无损：前景层只有一层渐变 + 抗锯齿边缘，有损会在大图标上出色带/糊边
+        fg.save(p, "WEBP", lossless=True, method=6)
         print(f"  {p} {fg.size[0]}x{fg.size[1]}")
 
 

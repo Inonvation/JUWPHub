@@ -214,7 +214,7 @@ private fun CalendarImage(bitmap: ImageBitmap, year: String, onClick: () -> Unit
     )
 }
 
-/** 内置兜底图（res/drawable-nodpi/ic_campus_calendar.jpg，2026-2027 学年）。 */
+/** 内置兜底图（res/drawable-nodpi/ic_campus_calendar.webp，2026-2027 学年）。 */
 @Composable
 private fun BuiltinFallbackImage(onClick: () -> Unit) {
     // 打包资源是固定图，比例写死 1375×1020（与 res 里那张一致；改图要同步这行）

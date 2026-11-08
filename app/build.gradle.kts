@@ -33,6 +33,12 @@ android {
         targetSdk = 36
         versionCode = 33
         versionName = "3.3.0"
+
+        // 只留中英（2026-11-06）：androidx / material3 / glance 会带进 89 个 locale，
+        // 实测 resources.arsc 里 88% 的 string 值是外语，本项目纯中文用不上。
+        // AGP 8.9 还没有 `androidResources.localeFilters`（8.13 才有），只能用这个已弃用的口子；
+        // 升到 AGP 8.13+ 时改过去，别两个都留。
+        resourceConfigurations += listOf("zh", "en")
     }
 
     signingConfigs {

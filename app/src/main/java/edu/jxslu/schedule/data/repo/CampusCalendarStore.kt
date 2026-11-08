@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit
  * 足够；StateFlow 只为「后台刷完页内立即换图」（同 `QzxyWateringStore` 的理由）。
  *
  * 失败静默（与 ScoreSync 同纪律）：校历是锦上添花的信息，拉不到就继续用本地缓存，
- * 连内置兜底都没有才是问题——兜底图在 `res/drawable-nodpi/ic_campus_calendar.jpg`，
+ * 连内置兜底都没有才是问题——兜底图在 `res/drawable-nodpi/ic_campus_calendar.webp`，
  * 由 UI 层直接兜，本类不感知。无任何凭证与用户数据，镜像 URL 是公开仓库。
  */
 class CampusCalendarStore(context: Context) {

@@ -190,7 +190,7 @@ requestCode = 1008 / `score_alert` / 3008，考试 = 1009 / `exam_alert` / 3009
 | 学校官网（主源） | `jw.juwp.edu.cn` 通知公告「20XX-20XX学年校历」文章的高清原图（免登录；`domain/CampusCalendarSchoolRules` 解析） | 冷启动静默刷（7 天闸门 `AutoSyncRules.shouldAttemptAt`）+ 页内刷新按钮（force） |
 | 仓库镜像（兜底） | `docs-public/calendar/index.json`（`{"year","file"}`）+ 校历图，多源直链（`domain/RepoMirror`：gh-proxy 加速 → jsdelivr → raw 兜底）；**已停日常维护** | 官网不可达时逐源尝试 |
 | 本地缓存 | `filesDir/campus_calendar/calendar_<year>.<ext>`（原子落盘：临时文件写完改名；下载后 `inJustDecodeBounds` 探测，坏的当没下） | 有缓存就用，学年 + 文件名没变不重下（`matchesLocal`） |
-| 内置兜底 | `res/drawable-nodpi/ic_campus_calendar.jpg`（1375×1020，约 400KB） | 首装/无网/全部源挂了——永不空屏 |
+| 内置兜底 | `res/drawable-nodpi/ic_campus_calendar.webp`（1375×1020，有损 q85，约 280KB） | 首装/无网/全部源挂了——永不空屏 |
 
 **规则与校验**（`domain/CampusCalendarRules`，纯 JVM）：index.json 大小上限 4KB；
 学年格式 `\d{4}-\d{4}` 且后段 = 前段 + 1；文件名白名单 `[a-z0-9_-]+\.(png|jpg)`

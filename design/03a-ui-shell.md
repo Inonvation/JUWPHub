@@ -179,7 +179,7 @@
 - **关于**：关于与更新（`ABOUT_UPDATE`：版本、手动 / 自动检查更新、开源仓库与许可）
   + 条款与声明（`TERMS_DECLARATIONS`）+ 支持开发（`SUPPORT_DEV`，2026-11-01）。
   支持开发三段式——顶部 hero（爱心圆底 +「感谢支持」）→ 赞赏码大图
-  （`res/drawable-nodpi/ic_reward_qr.png`，1:1 满宽、12dp 圆角）→ 说明文案卡。
+  （`res/drawable-nodpi/ic_reward_qr.webp`，无损；1:1 满宽、12dp 圆角）→ 说明文案卡。
   底部主操作「保存赞赏码并去微信扫码」：落盘 `Pictures/JUWPHub` 成功才拉微信；
   赞赏完全自愿、不影响任何功能。
 - **学习、校园服务不再有设置入口**：笔记 / 作业 / 账号在左侧栏；成绩、考试、培养

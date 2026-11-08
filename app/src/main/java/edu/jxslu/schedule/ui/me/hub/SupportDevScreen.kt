@@ -53,7 +53,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Heart
 import me.rerere.hugeicons.stroke.ImageDownload
 
-/** 赞赏码打包资源（res/drawable-nodpi/ic_reward_qr.png），固定 1037×1037；改图要同步这行。 */
+/** 赞赏码打包资源（res/drawable-nodpi/ic_reward_qr.webp），固定 1037×1037；改图要同步这行。 */
 private const val REWARD_QR_RATIO = 1f
 
 /** 赞赏码落相册的文件名（`Pictures/JUWPHub`，目录口径见 domain/GalleryPaths）。 */
