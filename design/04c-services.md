@@ -639,7 +639,7 @@ MAX_PAGES 兜底、令牌回传、三条失败路径、IOException → 网络错
    所以打开/分享前一律用 `TranscriptStore.existingFile` 复核，文件不在就给提示并刷新列表，
    而不是把一个不存在的 Uri 交给阅读器（那会变成系统报错弹窗）。
 
-### 4.26 学工表单：宿舍报修 · 请假（学工系统 WebView，2026-09-24，P6；UI 规格见 §3.15）
+### 4.26 学工表单：宿舍报修 · 请假系统（学工系统 WebView，2026-09-24，P6；UI 规格见 §3.15）
 
 宿舍报修**不在教务系统里**，它在**超星智慧学工**（`xgxt.juwp.edu.cn`，出厂 unitId 343962，
 学校侧的 unitname 是「江西水利电力大学智慧学工」）。教务页面上的「新版学生工作系统」
@@ -704,9 +704,15 @@ GET https://xgxt.juwp.edu.cn/sfrz/login343962
 |------|----|-----------|-------------|
 | 宿舍报修 | `dorm_repair` | `2a6e9319e7a9ac992f30e587d26f435d` | 278625 |
 | 请假 | `leave` | `5f440bbcb35527e35a7c4e7169bcabc2` | 278616 |
+| 销假 | `leave_cancel` | `8c49377f5a3e2e1d5e1860baafa4dc00` | 278615 |
+| 续假 | `leave_extend` | `3c47a53ea27b0e7aa201491119958312` | 278618 |
 
-两条真实 URL 顺带印证了上面那条判据：两个 `pageEnc` 的第 13 位分别是 `a` 和 `2`，
-而它们各自附带的那条 `uuid` 第 13 位都是 `4`。
+销假 / 续假的标识 2026-11-08 从学生工作台应用列表（`getRoleAppList`）实测取得：学校把
+「新版请销假」配成**三张独立审批表单**（不是同一流程的三步），App 的入口页是
+`SubpageScreen.LEAVE_HUB`（教务 Tab「请假系统」行进，三行各开一张表单）。
+
+真实 URL 顺带印证了上面那条判据：几张 `pageEnc` 的第 13 位各不相同（`a` / `5` / `9` / `7`），
+而工作台列表里各自附带的那条 `uuid` 第 13 位都是 `4`。
 
 **为什么不做原生**（这条是决策，不是偷懒）：
 
@@ -725,7 +731,8 @@ GET https://xgxt.juwp.edu.cn/sfrz/login343962
 而 CookieManager 是**全应用共用**的——教务导入（§4.4）登录过一次，学工这边就免登。
 App 不需要读密码、不需要伪造登录请求、更不需要新增凭证存储。
 
-**销假要网页定位（2026-11-08）**：请假流程里的「销假」由页面自己调 `navigator.geolocation`。
+**销假要网页定位（2026-11-08）**：销假（独立表单，也从请假流程里进）由页面自己调
+`navigator.geolocation`。
 Android WebView 对定位请求默认**不回填回调**（默认 `WebChromeClient` 的空实现），页面
 永远等不到坐标——这就是用户报的「内置浏览器拿不到手机定位」。窗口里补上
 `onGeolocationPermissionsShowPrompt`：已有定位权限直接放行，没有就在那一刻申请运行时权限
@@ -737,10 +744,11 @@ Android WebView 对定位请求默认**不回填回调**（默认 `WebChromeClie
 Vue `mount()` 时才被替换。坏缓存会让它引用的 JS 加载失败，占位就永远留着（用户实测
 清浏览器缓存可恢复）。窗口的对策是两段的：点 Home 时用一次性 `LOAD_NO_CACHE` 重取
 （不动 cookie/localStorage，不重登）；`onPageFinished` 后 2.5s 探一次 `#app .loading-box`，
-还在就把状态条换成「卡住了？清理网页缓存重新加载试试」+ 右侧「清理并刷新」按钮，
+还在就把状态条换成「卡住了？清理网页缓存重新加载试试」+ 右侧链接式的「清理并刷新」
+（主色文字，不用按钮——按钮的最小触控高度会把这条撑高，2026-11-08 用户口径），
 点了才 `clearCache(true)` + no-cache 重载（不自动重载，避免页面在用户眼皮底下自己刷新）。
-状态条常驻 48dp 高，提示出现/消失不改变 WebView 尺寸。判据是 `XgUrls.isHomeShell`
-（只认 `/`，表单页也有 `#app`，不能误伤）。
+状态条常驻约 36dp 高（与教务导入窗口同高），提示出现/消失不改变 WebView 尺寸。
+判据是 `XgUrls.isHomeShell`（只认 `/`，表单页也有 `#app`，不能误伤）。
 
 **WebView 能力三件套（2026-11-08 审查补）**：附件上传、网页定位、非 http(s) 外链
 统一由 `ui/common/WebViewSupport.kt` 提供，学工 / 教务 / 门户三个窗口共用（门户里的
@@ -756,7 +764,8 @@ Vue `mount()` 时才被替换。坏缓存会让它引用的 JS 加载失败，�
 | `data/xg/XgUrls.kt` | 表单清单（`XgForm`：id / 标题 / 副标题 / `pageEnc` / `appId` 与直达地址）、地址常量、纯判定（域归属、表单页、统一认证接入点、直达闸门、状态条分档）。不依赖 android.* |
 | `ui/campus/XgFormScreen.kt` | WebView 窗口：状态条 + 进度 + 文件选择 + 返回键接管 |
 | `XgFormActivity.kt` + manifest | 独立窗口，按表单标识分发、锁竖屏（理由同 §4.4 / §3.14） |
-| `ui/jw/JwHubScreen.kt` | 入口：「学工与校历」分组，请假 / 宿舍报修按 `XgUrls` 直达（图标映射留在 UI 层，data 层不带 Compose 类型） |
+| `ui/jw/JwHubScreen.kt` | 入口：「学工与校历」分组的「请假系统」行 → `SubpageScreen.LEAVE_HUB`；「宿舍报修」行 → 报修进度页 |
+| `ui/campus/LeaveHubScreen.kt` | 请假系统入口页（2026-11-08）：请假 / 销假 / 续假三行，各开对应的 `XgFormActivity` |
 
 **风险，如实记下**：
 

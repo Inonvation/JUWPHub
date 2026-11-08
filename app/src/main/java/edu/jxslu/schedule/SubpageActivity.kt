@@ -24,6 +24,7 @@ import edu.jxslu.schedule.ui.me.hub.TimetableHubScreen
 import edu.jxslu.schedule.ui.campus.CampusCalendarScreen
 import edu.jxslu.schedule.ui.campus.CampusCardSettingsScreen
 import edu.jxslu.schedule.ui.campus.DormRepairScreen
+import edu.jxslu.schedule.ui.campus.LeaveHubScreen
 import edu.jxslu.schedule.ui.campus.PayCodeScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
@@ -190,6 +191,8 @@ enum class SubpageScreen {
      * 纯原生只读页；「去学工报修页核对」另开 [XgFormActivity]。
      */
     DORM_REPAIR,
+    /** 教务 → 请假系统（请假 / 销假 / 续假三张学工表单的入口页，2026-11-08）。 */
+    LEAVE_HUB,
     /** 我的 → 校园服务 → U净（美的校园洗衣：空闲看板 · 扫码识别，DESIGN §4.37） */
     UJING,
     /** U净 扫码后 → 下单页（档位单选 · 水温 · 投放加购，数据走 UjingDraftStore，DESIGN §3.23） */
@@ -339,6 +342,8 @@ class SubpageActivity : ComponentActivity() {
                 onBack = onBack,
                 focusItemId = focusItemId,
             )
+            // 请假系统（2026-11-08）：三张学工表单的入口页，各自行里直接开 XgFormActivity
+            SubpageScreen.LEAVE_HUB -> LeaveHubScreen(onBack = onBack)
             // U净 三页链（DESIGN §3.23）：主页（看板 / 扫码）→ 下单页（档位 / 投放）→ 历史账单。
             // 下单页与主页间的大对象交接不走 extra，走 Graph 的 UjingDraftStore（进程内草稿）
             SubpageScreen.UJING -> UjingScreen(

@@ -112,10 +112,8 @@ object XgUrls {
     )
 
     /**
-     * 请假。
-     *
-     * 副标题只写这张单子能干什么，不写它在学工里挂哪个分组——那个分组名我还没实测到
-     * （学工菜单接口要登录态才能调），编一个分类名比不写更糟。
+     * 请假。与 [LEAVE_CANCEL] / [LEAVE_EXTEND] 同属学工「新版请销假」分组，
+     * 是三张各自独立的审批表单，不是一个流程的三步。
      */
     val LEAVE = XgForm(
         id = "leave",
@@ -126,10 +124,33 @@ object XgUrls {
     )
 
     /**
-     * 可直达的表单清单。扩展服务页按它渲染入口，加一个新表单只需在这里加一条
-     * （再在 UI 层补一个图标映射）。
+     * 销假。标识 2026-11-08 从学生工作台应用列表（`getRoleAppList`）实测取得；
+     * 销假页要网页定位（页面自己调 `navigator.geolocation`），定位桥见
+     * `ui/common/WebViewSupport.kt`。
      */
-    val FORMS: List<XgForm> = listOf(REPAIR, LEAVE)
+    val LEAVE_CANCEL = XgForm(
+        id = "leave_cancel",
+        title = "销假",
+        subtitle = "返校后提交 · 需要手机定位",
+        pageEnc = "8c49377f5a3e2e1d5e1860baafa4dc00",
+        appId = 278615,
+    )
+
+    /** 续假（学工「新版请销假」分组）。标识来源同 [LEAVE_CANCEL]。 */
+    val LEAVE_EXTEND = XgForm(
+        id = "leave_extend",
+        title = "续假",
+        subtitle = "假期不够用时提交",
+        pageEnc = "3c47a53ea27b0e7aa201491119958312",
+        appId = 278618,
+    )
+
+    /**
+     * 可直达的表单清单，同时是 [XgFormActivity] 解析 extra id 的查找表。
+     * 入口由各页面自行挑（教务 Tab 的报修行 / 请假系统页），加一个新表单只需
+     * 在这里加一条（再在 UI 层补一个图标映射）。
+     */
+    val FORMS: List<XgForm> = listOf(REPAIR, LEAVE, LEAVE_CANCEL, LEAVE_EXTEND)
 
     /** 按 [XgForm.id] 取表单；脏 extra（旧版本写下的 id）返回 null。 */
     fun formById(id: String?): XgForm? = id?.let { raw -> FORMS.firstOrNull { it.id == raw } }

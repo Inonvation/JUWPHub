@@ -28,8 +28,12 @@
 ## 学工表单是 WebView
 
 - **学工表单是 WebView，不是原生表单**（2026-09-24，DESIGN §3.15 / §4.26）：
-  `XgFormActivity` 承载全部学工表单（已登记：宿舍报修、请假），表单标识走 extra、
-  清单在 `XgUrls.FORMS`，加一个新的只需在清单里补一条 + 在扩展服务页的图标映射里补一条。
+  `XgFormActivity` 承载全部学工表单（已登记：宿舍报修、请假 / 销假 / 续假），表单标识走
+  extra、清单在 `XgUrls.FORMS`，加一个新的只需在清单里补一条 + 在 UI 层的入口映射里补一条。
+  请假三张表单的标识 2026-11-08 从学生工作台应用列表（`getRoleAppList`，走 CAS →
+  `/sfrz/` → `/pedestal/user/ermLogin` 换 X-Token，脚本留档 `scripts/_archive/probe_xg_dump_apps.py`）
+  实测取得；学校把请 / 销 / 续配成**三张独立审批表单**（不是同一流程的三步），
+  入口页是 `SubpageScreen.LEAVE_HUB`（教务 Tab 的「请假系统」行）。
   它是第三个「因为窗口里有统一认证表单而锁竖屏」的窗口（前两个是教务导入与成绩单导出），
   进页打开 `XgUrls.SSO_LOGIN`（`/sfrz/login343962`）→ 302 到 `eapp2` 的 CAS。
   学工与教务**共用同一套统一身份认证**，所以教务导入登录过一次这边就免登。学工自己的
@@ -90,8 +94,10 @@
      「卡住了？清理网页缓存重新加载试试」+ 右侧「清理并刷新」按钮（`checkHomeShellStuck`），
      点了才 `clearCache(true)` + no-cache 重载首页。**不在探测到卡住时自动重载**：页面
      会在用户眼皮底下自己刷新，容易被当成操作丢了（2026-11-08 用户口径）。
-- 状态条常驻 48dp 高（`heightIn(min = 48.dp)`）：提示与按钮出现/消失**不能改变 WebView
-  高度**（MIUI 上 resize 可能整面刷白，与进度条 overlay 同一条）。
+- 状态条常驻约 36dp 高（`heightIn(min = 36.dp)`，与教务导入窗口同高）：提示与链接式的
+  「清理并刷新」（主色文字，**不是按钮**——按钮的最小触控高度会把这条撑到 48dp，
+  2026-11-08 用户口径）出现/消失**不能改变 WebView 高度**（MIUI 上 resize 可能整面刷白，
+  与进度条 overlay 同一条）。
 - 探测带**导航代次**（`navToken`，`onPageStarted` +1）：2.5s 内用户 reload 过首页时旧探测作废，
   不能拿新页面的 DOM 下结论（否则新页还在挂载的一两秒会被误报）。Vue 的 `mount()` 会
   `innerHTML=""` 清掉占位，所以健康加载到这里必然是 0；健康页面通常还会被路由改写成

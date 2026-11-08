@@ -163,6 +163,26 @@ class XgUrlsTest {
     }
 
     /**
+     * 销假 / 续假必须各自是独立表单（学工「新版请销假」分组，2026-11-08 实测），
+     * 且三者的 appId 互不相同——错用请假的标识会打开一张张冠李戴的单子。
+     */
+    @Test
+    fun leaveCancelAndExtend_areRegisteredAsDistinctForms() {
+        val cancel = XgUrls.formById("leave_cancel")
+        val extend = XgUrls.formById("leave_extend")
+        assertNotNull("销假没登记进 XgUrls.FORMS", cancel)
+        assertNotNull("续假没登记进 XgUrls.FORMS", extend)
+        assertEquals("销假", cancel!!.title)
+        assertEquals("续假", extend!!.title)
+        assertTrue(cancel.applyUrl.contains("pageEnc=8c49377f5a3e2e1d5e1860baafa4dc00"))
+        assertTrue(cancel.applyUrl.contains("aprvAppId=278615"))
+        assertTrue(extend.applyUrl.contains("pageEnc=3c47a53ea27b0e7aa201491119958312"))
+        assertTrue(extend.applyUrl.contains("aprvAppId=278618"))
+        val appIds = listOf(XgUrls.LEAVE, cancel, extend).map { it.toString() }.toSet()
+        assertEquals("三张表单的标识必须互不相同", 3, appIds.size)
+    }
+
+    /**
      * 清单里每一张表单的直达地址都要成形，且能被 [XgUrls.formById] 找回。
      *
      * 这条是为「以后加新表单」写的：新加的那条写错了标识、漏了 id，这里先炸，

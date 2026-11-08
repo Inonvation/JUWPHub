@@ -89,7 +89,6 @@ import edu.jxslu.schedule.data.repo.AppShellPrefs
 import edu.jxslu.schedule.data.qiekj.QiekjAutoSignInRunner
 import edu.jxslu.schedule.ui.reminder.QiekjSignInNoticeBus
 import edu.jxslu.schedule.ui.reminder.QiekjSignInNoticeHost
-import edu.jxslu.schedule.data.xg.XgUrls
 import edu.jxslu.schedule.data.prefs.OnboardingSyncOutcome
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
@@ -1645,7 +1644,9 @@ internal fun JuwApp(
                                 openSubpage(context, SubpageRequest(screen = SubpageScreen.TEACHING_CALENDAR))
                             },
                             onOpenTeachingEval = { JwImportActivity.start(context, JwImportMode.TeachingEval) },
-                            onOpenLeave = { XgFormActivity.start(context, XgUrls.LEAVE) },
+                            onOpenLeaveHub = {
+                                openSubpage(context, SubpageRequest(screen = SubpageScreen.LEAVE_HUB))
+                            },
                             onOpenRepair = { openSubpage(context, SubpageRequest(screen = SubpageScreen.DORM_REPAIR)) },
                             onOpenCalendar = {
                                 openSubpage(context, SubpageRequest(screen = SubpageScreen.CAMPUS_CALENDAR))

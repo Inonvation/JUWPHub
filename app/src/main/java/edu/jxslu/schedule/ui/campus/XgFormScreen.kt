@@ -21,6 +21,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import edu.jxslu.schedule.Graph
@@ -249,12 +251,13 @@ fun XgFormScreen(form: XgForm, onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            // 状态条固定 48dp 高：卡住时多出一枚「清理并刷新」按钮，高度不变 →
-            // WebView 不会被重新测量（MIUI 上 resize 可能整面刷白，见下面的 overlay 注释）。
+            // 状态条与教务导入窗口同高（单行 bodySmall，约 36dp）。卡住时多出一段
+            // 链接式的「清理并刷新」，高度不变 → WebView 不会被重新测量（MIUI 上
+            // resize 可能整面刷白，见下面的 overlay 注释）。
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 48.dp)
+                    .heightIn(min = 36.dp)
                     .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -265,6 +268,8 @@ fun XgFormScreen(form: XgForm, onBack: () -> Unit) {
                         statusNote
                     },
                     style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     color = if (showCacheHint) {
                         MaterialTheme.colorScheme.error
                     } else {
@@ -273,19 +278,28 @@ fun XgFormScreen(form: XgForm, onBack: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
                 if (showCacheHint) {
-                    TextButton(onClick = {
-                        val wv = webView ?: return@TextButton
-                        // 用户明确要求「清缓存」：清整库 HTTP 资源缓存（HTML + JS），
-                        // 再用 no-cache 重取首页。**不动 cookie / localStorage**，
-                        // 不用重新登录；整库清只影响各窗口下次重新下载资源。
-                        showCacheHint = false
-                        loadError = null
-                        loadErrorUrl = null
-                        homeNoCacheLoad = true
-                        wv.settings.cacheMode = WebSettings.LOAD_NO_CACHE
-                        wv.clearCache(true)
-                        wv.loadUrl(XgUrls.HOME)
-                    }) { Text("清理并刷新") }
+                    // 链接形态（主色文字）而不是按钮：按钮的最小触控高度会把这一条撑到
+                    // 48dp，比其它窗口的提示条高一截（2026-11-08 用户口径）。
+                    Text(
+                        text = "清理并刷新",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clickable(onClickLabel = "清理并刷新") {
+                                val wv = webView ?: return@clickable
+                                // 用户明确要求「清缓存」：清整库 HTTP 资源缓存（HTML + JS），
+                                // 再用 no-cache 重取首页。**不动 cookie / localStorage**，
+                                // 不用重新登录；整库清只影响各窗口下次重新下载资源。
+                                showCacheHint = false
+                                loadError = null
+                                loadErrorUrl = null
+                                homeNoCacheLoad = true
+                                wv.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                                wv.clearCache(true)
+                                wv.loadUrl(XgUrls.HOME)
+                            }
+                            .padding(start = 12.dp),
+                    )
                 }
             }
             // 错误条必须是 **overlay**，不能放进 Column 当兄弟节点：它出现/消失会改变

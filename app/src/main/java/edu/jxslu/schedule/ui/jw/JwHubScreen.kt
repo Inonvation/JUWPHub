@@ -90,7 +90,7 @@ fun JwHubScreen(
     onOpenInternship: () -> Unit,
     onOpenTeachingCalendar: () -> Unit,
     onOpenTeachingEval: () -> Unit,
-    onOpenLeave: () -> Unit,
+    onOpenLeaveHub: () -> Unit,
     onOpenRepair: () -> Unit,
     onOpenCalendar: () -> Unit,
 ) {
@@ -128,7 +128,7 @@ fun JwHubScreen(
             title = "学工与校历",
             entries = listOf(
                 HubEntry("学生评教", "评完解锁成绩", HugeIcons.CheckmarkCircle02, onOpenTeachingEval),
-                HubEntry("请假", "学工系统 · 填表", HugeIcons.File01, onOpenLeave),
+                HubEntry("请假系统", "请假 · 销假 · 续假", HugeIcons.File01, onOpenLeaveHub),
                 HubEntry("宿舍报修", "进度 · 审批", HugeIcons.Toolbox, onOpenRepair),
                 HubEntry("校历", "学年校历", HugeIcons.Calendar01, onOpenCalendar),
             ),
