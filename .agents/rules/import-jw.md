@@ -29,7 +29,8 @@
   点完「完成」就 finish，反馈停在他看不见的那个窗口里。
 - **七个落点**各调一次 `JwImportOutcomeEffect(snackbar)`：课表页 / 今日页 / 成绩页 /
   学校统一认证页 / 课表中心页 / 考试设置页 / 教务 Tab（2026-10-20 加；教务 Tab 顶栏
-  的「导入」入口 2026-10-24 改成「教务主页」浏览图标（`JwWebActionButton` → Browse），
+  的「导入」入口 2026-10-24 改成浏览图标，2026-11-08 起目标是「校园门户」
+  `JwUrls.PORTAL`（`JwWebActionButton` → Browse），
   导入入口只剩今日 / 课表 / 成绩 / 考试页，本 Tab 仍是落点，导入窗口 finish
   后落回的就是它们）。新增落点页面时别忘了同时补 `AppSnackbarHost`；`JwAccountScreen` 的
   Scaffold 把 `contentWindowInsets` 归零了，提示条要自己 `navigationBarsPadding()`。
@@ -416,6 +417,19 @@
   不要再新建 WebView 窗口；Browse 模式没有导入按钮，教务目标仍从 `SSO_WARMUP`
   起跳，非教务目标直接开目标页。网页核对由此天然继承电脑版/手机版、
   返回先关弹层、会话失效回登录与错误态。
+- **校园门户入口**（2026-11-08）：教务 Tab 顶栏那一格是 `JwUrls.PORTAL`
+  （`http://portal.juwp.edu.cn`，**HTTP；443 不通**，见 `design/04a-foundation.md`）。
+  它是非教务域目标，Browse 直接开根路径（根路径 302 → `/cas/login_portal` → CAS），
+  自动填表与 cookie 过期恢复照旧；`JwWebFit.fitScript` 对门户域**不注入电脑版**——
+  门户自带 `width=device-width` 响应式版式，压到 980 会变成另一种版式。
+  门户里的服务入口（教务、WebVPN 等）点在同一个 WebView 里，不改窗口。
+- **门户窗口的 WebView 桥（2026-11-08 审查补）**：门户挂着学习通 / 就业平台 / 问卷 /
+  学工报修等站外应用，光有「能打开」不够，`JwImportScreen` 已补齐三件：
+  ① 附件上传（`onShowFileChooser`，解析走共享的 `parseWebViewFileChooserResult`，
+  **不要**改用 `FileChooserParams.parseResult`——它丢 `ClipData`，多选附件会被当成取消）；
+  ② 网页定位（`onGeolocationPermissionsShowPrompt`，学习通位置签到会用）；
+  ③ 非 http(s) 链接（`tel:` / `mailto:` / `weixin://` / `intent://`）交系统处理。
+  三者的实现都在 `ui/common/WebViewSupport.kt`，与学工窗口共用，别在页面里另写一份。
 - **cookie 过期后的自动重登与落页**（2026-10-21，用户报「网页核对入口重登后不自动跳」）：
   ① Browse 的「落点」不再只认 `xsMainV`——`startAutoNavOnLanding` 接受教务域里任何
   已登录的普通页（`JwUrls.isAuthHop` 排除 `sso.jsp` / `LoginToXk`，`isLoginLikeUrl`

@@ -93,6 +93,11 @@
   页底「清除全部凭证」（二次确认）只清本机凭证与会话，不动平台账号；AI Key 一并清，
   学籍缓存（姓名 / 班级 / 学号 / 补抓闸门）也一起清——否则凭证清了、卡上还留着上一个人的名字。
   第三方登录表单统一一句「只保存登录状态，不保存密码」（胖乖 / 趣智 / U净）。
+- **退出要把 WebView 的 localStorage 一起清**（2026-11-08 审查补）：`CasSession.logout`
+  → `WebViewCookieBridge.clearAll` 现在同时清 `CookieManager` 与 `WebStorage`。只清 cookie
+  的话，学工的登录 token（`cx_qmx_token`，存在 localStorage）还留着，换账号/退出后
+  学工窗口可能仍带出上一位用户的数据。**别把这一步挪回只清 cookie**，也不要改成
+  按域清——`CookieManager` 没有按域删除的公开 API，整库清是既有口径。
 
 ## 登录过期要在下次进页说出来（2026-10-21）
 

@@ -725,6 +725,30 @@ GET https://xgxt.juwp.edu.cn/sfrz/login343962
 而 CookieManager 是**全应用共用**的——教务导入（§4.4）登录过一次，学工这边就免登。
 App 不需要读密码、不需要伪造登录请求、更不需要新增凭证存储。
 
+**销假要网页定位（2026-11-08）**：请假流程里的「销假」由页面自己调 `navigator.geolocation`。
+Android WebView 对定位请求默认**不回填回调**（默认 `WebChromeClient` 的空实现），页面
+永远等不到坐标——这就是用户报的「内置浏览器拿不到手机定位」。窗口里补上
+`onGeolocationPermissionsShowPrompt`：已有定位权限直接放行，没有就在那一刻申请运行时权限
+（`AppPermissions.location`，manifest 早已为单车地图声明），结果回来再回填；
+`retain = false`，不把授权持久化到 WebView。页面撤销请求时（`HidePrompt`）清掉挂起回调，
+按契约不能再回填。
+
+**首页壳坏缓存自愈（2026-11-08）**：学工首页 `/` 的 `index.html` 自带「正在加载中…」占位，
+Vue `mount()` 时才被替换。坏缓存会让它引用的 JS 加载失败，占位就永远留着（用户实测
+清浏览器缓存可恢复）。窗口的对策是两段的：点 Home 时用一次性 `LOAD_NO_CACHE` 重取
+（不动 cookie/localStorage，不重登）；`onPageFinished` 后 2.5s 探一次 `#app .loading-box`，
+还在就把状态条换成「卡住了？清理网页缓存重新加载试试」+ 右侧「清理并刷新」按钮，
+点了才 `clearCache(true)` + no-cache 重载（不自动重载，避免页面在用户眼皮底下自己刷新）。
+状态条常驻 48dp 高，提示出现/消失不改变 WebView 尺寸。判据是 `XgUrls.isHomeShell`
+（只认 `/`，表单页也有 `#app`，不能误伤）。
+
+**WebView 能力三件套（2026-11-08 审查补）**：附件上传、网页定位、非 http(s) 外链
+统一由 `ui/common/WebViewSupport.kt` 提供，学工 / 教务 / 门户三个窗口共用（门户里的
+学习通、就业平台、学工报修都依赖它们）。四个 WebView 窗口都必须重写
+`onRenderProcessGone`：不重写时渲染进程崩溃会带走整个 App，统一走
+`handleWebViewRendererGone`（返回 true + 重建窗口）。学工窗口的主 frame 失败另有
+「重试」行与顶栏刷新出口。
+
 **接线**：
 
 | 位置 | 内容 |

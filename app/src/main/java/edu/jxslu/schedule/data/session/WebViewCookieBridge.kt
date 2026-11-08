@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.data.session
 
 import android.webkit.CookieManager
+import android.webkit.WebStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Cookie
@@ -31,7 +32,7 @@ interface WebCookieBridge {
     fun hasAnyCookie(urls: List<String> = CasSession.ADOPT_URLS): Boolean
 
     /**
-     * 清掉 WebView 的全部 cookie（2026-09-28，退出登录用）。
+     * 清掉 WebView 的 cookie **与 localStorage**（退出登录 / 清缓存共用）。
      *
      * `CookieManager` 没有按域删除的公开 API（`removeAllCookies` 是整库、
      * `setCookie` 只能覆写单条且要求完整的过期属性拼装）。取**整库清空**：
@@ -41,6 +42,11 @@ interface WebCookieBridge {
      * 不清这里的代价：用户「退出登录并清除密码」后，WebView 里留着的手登会话
      * 仍然有效——导入页探针通过照常直进教务，「我的」页状态卡也一直「已登录」，
      * 退出形同虚设。
+     *
+     * **必须连 localStorage 一起清**（2026-11-08）：学工平台把登录 token
+     * （`cx_qmx_token`）放在这个源下，只清 cookie 的话退出后 token 还在本机
+     * （口径见 `AppCacheCleaner` 的注释）。`WebStorage.deleteAllData()` 是整库清，
+     * 与「清理缓存」同一条官方 API。
      */
     suspend fun clearAll()
 }
@@ -100,5 +106,8 @@ object WebViewCookieBridge : WebCookieBridge {
     override suspend fun clearAll() = withContext(Dispatchers.Main) {
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()
+        // 学工 token 在 localStorage（AppCacheCleaner 清缓存同款口径）：只清 cookie
+        // 等于「退出」只退了一半，换账号后可能带出上一位用户的学工数据。
+        WebStorage.getInstance().deleteAllData()
     }
 }

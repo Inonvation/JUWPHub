@@ -71,4 +71,21 @@ class JwUrlsTest {
         assertEquals(JwUrls.SCHEDULE_LIST, JwUrls.scheduleListUrl(null))
         assertEquals(JwUrls.SCHEDULE_LIST, JwUrls.scheduleListUrl("2025-2026"))
     }
+
+    /**
+     * 校园门户（2026-11-08，教务 Tab 顶栏入口）。两条会直接被行为依赖的口径：
+     * ① 必须走 HTTP（443 不通）；② 不是教务域——[JwImportScreen] 的 Browse 模式据此
+     * 直接开目标页（是教务域的话会先走 SSO 预热再靠自动落页导过来）。
+     */
+    @Test
+    fun portal_isHttpPortalHostAndNotJwHost() {
+        assertTrue(JwUrls.PORTAL.startsWith("http://"))
+        assertTrue(JwUrls.isPortalHost(JwUrls.PORTAL))
+        assertTrue(JwUrls.isPortalHost("${JwUrls.PORTAL}/cas/login_portal"))
+        assertFalse(JwUrls.isJwHost(JwUrls.PORTAL))
+
+        assertFalse(JwUrls.isPortalHost(JwUrls.STUDENT_HOME))
+        assertFalse(JwUrls.isPortalHost("http://notportal.juwp.edu.cn/"))
+        assertFalse(JwUrls.isPortalHost(null))
+    }
 }

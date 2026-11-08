@@ -333,6 +333,10 @@ object JwWebFit {
      *   都挂在这几页的 DOM 上，不去动它。
      * - **课表页**：既有适配 + （开着电脑版时）桌面覆盖。
      * - **其余**（教务主页 / 选课中心 / 进选课页 / 成绩页 / 评教平台）：开着电脑版时覆盖。
+     * - **校园门户**（[JwUrls.isPortalHost]，2026-11-08）：**不覆盖**。门户自己带
+     *   `width=device-width` 的响应式版式（手机上是单列工作台），电脑版把它压到 980
+     *   再缩到手机屏，字小且版式与用户在浏览器里看到的不是一页——这一格是去门户的，
+     *   不是教务业务页，电脑版预览不该管它。
      * - **关掉电脑版时**：与引入电脑版之前**逐字一致**（回归闸，单测钉住）。
      */
     fun fitScript(url: String?, desktop: Boolean): String? {
@@ -341,7 +345,7 @@ object JwWebFit {
         if (isLoginLikeUrl(u)) return LOGIN_FIT_JS
         val parts = ArrayList<String>(2)
         if (JwUrls.schedulePageKind(u) != JwSchedulePage.None) parts += SCHEDULE_FIT_JS
-        if (desktop) parts += DESKTOP_JS
+        if (desktop && !JwUrls.isPortalHost(u)) parts += DESKTOP_JS
         return if (parts.isEmpty()) null else parts.joinToString("\n;\n")
     }
 }

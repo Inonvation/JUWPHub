@@ -7,7 +7,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- 附近单车地图「定位到我的位置」（DESIGN §3.9）：只在该按钮被点击时才运行时申请，
          不预取、不参与进页流程。精确档用于把地图中心落到用户所在的那一片车桩，
-         用户只给「大致位置」也能用（BikeLocator 两个权限任一即可）。 -->
+         用户只给「大致位置」也能用（BikeLocator 两个权限任一即可）。
+         2026-11-08 起还供学工请假 → 销假页的 WebView 定位使用（页面自己调
+         navigator.geolocation，权限在网页请求定位那一刻才申请，见 XgFormScreen）：
+         Android 的 WebView 只有在 App 持有定位权限时才会给出真实坐标。 -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- 趣智校园开热水（DESIGN §4.30）：扫描附近的 KLCXKJ 热水器广播，再按地址连设备。

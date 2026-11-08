@@ -2,11 +2,15 @@ package edu.jxslu.schedule.ui.jwvw
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.net.Uri
 import android.net.http.SslError
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.GeolocationPermissions
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -16,6 +20,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -92,8 +98,13 @@ import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.CasLoginDialog
 import edu.jxslu.schedule.ui.common.ImportTargetDialogHost
 import edu.jxslu.schedule.ui.common.NoticeTone
+import edu.jxslu.schedule.ui.common.handleWebViewRendererGone
+import edu.jxslu.schedule.ui.common.launchWebViewExternal
+import edu.jxslu.schedule.ui.common.parseWebViewFileChooserResult
+import edu.jxslu.schedule.ui.common.rememberWebViewGeolocationBridge
 import edu.jxslu.schedule.ui.common.resolveImportTarget
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.common.shouldHandOffToSystem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
@@ -245,6 +256,26 @@ fun JwImportScreen(
     var busy by remember { mutableStateOf(false) }
     var pageState by remember { mutableStateOf<PageState>(PageState.Loading) }
     var statusNote by remember { mutableStateOf("正在打开学校统一身份认证登录…") }
+    // 网页里点「上传附件」时 WebView 交出的文件选择回调。握住它直到系统选择器返回；
+    // 结果回来立刻清掉——同一个 callback 消费两次会抛 IllegalStateException。
+    // 门户里的学习通 / 就业平台 / 学工报修都有附件上传，缺这段等于上传按钮点了没反应。
+    var fileCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val callback = fileCallback
+        fileCallback = null
+        callback?.onReceiveValue(parseWebViewFileChooserResult(result.resultCode, result.data))
+    }
+    // 门户里的学习通位置签到 / 门户自己的签到类应用会调 navigator.geolocation：
+    // 默认 WebChromeClient 不回填定位回调，与请假销假是同一个坑（实现见 ui/common）。
+    val geoBridge = rememberWebViewGeolocationBridge { granted ->
+        statusNote = if (granted) {
+            "已允许定位"
+        } else {
+            "定位权限被拒绝：网页需要位置信息，可在系统设置里允许后重试"
+        }
+    }
     // 最近一次同源 fetch 是不是因为「会话被顶」失败的：调用方的超时分支要先看它，
     // 否则会用「请求超时」把已经报出来的会话诊断盖掉（见 fetchJsonInWebView）
     var lastFetchConflict by remember { mutableStateOf(false) }
@@ -280,6 +311,17 @@ fun JwImportScreen(
         JwImportMode.Schedule -> if (startAtExam) JwUrls.EXAM_QUERY else JwUrls.SCHEDULE_LIST
         JwImportMode.Browse -> browseUrl
     }
+    /**
+     * 这个窗口适不适用「登录落点 → 目标页」这套自动落页。
+     *
+     * 只有目标是教务域的窗口才有这条链（教务目标从 [JwUrls.SSO_WARMUP] 起跳，登录落到
+     * 哪一页由教务决定）。Browse 的非教务目标（校园门户 / 学工 / 签章）直接开目标页，
+     * 登录回跳由站点自己处理——**不能认 `xsMainV` 落点**：校园门户的应用列表里就有
+     * 「教务管理系统」，用户从门户点进去正好落在 `xsMainV`，认了就会把人拽回门户
+     * （2026-11-08）。
+     */
+    val navOnJwLanding: Boolean =
+        mode != JwImportMode.Browse || JwUrls.isJwHost(browseUrl)
     val autoNavNote: String = when (mode) {
         JwImportMode.Scores -> "已登录教务主页，正在打开成绩查询页…"
         JwImportMode.Selection -> "已登录教务主页，正在打开选课中心…"
@@ -533,8 +575,9 @@ fun JwImportScreen(
      */
     fun stillOnNavLanding(): Boolean {
         val u = currentUrl
-        if ("xsMainV" in u) return true
+        if ("xsMainV" in u && navOnJwLanding) return true
         return mode == JwImportMode.Browse &&
+            navOnJwLanding &&
             JwUrls.isJwHost(u) &&
             !JwUrls.isAuthHop(u) &&
             !JwWebFit.isLoginLikeUrl(u) &&
@@ -631,12 +674,15 @@ fun JwImportScreen(
         if (mode == JwImportMode.Browse && JwUrls.samePath(u, browseUrl)) {
             browseAuthChainActive = false
         }
-        val home = "xsMainV" in u
+        val home = "xsMainV" in u && navOnJwLanding
         // Browse 模式（2026-10-21）：重登后的落点不一定是 xsMainV——只要它是教务域里
         // 一个已登录的普通页（不是 sso.jsp / LoginToXk 这类认证中转、不是登录页、
         // 也不是目标页本身），就当成可以起跳的落点。**只认认证链在途的窗口**：
         // 否则用户在任意教务页刷新都会被拽回最初的目标页（2026-10-21 复核补）。
+        // **只对教务域目标生效**（[navOnJwLanding]，2026-11-08）：目标是校园门户/学工
+        // 这类站点时，用户从站点里点进教务不该被当成「还没到目标页」再拽回去。
         val browseLanding = mode == JwImportMode.Browse &&
+            navOnJwLanding &&
             browseAuthChainActive &&
             JwUrls.isJwHost(u) &&
             !JwUrls.isAuthHop(u) &&
@@ -1114,18 +1160,24 @@ fun JwImportScreen(
                 actions = {
                     // 电脑版 / 手机版（DESIGN §4.4）：效果就在眼前，所以开关放在这里而不是设置页。
                     // 顶栏空间有限，用纯文字 chip（骑行页使用方式同款形态）而不是再加一枚图标。
-                    JwDesktopModeChip(
-                        desktop = desktopMode,
-                        onToggle = {
-                            val next = !desktopMode
-                            scope.launch {
-                                prefs.setJwDesktopMode(next)
-                                snackbar.showNotice(
-                                    if (next) "已切换为电脑版；双指可放大缩小" else "已切换为手机版",
-                                )
-                            }
-                        },
-                    )
+                    //
+                    // 门户域不显示这枚 chip（2026-11-08）：`JwWebFit.fitScript` 对门户不注入
+                    // 电脑版（门户自带响应式版式），留着它点下去就是「没反应」。从门户里
+                    // 点进教务 / 别的站点后 currentUrl 变了，chip 自己回来。
+                    if (!JwUrls.isPortalHost(currentUrl)) {
+                        JwDesktopModeChip(
+                            desktop = desktopMode,
+                            onToggle = {
+                                val next = !desktopMode
+                                scope.launch {
+                                    prefs.setJwDesktopMode(next)
+                                    snackbar.showNotice(
+                                        if (next) "已切换为电脑版；双指可放大缩小" else "已切换为手机版",
+                                    )
+                                }
+                            },
+                        )
+                    }
                     IconButton(
                         onClick = {
                             // 先取出错误态里的重试目标，再改状态（顺序反了就永远读到 Loading）
@@ -1182,7 +1234,18 @@ fun JwImportScreen(
                                     override fun shouldOverrideUrlLoading(
                                         view: WebView?,
                                         request: WebResourceRequest?,
-                                    ): Boolean = false
+                                    ): Boolean {
+                                        // 门户里的第三方服务 / 教务页面可能带 tel: / mailto: /
+                                        // weixin:// / intent:// 链接：WebView 只会报
+                                        // ERR_UNKNOWN_URL_SCHEME，交给系统解析。只拦主 frame。
+                                        val target = request?.url?.toString().orEmpty()
+                                        if (request?.isForMainFrame == true &&
+                                            shouldHandOffToSystem(target)
+                                        ) {
+                                            return launchWebViewExternal(context, target)
+                                        }
+                                        return false
+                                    }
 
                                     override fun onPageStarted(
                                         view: WebView?,
@@ -1281,7 +1344,10 @@ fun JwImportScreen(
                                                 "eapp2.juwp.edu.cn" in u ->
                                                     "请使用学校统一身份认证登录"
                                                 // 落地主页的文案与自动跳转共用一份口径（见 autoNavNote）
-                                                "xsMainV" in u -> autoNavNote
+                                                "xsMainV" in u && navOnJwLanding -> autoNavNote
+                                                // 目标是非教务站点的 Browse 窗口（门户 / 学工）：
+                                                // 用户从站点里点进教务，这里只报事实、不自动跳
+                                                "xsMainV" in u -> "教务主页已打开。"
                                                 mode == JwImportMode.Browse &&
                                                     JwUrls.isScoreQueryUrl(u) ->
                                                     "已打开成绩查询页；点页面上的「查询」加载成绩。"
@@ -1321,8 +1387,9 @@ fun JwImportScreen(
                                             // 落地主页 → 自动去目标页。与 onPageCommitVisible 那条路
                                             // 共用同一个闸门与实现（见 startAutoNavOnLanding）；这里是兜底，
                                             // 也负责「内容可见那条路没触发」时的第二次机会。
-                                            // autoNavDone 之后不再拦：用户自己回到主页时按普通页处理（Ready）
-                                            if ("xsMainV" in u && !autoNavDone) {
+                                            // autoNavDone 之后不再拦：用户自己回到主页时按普通页处理（Ready）。
+                                            // [navOnJwLanding] 外的 Browse 窗口（门户 / 学工）不认这个落点。
+                                            if (navOnJwLanding && "xsMainV" in u && !autoNavDone) {
                                                 view?.let { startAutoNav(it) }
                                                 return@checkSessionLost
                                             }
@@ -1442,6 +1509,15 @@ fun JwImportScreen(
                                         Log.w(TAG, "ssl error cancelled: host=$host url=${JwTeachingEval.redactForLog(error?.url)}")
                                     }
                                 }
+
+                                /**
+                                 * 渲染进程被系统回收 / 崩溃：不处理会带走整个 App。
+                                 * 统一走 [handleWebViewRendererGone]（返回 true + 重建窗口）。
+                                 */
+                                override fun onRenderProcessGone(
+                                    view: WebView?,
+                                    detail: RenderProcessGoneDetail?,
+                                ): Boolean = handleWebViewRendererGone(context, TAG, detail)
                                 }
                                 webChromeClient = object : WebChromeClient() {
                                     override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -1453,6 +1529,48 @@ fun JwImportScreen(
 
                                     override fun onReceivedTitle(view: WebView?, title: String?) {
                                         if (!title.isNullOrBlank()) pageTitle = title
+                                    }
+
+                                    /**
+                                     * 附件上传（门户里的学工报修 / 学习通作业 / 就业平台简历）。
+                                     * 结果解析走共享的 [parseWebViewFileChooserResult]：Chromium 的
+                                     * `FileChooserParams.parseResult` 丢 `ClipData`，多选附件会被
+                                     * 当成「取消」（学工窗口踩过，见 ui/common/WebViewSupport.kt）。
+                                     */
+                                    override fun onShowFileChooser(
+                                        view: WebView?,
+                                        filePathCallback: ValueCallback<Array<Uri>>?,
+                                        fileChooserParams: FileChooserParams?,
+                                    ): Boolean {
+                                        if (filePathCallback == null || fileChooserParams == null) {
+                                            return false
+                                        }
+                                        // 上一个还没消费就来了新的：把旧的按「取消」了结，
+                                        // 否则页面永远等在那里（系统选择器不支持并发）。
+                                        fileCallback?.onReceiveValue(null)
+                                        fileCallback = filePathCallback
+                                        return try {
+                                            filePicker.launch(fileChooserParams.createIntent())
+                                            true
+                                        } catch (e: Exception) {
+                                            Log.w(TAG, "file chooser unavailable", e)
+                                            fileCallback = null
+                                            false
+                                        }
+                                    }
+
+                                    /** 网页定位（学习通位置签到等）：桥在 ui/common，与学工窗口共用。 */
+                                    override fun onGeolocationPermissionsShowPrompt(
+                                        origin: String?,
+                                        callback: GeolocationPermissions.Callback?,
+                                    ) {
+                                        if (geoBridge.onShowPrompt(origin, callback)) {
+                                            statusNote = "网页需要定位：请在系统弹窗里允许"
+                                        }
+                                    }
+
+                                    override fun onGeolocationPermissionsHidePrompt() {
+                                        geoBridge.onHidePrompt()
                                     }
                                 }
                                 // 从预热入口进（而不是 CAS 直链）：先落教务域写 `bzb_njw`，

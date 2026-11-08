@@ -149,6 +149,23 @@ object XgUrls {
         url != null && isXgHost(url) && "/office/apps/forms/" in url
 
     /**
+     * 是否学工**首页壳**（`https://xgxt.juwp.edu.cn/`，可带查询串 / fragment）。
+     *
+     * 首页的 `index.html` 自带「正在加载中…」占位（`#app .loading-box`），Vue 挂载后
+     * 才会被替换；坏缓存会让它引用的 JS 加载失败，占位就永远留着（2026-11-08 用户报障，
+     * 见 `XgFormScreen.healHomeShellIfStuck`）。表单页（`/office/...`）也有 `#app`，
+     * 但那是另一个应用，不能混为一谈。
+     */
+    fun isHomeShell(url: String?): Boolean {
+        if (!isXgHost(url)) return false
+        val rest = url.orEmpty().substringAfter("://", "")
+        val slash = rest.indexOf('/')
+        if (slash < 0) return true
+        val path = rest.substring(slash + 1).substringBefore('?').substringBefore('#')
+        return path.isEmpty()
+    }
+
+    /**
      * 是否还在统一认证的接入点上（`/sfrz/login343962`，含 CAS 带 ticket 回跳的那一刻）。
      *
      * 必须单独认出来：这个路径**也在学工域**，但它出现时学工后端还没把 office 的

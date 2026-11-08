@@ -48,6 +48,56 @@
   那套账号上；而闸门必须排除 `/sfrz/`（它也在学工域），否则 CAS 回跳的一刻被截断。
   直达地址**不带 `uuid`**：那是前端提交时现场生成的随机值，URL 上那个没有读取点。
 
+## 请假 → 销假要网页定位（2026-11-08）
+
+- 销假页自己调 `navigator.geolocation`。Android WebView 的默认 `WebChromeClient`
+  **不回填定位回调**，页面永远等不到坐标——用户看到的「内置浏览器拿不到手机定位」就是这条。
+  实现在 `ui/common/WebViewSupport.kt` 的 `WebViewGeolocationBridge`（学工与门户共用）：
+  `onGeolocationPermissionsShowPrompt` 把请求接到 App 的运行时权限
+  （`AppPermissions.location`），已有权限直接 `invoke(true)`，没有就先弹系统授权，
+  结果回来统一回填；`retain = false`，不把授权持久化到 WebView。
+- `onGeolocationPermissionsHidePrompt` 必须清掉挂起的回调（页面撤销请求后按契约不能再回填）；
+  多个请求同时挂起时要**全部**回填，漏一个那页就一直挂着。
+- 定位权限已在 manifest 声明（与单车地图共用 `ACCESS_FINE/COARSE_LOCATION`），
+  **不要**在进页时预申请：只在网页真的请求定位那一刻申请（挂起表非空时不重复 launch，
+  系统弹框不支持并发）。
+
+## 学工 WebView 的失败出口（2026-11-08 审查补）
+
+- **文件上传、定位、外链**三件都走 `ui/common/WebViewSupport.kt`：别在页面里另写。
+  `<input type=file>` 的结果解析必须读 `ClipData`（`parseWebViewFileChooserResult`），
+  交给 `FileChooserParams.parseResult` 会把多选附件当取消。
+- **主 frame 失败要有出口**：`onReceivedError` / `onReceivedHttpError` 记下失败 URL
+  并显示一条「重试」，顶栏也有刷新。**不要在 `onPageStarted` 里清错误**——实测回调顺序
+  可能是「错误 → onPageStarted → onPageFinished」，在 start 里清会把刚报出来的错洗掉；
+  清理由 `onPageFinished` 按 URL 匹配决定（同 JwImportScreen 的口径）。
+- **`onRenderProcessGone` 必须重写**：不处理时渲染进程崩溃会带走整个 App（SDK 文档）。
+  四个 WebView 窗口统一走 `handleWebViewRendererGone`：返回 true + `Activity.recreate()`。
+
+## 学工首页卡「正在加载中…」（2026-11-08）
+
+- 症状：在请假表单里点右上角小房子回学工首页，页面停在首页 index.html 自带的
+  「正在加载中…」；在设置里清浏览器缓存后恢复。
+- 根因：`/` 的 index.html 是 SPA 壳，Vue `mount()` 会把 `#app` 里的
+  `.loading-box` 整块替换掉。**占位还在 = JS 根本没跑起来**（缓存里的旧 HTML
+  引用了已下线的 JS 哈希，或缓存条目坏了）；普通 `loadUrl` 继续命中同一份缓存，
+  修不好，只有清缓存能恢复。页面本身与登录态无关：带任何 cookie / UA 请求 `/`
+  拿到的 HTML 都逐字相同（2026-11-08 实测）。
+- 修法（`XgFormScreen`，两段）：
+  1. Home 点击时用一次性 `LOAD_NO_CACHE` 重取首页（`onPageFinished` 还原
+     `LOAD_DEFAULT`）。只绕缓存，**不动 cookie / localStorage**，用户不用重新登录。
+  2. `onPageFinished` 后 2.5s 探一次 `#app .loading-box` 是否还在；还在就把状态条换成
+     「卡住了？清理网页缓存重新加载试试」+ 右侧「清理并刷新」按钮（`checkHomeShellStuck`），
+     点了才 `clearCache(true)` + no-cache 重载首页。**不在探测到卡住时自动重载**：页面
+     会在用户眼皮底下自己刷新，容易被当成操作丢了（2026-11-08 用户口径）。
+- 状态条常驻 48dp 高（`heightIn(min = 48.dp)`）：提示与按钮出现/消失**不能改变 WebView
+  高度**（MIUI 上 resize 可能整面刷白，与进度条 overlay 同一条）。
+- 别把判据放宽到整个学工域：表单页（`/office/...`）也有 `#app`，清缓存重载会把
+  用户从表单里拽走。首页壳判定唯一实现在 `XgUrls.isHomeShell`（有单测）。
+- 清的是 **HTTP 资源缓存（整 App 共享）**，不清 cookie / localStorage：教务/门户窗口
+  下次只是重新下载资源；别在退出登录路径上复用这段（那边的口径是
+  `WebViewCookieBridge.clearAll`）。
+
 ## 报修进度是只读直取，不碰表单写接口（DESIGN §4.49）
 
 - **唯一接口**：`POST /office/data/approve/apps/forms/fore/user/list`（`XgUrls.OFFICE_RECORD_LIST`，

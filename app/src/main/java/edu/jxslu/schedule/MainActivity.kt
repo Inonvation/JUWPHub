@@ -1623,7 +1623,7 @@ internal fun JuwApp(
                         )
                     }
                     // 教务 Tab（2026-10-20）：入口汇总；每个入口落到原生二级页。
-                    // 顶栏只留教务主页的网页图标；网页核对按钮收在各业务页顶栏。
+                    // 顶栏只留校园门户的网页图标（2026-11-08 起指向 portal）；网页核对按钮收在各业务页顶栏。
                     composable(Routes.JW) {
                         JwHubScreen(
                             onOpenTheorySchedule = {

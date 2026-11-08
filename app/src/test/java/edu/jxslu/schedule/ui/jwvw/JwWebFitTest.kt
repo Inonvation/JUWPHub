@@ -166,6 +166,22 @@ class JwWebFitTest {
         assertTrue(js.contains(JwWebFit.ATTR_ORIG))
     }
 
+    /**
+     * 校园门户（2026-11-08）不套电脑版：门户自带 `width=device-width` 的响应式版式，
+     * 压到 980 再缩到手机屏会变成另一种版式（用户要的是浏览器里看到的那一页）。
+     * 登录中转 `/cas/login_portal` 命中 [JwWebFit.isLoginLikeUrl]，只给表单适配、
+     * 同样不覆盖 viewport（那片页面随即 302 到 CAS）。
+     */
+    @Test
+    fun portalNeverGetsViewportOverride() {
+        assertNull(JwWebFit.fitScript(JwUrls.PORTAL, desktop = true))
+        assertNull(JwWebFit.fitScript("${JwUrls.PORTAL}/", desktop = true))
+        assertEquals(
+            JwWebFit.LOGIN_FIT_JS,
+            JwWebFit.fitScript("${JwUrls.PORTAL}/cas/login_portal", desktop = true),
+        )
+    }
+
     /** 登录 / SSO 页只补表单适配，**不覆盖 viewport**（自动填表与会话链挂在这几页上）。 */
     @Test
     fun loginPagesNeverGetViewportOverride() {

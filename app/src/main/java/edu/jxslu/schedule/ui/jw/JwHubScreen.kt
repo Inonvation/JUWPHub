@@ -152,7 +152,9 @@ fun JwHubScreen(
                     }
                 },
                 actions = {
-                    JwWebActionButton("教务主页", JwUrls.STUDENT_HOME, description = "打开教务网页主页")
+                    // 2026-11-08 用户口径：这一格去**校园门户**（工作台 / 服务 / 应用），
+                    // 不是强智教务主页。门户自己会跳统一认证，Browse 窗口的自动登录照旧接管。
+                    JwWebActionButton("校园门户", JwUrls.PORTAL, description = "打开学校智慧校园门户")
                 },
             )
         },

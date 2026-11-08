@@ -6,6 +6,7 @@ import android.net.http.SslError
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -85,6 +86,7 @@ import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SectionHeader
 import edu.jxslu.schedule.ui.common.CasLoginDialog
+import edu.jxslu.schedule.ui.common.handleWebViewRendererGone
 import edu.jxslu.schedule.ui.common.showNotice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -692,6 +694,12 @@ private fun AuthorizationOverlay(
                                     problem = "证书校验失败，已阻止访问（$host）"
                                 }
                             }
+
+                            /** 渲染进程被系统回收 / 崩溃：不处理会带走整个 App。 */
+                            override fun onRenderProcessGone(
+                                view: WebView?,
+                                detail: RenderProcessGoneDetail?,
+                            ): Boolean = handleWebViewRendererGone(context, AUTH_TAG, detail)
                         }
                         webChromeClient = WebChromeClient()
                         // 直接加载：登录由页面上的自动填表完成（DESIGN §4.27）。

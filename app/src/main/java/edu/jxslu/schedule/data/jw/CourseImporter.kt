@@ -117,6 +117,15 @@ object JwUrls {
     /** 统一身份认证（学校官网登录） */
     const val CAS_BASE = "https://eapp2.juwp.edu.cn:9443"
 
+    /**
+     * 智慧校园门户（工作台）。教务 Tab 顶栏右上角的入口指向这里（2026-11-08）。
+     *
+     * **HTTP，443 不通**（`design/04a-foundation.md` 实测）；根路径 302 到
+     * `/cas/login_portal`，再由门户自己跳统一认证、登录后回门户——所以直接开根路径
+     * 就能走完整条登录链，不像教务那样要先预热写 `bzb_njw`。
+     */
+    const val PORTAL = "http://portal.juwp.edu.cn"
+
     /** 教务 SSO 回跳（不要带 :81/:8080，否则 500） */
     const val JW_SSO_SERVICE = "http://jiaowu.juwp.edu.cn/sso.jsp"
 

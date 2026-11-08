@@ -9,6 +9,7 @@ import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -50,6 +51,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import edu.jxslu.schedule.data.power.PowerPayModels
 import edu.jxslu.schedule.startActivityOutsideApp
+import edu.jxslu.schedule.ui.common.handleWebViewRendererGone
+import edu.jxslu.schedule.ui.common.launchWebViewExternal
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
@@ -160,12 +163,17 @@ fun PowerBankPayScreen(
                                             onMerchantReturn()
                                             return true
                                         }
+                                        // 非 http(s)（农行掌银 scheme / intent:// / 微信 / 支付宝）
+                                        // 交给系统：留在 WebView 里只会显示 ERR_UNKNOWN_URL_SCHEME。
+                                        // 这里保持收银台原有口径（一切非 http(s) 都外发，含 blob/data），
+                                        // 不复用学校窗口那条更保守的 shouldHandOffToSystem：
+                                        // 银行页面的下载 / 跳转形态是实测过的，别顺手改。
                                         return if (target.startsWith("http://") ||
                                             target.startsWith("https://")
                                         ) {
                                             false
                                         } else {
-                                            launchExternal(target)
+                                            launchWebViewExternal(context, target)
                                         }
                                     }
 
@@ -214,6 +222,12 @@ fun PowerBankPayScreen(
                                                 logUrlOf(request?.url?.toString()),
                                         )
                                     }
+
+                                    /** 渲染进程被系统回收 / 崩溃：不处理会带走整个 App。 */
+                                    override fun onRenderProcessGone(
+                                        view: WebView?,
+                                        detail: RenderProcessGoneDetail?,
+                                    ): Boolean = handleWebViewRendererGone(context, PAY_LOG, detail)
                                 }
                                 webChromeClient = object : WebChromeClient() {
                                     override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -300,24 +314,6 @@ private fun isMerchantReturn(url: String): Boolean = runCatching {
     val host = Uri.parse(url).host.orEmpty()
     host == "charge.juwp.edu.cn"
 }.getOrDefault(false)
-
-/**
- * 非 http(s) 的跳转交给系统（农行掌银的 scheme、`intent://`、微信/支付宝拉起）。
- *
- * 返回 true = 已接管（无论成功），让 WebView 别自己去加载它——WebView 遇到未知 scheme
- * 只会显示 ERR_UNKNOWN_URL_SCHEME 错误页，等于把用户卡在收银台里。
- */
-private fun WebView.launchExternal(target: String): Boolean {
-    val ctx = context ?: return true
-    val intent = when {
-        target.startsWith("intent://") ->
-            runCatching { Intent.parseUri(target, Intent.URI_INTENT_SCHEME) }.getOrNull()
-
-        else -> runCatching { Intent(Intent.ACTION_VIEW, Uri.parse(target)) }.getOrNull()
-    } ?: return true
-    runCatching { ctx.startActivityOutsideApp(intent) }
-    return true
-}
 
 /**
  * 收银台页面的 WebView 配置。

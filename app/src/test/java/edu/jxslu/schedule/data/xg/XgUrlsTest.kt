@@ -82,6 +82,25 @@ class XgUrlsTest {
     }
 
     /**
+     * 首页壳判定（2026-11-08）：只有 `/` 算首页，表单页 / 认证入口 / 其他学工页都不算。
+     * 坏缓存自愈只对首页壳生效，判宽了会把表单页也清缓存重载。
+     */
+    @Test
+    fun homeShell_isRootOnly() {
+        assertTrue(XgUrls.isHomeShell(XgUrls.HOME))
+        assertTrue(XgUrls.isHomeShell("https://xgxt.juwp.edu.cn"))
+        assertTrue(XgUrls.isHomeShell("https://xgxt.juwp.edu.cn/?t=1"))
+        assertTrue(XgUrls.isHomeShell("https://xgxt.juwp.edu.cn/#/home"))
+
+        assertFalse(XgUrls.isHomeShell(XgUrls.SSO_LOGIN))
+        assertFalse(XgUrls.isHomeShell(XgUrls.REPAIR.applyUrl))
+        assertFalse(XgUrls.isHomeShell("https://xgxt.juwp.edu.cn/wfw/index"))
+        assertFalse(XgUrls.isHomeShell("https://eapp2.juwp.edu.cn:9443/cas/login"))
+        assertFalse(XgUrls.isHomeShell(null))
+        assertFalse(XgUrls.isHomeShell(""))
+    }
+
+    /**
      * 直达表单页的闸门（回归钉）。
      *
      * 最要紧的是第二档：**认证接入点也在学工域**。若只判 `isXgHost` 就往下跳，
