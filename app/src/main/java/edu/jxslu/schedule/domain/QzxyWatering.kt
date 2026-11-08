@@ -51,13 +51,37 @@ data class QzxyWatering(
 object QzxyWateringFormat {
 
     /**
-     * 厘 → 「¥x.xx」。服务端不给金额时返回兜底文案。
+     * 厘 → 「¥x.xx」；服务端不给金额时返回兜底文案。
      *
      * 结算接口的 `consumeMoney` 与下单接口的 `preDeductMoney` 都是厘。
      */
-    fun money(milli: String?): String {
-        val value = milli?.trim()?.toLongOrNull() ?: return "金额待服务端结算"
-        return "¥%.2f".format(value / 1000.0)
+    fun money(milli: String?): String = moneyOrNull(milli) ?: "金额待服务端结算"
+
+    /**
+     * 厘 → 「¥x.xx」；缺失或不可解析返回 null，**不给兜底文案**。
+     *
+     * 今日页「已结束用水」那一行的副行要把金额拼进 `·` 串里，混一句
+     * 「金额待服务端结算」会把整行撑满——那里宁可不提金额。
+     */
+    fun moneyOrNull(milli: String?): String? =
+        milli?.trim()?.toLongOrNull()?.let { "¥%.2f".format(it / 1000.0) }
+
+    /**
+     * 今日页「已结束用水」完成态的副行：`实扣 ¥x.xx · 设备 · 用时 mm:ss`。
+     *
+     * **金额放最前**：这一行是单行 `maxLines = 1` + 省略号，服务端设备名可以长到
+     * 「热水器-学生公寓-1号楼-3层-301」，金额排在末尾必然被截——而它就是这一行新增的理由。
+     * 金额与用时都可缺：金额缺失（服务端没回金额 / 这份状态里没有这一笔的结算）与
+     * 无记账起点时整段不写，不留占位。金额口径与结算写进收件箱的那条一致（「实扣」），
+     * 同一件事在 App 里只叫一个名字。
+     */
+    fun doneSubtitle(deviceName: String, durationText: String?, amountMilli: String?): String {
+        val parts = buildList {
+            moneyOrNull(amountMilli)?.let { add("实扣 $it") }
+            deviceName.trim().takeIf { it.isNotEmpty() }?.let { add(it) }
+            durationText?.takeIf { it.isNotBlank() }?.let { add("用时 $it") }
+        }
+        return parts.joinToString(" · ")
     }
 
     /** 用水时长：不足一小时 `mm:ss`，超过一小时 `h:mm:ss`。 */

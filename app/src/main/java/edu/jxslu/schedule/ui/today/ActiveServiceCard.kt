@@ -71,6 +71,7 @@ import edu.jxslu.schedule.ui.ebike.KvcxAction
 import edu.jxslu.schedule.ui.ebike.KvcxReturnSummary
 import edu.jxslu.schedule.ui.ebike.KvcxRideState
 import edu.jxslu.schedule.ui.ebike.unlockCooldownSecondsLeft
+import edu.jxslu.schedule.ui.qzxy.QzxySettlement
 import edu.jxslu.schedule.ui.qzxy.isQzxyWateringExpired
 import edu.jxslu.schedule.ui.qzxy.rememberQzxyWateringClock
 import edu.jxslu.schedule.ui.theme.Motion
@@ -144,6 +145,12 @@ internal fun ActiveServiceCard(
     qzxyStopping: Boolean = false,
     /** 趣智结束中的当前步骤文案（`QzxyFlowState.Working.step`）；null = 还没进到第一步。 */
     qzxyStopStep: String? = null,
+    /**
+     * 趣智最近一次结算（`QzxyUiState.lastSettlement`，2026-11-06）：完成态那一行要报
+     * 「实扣多少」。只在记账起点对得上时才会用（见 [QzxyDoneRow]），跨窗口结束的那次
+     * 今日页没有这份状态，那一行照旧只报用时。
+     */
+    qzxySettlement: QzxySettlement? = null,
     /**
      * 快趣还车的完成态是否在亮（2026-10-29）。由列表层算好传进来而不是卡内自算：
      * 有在案骑行时这张卡被提到课程区之前，还车成功那一刻 `ride` 就没了——卡内自算的话
@@ -326,7 +333,11 @@ internal fun ActiveServiceCard(
                             onOpen = onOpenQzxy,
                         )
                     } else if (showDone) {
-                        QzxyDoneRow(watering = lastQzxyWatering, onOpen = onOpenQzxy)
+                        QzxyDoneRow(
+                            watering = lastQzxyWatering,
+                            settlement = qzxySettlement,
+                            onOpen = onOpenQzxy,
+                        )
                     }
                 }
             }
@@ -1194,11 +1205,17 @@ private fun QzxyActiveRow(
 
 /**
  * 趣智「已结束用水」完成态（2026-10-29，停留 8 秒 / 可点 2026-10-31）：结算成功、本地记账
- * 清掉后停留。副行 = 设备 · 本次用时；金额与账单在结算提示（Snackbar）和趣智页消费记录里。
- * 点整行进趣智页。
+ * 清掉后停留。副行 = 实扣金额 · 设备 · 本次用时（2026-11-06 加金额：用户关水后要能当场
+ * 看出花了多少，别让人再翻消费记录）。金额排最前——单行省略号从右往左吃，服务端设备名
+ * 可以长到「热水器-学生公寓-1号楼-3层-301」，金额放末尾必然被截。金额缺失就整段不写
+ * （`QzxyWateringFormat.doneSubtitle`）。点整行进趣智页。
  */
 @Composable
-private fun QzxyDoneRow(watering: QzxyWatering?, onOpen: () -> Unit) {
+private fun QzxyDoneRow(
+    watering: QzxyWatering?,
+    settlement: QzxySettlement?,
+    onOpen: () -> Unit,
+) {
     // 同上：完成态停留期间把用时定住，别让重组把「用时」继续往上加
     val duration = remember(watering) {
         watering?.let {
@@ -1207,6 +1224,12 @@ private fun QzxyDoneRow(watering: QzxyWatering?, onOpen: () -> Unit) {
             )
         }
     }
+    // 金额只认「这一笔」的结算：`lastSettlement` 不自动清，上一次用水的金额会留在状态里
+    // （比如这次是从趣智页结束的——今日页这份 ViewModel 没跑结算）。按记账起点对齐，
+    // 对不上的宁缺勿错，别把别人的金额贴到这一行。
+    val amountMilli = settlement
+        ?.takeIf { watering != null && it.startedAtMillis == watering.startedAtMillis }
+        ?.consumeMoneyMilli
     ActiveRow(
         brandRes = edu.jxslu.schedule.R.drawable.ic_brand_qzxy,
         title = "趣智校园",
@@ -1216,11 +1239,11 @@ private fun QzxyDoneRow(watering: QzxyWatering?, onOpen: () -> Unit) {
         onClick = onOpen,
         onClickLabel = "查看用水详情",
         subtitle = watering?.let { w ->
-            buildString {
-                append(w.deviceName.ifBlank { "热水器" })
-                append(" · 用时 ")
-                append(duration)
-            }
+            QzxyWateringFormat.doneSubtitle(
+                deviceName = w.deviceName.ifBlank { "热水器" },
+                durationText = duration,
+                amountMilli = amountMilli,
+            )
         } ?: "本次用水已结束",
         trailing = { DoneCheck() },
     )

@@ -101,6 +101,7 @@ import edu.jxslu.schedule.ui.ebike.kvcxConfirmDialog
 import edu.jxslu.schedule.ui.qzxy.QzxyViewModel
 import edu.jxslu.schedule.ui.qzxy.QzxyEvent
 import edu.jxslu.schedule.ui.qzxy.QzxyFlowState
+import edu.jxslu.schedule.ui.qzxy.QzxySettlement
 import edu.jxslu.schedule.ui.ujing.UjingEntrySheet
 import edu.jxslu.schedule.ui.reminder.UjingDoneReminder
 import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
@@ -754,6 +755,8 @@ fun TodayScreen(
                     // 结束用水的两段反馈（2026-10-29）：行切「正在结束…」+ 副行展示当前步骤
                     qzxyStopping = qzxyEntryState.flow is QzxyFlowState.Working,
                     qzxyStopStep = (qzxyEntryState.flow as? QzxyFlowState.Working)?.step,
+                    // 关水后的完成态要报实扣金额（2026-11-06）：结算结果本来就在这份状态里
+                    qzxySettlement = qzxyEntryState.lastSettlement,
                     ujingOrder = ujingOrder,
                     onKvcxAction = dispatchKvcxAction,
                     onWaterEnd = { waterViewModel?.endSession() },
@@ -1022,6 +1025,8 @@ private fun TodayContent(
     qzxyStopping: Boolean = false,
     /** 结束中的当前步骤文案（`QzxyFlowState.Working.step`）。 */
     qzxyStopStep: String? = null,
+    /** 趣智最近一次结算（完成态行报「实扣金额」用；记账起点对不上时不显示）。 */
+    qzxySettlement: QzxySettlement? = null,
     ujingOrder: UjingOrderSnapshot?,
     onKvcxAction: (KvcxAction) -> Unit = {},
     onWaterEnd: () -> Unit = {},
@@ -1073,6 +1078,7 @@ private fun TodayContent(
             qzxyDeviceEnded = qzxyDeviceEnded,
             qzxyStopping = qzxyStopping,
             qzxyStopStep = qzxyStopStep,
+            qzxySettlement = qzxySettlement,
             kvcxDone = kvcxDone,
             ujingOrder = ujingOrder,
             kvcxOnUnlock = { onKvcxAction(KvcxAction.RESUME) },

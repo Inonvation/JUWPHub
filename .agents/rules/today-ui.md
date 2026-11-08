@@ -75,6 +75,14 @@
     点行进开水页（跨窗口结束没有对应的 VM 可调）。行落点 = 开水页。
   - 趣智：`QzxyWateringStore.watering`（落盘）；对账沿用今日页已有 `WateringReconcileEffect`；
     超 1h / 设备确认结束转「待核对」，按钮切「结算核对」。
+    **关水后的完成态报实扣金额**（2026-11-06 用户要求「关水后能看出消费金额」）：副行
+    「实扣 ¥x.xx · 设备 · 用时 mm:ss」，金额取 `QzxyUiState.lastSettlement.consumeMoneyMilli`
+    ——不新发请求、不查账单。**金额排最前**：副行是单行 + 省略号，服务端设备名可以长到
+    「热水器-学生公寓-1号楼-3层-301」，放末尾必被截掉，而它就是这行新增的理由。
+    **金额必须按记账起点对**（`QzxySettlement.startedAtMillis` ==
+    `QzxyWatering.startedAtMillis`）：`lastSettlement` 不自动清，从趣智页结束的那次今日页
+    这份 ViewModel 没跑过结算，直接读会把上一次的钱贴到这一行，宁缺勿错。
+    文案唯一实现在 `QzxyWateringFormat.doneSubtitle`（金额缺失整段不写，不留「待结算」占位）。
   - U净：`UjingRepository.orderState`（落盘快照）；对表沿用 10s TTL 节流（进页 / 回页 / 下拉 /
     开弹窗四路同一道闸）；行纯展示点整行进 UJING 页（写操作只在 U净 主页）。
     **取衣提醒（2026-10-29 用户要求；2026-11-05 改视觉）**：`status == "50"` 的完成快照不再随行退场，行切

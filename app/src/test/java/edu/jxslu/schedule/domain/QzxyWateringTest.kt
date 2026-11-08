@@ -32,6 +32,47 @@ class QzxyWateringTest {
     }
 
     @Test
+    fun `可缺金额的换算在拿不到金额时返回空`() {
+        assertEquals("¥0.04", QzxyWateringFormat.moneyOrNull("40"))
+        assertEquals(null, QzxyWateringFormat.moneyOrNull(null))
+        assertEquals(null, QzxyWateringFormat.moneyOrNull("—"))
+    }
+
+    @Test
+    fun `已结束用水副行带实扣金额与用时`() {
+        // 今日页完成态那一行（2026-11-06 用户要求：关水后要能看出消费金额）。
+        // 金额排在最前：单行省略号从右往左吃，长设备名不该把金额截掉。
+        assertEquals(
+            "实扣 ¥0.52 · 热水器-301 · 用时 12:34",
+            QzxyWateringFormat.doneSubtitle(
+                deviceName = "热水器-301",
+                durationText = "12:34",
+                amountMilli = "520",
+            ),
+        )
+    }
+
+    @Test
+    fun `已结束用水副行缺金额或缺用时时不留占位`() {
+        assertEquals(
+            "热水器-301 · 用时 12:34",
+            QzxyWateringFormat.doneSubtitle("热水器-301", "12:34", null),
+        )
+        assertEquals(
+            "热水器-301 · 用时 12:34",
+            QzxyWateringFormat.doneSubtitle("热水器-301", "12:34", ""),
+        )
+        assertEquals(
+            "实扣 ¥0.52 · 热水器-301",
+            QzxyWateringFormat.doneSubtitle("热水器-301", null, "520"),
+        )
+        assertEquals(
+            "热水器-301",
+            QzxyWateringFormat.doneSubtitle("热水器-301", null, null),
+        )
+    }
+
+    @Test
     fun `时长不足一小时用分秒`() {
         assertEquals("00:00", QzxyWateringFormat.duration(0L))
         assertEquals("01:15", QzxyWateringFormat.duration(75_000L))

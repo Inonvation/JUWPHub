@@ -208,6 +208,14 @@ data class QzxySettlement(
     val durationMillis: Long?,
     /** 例外情况：设备记录没清掉、结算被拒但记录已清之类，需要让用户看到的那句。 */
     val note: String? = null,
+    /**
+     * 这笔结算对应的用水记账起点（`QzxyWatering.startedAtMillis`），结算时从记账里取。
+     *
+     * 用来认「这笔结算说的是哪一次用水」：`lastSettlement` 不自动清（金额值得多看一眼），
+     * 今日页完成态拿它比对记账，错位的不显示金额——否则从趣智页结束的那次会顶着
+     * 上一次的金额出现（两个窗口各持一份 ViewModel，这边没跑过结算）。
+     */
+    val startedAtMillis: Long? = null,
 )
 
 /** 一次签名试错的结果。 */
@@ -2096,6 +2104,7 @@ class QzxyViewModel(
                         System.currentTimeMillis() - start
                     },
                     note = if (result.cleared) null else "设备记录没清掉：${result.clearDetail}",
+                    startedAtMillis = startedAt,
                 ),
             )
         }
