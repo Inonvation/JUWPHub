@@ -31,8 +31,8 @@ android {
         applicationId = "edu.jxslu.schedule"
         minSdk = 26
         targetSdk = 36
-        versionCode = 33
-        versionName = "3.3.0"
+        versionCode = 34
+        versionName = "3.4.0"
 
         // 只留中英（2026-11-06）：androidx / material3 / glance 会带进 89 个 locale，
         // 实测 resources.arsc 里 88% 的 string 值是外语，本项目纯中文用不上。
