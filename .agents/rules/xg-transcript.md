@@ -92,6 +92,10 @@
      会在用户眼皮底下自己刷新，容易被当成操作丢了（2026-11-08 用户口径）。
 - 状态条常驻 48dp 高（`heightIn(min = 48.dp)`）：提示与按钮出现/消失**不能改变 WebView
   高度**（MIUI 上 resize 可能整面刷白，与进度条 overlay 同一条）。
+- 探测带**导航代次**（`navToken`，`onPageStarted` +1）：2.5s 内用户 reload 过首页时旧探测作废，
+  不能拿新页面的 DOM 下结论（否则新页还在挂载的一两秒会被误报）。Vue 的 `mount()` 会
+  `innerHTML=""` 清掉占位，所以健康加载到这里必然是 0；健康页面通常还会被路由改写成
+  `/home`，`isHomeShell` 直接把探测挡掉。
 - 别把判据放宽到整个学工域：表单页（`/office/...`）也有 `#app`，清缓存重载会把
   用户从表单里拽走。首页壳判定唯一实现在 `XgUrls.isHomeShell`（有单测）。
 - 清的是 **HTTP 资源缓存（整 App 共享）**，不清 cookie / localStorage：教务/门户窗口

@@ -133,6 +133,10 @@ fun XgFormScreen(form: XgForm, onBack: () -> Unit) {
 
     var homeNoCacheLoad by remember { mutableStateOf(false) }
     var showCacheHint by remember { mutableStateOf(false) }
+    // 导航代次：每次主 frame 开始导航 +1。卡住探测在 2.5s 后要复核这个值——
+    // 期间用户重新加载了首页时，旧探测不能再拿新页面的 DOM 下结论
+    // （否则新页面还在挂载的那一两秒会被误报「卡住了」）。
+    var navToken by remember { mutableIntStateOf(0) }
 
     // 网页里点「上传附件」时，WebView 会把文件选择回调交出来，等系统选择器的结果。
     // 期间必须一直握着它：提前丢掉页面会永远停在「上传中」；而结果回来后又必须立刻
@@ -180,11 +184,12 @@ fun XgFormScreen(form: XgForm, onBack: () -> Unit) {
      * 探测前复核 `wv.url` 仍是首页壳——用户可能已经点进表单，这时换提示会误导。
      */
     fun checkHomeShellStuck(wv: WebView) {
+        val token = navToken
         scope.launch {
             delay(HOME_SHELL_PROBE_DELAY_MS)
-            if (webView !== wv || !XgUrls.isHomeShell(wv.url)) return@launch
+            if (token != navToken || webView !== wv || !XgUrls.isHomeShell(wv.url)) return@launch
             wv.evaluateJavascript(HOME_SHELL_STUCK_JS) { raw ->
-                if (!XgUrls.isHomeShell(wv.url)) return@evaluateJavascript
+                if (token != navToken || !XgUrls.isHomeShell(wv.url)) return@evaluateJavascript
                 val stuck = raw?.trim()?.removeSurrounding("\"") == "1"
                 if (stuck) Log.w(TAG, "xg home shell stuck at loading; show cache-clear hint")
                 // 卡住 → 显示提示；已经恢复 → 收掉上一次的提示
@@ -326,8 +331,9 @@ fun XgFormScreen(form: XgForm, onBack: () -> Unit) {
                                     progress = 0
                                     canGoBack = view?.canGoBack() ?: false
                                     statusNote = XgUrls.statusHint(url, form.title)
-                                    // 新导航 = 上一轮的「卡住了？」提示作废；若新页真的还卡着，
-                                    // onPageFinished 的探测会再把它亮起来。
+                                    // 新导航作废旧探测（见 navToken 注释），并收掉上一轮的提示；
+                                    // 若新页真的还卡着，onPageFinished 的探测会再把它亮起来。
+                                    navToken++
                                     showCacheHint = false
                                     // **不要**在这里清 loadError：错误回调可能先于它到达
                                     // （见 loadError 旁的注释）。清理由 onPageFinished 按 URL 判定。
