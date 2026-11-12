@@ -156,6 +156,15 @@
   （骑行页附近车辆 / 还车点，`RidePanels.AnimatedCardList`，2026-10-19）可以走一层
   `AnimatedContent` 整块淡入淡出 + `SizeTransform`：按**卡片身份集合**判是否播，
   只变距离数字不播；它不是逐项退场，别拿它替代 LazyColumn 的 `animateItem()`。
+- **自身高度会动画的列表项，别开位移动画**（2026-11-12）：可展开/收起的卡片（`AnimatedVisibility`
+  在项内做 `expandVertically` / `shrinkVertically`）写 `Modifier.animateItem(placementSpec = null)`，
+  只留进出场淡入淡出。`animateItem()` 的 placement 动画对**下面每一项**都生效：展开时高度每帧
+  变一截，它们每帧都被判成「位置变了」并开始/续播一段弹簧位移，于是展开中的卡片与下一张卡
+  同时画在屏幕上（文字叠文字）、落定后再滑下来——用户报的「展开折叠卡片时页面文字重组跳动」
+  （培养方案 `TermCard` 就是这么来的）。位移动画只属于「列表项增删 / 换序」，高度动画期间
+  必须让后面各项跟手。同款已按此处理：培养方案 / 学业完成情况 / 笔记库 / 作业库的展开卡。
+  **例外是今日页那两处 `animateItem`**：服务卡条目靠位移做「有订单时提到课程区之前」的换位、
+  课程卡靠位移做加 / 删课的进出场，高度变化只有几十 dp 且是状态驱动——别顺手也改成 null。
 - **按压反馈**：`rememberPressScale(interaction)`（0.96，走 `Motion.tap()`）。调用方必须自己建
   `MutableInteractionSource` 并同时交给 `clickable(interactionSource = …)`，否则永远读不到按下态。
 - **无限动画必须跟随系统「关闭动画」**：套 `rememberAnimationsEnabled()`，关掉时给静止态

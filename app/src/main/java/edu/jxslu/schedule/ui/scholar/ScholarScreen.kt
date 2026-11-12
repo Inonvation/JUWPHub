@@ -358,8 +358,11 @@ fun ScholarScreen(onBack: () -> Unit) {
                 },
                 onShowAllCourses = { fullyExpanded = fullyExpanded + key },
                 onCourseClick = { detailCourse = it },
-                // 切维度 / 搜索过滤时分组会整批进出，让它平滑滑走而不是硬跳
-                modifier = Modifier.animateItem(),
+                // 切维度 / 搜索过滤时分组会整批进出，让它淡入淡出而不是硬跳。
+                // **不播位移动画**（`placementSpec = null`，2026-11-12）：展开 / 收起是分组卡自身
+                // 高度在变，位移动画会让下面各卡追着这个变化走（文字叠文字、落定后再滑），
+                // 口径见 `.agents/rules/ui-common.md`。
+                modifier = Modifier.animateItem(placementSpec = null),
             )
         }
 

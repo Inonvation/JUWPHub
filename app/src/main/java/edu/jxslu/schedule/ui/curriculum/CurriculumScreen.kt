@@ -222,8 +222,13 @@ fun CurriculumScreen(onBack: () -> Unit) {
                     courses = term.courses,
                     expanded = term.term in expanded,
                     onToggle = { toggleTerm(term.term, "term-${term.term}") },
-                    // 重新导入培养方案时学年/学期的分组会整批换掉，让它平滑进出
-                    modifier = Modifier.animateItem(),
+                    // 重新导入培养方案时学年/学期的分组会整批换掉，让它平滑进出。
+                    // **只淡入淡出、不播位移动画**（`placementSpec = null`，2026-11-12）：展开 /
+                    // 收起是卡片自身高度在变，下面各卡每一帧都被顶开一截，位移动画会追着这个
+                    // 变化走——展开中的卡片与下面那张卡同时画在屏幕上（文字叠文字），落定后
+                    // 再滑下来，就是用户报的「展开折叠卡片时页面文字重组跳动」。
+                    // 位移动画只属于「列表项增删 / 换序」；高度动画期间必须让下面各卡跟手。
+                    modifier = Modifier.animateItem(placementSpec = null),
                     onCourseClick = { detailCourse = it },
                 )
             }

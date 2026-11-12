@@ -141,9 +141,11 @@ fun NoteLibraryScreen(
             ) {
                 item(key = "header") { SectionHeader("按课程（点课程名展开/收起）") }
                 items(groups, key = { it.courseName }) { group ->
-                    // 分组会随笔记增删出现/消失、按课程名插队：给位移动画，别的分组不会硬跳
+                    // 分组会随笔记增删出现/消失、按课程名插队：给淡入淡出，别的分组不会硬跳。
+                    // **不播位移动画**（`placementSpec = null`，2026-11-12）：展开 / 收起是卡片自身
+                    // 高度在变，位移动画会让下面各卡追着位移、文字叠字（口径见 `.agents/rules/ui-common.md`）。
                     NoteGroupCard(
-                        modifier = Modifier.animateItem(),
+                        modifier = Modifier.animateItem(placementSpec = null),
                         group = group,
                         allNotes = notes,
                         courses = courses,
