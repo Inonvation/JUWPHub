@@ -413,7 +413,9 @@
   即置位，回升随收件箱状态消解一并清除；改设置（开关/阈值/间隔）清标记重新评估。
   四条不许动：**失败不重试**（防撞风控）、一卡通只算**正式卡余额**（不含电子账户）、
   `balance_alert_periodic` / `BalanceAlertCheckWorker` 的名字（`KEEP` 下改名 = 周期兜底永久消失）、
-  通知 id/tag 与落点（电费 1005 / 一卡通 1006；2026-10-20 起不带 extra，落今日页 / 左侧栏）。关凭证时两个开关一并回落（都靠那份凭证）。
+  通知 id/tag 与落点（电费 1005 / 一卡通 1006；**2026-11-12 起点通知落电费账单页 / 校园卡设置页**——
+  与收件箱消息的 route 同一页，走 `subpageLaunchIntent` + `NEW_TASK|CLEAR_TASK`；此前落今日页，
+  改的原因是「余额通知点开就是要看余额 / 充值」+ 让「打开落点页 = 消息已读」清掉收件箱红点）。关凭证时两个开关一并回落（都靠那份凭证）。
   **PendingIntent requestCode（3005/3006）与通知 id 分离**：骑行提醒的通知 id 也是
   1005/1006，两边落点 intent 都指向 MainActivity 无 action，filterEquals 相同——
   requestCode 撞了会被 `FLAG_UPDATE_CURRENT` 改写落点（2026-09-24 修的真 bug）。

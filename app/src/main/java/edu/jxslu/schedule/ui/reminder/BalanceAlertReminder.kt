@@ -18,9 +18,10 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.MainActivity
 import edu.jxslu.schedule.R
+import edu.jxslu.schedule.SubpageRequest
 import edu.jxslu.schedule.SubpageScreen
+import edu.jxslu.schedule.subpageLaunchIntent
 import edu.jxslu.schedule.data.power.PowerReadingSource
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.PendingLaunch
@@ -170,8 +171,10 @@ object BalanceAlertReminder {
             if (!powerOn && !yktOn) return
             val credentials = Graph.yktCredentialStore(context).read() ?: return
             val nowMillis = System.currentTimeMillis()
-            // 通知落点：不带路由 = 主窗口按用户的启动页打开（默认今日页）。
-            // 生活页 2026-10-22 删除后不再有 ROUTE_LIFE；余额在侧栏与账单页都能看。
+            // 通知落点（2026-11-12 统一）：电费 → 电费账单页、校园卡 → 校园卡设置页，与收件箱
+            // 消息的 route 同一个页面。此前落在启动页（默认今日页）——余额通知点开就是要看余额 /
+            // 充值，落今日页还得自己找；改成落页后，「打开落点页 = 消息已读」这条规则
+            // （`SubpageActivity`）也顺带把收件箱红点清掉。
             // 通知总开关只拦「发通知」，不拦核对本身（2026-10-06 收件箱 §4.38）：
             // 状态消解（回升移除消息）与入箱都靠这条核对链，通知全关也得照跑。
             val notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
@@ -259,9 +262,10 @@ object BalanceAlertReminder {
                 text = text,
                 enqueuedAt = System.currentTimeMillis(),
                 launch = PendingLaunch(
-                    kind = PendingLaunch.Kind.MAIN_ROUTE,
+                    kind = PendingLaunch.Kind.SUBPAGE,
                     requestCode = POWER_REQUEST_CODE,
-                    route = null,
+                    screen = SubpageScreen.POWER_BILL.name,
+                    clearTask = true,
                 ),
             ),
         )
@@ -279,6 +283,7 @@ object BalanceAlertReminder {
         notificationId = POWER_NOTIFICATION_ID,
         title = "寝室电费偏低",
         text = text,
+        screen = SubpageScreen.POWER_BILL,
     )
 
     // ------------------------------------------------------------------
@@ -383,9 +388,10 @@ object BalanceAlertReminder {
                 text = text,
                 enqueuedAt = System.currentTimeMillis(),
                 launch = PendingLaunch(
-                    kind = PendingLaunch.Kind.MAIN_ROUTE,
+                    kind = PendingLaunch.Kind.SUBPAGE,
                     requestCode = YKT_REQUEST_CODE,
-                    route = null,
+                    screen = SubpageScreen.CAMPUS_CARD_SETTINGS.name,
+                    clearTask = true,
                 ),
             ),
         )
@@ -402,6 +408,7 @@ object BalanceAlertReminder {
         notificationId = YKT_NOTIFICATION_ID,
         title = "校园卡余额偏低",
         text = text,
+        screen = SubpageScreen.CAMPUS_CARD_SETTINGS,
     )
 
     // ------------------------------------------------------------------
@@ -411,6 +418,9 @@ object BalanceAlertReminder {
     /**
      * 发一条余额提醒。无权限/被系统拒绝时静默失败（写不出去不该把核对链路搞崩）；
      * 返回系统是否真收下——调用方（标记置位）需要这个区分。
+     *
+     * [screen] = 点通知落哪一页（电费 → 账单页、校园卡 → 设置页），与收件箱消息的 route
+     * 同一个页面：看余额 / 充值就在那儿，落启动页还得自己找（2026-11-12 统一）。
      */
     private fun post(
         context: Context,
@@ -418,6 +428,7 @@ object BalanceAlertReminder {
         notificationId: Int,
         title: String,
         text: String,
+        screen: SubpageScreen,
     ): Boolean {
         ensureChannel(context)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
@@ -431,6 +442,7 @@ object BalanceAlertReminder {
                 contentIntent(
                     context,
                     if (notificationId == POWER_NOTIFICATION_ID) POWER_REQUEST_CODE else YKT_REQUEST_CODE,
+                    screen,
                 ),
             )
             .build()
@@ -441,19 +453,17 @@ object BalanceAlertReminder {
     }
 
     /**
-     * 点通知落**主窗口的启动页**（默认今日页；余额在侧栏与账单页都能看）。
+     * 点通知落**余额那一页**（电费账单 / 校园卡设置），与考试 / 成绩 / 调课等通知同一套：
+     * `subpageLaunchIntent` 走 MainActivity 跳板（根恒为 MainActivity，二级页只是上面一层），
+     * 再叠 `NEW_TASK | CLEAR_TASK` 清掉旧窗口链——否则新页面会压在旧二级页上，返回退进旧栈。
      *
-     * 不带 `EXTRA_ROUTE`。用 `NEW_TASK | CLEAR_TASK`，与桌面小组件跳课表 Tab 同一套
-     * （`ScheduleWidget.widgetIntent`，真机实测过）：`MainActivity` 是 standard，
-     * `CLEAR_TOP` 匹配不上纯显式 intent，清不掉二级页；`CLEAR_TASK` 与匹配无关、行为确定。
      * requestCode 必须逐条不同（3005/3006，与通知 id 分离）——PendingIntent 的身份是
      * 「requestCode + Intent.filterEquals」，两条通知的 Intent 若完全相同会被系统视为同一个，
      * `FLAG_UPDATE_CURRENT` 会让两条通知的落点互相改写。
      */
-    private fun contentIntent(context: Context, requestCode: Int): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
+    private fun contentIntent(context: Context, requestCode: Int, screen: SubpageScreen): PendingIntent {
+        val intent = subpageLaunchIntent(context, SubpageRequest(screen = screen))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         return PendingIntent.getActivity(
             context,
             requestCode,

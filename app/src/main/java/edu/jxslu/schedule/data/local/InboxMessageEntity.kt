@@ -127,6 +127,16 @@ interface InboxDao {
     @Query("UPDATE inbox_messages SET readAt = :readAt WHERE kind = :kind AND deletedAt IS NULL AND readAt IS NULL")
     suspend fun markKindRead(kind: String, readAt: Long)
 
+    /**
+     * 按落点标已读（2026-11-12）：用户打开了消息指向的页面 = 这条消息看过了。
+     * 只动未读、未删的行；同一落点的多条一起清（它们指向同一个页面）。
+     */
+    @Query(
+        "UPDATE inbox_messages SET readAt = :readAt " +
+            "WHERE route = :route AND deletedAt IS NULL AND readAt IS NULL",
+    )
+    suspend fun markRouteRead(route: String, readAt: Long)
+
     /** 批量软删（多选删除）。 */
     @Query("UPDATE inbox_messages SET deletedAt = :deletedAt WHERE id IN (:ids) AND deletedAt IS NULL")
     suspend fun softDelete(ids: List<Long>, deletedAt: Long)

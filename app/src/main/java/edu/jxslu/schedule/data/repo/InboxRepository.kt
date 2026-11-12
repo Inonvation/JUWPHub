@@ -108,6 +108,22 @@ class InboxRepository(
             .onFailure { Log.w(TAG, "inbox markKindRead failed", it) }
     }
 
+    /**
+     * 按落点标已读（2026-11-12）：**打开了消息指向的页面 = 这条消息看过了**。
+     *
+     * 兜的是「从通知直接进页」那条路：调课 / 考试 / 成绩 / 余额 / 轮次 / 问渠 / 报修的
+     * 通知点进来直接落二级页，页面上没有任何「点行标已读」的动作，此前看完返回今日页
+     * 红点还在（2026-11-12 用户报障）。同一落点的多条一起清——它们指向同一个页面。
+     *
+     * 收件箱行自己的 [markRead]（按 id）仍保留：行内点一下要当场给反馈；调课处置完成后的
+     * [markKindRead] 也保留（处置页可能从教务 hub 进、不经这条路）。
+     * 失败静默（同其它写操作）。
+     */
+    suspend fun markRouteRead(route: String) {
+        runCatching { dao.markRouteRead(route, nowMillis()) }
+            .onFailure { Log.w(TAG, "inbox markRouteRead failed", it) }
+    }
+
     /** 批量软删（多选删除）；重投同键不复活，30 天后物理清除。 */
     suspend fun softDelete(ids: Collection<Long>) {
         if (ids.isEmpty()) return

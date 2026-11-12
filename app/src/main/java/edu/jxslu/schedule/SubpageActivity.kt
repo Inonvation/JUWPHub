@@ -79,6 +79,7 @@ import edu.jxslu.schedule.ui.wenqu.WenquGrabScreen
 import edu.jxslu.schedule.ui.wenqu.WenquRecordsScreen
 import edu.jxslu.schedule.ui.wenqu.WenquScreen
 import edu.jxslu.schedule.ui.wenqu.WenquSettingsScreen
+import kotlinx.coroutines.launch
 
 /** 二级页种类；通过 extra 传给 [SubpageActivity]，值必须与 enum 名一致。 */
 enum class SubpageScreen {
@@ -270,6 +271,14 @@ class SubpageActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val request = request
         SubpageStack.onWindowCreated(request)
+        // 收件箱（2026-11-12）：**打开消息指向的页面 = 这条消息看过了**。
+        // 通知（调课 / 考试 / 成绩 / 余额 / 轮次 / 问渠 / 报修）点进来直接落二级页，
+        // 页面上没有「点行标已读」这个动作，此前看完返回今日页红点还在（用户报障）。
+        // 收口在本窗口：通知跳板、小组件、页内入口最终都从这里开页，按 route 清未读即可，
+        // 不必让每个目标页各写一遍。写库在 IO 线程、失败静默，不挡窗口创建。
+        Graph.appScope.launch {
+            Graph.inboxRepository(this@SubpageActivity).markRouteRead(request.screen.name)
+        }
         // 小组件「去开水」直达令牌（WaterAutoStart）：进页前武装、本窗口首帧消费。
         // 在 composable 外消费一次——组合重组再读会拿到恒定值，消费语义就没了
         val autoStart = WaterAutoStart.consume(request.screen)

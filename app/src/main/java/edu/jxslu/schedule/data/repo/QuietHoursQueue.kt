@@ -17,8 +17,8 @@ private const val TAG = "QuietHoursQueue"
  *
  * 三种落点对应通知链既有的三种 contentIntent 构建（见各 Reminder 文件）：
  * - [Kind.MAIN_PLAIN]：裸 `MainActivity`（上课提醒）；
- * - [Kind.MAIN_ROUTE]：`MainActivity + EXTRA_ROUTE`（余额 → 不带路由、落启动页；登录失效 → 账号与登录）；
- * - [Kind.SUBPAGE]：`subpageLaunchIntent(SubpageRequest)`（成绩/考试/选课/调课/U净/骑行/作业）。
+ * - [Kind.MAIN_ROUTE]：`MainActivity + EXTRA_ROUTE`（登录失效 → 账号与登录）；
+ * - [Kind.SUBPAGE]：`subpageLaunchIntent(SubpageRequest)`（成绩/考试/选课/调课/余额/U净/骑行/作业）。
  *
  * requestCode 逐条存档——PendingIntent 的身份是「requestCode + filterEquals」，
  * 补发时必须用原值重建，否则两条通知的落点互相改写（历史坑两轮，§3.9）。
