@@ -43,8 +43,13 @@
 
 ## 进行中服务卡（2026-10-21，DESIGN §3.3）
 
-- 位置：**没有在案骑行时在作业卡与收件箱列表之间**；**有在案骑行（`kvcxRideState?.ride != null`）
-  时提到课程区之前**（列表第一项，2026-10-22 用户口径：骑行是最需要一眼看到的状态）。
+- 位置：**没有在案骑行时在作业卡与收件箱列表之间**；**有在案骑行时提到课程区之前**
+  （列表第一项，2026-10-22 用户口径：骑行是最需要一眼看到的状态）。
+  **位置判据 = `kvcxRideActive`**（= 快趣单例 `state.ride != null && loggedIn`，**同步**），
+  别用过了能力闸的 `kvcxRideState`：能力闸读的 `ebikeUseMode` 是 DataStore 冷流，新组合
+  （切 Tab / 二级页返回）的第一帧恒是默认档（小程序方式 → `inAppRide=false`），第二帧才发真值，
+  位置会晚一帧翻真、`animateItem` 把卡片从列表下方滑到顶部（2026-11-12 用户报「切 Tab 时
+  快趣卡从界面底部跳到顶部」）。与 `DoneLingerGate` 同一条纪律：位置判据必须同帧成立。
   key 始终是 `item(key = "active-services")`，两处条件渲染、不会同时出现；移动靠
   `Modifier.animateItem()` 过渡。本体 `ui/today/ActiveServiceCard.kt`。
   快趣骑行 / 胖乖开水 / 趣智洗澡 / U净 洗烘谁在进行中谁占一行（一张 AppCard 平铺 +

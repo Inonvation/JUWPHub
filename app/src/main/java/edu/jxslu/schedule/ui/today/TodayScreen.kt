@@ -745,6 +745,13 @@ fun TodayScreen(
                     onOpenRepair = onOpenDormRepair,
                     repair = dormRepair,
                     kvcxRideState = kvcxRideState?.takeIf { kvcxInAppRide && kvcxLoggedIn },
+                    // 卡片位置判据（2026-11-12）：**只认同步状态**（快趣单例的 state + 登录态）。
+                    // `ebikeUseMode` 是 DataStore 冷流，新组合的第一帧恒是 `Default`（小程序方式，
+                    // `inAppRide = false`），第二帧才发出真值；位置若跟着能力闸走，那一帧卡片先落在
+                    // 作业卡之后，下一帧再挪到顶部，`animateItem` 就把它演成「从界面底部滑到顶部」
+                    // （用户报的「切 Tab 时快趣卡从底部跳到顶部」）。
+                    // 与 `DoneLingerGate` 同一纪律：位置判据必须同帧成立，见 ActiveServiceCard 的 KDoc。
+                    kvcxRideActive = kvcxRideState?.ride != null && kvcxLoggedIn,
                     // 账号方式的免费窗口起点：快趣行倒计时 / 超时进度条（小程序方式走下面那一行）
                     kvcxFreeStartAt = ebikeRideStartAt.takeIf { kvcxInAppRide },
                     waterSession = qiekjWateringSession,
@@ -1006,6 +1013,13 @@ private fun TodayContent(
     // ── 进行中服务卡（2026-10-21）：数据在 TodayScreen 收集，卡片按需渲染 ──
     /** 快趣骑行状态（能力闸 + 登录双闸已在调用侧滤过）；null = 行不出现。 */
     kvcxRideState: KvcxRideState? = null,
+    /**
+     * **有在案骑行**（位置判据，2026-11-12）：由调用侧用**同步**状态算好传进来
+     * （快趣单例 `state.ride != null && loggedIn`）。别在这里拿 [kvcxRideState] 判——
+     * 那份过了能力闸，而能力闸读的是 DataStore 冷流、新组合首帧恒为默认档，
+     * 位置会晚一帧翻真（`animateItem` 就演成「从底部跳到顶部」）。缺省 false = 留在原位。
+     */
+    kvcxRideActive: Boolean = false,
     /** 账号方式的免费窗口起点（`ebikeRideStartAt`）：快趣行倒计时 / 超时进度条用。 */
     kvcxFreeStartAt: Long? = null,
     /**
@@ -1047,6 +1061,10 @@ private fun TodayContent(
     // 有在案骑行时把「进行中服务」卡提到课程区之前（2026-10-22 用户口径）：骑行是最需要
     // 一眼看到的状态，课程 / 作业多的时候原位置会落到首屏之外；没有在案订单时留在原位。
     //
+    // 位置判据 = [kvcxRideActive]（同步），**不是** [kvcxRideState]（过能力闸，而能力闸读的是
+    // DataStore 冷流、首帧恒为默认档）：拿闸后的状态判位置，新组合的第二帧才翻真值，
+    // `animateItem` 会把卡片从列表下方滑到顶部（2026-11-12 用户报「切 Tab 时从底部跳到顶部」）。
+    //
     // 还车成功后的 8 秒完成态（2026-10-29；时长 2026-10-31 改）也要留在这个位置：`ride`
     // 在成功那一刻就没了，只看 ride 的话卡片会带着「已还车」当场挪回列表中间。
     val kvcxDone = rememberDoneLinger(
@@ -1065,7 +1083,7 @@ private fun TodayContent(
             kvcxPinned = false
         }
     }
-    val rideInProgress = kvcxRideState?.ride != null || kvcxDone || kvcxPinned
+    val rideInProgress = kvcxRideActive || kvcxDone || kvcxPinned
     val activeServicesCard: @Composable (Modifier) -> Unit = { cardModifier ->
         ActiveServiceCard(
             kvcxState = kvcxRideState,
