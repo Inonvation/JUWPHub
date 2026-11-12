@@ -347,6 +347,13 @@
   平移过去**（`pushCamera(animated = true)`），**仍然不重查车辆接口**——程序性移动被
   `CameraSuppressor` 吃掉、走不到拖动停手那条查询，接口禁止轮询的红线不变。用户口径
   （2026-10-19）：从一个地方开锁骑到另一个地方，地图不能还停在开锁那一刻的位置。
+  **骑行结束补一次重查**（2026-11-09 用户报「还车后停在那个 8 秒结算卡时，当前位置周围
+  没有停车点也没有车，非要拖一下地图或点定位」）：`BikeMapViewModel.refreshNearUser()`——
+  ride 由非空变空（手动还车 / 自动还车 / 订单在别处结束）时把 `pendingLat/Lng` 拉回
+  `state.userLat/Lng` 再 `scheduleQuery(immediate = true)`，车与还车点这才跟镜头对齐；
+  **只在跟随态做**（跟随关着 = 用户自己把图拖到了别处，那一片的视野与数据是配对的，
+  拽回人身上地图反而整片空白），没有定位时什么都不做。触发点是 VM 里对 `kvcx.state` 的
+  转折，**不是轮询**——别把它挪进 `followCameraIfMoved`（那就成了骑行途中每 8 米查一次接口）。
   打开跟随 = 进页自动定位 / 点「定位」/ **人就在车边时开始骑行**（`RideScreen` 的 phase
   effect 调 `startFollowing`）；关闭 = **用户单指拖动地图**（`TouchTracker` 过系统 touch slop；
   双指缩放不算、点地图不算）、点「回到校区」、点停车点 / 车辆定位 / 按车号找车——

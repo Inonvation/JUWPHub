@@ -105,7 +105,8 @@
   节奏挂同样的两条更新，经 `shouldMoveDot`（位移 ≥ 4 米或精度显著提升才挪，纯 JVM 可测
   `BikeLocatorLiveDotTest`）滤掉双源交替与站定抖动后逐条转 GCJ-02；**跟随态下镜头也跟着
   人走**（`followUser`，位移 ≥ 8 米推一次相机，2026-10-19，§3.9），但**不重查车辆接口**
-  （程序性移动被 `CameraSuppressor` 吃掉）。权限缺失等硬失败发一条 Failed 即结束，
+  （程序性移动被 `CameraSuppressor` 吃掉；骑行结束那一下补一次重查，见 §3.9
+  `refreshNearUser`）。权限缺失等硬失败发一条 Failed 即结束，
   失败提示归一次性定位管。
 - **`LocationListener` 的四个方法都要写全**（含 API 29 起废弃的 `onStatusChanged`）：
   它们在 API 30 的 `android.jar` 里才是 default 方法，编译期少写也能过，

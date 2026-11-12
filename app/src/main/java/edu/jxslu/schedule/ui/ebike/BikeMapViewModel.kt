@@ -476,6 +476,17 @@ class BikeMapViewModel(
                 if (num == rideCar) clearHighlight()
             }
         }
+        // 骑行结束（手动还车 / 自动还车 / 订单在别处结束）→ 查询中心拉回用户脚下重查一次
+        // （理由见 [refreshNearUser]）。只在 ride 由非空变空的**转折点**触发：进页时 ride 本来
+        // 就是空，那不是"骑完了"，不该在这里查第二次。
+        viewModelScope.launch {
+            var riding = kvcx.state.value.ride != null
+            kvcx.state.collect { snapshot ->
+                val nowRiding = snapshot.ride != null
+                if (riding && !nowRiding) refreshNearUser()
+                riding = nowRiding
+            }
+        }
         // 图层缓存先读回来（几十 KB 的文件，毫秒级）：进页那一刻就把上次那片还车点摆上，
         // 命中的话连请求都不发（判定在 domain/ZoneCache）。与下面几条并行，互不依赖
         viewModelScope.launch {
@@ -545,6 +556,35 @@ class BikeMapViewModel(
         // 大桩补全的缓存一并作废：手动刷新要看最新的，不能吃 60 秒内的旧快照
         spotFills.clear()
         scheduleQuery(immediate = true, forceZones = true)
+    }
+
+    /**
+     * 骑行结束后把查询中心拉回**用户当前位置**并重查一次（2026-11-09）。
+     *
+     * 为什么需要：骑行期间镜头跟着用户走（[onUserLocationChanged] → [followCameraIfMoved]），
+     * 但**跟随只挪镜头、不重查接口**（禁止轮询第三方接口，见 [BikeMapUiState.followUser]）。
+     * 于是从一个地方骑到另一个地方还车时，镜头已经在人脚下、车与还车点还是开锁那一刻那一批：
+     * 还车后停在 8 秒结算卡那段时间，当前位置周围一片空白，非要拖一下地图或点「定位」才会重查
+     * （2026-11-09 用户报的正是这个）。还车本身是用户动作，用它把两者对齐，不违反
+     * 「刷新只由用户动作驱动」。
+     *
+     * **只在跟随态对齐**：跟随关着说明用户自己把地图拖到了别处，那一片的视野与数据是配对的
+     * （拖动停稳就重查过），这时把数据拽回人身上，地图反而整片空白。没有定位（未授权 /
+     * 还没取到）时同样什么都不做——没有"当前位置"可言。
+     *
+     * 触发点在 `init` 里对 [kvcx] 状态的 ride 非空 → 空转折（手动还车 / 自动还车 /
+     * 订单在别处结束都走那一条），**不是轮询**。
+     */
+    fun refreshNearUser() {
+        val state = _uiState.value
+        if (!state.followUser) return
+        val lat = state.userLat ?: return
+        val lng = state.userLng ?: return
+        if (!lat.isFinite() || !lng.isFinite()) return
+        // 查询中心跟着人走：之后「继续找车」/ 8 秒自动收尾那次 refresh() 也查这一片
+        pendingLat = lat
+        pendingLng = lng
+        scheduleQuery(immediate = true)
     }
 
     /** 取定位期间置位，让按钮有个"在做事"的样子。 */
