@@ -135,8 +135,7 @@ private fun dayLabel(date: LocalDate, today: LocalDate): String = when (date) {
 fun sumCents(bills: List<QzxyBill>): Long = bills.sumOf { parseBillCents(it.consumeMoney) }
 
 /** 金额文案：`¥12.40` / `¥0.00`。 */
-fun billMoneyText(cents: Long): String =
-    "¥" + BigDecimal(cents).movePointLeft(2).setScale(2, RoundingMode.HALF_UP).toPlainString()
+fun billMoneyText(cents: Long): String = MoneyFormat.fromFen(cents)
 
 /**
  * 入口卡右侧的一句话摘要：`本月 12 笔 · ¥8.60`。

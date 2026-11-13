@@ -32,6 +32,7 @@ import edu.jxslu.schedule.domain.BalanceAlert
 import edu.jxslu.schedule.domain.BalanceAlertSource
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.ui.campus.YktBalanceChangeSync
 import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 import kotlinx.coroutines.flow.first
@@ -235,7 +236,7 @@ object BalanceAlertReminder {
         if (prefs.balanceAlertNotified(BalanceAlertSource.Power)) return
         val text = buildString {
             if (!room.isNullOrBlank()) append("$room ")
-            append("剩余 ¥%.2f".format(yuan))
+            append("剩余 ${MoneyFormat.fromYuan(yuan)}")
             meter.remain?.let { append("（%.2f 度）".format(it)) }
             append("，低于提醒线 ¥$threshold，记得充值")
         }
@@ -368,7 +369,7 @@ object BalanceAlertReminder {
         }
         // 「偏低期间只提醒一次」（同电费口径）
         if (prefs.balanceAlertNotified(BalanceAlertSource.Ykt)) return
-        val text = "正式卡余额 ¥%.2f，低于提醒线 ¥$threshold，记得充值".format(cardYuan)
+        val text = "正式卡余额 ${MoneyFormat.fromYuan(cardYuan)}，低于提醒线 ¥$threshold，记得充值"
         Graph.inboxRepository(context).post(
             kind = InboxKind.YKT_LOW,
             dedupeKey = InboxKeys.YKT_LOW,

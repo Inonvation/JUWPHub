@@ -313,8 +313,8 @@ object KqcxAuth {
         val displayText: String?
             get() {
                 val parts = buildList {
-                    rechargeCents?.let { add("充值 ¥%.2f".format(it / 100.0)) }
-                    giftCents?.let { add("赠送 ¥%.2f".format(it / 100.0)) }
+                    rechargeCents?.let { add("充值 ${MoneyFormat.fromFen(it)}") }
+                    giftCents?.let { add("赠送 ${MoneyFormat.fromFen(it)}") }
                 }
                 return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
             }

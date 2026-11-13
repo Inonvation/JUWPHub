@@ -26,6 +26,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.YktPayment
 import edu.jxslu.schedule.ui.common.AmountHeroText
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
@@ -96,7 +97,7 @@ fun RechargeSheet(
             if (accountFen == null) {
                 balanceFen?.let {
                     Text(
-                        "当前卡余额 ¥%.2f".format(it / 100.0),
+                        "当前卡余额 ${MoneyFormat.fromFen(it)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     )
@@ -109,7 +110,7 @@ fun RechargeSheet(
                         onClick = { toElectric = false },
                         label = {
                             Text(
-                                balanceFen?.let { "正式卡 ¥%.2f".format(it / 100.0) } ?: "正式卡",
+                                balanceFen?.let { "正式卡 ${MoneyFormat.fromFen(it)}" } ?: "正式卡",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         },
@@ -119,7 +120,7 @@ fun RechargeSheet(
                         onClick = { toElectric = true },
                         label = {
                             Text(
-                                "电子账户 ¥%.2f".format(accountFen / 100.0),
+                                "电子账户 ${MoneyFormat.fromFen(accountFen)}",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         },
@@ -240,7 +241,7 @@ fun CampusArrivalDialog(
         dismissLabel = "关闭",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            AmountHeroText("¥%.2f".format(arrived.orderFen / 100.0))
+            AmountHeroText(MoneyFormat.fromFen(arrived.orderFen))
             Text(
                 text = "已到账",
                 style = MaterialTheme.typography.bodyMedium,
@@ -248,7 +249,7 @@ fun CampusArrivalDialog(
             )
             arrived.newBalanceFen?.let {
                 Text(
-                    text = "当前卡余额 ¥%.2f".format(it / 100.0),
+                    text = "当前卡余额 ${MoneyFormat.fromFen(it)}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = onSurface.copy(alpha = 0.75f),
                 )
@@ -298,7 +299,7 @@ fun CampusPendingConfirmDialog(
         dismissLabel = if (onNotPaid != null) "我没有付款" else "关闭",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            AmountHeroText("¥%.2f".format(orderFen / 100.0))
+            AmountHeroText(MoneyFormat.fromFen(orderFen))
             Text(
                 text = "已发起充值订单。若你已在微信完成支付，余额更新常有数分钟延迟，" +
                     "App 正在自动检测，确认到账后立即提示。",
@@ -343,7 +344,7 @@ fun CampusPaymentDialog(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             // 大字金额：与趣智/骑行页的大号数字同族（AmountHeroText 唯一口径）
-            AmountHeroText("¥%.2f".format(payment.amountFen / 100.0))
+            AmountHeroText(MoneyFormat.fromFen(payment.amountFen))
             if (detail.isNotEmpty()) {
                 Text(
                     text = detail,
@@ -353,7 +354,7 @@ fun CampusPaymentDialog(
             }
             payment.balanceAfterFen?.let {
                 Text(
-                    text = "卡余额 ¥%.2f".format(it / 100.0),
+                    text = "卡余额 ${MoneyFormat.fromFen(it)}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = onSurface.copy(alpha = 0.75f),
                 )

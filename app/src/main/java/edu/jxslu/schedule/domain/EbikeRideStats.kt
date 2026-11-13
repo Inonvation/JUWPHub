@@ -90,7 +90,7 @@ object EbikeRideStats {
     fun unitsOf(cents: Long): Int =
         if (cents <= 0) 0 else ((cents + UNIT_CENTS / 2) / UNIT_CENTS).toInt()
 
-    fun moneyText(cents: Long): String = "¥%.2f".format(cents / 100.0)
+    fun moneyText(cents: Long): String = MoneyFormat.fromFen(cents)
 
     /** 资产卡里「超时费累计」那一行的说明（唯一出处）。 */
     fun caption(summary: Summary): String = when {

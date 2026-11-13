@@ -25,14 +25,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -69,6 +67,7 @@ import edu.jxslu.schedule.data.qiekj.DeviceItem
 import edu.jxslu.schedule.data.qiekj.OrderHistoryItem
 import edu.jxslu.schedule.data.qiekj.ServerOrderItem
 import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.UnlockFlowState
 import edu.jxslu.schedule.domain.UnlockResult
 import edu.jxslu.schedule.domain.QzxyPhoneMask
@@ -100,7 +99,6 @@ import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.me.MeViewModel
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -869,86 +867,22 @@ private fun PageFlowStatus(
     onShowDetail: (Any) -> Unit,
 ) {
     when (flow) {
-        is UnlockFlowState.Idle -> Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("使用积分抵扣", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "关闭后开水不消耗积分",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                )
-            }
-            Switch(checked = usePoints, onCheckedChange = { onToggleUsePoints() })
-        }
-        is UnlockFlowState.PreChecking -> Row(verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.width(10.dp))
-            Text(
-                flow.step,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-            )
-        }
-        is UnlockFlowState.Working -> Column {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "正在出水 ${formatClock(flow.elapsedSeconds)}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "${(WaterViewModel.AUTO_SETTLE_SECONDS - flow.elapsedSeconds).coerceAtLeast(0)} 秒后自动关闭",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            LinearProgressIndicator(
-                progress = {
-                    (flow.elapsedSeconds.toFloat() / WaterViewModel.AUTO_SETTLE_SECONDS).coerceIn(0f, 1f)
-                },
-                modifier = Modifier.fillMaxWidth().height(4.dp),
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                flow.step,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            )
-        }
-        is UnlockFlowState.Success -> Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "花费 ¥${calculateActualCost(flow.result)}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "订单详情 ›",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { onShowDetail(flow.result) },
-                )
-            }
-            Spacer(Modifier.height(2.dp))
-            Text(
-                // 支付构成副行（DESIGN §4.10 账单口径）：小票是账户余额支付，
-                // 现金实付 0.00 只代表没走在线支付，不能当作「本次花费 0」
-                costBreakdownText(flow.result),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            )
-        }
+        is UnlockFlowState.Idle -> WaterIdleBlock(
+            usePoints = usePoints,
+            onToggleUsePoints = onToggleUsePoints,
+            // 页面当时没有「确保积分充足」这一行，保留差异（面板有）
+            showPointsHint = false,
+        )
+        is UnlockFlowState.PreChecking -> WaterPreCheckingBlock(flow.step)
+        is UnlockFlowState.Working -> WaterWorkingBlock(
+            step = flow.step,
+            elapsedSeconds = flow.elapsedSeconds,
+            progressTopPadding = 8.dp,
+        )
+        is UnlockFlowState.Success -> WaterSettlementBlock(
+            result = flow.result,
+            onShowDetail = { onShowDetail(flow.result) },
+        )
         is UnlockFlowState.Failed -> Column {
             Text(flow.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
             Spacer(Modifier.height(4.dp))
@@ -968,12 +902,6 @@ private fun PageFlowStatus(
             }
         }
     }
-}
-
-private fun formatClock(totalSeconds: Int): String {
-    val m = totalSeconds / 60
-    val s = totalSeconds % 60
-    return "%02d:%02d".format(m, s)
 }
 
 // ── 弹层与列表 ──
@@ -1306,38 +1234,18 @@ internal fun OrderDetailDialog(item: UnlockResult, onDismiss: () -> Unit) {
         // 账单构成（DESIGN §4.10 账单口径）：小票是账户余额，扣了就是花了；
         // 「现金支付 ¥0.00」只代表没走在线支付，不叫「实付 0」
         ticketPaidAmount(item)?.takeIf { it > BigDecimal.ZERO }
-            ?.let { DetailRow("小票支付", "¥${money(it)}") }
+            ?.let { DetailRow("小票支付", MoneyFormat.fromYuan(it)) }
         if (item.integralCost != "-") DetailRow("积分抵扣", item.integralCost)
         item.otherPromotions.forEach { p ->
             DetailRow("其他优惠", p.discountAmount ?: "-")
         }
         cashPaidAmount(item)?.let { cash ->
             val channel = item.payTypeName?.let { "（$it）" } ?: ""
-            DetailRow("现金支付", "¥${money(cash)}$channel")
+            DetailRow("现金支付", "${MoneyFormat.fromYuan(cash)}$channel")
         }
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
         DetailRow("本次花费", "¥${calculateActualCost(item)}")
     }
-}
-
-/** 金额统一显示两位小数（服务端金额字符串可能缺位）。 */
-private fun money(value: BigDecimal): String =
-    value.setScale(2, RoundingMode.HALF_UP).toPlainString()
-
-/**
- * 成功卡的支付构成副行（DESIGN §4.10 账单口径）：
- * 「小票支付 ¥0.16 · 积分抵扣 0.10 · 支付宝-代扣 ¥0.06」，全空兜底「开水成功」。
- */
-private fun costBreakdownText(result: UnlockResult): String {
-    val parts = buildList {
-        ticketPaidAmount(result)?.takeIf { it > BigDecimal.ZERO }
-            ?.let { add("小票支付 ¥${money(it)}") }
-        result.integralCost.takeIf { it != "-" }?.let { add("积分抵扣 $it") }
-        cashPaidAmount(result)?.takeIf { it > BigDecimal.ZERO }?.let { cash ->
-            add("${result.payTypeName ?: "现金"} ¥${money(cash)}")
-        }
-    }
-    return parts.joinToString(" · ").ifBlank { "开水成功" }
 }
 
 @Composable

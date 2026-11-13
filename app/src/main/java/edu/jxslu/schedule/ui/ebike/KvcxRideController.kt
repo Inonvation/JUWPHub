@@ -8,6 +8,7 @@ import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.kqcx.KvcxRideSession
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.InboxKind
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.data.kqcx.LockOutcome
 import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.data.kqcx.UnlockOutcome
@@ -221,7 +222,7 @@ data class KvcxReturnSummary(
     /** 时长文案用人话（「13 分钟」），与历史列表同一口径（`RideRecord.durationText`）。 */
     val durationText: String? get() = durationSeconds?.let(RideRecord::durationText)
 
-    val feeText: String? get() = feeCents?.let { "¥%.2f".format(it / 100.0) }
+    val feeText: String? get() = feeCents?.let { MoneyFormat.fromFen(it) }
 
     /**
      * 结算状态一句话（单测锁定）。**别把"没确认到"说成"欠费"**：手动还车的结果卡先出，
@@ -238,8 +239,7 @@ data class KvcxReturnSummary(
             !needPay -> "本次无需支付"
             settled == true -> "费用已自动结清"
             owedCents != null ->
-                "有未结算费用 ¥%.2f；进快趣小程序点主页「待支付」横幅，或在历史订单里点那笔待支付"
-                    .format(owedCents / 100.0)
+                "有未结算费用 ${MoneyFormat.fromFen(owedCents)}；进快趣小程序点主页「待支付」横幅，或在历史订单里点那笔待支付"
             else -> "费用结算中或未结清，可在快趣小程序核对"
         }
 

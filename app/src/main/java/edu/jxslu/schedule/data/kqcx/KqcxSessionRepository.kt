@@ -8,6 +8,7 @@ import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KvcBusinessError
 import edu.jxslu.schedule.domain.KvcProtocolException
 import edu.jxslu.schedule.domain.KvcxZones
+import edu.jxslu.schedule.domain.MoneyFormat
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -643,8 +644,7 @@ class KqcxSessionRepository(
     private fun rejectedText(rejected: KqcxAuth.EndOutcome.Rejected): String {
         val fee = rejected.dispatchMoneyCents
         return if (fee != null && fee > 0) {
-            "该位置还车会产生调度费（约 ¥%.2f）；为免误扣，请在快趣小程序中确认还车"
-                .format(fee / 100.0)
+            "该位置还车会产生调度费（约 ${MoneyFormat.fromFen(fee)}）；为免误扣，请在快趣小程序中确认还车"
         } else {
             KqcxAuth.errorMessage(rejected.code, rejected.message)
         }

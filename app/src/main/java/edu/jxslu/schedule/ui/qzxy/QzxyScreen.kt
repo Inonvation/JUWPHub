@@ -69,6 +69,7 @@ import edu.jxslu.schedule.data.qzxy.QzxyBluetoothScanner
 import edu.jxslu.schedule.data.qzxy.QzxyDeviceInfo
 import edu.jxslu.schedule.data.qzxy.QzxyScannedDevice
 import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.entrySummary
 import edu.jxslu.schedule.domain.QzxyWatering
 import edu.jxslu.schedule.domain.QzxyWateringFormat
@@ -602,7 +603,7 @@ private fun BalanceSection(state: QzxyUiState) {
             )
             MetricCell(
                 label = "账单合计",
-                value = if (state.billLoaded) "¥%.2f".format(total) else "—",
+                value = if (state.billLoaded) MoneyFormat.fromYuan(total) else "—",
                 caption = state.billMonth.ifBlank { "—" },
                 modifier = Modifier.weight(1f),
             )
@@ -742,10 +743,19 @@ private fun StatusCard(
                 Column(Modifier.fillMaxWidth()) {
                     when (content) {
                         // 过渡期间旧内容还在，读最新的 flow 只影响文案，不影响类型安全
-                        QzxyStatusContent.Working ->
-                            WorkingBlock((state.flow as? QzxyFlowState.Working)?.step ?: "正在处理")
-                        is QzxyStatusContent.Settlement ->
-                            SettlementBlock(content.settlement, state, viewModel)
+                        QzxyStatusContent.Working -> QzxyWorkingBlock(
+                            step = (state.flow as? QzxyFlowState.Working)?.step ?: "正在处理",
+                            showProgressBar = false,
+                            topPadding = 12.dp,
+                        )
+                        is QzxyStatusContent.Settlement -> QzxySettlementBlock(
+                            settlement = content.settlement,
+                            balanceText = state.balance?.text,
+                            titleStyle = MaterialTheme.typography.titleSmall,
+                            topPadding = 12.dp,
+                            partsTopPadding = 0.dp,
+                            onDone = { viewModel.dismissSettlement() },
+                        )
                         is QzxyStatusContent.Watering ->
                             WateringStatusBlock(
                                 watering = content.watering,
@@ -756,11 +766,17 @@ private fun StatusCard(
                                 onClearDeviceRecord = { viewModel.clearDeviceRecord() },
                                 modifier = Modifier.padding(top = 12.dp),
                             )
-                        is QzxyStatusContent.Failed -> FailureBlock(
+                        is QzxyStatusContent.Failed -> QzxyFailureBlock(
                             failure = content.failure,
-                            state = state,
-                            viewModel = viewModel,
-                            onShowDetail = { failureDetail = content.failure },
+                            canRetry = state.hasUsableDevice,
+                            canClear = state.selected != null,
+                            topPadding = 12.dp,
+                            onRetry = { viewModel.openValveFromCard() },
+                            onResend = { viewModel.resendOpenData() },
+                            onClear = { viewModel.clearDeviceRecord() },
+                            onSettle = { viewModel.stopWater() },
+                            onClearAndOpen = { viewModel.clearAndOpen() },
+                            onDetail = { failureDetail = content.failure },
                         )
                         QzxyStatusContent.Idle -> IdleBlock(state, viewModel)
                     }
@@ -882,160 +898,6 @@ private fun billTimeText(raw: String?): String {
     return "${month}月${day}日 ${text.substring(11, 16)}"
 }
 
-@Composable
-private fun WorkingBlock(step: String) {
-    Row(
-        modifier = Modifier.padding(top = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = step,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-        )
-    }
-    // 给个时间预期：这一段要连蓝牙再下单，几秒内没动才是异常
-    Text(
-        text = "连接热水器并下单，通常几秒",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-        modifier = Modifier.padding(top = 8.dp),
-    )
-}
-
-@Composable
-private fun SettlementBlock(
-    settlement: QzxySettlement,
-    state: QzxyUiState,
-    viewModel: QzxyViewModel,
-) {
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    Text(
-        text = "已结束用水",
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(top = 12.dp),
-    )
-    Text(
-        text = QzxyWateringFormat.money(settlement.consumeMoneyMilli),
-        style = MaterialTheme.typography.headlineSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 4.dp),
-    )
-    val parts = buildList {
-        settlement.durationMillis?.let { add("本次用水 ${QzxyWateringFormat.duration(it)}") }
-        state.balance?.let { add("余额 ¥${it.text}") }
-    }
-    if (parts.isNotEmpty()) {
-        Text(
-            text = parts.joinToString(" · "),
-            style = MaterialTheme.typography.bodySmall,
-            color = onSurface.copy(alpha = 0.6f),
-        )
-    }
-    settlement.note?.let { note ->
-        Text(
-            text = note,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-    }
-    Text(
-        text = "金额来自服务端账单，不是本地推算",
-        style = MaterialTheme.typography.bodySmall,
-        color = onSurface.copy(alpha = 0.5f),
-        modifier = Modifier.padding(top = 6.dp),
-    )
-    OutlinedButton(
-        onClick = { viewModel.dismissSettlement() },
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp)
-            .height(48.dp),
-    ) {
-        Text("完成")
-    }
-}
-
-@Composable
-private fun FailureBlock(
-    failure: QzxyFlowState.Failed,
-    state: QzxyUiState,
-    viewModel: QzxyViewModel,
-    onShowDetail: () -> Unit,
-) {
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    Text(
-        text = failure.reason,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.error,
-        modifier = Modifier.padding(top = 12.dp),
-    )
-    failure.detail?.let { detail ->
-        Text(
-            text = detail,
-            style = MaterialTheme.typography.bodySmall,
-            color = onSurface.copy(alpha = 0.6f),
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-    }
-    Button(
-        // 开阀被「未结算的老记录」挡住时，主出口是先去结算——提示让点「结束用水」，
-        // 这里就必须真的给出那个按钮（旧版只有「重试开阀」，用户只能卡住）
-        onClick = {
-            when {
-                failure.clearThenOpen -> viewModel.clearAndOpen()
-                failure.resendRecovery -> viewModel.resendOpenData()
-                failure.settleRecovery -> viewModel.stopWater()
-                else -> viewModel.openValveFromCard()
-            }
-        },
-        enabled = state.hasUsableDevice,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp)
-            .height(48.dp),
-    ) {
-        Text(
-            when {
-                failure.clearThenOpen -> "清除并继续开阀"
-                failure.resendRecovery -> "重发开阀数据"
-                failure.settleRecovery -> "结算设备记录"
-                else -> "重试开阀"
-            },
-        )
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        OutlinedButton(
-            onClick = { viewModel.clearDeviceRecord() },
-            enabled = state.selected != null,
-            modifier = Modifier
-                .weight(1f)
-                .height(42.dp),
-        ) {
-            Text(if (failure.clearThenOpen) "只清除记录" else "清除设备记录")
-        }
-        OutlinedButton(
-            onClick = onShowDetail,
-            modifier = Modifier
-                .weight(1f)
-                .height(42.dp),
-        ) {
-            Text("详情")
-        }
-    }
-}
 
 /**
  * 失败详情：原始数据不铺在页面上，要看的自己点开，或者进诊断页看全。

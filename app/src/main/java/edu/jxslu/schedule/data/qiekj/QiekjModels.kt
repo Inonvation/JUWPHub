@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.data.qiekj
 
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.PromotionLine
 import kotlinx.serialization.Serializable
 
@@ -53,7 +54,7 @@ data class BalanceData(
 ) {
     /** tokenCoin 为「分」，展示转元；解析失败显示 "-"（对齐参考实现）。 */
     val ticketText: String
-        get() = tokenCoin?.toDoubleOrNull()?.let { "%.2f".format(it / 100.0) } ?: "-"
+        get() = tokenCoin?.toDoubleOrNull()?.let { MoneyFormat.yuanText(it / 100.0) } ?: "-"
 
     val pointsText: String get() = integral ?: "-"
 
@@ -63,7 +64,7 @@ data class BalanceData(
      * 舍入到分后为 0.00 / 解析失败回 null，调用方隐藏后缀（不显示「约可抵扣 ¥0.00」）。
      */
     val pointsDeductText: String?
-        get() = integralAmount?.toDoubleOrNull()?.takeIf { it >= 0.005 }?.let { "%.2f".format(it) }
+        get() = integralAmount?.toDoubleOrNull()?.takeIf { it >= 0.005 }?.let { MoneyFormat.yuanText(it) }
 }
 
 // ── 每日签到（2026-10-23）──

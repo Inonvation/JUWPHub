@@ -64,7 +64,7 @@ object QzxyWateringFormat {
      * 「金额待服务端结算」会把整行撑满——那里宁可不提金额。
      */
     fun moneyOrNull(milli: String?): String? =
-        milli?.trim()?.toLongOrNull()?.let { "¥%.2f".format(it / 1000.0) }
+        milli?.trim()?.toLongOrNull()?.let { MoneyFormat.fromLi(it) }
 
     /**
      * 今日页「已结束用水」完成态的副行：`实扣 ¥x.xx · 设备 · 用时 mm:ss`。

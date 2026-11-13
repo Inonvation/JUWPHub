@@ -21,6 +21,7 @@ import edu.jxslu.schedule.domain.YktArrival
 import edu.jxslu.schedule.domain.BalanceAlertSource
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -697,8 +698,8 @@ class CampusCardViewModel(
             dedupeKey = InboxKeys.YKT_RECHARGE_PREFIX + startedAt,
             title = "一卡通充值到账",
             body = buildString {
-                append("充值 ¥").append("%.2f".format(orderFen / 100.0))
-                newBalanceFen?.let { append(" · 余额 ¥%.2f".format(it / 100.0)) }
+                append("充值 ").append(MoneyFormat.fromFen(orderFen))
+                newBalanceFen?.let { append(" · 余额 ").append(MoneyFormat.fromFen(it)) }
             },
             // 落点 = 消费流水页（充值记录以收入行在那里可回查）；静默留痕不点红点
             route = SubpageScreen.CAMPUS_STATEMENT.name,

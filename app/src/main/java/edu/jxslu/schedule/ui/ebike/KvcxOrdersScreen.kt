@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.domain.KqcxAuth
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.RideRecord
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppInfoDialog
@@ -398,7 +399,7 @@ private fun orderTimeText(endAt: String?): String {
 }
 
 private fun moneyText(cents: Long?): String =
-    cents?.let { "¥%.2f".format(it / 100.0) } ?: "—"
+    cents?.let { MoneyFormat.fromFen(it) } ?: "—"
 
 @Composable
 private fun statusColor(order: KqcxAuth.OrderItem): Color = when {

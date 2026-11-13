@@ -77,6 +77,7 @@ import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.ujing.UjingHouseStore
 import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.domain.AccountMask
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.ShortcutSettings
 import edu.jxslu.schedule.ui.campus.CampusCardViewModel
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -282,12 +283,12 @@ fun SideDrawerContent(
     val remain = power.snapshot?.meter?.remain
     val balanceText = when {
         !campusEnabled -> "未开启"
-        snapshot != null -> "¥%.2f".format(snapshot.cardFen / 100.0)
+        snapshot != null -> MoneyFormat.fromFen(snapshot.cardFen)
         balanceLoaded -> "—"
         else -> "读取中…"
     }
     val accountValue = snapshot?.accountFen
-        ?.let { "¥%.2f".format(it / 100.0) }
+        ?.let { MoneyFormat.fromFen(it) }
         ?: "—"
     val powerText = when {
         // 有读数就先留着：刷新期间不再退回「读取中…」（侧栏展开即静默刷一轮，
@@ -936,7 +937,7 @@ private fun WalletDetailSheet(
             )
             Text(
                 text = if (isCampus) {
-                    campusCardFen?.let { "¥%.2f".format(it / 100.0) } ?: "—"
+                    campusCardFen?.let { MoneyFormat.fromFen(it) } ?: "—"
                 } else {
                     powerRemain?.let { "%.2f 度".format(it) } ?: "—"
                 },
@@ -949,15 +950,15 @@ private fun WalletDetailSheet(
                 text = if (isCampus) {
                     "正式卡余额；电子账户另计"
                 } else {
-                    powerRemain?.let { "约 ¥%.2f（按 0.62 元/度估算）".format(it * 0.62) } ?: "以缴费平台账单为准"
+                    powerRemain?.let { "约 ${MoneyFormat.fromYuan(it * 0.62)}（按 0.62 元/度估算）" } ?: "以缴费平台账单为准"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = muted,
             )
             Spacer(Modifier.height(12.dp))
             if (isCampus) {
-                DetailRow("正式卡", campusCardFen?.let { "¥%.2f".format(it / 100.0) } ?: "—")
-                DetailRow("电子账户", campusAccountFen?.let { "¥%.2f".format(it / 100.0) } ?: "—")
+                DetailRow("正式卡", campusCardFen?.let { MoneyFormat.fromFen(it) } ?: "—")
+                DetailRow("电子账户", campusAccountFen?.let { MoneyFormat.fromFen(it) } ?: "—")
                 DetailRow("更新时间", formatTime(campusAt))
             } else {
                 DetailRow("房间", powerRoom ?: "—")

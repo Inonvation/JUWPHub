@@ -7,20 +7,13 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -29,13 +22,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.QzxyWatering
-import edu.jxslu.schedule.domain.QzxyWateringFormat
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import edu.jxslu.schedule.ui.theme.Motion
@@ -194,13 +184,18 @@ fun QzxyEntrySheet(
                             }
 
                             // 过渡期间旧内容还在，读最新的 flow 只影响文案，不影响类型安全
-                            QzxySheetContent.Working -> WorkingBlock(
-                                (state.flow as? QzxyFlowState.Working)?.step ?: "正在处理",
+                            QzxySheetContent.Working -> QzxyWorkingBlock(
+                                step = (state.flow as? QzxyFlowState.Working)?.step ?: "正在处理",
+                                showProgressBar = true,
+                                topPadding = 4.dp,
                             )
 
-                            is QzxySheetContent.Settlement -> SettlementBlock(
+                            is QzxySheetContent.Settlement -> QzxySettlementBlock(
                                 settlement = content.settlement,
                                 balanceText = state.balance?.text,
+                                titleStyle = MaterialTheme.typography.titleMedium,
+                                topPadding = 4.dp,
+                                partsTopPadding = 2.dp,
                                 onDone = {
                                     haptics.tap()
                                     // 先关面板再清结算结果：清在前会让面板在滑走的路上
@@ -228,10 +223,11 @@ fun QzxyEntrySheet(
                                 modifier = Modifier.padding(top = 0.dp),
                             )
 
-                            is QzxySheetContent.Failed -> FailureBlock(
+                            is QzxySheetContent.Failed -> QzxyFailureBlock(
                                 failure = content.failure,
                                 canRetry = state.hasUsableDevice,
                                 canClear = state.selected != null,
+                                topPadding = 4.dp,
                                 onRetry = {
                                     haptics.tap()
                                     onStart()
@@ -337,170 +333,6 @@ private fun sheetContentOf(state: QzxyUiState, loggedIn: Boolean): QzxySheetCont
     }
 }
 
-@Composable
-private fun WorkingBlock(step: String) {
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    Column(Modifier.padding(top = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = step,
-                style = MaterialTheme.typography.bodyMedium,
-                color = onSurface.copy(alpha = 0.75f),
-            )
-        }
-        // 不定态进度条：这几秒里唯一在动的东西，比一个转圈更能压住等待
-        LinearProgressIndicator(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 12.dp),
-        )
-        Text(
-            text = "连接热水器并下单，通常几秒",
-            style = MaterialTheme.typography.bodySmall,
-            color = onSurface.copy(alpha = 0.5f),
-            modifier = Modifier.padding(top = 8.dp),
-        )
-    }
-}
-
-@Composable
-private fun SettlementBlock(
-    settlement: QzxySettlement,
-    balanceText: String?,
-    onDone: () -> Unit,
-) {
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    Text(
-        text = "已结束用水",
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(top = 4.dp),
-    )
-    Text(
-        text = QzxyWateringFormat.money(settlement.consumeMoneyMilli),
-        style = MaterialTheme.typography.headlineSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 4.dp),
-    )
-    val parts = buildList {
-        settlement.durationMillis?.let { add("本次用水 ${QzxyWateringFormat.duration(it)}") }
-        balanceText?.let { add("余额 ¥$it") }
-    }
-    if (parts.isNotEmpty()) {
-        Text(
-            text = parts.joinToString(" · "),
-            style = MaterialTheme.typography.bodySmall,
-            color = onSurface.copy(alpha = 0.6f),
-            modifier = Modifier.padding(top = 2.dp),
-        )
-    }
-    settlement.note?.let { note ->
-        Text(
-            text = note,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-    }
-    Text(
-        text = "金额来自服务端账单，不是本地推算",
-        style = MaterialTheme.typography.bodySmall,
-        color = onSurface.copy(alpha = 0.5f),
-        modifier = Modifier.padding(top = 6.dp),
-    )
-    OutlinedButton(
-        onClick = onDone,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp)
-            .height(48.dp),
-    ) {
-        Text("完成")
-    }
-}
-
-@Composable
-private fun FailureBlock(
-    failure: QzxyFlowState.Failed,
-    canRetry: Boolean,
-    canClear: Boolean,
-    onRetry: () -> Unit,
-    onResend: () -> Unit,
-    onClear: () -> Unit,
-    onSettle: () -> Unit,
-    onClearAndOpen: () -> Unit,
-    onDetail: () -> Unit,
-) {
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    Text(
-        text = failure.reason,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.error,
-        modifier = Modifier.padding(top = 4.dp),
-    )
-    failure.detail?.let { detail ->
-        Text(
-            text = detail,
-            style = MaterialTheme.typography.bodySmall,
-            color = onSurface.copy(alpha = 0.6f),
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-    }
-    Button(
-        // 开阀被「未结算的老记录」挡住时，主出口是先去结算（与趣智页失败卡同一口径）
-        onClick = {
-            when {
-                failure.clearThenOpen -> onClearAndOpen()
-                failure.resendRecovery -> onResend()
-                failure.settleRecovery -> onSettle()
-                else -> onRetry()
-            }
-        },
-        enabled = canRetry,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp)
-            .height(48.dp),
-    ) {
-        Text(
-            when {
-                failure.clearThenOpen -> "清除并继续开阀"
-                failure.resendRecovery -> "重发开阀数据"
-                failure.settleRecovery -> "结算设备记录"
-                else -> "重试开阀"
-            },
-        )
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        OutlinedButton(
-            onClick = onClear,
-            enabled = canClear,
-            modifier = Modifier
-                .weight(1f)
-                .height(42.dp),
-        ) {
-            Text(if (failure.clearThenOpen) "只清除记录" else "清除设备记录")
-        }
-        OutlinedButton(
-            onClick = onDetail,
-            modifier = Modifier
-                .weight(1f)
-                .height(42.dp),
-        ) {
-            Text("详情")
-        }
-    }
-}
 
 @Composable
 private fun IdleBlock(state: QzxyUiState, onStart: () -> Unit) {

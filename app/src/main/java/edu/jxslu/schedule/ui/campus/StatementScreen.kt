@@ -48,6 +48,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.data.local.YktTurnoverEntity
 import edu.jxslu.schedule.data.ykt.YktModels
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.ui.common.AppBarChart
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
@@ -345,7 +346,7 @@ private fun SummaryCard(
                 if (index > 0) Spacer(Modifier.height(10.dp))
                 AppRatioBar(
                     label = row.type.ifBlank { "其他" },
-                    valueText = "¥%.2f · %d%%".format(row.amountFen / 100.0, row.amountFen * 100 / total),
+                    valueText = "${MoneyFormat.fromFen(row.amountFen)} · ${row.amountFen * 100 / total}%",
                     fraction = row.amountFen.toFloat() / max.toFloat(),
                     highlight = index == 0,
                 )
@@ -382,7 +383,7 @@ private fun SummaryCard(
             items = items,
             selectedKey = monthKeyOf(month),
             header = "近 12 个月支出",
-            selectedText = if (monthFen > 0) "%s · ¥%.2f".format(monthLabel, monthFen / 100.0) else null,
+            selectedText = if (monthFen > 0) "$monthLabel · ${MoneyFormat.fromFen(monthFen)}" else null,
             emptyText = "还没有可统计的支出",
             onSelect = { key ->
                 windowMonths.firstOrNull { monthKeyOf(it) == key }?.let(onPickMonth)
@@ -404,7 +405,7 @@ private fun SummaryCard(
 private fun AmountBlock(label: String, fen: Long, color: Color) {
     Column {
         Text(
-            text = "¥%.2f".format(fen / 100.0),
+            text = MoneyFormat.fromFen(fen),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
             color = color,
@@ -516,7 +517,7 @@ private fun TurnoverRow(record: YktTurnoverEntity, onClick: () -> Unit) {
         }
         Spacer(Modifier.width(8.dp))
         Text(
-            text = (if (income) "+" else "−") + "¥%.2f".format(record.tranamtFen / 100.0),
+            text = (if (income) "+" else "−") + MoneyFormat.fromFen(record.tranamtFen),
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.SemiBold,
             color = if (income) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
@@ -541,10 +542,10 @@ private fun TurnoverDetail(record: YktTurnoverEntity) {
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
         DetailRow("交易时间", record.jndatetimeStr)
-        DetailRow("金额", (if (record.income) "+" else "−") + "¥%.2f".format(record.tranamtFen / 100.0))
+        DetailRow("金额", (if (record.income) "+" else "−") + MoneyFormat.fromFen(record.tranamtFen))
         // 详情里不设「只给充值行」的限制：进来就是查这一笔的，账户信息越全越好
         YktModels.accountLabelOf(record.accType, record.fromAccount)?.let { DetailRow("交易账户", it) }
-        record.balanceAfterFen?.let { DetailRow("交易后余额", "¥%.2f".format(it / 100.0)) }
+        record.balanceAfterFen?.let { DetailRow("交易后余额", MoneyFormat.fromFen(it)) }
         record.locationName?.let { DetailRow("商户/终端", it) }
         record.remark?.let { DetailRow("摘要", it) }
         record.resume?.takeIf { it != record.remark }?.let { DetailRow("说明", it) }

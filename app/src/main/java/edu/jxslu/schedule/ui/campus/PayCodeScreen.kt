@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.SkeletonBox
 import edu.jxslu.schedule.ui.common.lineHeightDp
@@ -199,8 +200,8 @@ private fun BalanceRow(
                 )
             } else {
                 Text(
-                    text = "正式卡 ¥%.2f".format(balance.cardFen / 100.0) +
-                        if (balance.accountFen > 0) " · 电子账户 ¥%.2f".format(balance.accountFen / 100.0) else "",
+                    text = "正式卡 ${MoneyFormat.fromFen(balance.cardFen)}" +
+                        if (balance.accountFen > 0) " · 电子账户 ${MoneyFormat.fromFen(balance.accountFen)}" else "",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,

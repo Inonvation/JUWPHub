@@ -90,6 +90,7 @@ import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.EbikeCapabilities
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeQr
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KvcxParkSpot
@@ -1135,7 +1136,7 @@ private fun RideRidingUpper(
                         text = buildString {
                             append("已骑 ${elapsed ?: "--"}")
                             ride.payMoneyCents?.takeIf { it > 0 }?.let { cents ->
-                                append(" · 费用 ¥%.2f".format(cents / 100.0))
+                                append(" · 费用 ${MoneyFormat.fromFen(cents)}")
                             }
                             ride.batteryPercent?.takeIf { it in 1..100 }?.let { percent ->
                                 append(" · 电量 $percent%")

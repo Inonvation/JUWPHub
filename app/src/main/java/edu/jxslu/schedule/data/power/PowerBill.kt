@@ -1,9 +1,9 @@
 package edu.jxslu.schedule.data.power
 
+import edu.jxslu.schedule.domain.MoneyFormat
 import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
-import java.util.Locale
 
 /**
  * 缴费账单的月度聚合（DESIGN §3.13「缴费账单页」/ §4.24）。
@@ -87,8 +87,8 @@ object PowerBill {
     fun shortMonthLabel(key: String): String =
         key.split("-").getOrNull(1)?.trimStart('0')?.takeIf { it.isNotEmpty() } ?: key
 
-    /** 金额文案（分 → `¥12.00`）；固定 Locale.US，免得系统语言把小数点换成逗号。 */
-    fun amountText(fen: Long): String = String.format(Locale.US, "¥%.2f", fen / 100.0)
+    /** 金额文案（分 → `¥12.00`）；Locale 口径收在 [MoneyFormat]。 */
+    fun amountText(fen: Long): String = MoneyFormat.fromFen(fen)
 
     /** `feerange` 的 `202608` 形态 → `2026-08`；不是 6 位数字就给 [UNKNOWN_MONTH]。 */
     private fun normalizeCompact(raw: String?): String {

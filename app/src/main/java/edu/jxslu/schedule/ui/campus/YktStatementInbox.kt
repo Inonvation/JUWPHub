@@ -5,6 +5,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.YktPayment
 import edu.jxslu.schedule.domain.YktTurnoverRow
 
@@ -48,8 +49,8 @@ private suspend fun postYktPaymentInbox(
         title = "一卡通消费",
         body = buildString {
             merchant?.takeIf { it.isNotBlank() }?.let { append(it).append(" · ") }
-            append("扣款 ¥%.2f".format(amountFen / 100.0))
-            balanceAfterFen?.let { append(" · 余额 ¥%.2f".format(it / 100.0)) }
+            append("扣款 ${MoneyFormat.fromFen(amountFen)}")
+            balanceAfterFen?.let { append(" · 余额 ${MoneyFormat.fromFen(it)}") }
         },
         route = SubpageScreen.CAMPUS_STATEMENT.name,
         silent = true,

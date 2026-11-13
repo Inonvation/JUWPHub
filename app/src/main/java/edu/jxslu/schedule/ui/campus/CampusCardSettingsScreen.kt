@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.BalanceAlert
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.RechargeDisclaimer
 import edu.jxslu.schedule.domain.YktArrival
 import edu.jxslu.schedule.data.ykt.rechargeTargetCard
@@ -345,8 +346,8 @@ fun CampusCardSettingsScreen(
                     ) {
                         if (balanceSnapshot != null) {
                             Text(
-                                "正式卡 ¥%.2f".format(balanceSnapshot.cardFen / 100.0) +
-                                    if (balanceSnapshot.accountFen > 0) " · 电子账户 ¥%.2f".format(balanceSnapshot.accountFen / 100.0) else "",
+                                "正式卡 ${MoneyFormat.fromFen(balanceSnapshot.cardFen)}" +
+                                    if (balanceSnapshot.accountFen > 0) " · 电子账户 ${MoneyFormat.fromFen(balanceSnapshot.accountFen)}" else "",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -381,10 +382,8 @@ fun CampusCardSettingsScreen(
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                ("正在等待充值到账（¥%.2f）· 约 %d 秒检测一次".format(
-                                    watching.orderFen / 100.0,
-                                    YktArrival.arrivalPollIntervalMs(System.currentTimeMillis() - watching.startedAt) / 1000,
-                                )),
+                                ("正在等待充值到账（${MoneyFormat.fromFen(watching.orderFen)}）· 约 " +
+                                    "${YktArrival.arrivalPollIntervalMs(System.currentTimeMillis() - watching.startedAt) / 1000} 秒检测一次"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
                             )

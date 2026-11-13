@@ -59,6 +59,7 @@ import edu.jxslu.schedule.data.qiekj.QiekjWateringSession
 import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.KqcxAuth
+import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.QzxyWatering
 import edu.jxslu.schedule.domain.QzxyWateringFormat
 import edu.jxslu.schedule.domain.UjingState
@@ -1003,7 +1004,7 @@ private fun KvcxDoneRow(summary: KvcxReturnSummary?, onOpen: () -> Unit) {
             }
             summary?.feeCents?.let { cents ->
                 if (isNotEmpty()) append(" · ")
-                append("¥%.2f".format(cents / 100.0))
+                append(MoneyFormat.fromFen(cents))
             }
         }.ifBlank { "订单已结束" },
         trailing = { DoneCheck() },

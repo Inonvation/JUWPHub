@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.widget
 
 import edu.jxslu.schedule.domain.BalanceAlert
+import edu.jxslu.schedule.domain.MoneyFormat
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.time.Instant
@@ -86,16 +87,16 @@ object CampusBalanceGate {
 object LifeWidgetFormat {
 
     /** 分 → 「128.45」。负数不该出现（上游口径保证非负），夹成 0 兜底。 */
-    fun yuan(fen: Long): String = String.format(Locale.US, "%.2f", fen.coerceAtLeast(0) / 100.0)
+    fun yuan(fen: Long): String = MoneyFormat.fenText(fen.coerceAtLeast(0))
 
     /** 元（`BalanceAlert.remainingYuan` 的返回值）→ 「14.69」。 */
-    fun yuanAmount(yuan: Double): String = String.format(Locale.US, "%.2f", yuan)
+    fun yuanAmount(yuan: Double): String = MoneyFormat.yuanText(yuan)
 
     /** 度数大字：一位小数（23.7）。 */
     fun kwh(remainKwh: Double): String = String.format(Locale.US, "%.1f", remainKwh)
 
     /** 单价（0.62 元/度）。 */
-    fun price(priceYuan: Double): String = String.format(Locale.US, "%.2f", priceYuan)
+    fun price(priceYuan: Double): String = MoneyFormat.yuanText(priceYuan)
 
     /** 「更新 12:30」的时刻部分；[fetchedAtMs] 无效（≤0）返回 null，调用方整段省略。 */
     fun timeLabel(fetchedAtMs: Long, zone: ZoneId = ZoneId.systemDefault()): String? {
