@@ -1,0 +1,120 @@
+{
+  "ok": true,
+  "items": [
+    {
+      "name": "机电传动控制B",
+      "position": "工程训练中心207",
+      "day": 6,
+      "week": 1,
+      "sections": "3-4"
+    },
+    {
+      "name": "机电传动控制B",
+      "position": "工程训练中心207",
+      "day": 6,
+      "week": 3,
+      "sections": "3-4"
+    },
+    {
+      "name": "机械制造基础A",
+      "position": "工程训练中心212",
+      "day": 6,
+      "week": 4,
+      "sections": "7-8"
+    },
+    {
+      "name": "机械制造基础A",
+      "position": "工程训练中心105",
+      "day": 6,
+      "week": 7,
+      "sections": "7-8"
+    },
+    {
+      "name": "机械制造基础A",
+      "position": "工程训练中心403",
+      "day": 6,
+      "week": 8,
+      "sections": "7-8"
+    },
+    {
+      "name": "PLC原理及应用B",
+      "position": "工程训练中心208",
+      "day": 2,
+      "week": 9,
+      "sections": "7-8"
+    },
+    {
+      "name": "人机交互技术",
+      "position": "工程训练中心210",
+      "day": 5,
+      "week": 9,
+      "sections": "7-8"
+    },
+    {
+      "name": "机械制造基础A",
+      "position": "工程训练中心403",
+      "day": 6,
+      "week": 9,
+      "sections": "7-8"
+    },
+    {
+      "name": "PLC原理及应用B",
+      "position": "工程训练中心208",
+      "day": 2,
+      "week": 10,
+      "sections": "5-6"
+    },
+    {
+      "name": "人机交互技术",
+      "position": "工程训练中心210",
+      "day": 5,
+      "week": 10,
+      "sections": "7-8"
+    },
+    {
+      "name": "机械装备结构与设计",
+      "position": "工程训练中心107",
+      "day": 3,
+      "week": 11,
+      "sections": "3-4"
+    },
+    {
+      "name": "机械装备结构与设计",
+      "position": "工程训练中心212",
+      "day": 4,
+      "week": 11,
+      "sections": "5-6"
+    },
+    {
+      "name": "液压与气压传动A",
+      "position": "工程训练中心201",
+      "day": 3,
+      "week": 14,
+      "sections": "3-4"
+    },
+    {
+      "name": "液压与气压传动A",
+      "position": "工程训练中心201",
+      "day": 5,
+      "week": 14,
+      "sections": "3-4"
+    },
+    {
+      "name": "液压与气压传动A",
+      "position": "工程训练中心201",
+      "day": 3,
+      "week": 15,
+      "sections": "1-2"
+    },
+    {
+      "name": "液压与气压传动A",
+      "position": "工程训练中心201",
+      "day": 5,
+      "week": 15,
+      "sections": "3-4"
+    }
+  ],
+  "term": "2026-2027-1",
+  "container": true,
+  "title": "实验课表查询"
+}

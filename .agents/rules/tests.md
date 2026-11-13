@@ -19,6 +19,19 @@
 
 **写不写测试**：新增分支 / 循环 / 解析 / 金额 / 安全 / 新脚本 → 至少一个小测试；纯文案 / 常量 / 资源 / 纯 UI 接线 → 不写。
 
+**教务页面 fixture**：`QiangzhiScheduleParserFixtureTest` / `SyjxScheduleParserFixtureTest` 读
+`app/src/test/resources/jw/{xskb_vt0,syxkb}_extract.json`——真实教务页面按注入脚本口径抽出来的
+JSON（2026-10-07 抓的 2026-2027-1 页面，老师姓名已替换为「某老师」）。重新生成：
+
+1. 跑 `scripts/fetch_courses.py` / `scripts/fetch_lab_courses.py`，`scripts/out/` 会落
+   `xskb_vt0.html` / `syxkb.html`（该目录不入库）。
+2. 用脚本侧同一口径的 `parse_courses(html)` / `parse_lab_courses(html)` 抽出 items，
+   把 `detail` 里的 `老师:XXX` 全部替换成 `老师:某老师`，再写成
+   `{"ok": true, "items": [...], "term": "..."}`（理论课表多带 `cells`；实验课表多带
+   `container: true`）。
+3. **fixture 脱敏红线**：真实学号 / 姓名 / 手机号 / 寝室房号一律替换；课程名和教室编号可以保留。
+4. 抽完先在测试里跑一遍，把聚合后的条数与抽查字段写进断言——条数不对说明页面结构又变了。
+
 **共享件归位**：行为抽到 `JwLayuiJson` / `JwHtml` / `WeeksText` / `CampusPaySign` 这类公共件后，
 边界与错误分支只写在公共件的测试里；调用方测试只留一条接线烟测，不重复铺同一组错误形态。
 
@@ -107,6 +120,7 @@
 、`JwWebBackTest`（教务窗口返回语义：同址条目 / 同址不同 fragment / CAS·SSO·登录页一律跳过，
 跳无可跳返回 null = 关窗口）
 、`PowerBillTest`（电费账单按月归集：按缴费日期归档/充值退款分列/倒序/月窗口跨年）
+、`MoneyFormatTest`（金额格式化：分 / 厘 / 元三种入参、负数、`HALF_UP`、阿拉伯语与德语 Locale 下仍是 ASCII 数字与小数点）
 、`PowerPayTest`（电费充值：订单·渠道·密码挑战解析、密文映射、签名、订单失效文案）
 、`StudentCardTest`（学籍卡解析：姓名班级学号，缺项返回 null）
 、`YktArrivalTest`（充值到账判定：余额涨满订单额/多卡与缺基线不判定）
