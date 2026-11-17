@@ -125,6 +125,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.JuwSchedule"
         android:usesCleartextTraffic="true">
+        <!-- 高德地图 SDK 的 key（2026-11-17）：SDK 只从这个 meta-data 读，不认代码里传的。
+             `${amapKey}` 由 build.gradle.kts 按 buildType 注入（debug / release 两个独立
+             key，各自绑自己的包名与签名 SHA1）；源码与仓库里都不出现 key 字面量。
+             占位符为空串时 SDK 校验失败 → 地图层自动回退 osmdroid 高德栅格。 -->
+        <meta-data
+            android:name="com.amap.api.v2.apikey"
+            android:value="${amapKey}" />
         <!-- 根 Activity 的启动姿势（2026-09-23 真机定了三轮，别再改回去）：
 
              桌面图标点击带的是 NEW_TASK|RESET_TASK_IF_NEEDED。实测四种组合：
@@ -218,7 +225,7 @@
                      RECEIVE_BOOT_COMPLETED 权限已为上课提醒声明，这里无需新增。 -->
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
-            <meta-data
+                <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_info" />
         </receiver>

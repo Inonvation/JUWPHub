@@ -16,6 +16,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -33,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.EbikeAutoReturn
+import edu.jxslu.schedule.data.prefs.AMAP_CHOICE_AGREED
+import edu.jxslu.schedule.data.prefs.AMAP_CHOICE_DECLINED
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.ui.common.AppCardRow
@@ -59,7 +62,7 @@ import me.rerere.hugeicons.stroke.UserAccount
  * 「快趣出行设置」弹层（DESIGN §3.9）：**快趣相关设置的唯一入口**。
  *
  * 快趣出行页顶栏 ⚙ 打开这一份，两档共用，按主题分组：账号 / 开锁与还车 / 自动还车 /
- * 乘车码 / 提醒 / 地图缓存。
+ * 乘车码 / 提醒 / 地图 / 地图缓存。
  * 使用方式不在这里：它搬到骑行页标题栏那枚常驻 chip（`RideModeChip`）。
  *
  * 顶部副行只报「使用方式 + 登录态」；分组沿革、已删入口与各条红线见
@@ -159,6 +162,17 @@ internal fun EbikeSettingsSheet(
                 onFreeReminderChanged = viewModel::onFreeReminderChanged,
                 onReminderPermissionGranted = viewModel::onReminderPermissionGranted,
                 withNotificationPermission = withNotificationPermission,
+            )
+
+            MapSettingsSection(
+                amapChoice = prefs.amapChoice,
+                onAmapChoiceChange = { enabled ->
+                    scope.launch {
+                        Graph.displayPrefs(context).setEbikeAmapChoice(
+                            if (enabled) AMAP_CHOICE_AGREED else AMAP_CHOICE_DECLINED,
+                        )
+                    }
+                },
             )
 
             MapCacheCard(
@@ -501,6 +515,44 @@ private fun ReminderSettingsSection(
 }
 
 /**
+ * 「地图」区：底图来源（DESIGN §3.9，2026-11-17 由天地图开关改过来）。
+ *
+ * 开着 = 高德官方 SDK（矢量底图，楼栋与 POI 名称新、任意缩放清晰）；关着 = osmdroid
+ * 高德栅格（体积小、不依赖 key）。**这也是 SDK 失效后的手动补救入口**：上次会话降级成
+ * 栅格的人，把开关关掉再打开就会重新初始化一次（[AmapMaps.reset] 在 [BikeMapHost] 里）。
+ */
+@Composable
+private fun MapSettingsSection(
+    amapChoice: String,
+    onAmapChoiceChange: (Boolean) -> Unit,
+) {
+    val enabled = amapChoice == AMAP_CHOICE_AGREED
+    val haptics = rememberAppHaptics()
+    SettingsSection(
+        title = "地图",
+        subtitle = "只换底图与标记绘制方式；车辆数据、查询口径与缓存清理不受影响",
+    ) {
+        SettingItem(
+            title = "高德地图（官方）",
+            subtitle = if (enabled) {
+                "矢量底图，楼栋与地名最新；地图数据由高德提供"
+            } else {
+                "基础底图（栅格）；换成官方矢量底图会更清晰、地名更新"
+            },
+            trailing = {
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = {
+                        haptics.toggle()
+                        onAmapChoiceChange(it)
+                    },
+                )
+            },
+        )
+    }
+}
+
+/**
  * 「地图缓存」卡：地图是两档共用的能力，缓存管理两档都要有
  * （小程序方式的人也看得到地图，也得清得掉那 60 MB 瓦片）。
  */
@@ -508,7 +560,7 @@ private fun ReminderSettingsSection(
 private fun MapCacheCard(usage: EbikeMapCache.Usage?, onClear: () -> Unit) {
     SettingsSection(
         title = "地图缓存",
-        subtitle = "离线瓦片与还车点数据；清除后下次打开重新下载，不影响账号与订单",
+        subtitle = "地图瓦片与还车点数据；清除后下次打开重新下载，不影响账号与订单",
     ) {
         SettingItem(
             title = when {

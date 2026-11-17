@@ -441,6 +441,39 @@
   dash/空 7/4dp，仿官方包裹样式；**别用主题深青**——深青 0.32 / 提亮 30% 的青真机都嫌"深、压暗"，
   2026-09-27 定稿直接换浅蓝色系），开关只管过滤不管画不画。
 
+## 地图底图（高德 SDK 主 · osmdroid 回退，2026-11-17）
+
+天地图那一档已整体删除（校区楼栋名缺失、校名仍是旧的「南昌工程学院」）。现在是两条渲染路径，
+**同一份参数契约**，`ui/ebike/BikeMapHost.kt` 二选一，`RideScreen` 只跟 host 打交道。
+
+- **主路径 = 高德官方 3D SDK**（`com.amap.api:3dmap`，`AmapMapView`）。矢量底图，校名与
+  楼栋名都是新的，任意缩放清晰。设置弹层「地图」区的开关**默认开**（`amapChoice = agreed`）。
+- **回退路径 = osmdroid + 高德栅格**（`OsmMapView`，`AmapRoadHD9` / style=9 / 相机 20）。
+  回退判据只有一条：**10 秒内没等到 `onMapLoaded`**（`MapsInitializer.initialize` 返回
+  void，key 校验在服务端异步做，问不出来）。回退是进程内的，下次冷启动重试；地图角上
+  显示「高德地图不可用，已用基础底图」。设置里把开关关掉再打开 = 手动重试。
+- **标记是位图**：高德走 OpenGL，没有自定义 Canvas overlay 的口子，聚合圈 / 车标 / 蓝点 /
+  高亮 chip / P 全在 `AmapMarkerBitmaps` 里离屏渲染，尺寸口径与 `BikeMarkerOverlay` 逐项
+  对齐——**改视觉必须两边一起改**。围栏 / 禁停区 / 还车点范围走 `Polygon`（原来的虚线描边
+  做不出来，现在是实线），精度圈走 `Circle`（半径单位就是米）。
+- **闪屏**：`MapView` 是 SurfaceView，首帧之前那块是它自己的底色（偏白）。`TextureMapView`
+  + alpha 淡入试过——动画掉帧，**已改回 `MapView`**；闪屏用「与页面同色的不透明占位 +
+  `onMapLoaded` 后 180ms 淡出」盖住。
+- **相机**：动画时长按距离 420~720ms；**相机请求必须等 `onMapLoaded` 之后再执行**——
+  高德首帧会重置相机，早发的会被吞掉（症状：进页面不跟到我的位置）。
+- **别把蓝点/朝向放进图层比对**：罗盘 10Hz 会每 100ms 全量重建标记，必卡。
+  `MapOverlayInputs` 比对前先 `copy(userPoint = null, userHeading = null, userAccuracyMeters = 0f)`。
+- **停手判定**：高德的 `onCameraChangeFinish` 就是「相机真的停住」，比 osmdroid 那个 120ms
+  轮询准，所以高德路径不用 `SettleWatcher`；程序性移动仍由 `CameraSuppressor` 吃掉，
+  `aim` 存的就是 GCJ-02（两条路径同基准，没有显示基准转换了）。单指拖动仍自己看 touch
+  （`MapTouchTracker`）用来退出自动跟随。
+- **缓存**：高德 SDK 的瓦片在 `getExternalFilesDir(null)/amap`，与 osmdroid 的 `cache.db`、
+  停车点 JSON 一起在 `EbikeMapCache` 里统计与清除。
+- **R8**：`proguard-rules.pro` 必须 keep `com.amap.api.**` / `com.autonavi.**`，否则 release
+  地图空白、点击无响应（Java 层要经 JNI 回调）。改混淆规则后必须装 release 包冒烟到地图页。
+- **点验**：进页面不再闪白；底图显示「江西水利电力大学」；车标 / 围栏 / 还车点 / 蓝点与底图
+  对齐；捏合能到 20 级；设置里关掉开关后重进是栅格底图。
+
 ## 车号口径
 
 - 车号口径（DESIGN §3.9）：输入框接受「1~3 位尾部」与「6~12 位完整车号」两种形态，

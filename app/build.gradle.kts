@@ -58,6 +58,17 @@ android {
             // 加 .debug 后缀后是两个独立应用，可共存；应用名由 src/debug/res 覆盖为「JUWPHub Debug」。
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            // 高德 key（2026-11-17）：绑定的是 **debug 包名 + 本机 debug.keystore 的 SHA1**，
+            // 与 release 那个 key 完全独立——一个 key 只能绑一个包名，debug 带 .debug 后缀，
+            // 所以两个包必须两个 key。空串时地图层回退 osmdroid 栅格。
+            // manifest 里靠 ${amapKey} 占位符落到 meta-data，源码不出现 key 字面量。
+            buildConfigField(
+                "String",
+                "AMAP_KEY",
+                "\"${keystoreProps.getProperty("amapKeyDebug").orEmpty()}\"",
+            )
+            manifestPlaceholders["amapKey"] =
+                keystoreProps.getProperty("amapKeyDebug").orEmpty()
         }
         release {
             // 有正式 keystore 用它；否则回退 AGP debug 签名（仅本地调试，不可对外分发）。
@@ -68,6 +79,15 @@ android {
                 logger.warn("keystore.properties 缺失，release 回退 debug 签名（仅限本地调试，勿对外分发）")
                 signingConfigs.getByName("debug")
             }
+            // 高德 key（2026-11-17）：绑 **release 包名 + release.jks 的 SHA1**。
+            // 与 debug 那个 key 分开申请，混用会校验失败（包名与 SHA1 都对不上）。
+            buildConfigField(
+                "String",
+                "AMAP_KEY",
+                "\"${keystoreProps.getProperty("amapKeyRelease").orEmpty()}\"",
+            )
+            manifestPlaceholders["amapKey"] =
+                keystoreProps.getProperty("amapKeyRelease").orEmpty()
             // 2026-09-21 起开启 R8 + 资源压缩：§5 的体积目标 < 15MB（1.0.0 实测 17.9MB），
             // 且笔记/作业的渲染内核又添了二十来个类。debug 构建不受影响（便于断点排查）。
             // 反射面已由 androidx 各组件的 consumer rules + proguard-rules.pro 覆盖；
@@ -96,6 +116,13 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        jniLibs {
+            // 高德 3dmap 的两个 .so 合计 32MB（arm64 19.1 + v7a 12.8）。AGP 默认把它们
+            // **不压缩**塞进 APK（为了安装后直接 mmap），实测 release 从 5.4MB 涨到 40.8MB。
+            // 打开 legacy 打包后 .so 走 deflate：APK 回到十几 MB，代价是安装时解压一次、
+            // 磁盘上多占一份。对分发的 APK 来说下载体积优先（2026-11-17 实测）。
+            useLegacyPackaging = true
         }
     }
 }
@@ -170,7 +197,15 @@ dependencies {
     // 附近单车地图（DESIGN §3.9 / §4.23）：osmdroid 6.1.18 的 POM 里没有 <dependencies>，
     // 不会拉进任何传递依赖，也不影响 androidx.core 的版本边界（对比 HugeIcons 那边的教训）。
     // 瓦片源是自建的高德栅格地址（见 ui/ebike/OsmMapView.kt），不用它的在线默认源。
+    // 2026-11-17 起它退居**回退路径**：高德 SDK 拿不到底图（key 失效 / 初始化失败）时顶上。
     implementation("org.osmdroid:osmdroid-android:6.1.18")
+
+    // 高德地图 SDK（2026-11-17）：矢量底图，楼栋与 POI 名称比天地图新，任意缩放都清晰。
+    // 只取 3dmap（地图显示 + 绘制），**不引 location / search**：定位仍走系统 LocationManager
+    // （BikeLocator），也不需要 POI 搜索——省一份体积和一份隐私声明。
+    // jar 内是 `lib/<abi>/*.so`（Eclipse 老布局，AGP 会解包），arm64 19.1MB + v7a 12.8MB，
+    // 这是 release 体积的主要增量，砍 ABI 前先看 §5 的体积目标。
+    implementation("com.amap.api:3dmap:10.0.600")
 
     testImplementation("junit:junit:4.13.2")
 }

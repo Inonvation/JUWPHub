@@ -110,4 +110,5 @@ class Gcj02Test {
             assertTrue("结果必须有限（lat=$lat lng=$lng）", point.lat.isFinite() && point.lng.isFinite())
         }
     }
+
 }

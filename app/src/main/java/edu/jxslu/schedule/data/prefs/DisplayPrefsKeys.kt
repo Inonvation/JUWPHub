@@ -86,13 +86,32 @@ internal val KEY_UJING_NOTICE_SEEN_AT = longPreferencesKey("ujing_notice_seen_at
 internal val KEY_EBIKE_MAP_ONLY_AVAILABLE = booleanPreferencesKey("ebike_map_only_available")
 internal val KEY_EBIKE_MAP_ONLY_OUR_CAMPUS = booleanPreferencesKey("ebike_map_only_our_campus")
 internal val KEY_EBIKE_MAP_BY_BIKE = booleanPreferencesKey("ebike_map_by_bike")
+/**
+ * 地图底图选择（DESIGN §3.9，2026-11-17）：`unset` / `agreed` / `declined`。
+ * 高德 SDK 要求先取得用户对隐私政策的同意，第一次进共享单车地图页问一次，答案落这里。
+ */
+internal val KEY_EBIKE_AMAP_CHOICE = stringPreferencesKey("ebike_amap_choice")
+/**
+ * 上次已知的用户位置（2026-11-17）：建图中心用它，进页面第一帧就落在人身上。
+ * 与 `EbikeUserLocation`（进程内、5 分钟有效）分开——这一份**落盘**，
+ * 冷启动 / 隔了很久再进也能用。
+ */
+internal val KEY_EBIKE_LAST_LAT = floatPreferencesKey("ebike_last_lat")
+internal val KEY_EBIKE_LAST_LNG = floatPreferencesKey("ebike_last_lng")
+internal val KEY_EBIKE_LAST_AT = longPreferencesKey("ebike_last_at")
+
+/** 地图底图选择的三个取值（见 [KEY_EBIKE_AMAP_CHOICE]）。 */
+internal const val AMAP_CHOICE_UNSET = "unset"
+internal const val AMAP_CHOICE_AGREED = "agreed"
+internal const val AMAP_CHOICE_DECLINED = "declined"
+internal val AMAP_CHOICE_VALUES = setOf(AMAP_CHOICE_UNSET, AMAP_CHOICE_AGREED, AMAP_CHOICE_DECLINED)
 internal val KEY_EBIKE_VIEW_LAT = floatPreferencesKey("ebike_view_lat")
 internal val KEY_EBIKE_VIEW_LNG = floatPreferencesKey("ebike_view_lng")
 internal val KEY_EBIKE_VIEW_ZOOM = floatPreferencesKey("ebike_view_zoom")
 internal val KEY_EBIKE_PANEL_HEIGHT_DP = floatPreferencesKey("ebike_panel_height_dp")
-        /** 保存视野时的缩放范围，与瓦片源的 1~19 对齐。 */
+        /** 保存视野时的缩放范围，与高德栅格相机的 1~20 对齐（HD 模式在 18 封顶）。 */
         const val MIN_MAP_ZOOM = 1.0f
-        const val MAX_MAP_ZOOM = 19.0f
+        const val MAX_MAP_ZOOM = 20.0f
 internal val KEY_EBIKE_PENDING_DELETE = stringSetPreferencesKey("ebike_pending_delete")
 internal val KEY_EBIKE_RECENT_IDS = stringPreferencesKey("ebike_recent_ids")
         /** 菜鸟批量查的最近提交（DESIGN §4.47）：JSON 数组，缺省 = 无历史。 */

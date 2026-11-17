@@ -13,7 +13,7 @@ import java.io.File
 /**
  * 「地图缓存」的统计与清除（DESIGN §3.9，2026-09-28 用户口径）。
  *
- * 缓存是两块，卡上分开报：
+ * 缓存是三块，卡上合并报：
  * 1. **离线瓦片**：osmdroid 的瓦片库 `cacheDir/osmdroid/tiles/cache.db`。
  *    注意它**不是**一堆图片文件——osmdroid 6.1.18 默认走 `SqlTileWriter`（SQLite 库），
  *    而且这个库的连接是**静态的、`onDetach()` 是空实现**（拆包确认）：进程内被第一次
@@ -22,14 +22,16 @@ import java.io.File
  *    正确做法是走 [SqlTileWriter.purgeCache] 删行（`DELETE FROM tiles`），再尽力 VACUUM
  *    把文件缩回去（DELETE 不缩文件，不 VACUUM 的话那几十兆磁盘看着像没清）。
  * 2. **停车点数据**：还车点 / 禁停区图层的落盘缓存文件（`ZoneCacheStore`，几十 KB）。
+ * 3. **高德 SDK 缓存**（2026-11-17）：官方地图把瓦片放在 `getExternalFilesDir(null)/amap`，
+ *    与上面那两块互不相干，清除时一起删（普通目录，SDK 会自己重建）。
  *
  * 路径一律经 [ensureOsmdroidConfiguration] 取（与地图页同一份配置），**别另抄一份**。
  */
 internal object EbikeMapCache {
 
-    /** 两块缓存各自的大小（字节）与合计。 */
-    data class Usage(val tileBytes: Long, val zoneBytes: Long) {
-        val totalBytes: Long get() = tileBytes + zoneBytes
+    /** 三块缓存各自的大小（字节）与合计。 */
+    data class Usage(val tileBytes: Long, val zoneBytes: Long, val amapBytes: Long) {
+        val totalBytes: Long get() = tileBytes + zoneBytes + amapBytes
         val isEmpty: Boolean get() = totalBytes <= 0L
     }
 
@@ -42,6 +44,7 @@ internal object EbikeMapCache {
         Usage(
             tileBytes = dirBytes(Configuration.getInstance().osmdroidTileCache),
             zoneBytes = Graph.zoneCacheStore(context).bytes(),
+            amapBytes = dirBytes(amapCacheDir(context)),
         )
     }
 
@@ -72,6 +75,8 @@ internal object EbikeMapCache {
         // （2026-10-08 起第二个入口是关于页「清理缓存」，清前骑行页已退出），没有在跑的事务。
         if (purged) runCatching { File(dbFile.absolutePath + JOURNAL_SUFFIX).delete() }
         Graph.zoneCacheStore(context).delete()
+        // 高德 SDK 的瓦片缓存：普通目录，删掉即失效，SDK 下次自己重建
+        runCatching { amapCacheDir(context).deleteRecursively() }
         purged
     }
 
@@ -90,6 +95,19 @@ internal object EbikeMapCache {
         }
     }
 
+    /**
+     * 高德 SDK 的瓦片缓存目录（2026-11-17）：`getExternalFilesDir(null)/amap`
+     * （真机确认，清除前约 7.5 MB）。它在应用专属外部目录下，不需要存储权限，
+     * 卸载即清。**不要**改成 `MapsInitializer.sdcardDir` 另指一处——那样这个卡片就统计不到了。
+     *
+     * 外部目录不可用（存储未挂载的少数情况）时退回内部 `filesDir/amap`：
+     * 千万别 `File(null, "amap")`——那会得到一个**相对路径**，清除时按进程 CWD 解析。
+     */
+    private fun amapCacheDir(context: Context): File {
+        val parent = context.getExternalFilesDir(null) ?: context.filesDir
+        return File(parent, AMAP_CACHE_DIR)
+    }
+
     /** 目录总字节（含 `-journal` 这类附属文件；目录不存在回 0）。 */
     private fun dirBytes(dir: File): Long = runCatching {
         dir.walkTopDown().filter(File::isFile).sumOf(File::length)
@@ -100,4 +118,7 @@ internal object EbikeMapCache {
 
     /** SQLite 回滚日志的后缀（`cache.db-journal`）。 */
     private const val JOURNAL_SUFFIX = "-journal"
+
+    /** 高德 SDK 缓存目录名（`getExternalFilesDir(null)` 下）。 */
+    private const val AMAP_CACHE_DIR = "amap"
 }

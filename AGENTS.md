@@ -95,7 +95,7 @@ Get-ChildItem -Recurse -Include *.md,*.kt | Select-String -Pattern '<旧说法>'
 | 课表网格 | 行号 = **小节号 1–11**（不是大节号）；`Course.startSection/endSection` 也是小节号 |
 | HugeIcons | `com.github.rikkahub:hugeicons-compose:1.4`（**JitPack**，**`isTransitive = false`**）。**不要**写 `me.rerere:hugeicons-compose:1.0.0`（Maven Central 不存在）；不要打开传递依赖（只用它的图标 AAR，打开会把它那一套 compose / core 版本带进来，与项目的版本边界打架） |
 | 图标用法 | `import me.rerere.hugeicons.stroke.*` + `HugeIcons.Calendar01` 等；查名用本地 JAR，勿猜 |
-| osmdroid | `org.osmdroid:osmdroid-android:6.1.18`（Maven Central；POM 里没有 `<dependencies>`，不拉传递依赖）。**加依赖后第一次构建要联网 resolve 一次**，之后 `--offline` 照常用 |
+| 高德地图 SDK | `com.amap.api:3dmap:10.0.600`（Maven Central，jar 里是 `lib/<abi>/*.so` 老布局，AGP 会解包）。**主底图**（2026-11-17）。两个 .so 合计 32MB：`jniLibs.useLegacyPackaging = true` 把 release 压在 22.5MB。R8 必须 keep `com.amap.api.**`，否则 release 地图空白 |
 | Glance | `androidx.glance:glance-appwidget:1.2.0`（桌面小组件）；传递抬 compose runtime 至 1.7.8 |
 | 样例课 | **已移除**；课表默认空，从教务 WebView 导入 |
 | 包名 | release = `edu.jxslu.schedule`；debug = `edu.jxslu.schedule.debug`（两者签名不同，**必须**靠后缀区分） |
@@ -298,6 +298,7 @@ JuwApplication ensureDefaults（节次/学期；课表不预置）+ 小组件冷
 
 - 刷积分/绕过付费/伪造官方身份：**App 允许个人账号的每日签到**（2026-10-23 用户授权）——当前只接签到，不接任务列表、任务完成上报/领奖。仍然禁止：绕过验证码/广告核验/付费/风控，批量账号，内置他人 token，后台静默刷取。签到接口的版本与签名口径见 `.agents/rules/life-power.md`；token 仍只走 EncryptedSharedPreferences，禁止进日志/git
 - 禁止把学号/密码/token 写进 git（`scripts/credentials.local.json`、`local.properties`、`release.jks`、`keystore.properties` 已 ignore）
+- 高德 key 按 buildType 注入：debug 用 `amapKeyDebug`（绑 `edu.jxslu.schedule.debug` + 本机 debug.keystore 的 SHA1），release 用 `amapKeyRelease`（绑正式包名 + `release.jks` 的 SHA1），均从 `keystore.properties` 读，经 `manifestPlaceholders` 落到 manifest 的 `com.amap.api.v2.apikey`；禁止混用、硬编码进 `build.gradle.kts` 或源码、入库。一个 key 只能绑一个包名，所以两个包必须两个 key
 - 提交与文档中不得出现真实学号、姓名、手机号、token（转私不改这条卫生习惯）；新增抓取产物目录前先确认 `.gitignore` 已覆盖
 - **提交不带个人信息**：提交信息、代码、注释、测试 fixture 里不出现真实学号、姓名、手机号、寝室房号、真实邮箱；作者身份用 noreply 邮箱
 - **提交信息精简**：标题一行说清改了什么，正文只写必要的理由与影响面。细则见 `.agents/rules/build-release.md`

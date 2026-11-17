@@ -75,7 +75,12 @@ object OpenSourceLicenses {
             url = "https://opendocs.alipay.com/open/204",
         ),
         LicenseEntry(
-            name = "osmdroid（地图）",
+            name = "高德地图 SDK（地图）",
+            license = "Amap SDK 使用许可（专有）",
+            url = "https://lbs.amap.com/",
+        ),
+        LicenseEntry(
+            name = "osmdroid（地图回退）",
             license = "Apache-2.0",
             url = "https://github.com/osmdroid/osmdroid",
         ),

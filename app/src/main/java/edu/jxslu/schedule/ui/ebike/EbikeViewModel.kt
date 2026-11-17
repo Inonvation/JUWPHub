@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.data.prefs.AMAP_CHOICE_UNSET
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.domain.EbikeAutoReturn
 import edu.jxslu.schedule.domain.EbikeQr
@@ -88,6 +89,8 @@ data class EbikePrefsSnapshot(
     val autoReturnLeadSeconds: Int = EbikeAutoReturn.DEFAULT_LEAD_SECONDS,
     /** 自动还车的失败重试次数（1~3，默认 2）。 */
     val autoReturnRetries: Int = EbikeAutoReturn.DEFAULT_RETRIES,
+    /** 地图底图选择（DESIGN §3.9，2026-11-17）：见 [DisplayPrefsStore.ebikeAmapChoice]。 */
+    val amapChoice: String = AMAP_CHOICE_UNSET,
 )
 
 sealed interface EbikeEvent {
@@ -147,6 +150,7 @@ class EbikeViewModel(
         prefs.ebikeAutoReturnEnabled,
         prefs.ebikeAutoReturnLeadSeconds,
         prefs.ebikeAutoReturnRetries,
+        prefs.ebikeAmapChoice,
     ) { array ->
         val autoSave = array[0] as Boolean
         val burnAfterScan = array[1] as Boolean
@@ -161,6 +165,7 @@ class EbikeViewModel(
         val autoReturnEnabled = array[9] as Boolean
         val autoReturnLeadSeconds = array[10] as Int
         val autoReturnRetries = array[11] as Int
+        val amapChoice = array[12] as String
         EbikePrefsSnapshot(
             autoSave = autoSave,
             burnAfterScan = burnAfterScan,
@@ -174,6 +179,7 @@ class EbikeViewModel(
             autoReturnEnabled = autoReturnEnabled,
             autoReturnLeadSeconds = autoReturnLeadSeconds,
             autoReturnRetries = autoReturnRetries,
+            amapChoice = amapChoice,
         )
     }.stateIn(
         viewModelScope,
@@ -182,8 +188,7 @@ class EbikeViewModel(
     )
 
     /** 免费提醒设置变更（开关/提前量）→ 重算：补发该发的、重排闹钟、起停服务。 */
-    fun onFreeReminderChanged() {
-        viewModelScope.launch {
+    fun onFreeReminderChanged() {        viewModelScope.launch {
             emitReminderNotice(EbikeFreeRideReminder.check(Graph.appContext))
         }
     }

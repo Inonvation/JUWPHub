@@ -74,6 +74,7 @@ import edu.jxslu.schedule.domain.EbikeQr
 import edu.jxslu.schedule.domain.EbikeRemoteRide
 import edu.jxslu.schedule.domain.EbikeRideCard
 import edu.jxslu.schedule.domain.EbikeUseMode
+import edu.jxslu.schedule.domain.GcjPoint
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
@@ -93,6 +94,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ChevronDown
@@ -188,6 +190,11 @@ fun RideScreen(
      * 按 `returnSummaryAt` 重置：新的一单还车后重新计时。
      */
     var settleAutoCancelled by remember(kvcxState.returnSummaryAt) { mutableStateOf(false) }
+    /**
+     * 官方地图 SDK 本次会话不可用、已降级成栅格（2026-11-17）：只用于地图角上那行说明。
+     * 按 `amapChoice` 重置——用户在设置里关掉再打开要能重新试一次，提示条也得跟着消失。
+     */
+    var mapFallback by remember(prefs.amapChoice) { mutableStateOf(false) }
     // 过期的结算卡不再渲染（离开页面很久再回来不闪一帧）；主动点过上面两个动作则保留
     val summaryExpired = rawSummary != null && kvcxState.returnSummaryAt > 0L &&
         System.currentTimeMillis() >= kvcxState.returnSummaryAt + SettleAutoContinueMillis
@@ -669,6 +676,20 @@ fun RideScreen(
         }
     }
     val prefsStore = remember { Graph.displayPrefs(context) }
+    /**
+     * 建图中心（2026-11-17）：进程内新鲜定位 → 落盘的上次位置 → null（回落到校区中心）。
+     *
+     * 阻塞读一次 DataStore：这是「首帧真值」，与 `useMode` / 首启那几处同一条纪律——
+     * 让地图**第一帧就落在人身上**，而不是先画一帧校区再挪过去。用户报的「进页面有时不跟到
+     * 我的位置」就是定位慢 / 失败时没有可用中心。
+     */
+    val initialMapCenter = remember {
+        EbikeUserLocation.fresh()?.let { GcjPoint(it.lat, it.lng) }
+            ?: runBlocking { prefsStore.ebikeLastLocation.first() }
+                ?.let { GcjPoint(it.lat, it.lng) }
+    }
+    /** 上次把位置落盘的时刻（节流用：定位每两秒来一次，不能每次都写 DataStore）。 */
+    val lastLocationPersistAt = remember { longArrayOf(0L) }
     LaunchedEffect(Unit) {
         when {
             BikeLocator.hasPermission(context) ->
@@ -694,6 +715,16 @@ fun RideScreen(
                             result.lng,
                             result.accuracyMeters,
                         )
+                        // 落盘「上次位置」给下次进页面用（60 秒一次足够，定位本身是 ~2 秒一跳）
+                        val now = System.currentTimeMillis()
+                        if (now - lastLocationPersistAt[0] >= LOCATION_PERSIST_INTERVAL_MS) {
+                            lastLocationPersistAt[0] = now
+                            scope.launch {
+                                runCatching {
+                                    prefsStore.setEbikeLastLocation(result.lat, result.lng, now)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -846,7 +877,10 @@ fun RideScreen(
                         .fillMaxSize()
                         .clipToBounds(),
                 ) {
-                    OsmMapView(
+                    BikeMapHost(
+                        // 底图选择（DESIGN §3.9，2026-11-17）：同意过高德才走官方 SDK，
+                        // 否则 / SDK 不可用时走 osmdroid 栅格（见 BikeMapHost）
+                        amapChoice = prefs.amapChoice,
                         // 账号方式的骑行态让位给还车点：那一刻用户要找的是"停哪儿"。
                         // 小程序方式没有还车点图层，让位只会剩一张空地图（见 showSpots）
                         clusters = if (showSpots) emptyList() else state.clusters,
@@ -892,6 +926,12 @@ fun RideScreen(
                         onCameraApplied = viewModel::onCameraApplied,
                         // 用户单指拖图：退出自动跟随（点「定位」/ 开始骑行会重新打开）
                         onUserPan = viewModel::onUserPanned,
+                        // 官方 SDK 拿不到底图：本次会话降级为栅格，并在地图上给一行说明
+                        onFallback = { mapFallback = true },
+                        // 建图中心直接用**上次已知的用户位置**（2026-11-17 用户报「进页面不会
+                        // 自动到我位置」）：地图每次进入都新建，靠一次性的 camera 请求不可靠，
+                        // 干脆第一帧就落在人身上。没有新鲜定位时留 null，回落到校区中心。
+                        initialCenter = initialMapCenter,
                         // 面板高度与底部块高度一变，就把整幅地图按两者之和的一半向上平移
                         // （见上面那段的注释）：只动图层、不 resize 视图，地图内容不跳、瓦片不重绘。
                         modifier = Modifier
@@ -902,6 +942,25 @@ fun RideScreen(
                                 translationY = -(panelHeight.toPx() + liveBlockDp.dp.toPx()) / 2f
                             },
                     )
+
+                    // 降级提示（2026-11-17）：高德官方 SDK 拿不到底图时，本次会话用 osmdroid
+                    // 栅格顶上。贴在地图可见区左上角，放在被整幅平移的地图之外——地图上移后
+                    // 自身的 top 会被 clipToBounds 裁掉。
+                    if (mapFallback) {
+                        Text(
+                            text = "高德地图不可用，已用基础底图",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(8.dp)
+                                .background(
+                                    Color.Black.copy(alpha = 0.35f),
+                                    RoundedCornerShape(4.dp),
+                                )
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
 
                     // 车号输入搬进「车号 / 出码」面板，地图上不再有第二个入口抢注意力。
                     // 定位 / 回到校区两枚浮动按钮在**地图右下角、面板上沿之上**（2026-10-29 用户口径：
@@ -1240,6 +1299,7 @@ fun RideScreen(
         )
     }
 
+
     // 本机用车确认（写操作二次确认；文案唯一出处 kvcxConfirmDialog）。
     // 状态读在 KvcxConfirmHost 里面（见那处注释），本函数体不读它。
     KvcxConfirmHost(
@@ -1497,6 +1557,12 @@ private const val DENIED_HINT = "已拒绝定位权限；可在系统设置里�
  * 通常几十米内，100 米足够宽容，又不会把"同一片校区但不在车边"算进来。「我的车」标记
  * 始终用车辆坐标，不受这个半径影响。
  */
+/**
+ * 「上次位置」落盘的节流间隔（2026-11-17）：定位每 ~2 秒来一次，每次都写 DataStore 没必要，
+ * 60 秒一次足够——它只服务「下次进页面第一帧落在人身上」。
+ */
+private const val LOCATION_PERSIST_INTERVAL_MS = 60_000L
+
 private const val RIDE_NEAR_USER_METERS = 100.0
 
 /**

@@ -15,15 +15,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.BuildConfig
 import edu.jxslu.schedule.domain.BikeCluster
 import edu.jxslu.schedule.domain.BikeNearby
+import edu.jxslu.schedule.domain.Gcj02
 import edu.jxslu.schedule.domain.GcjPoint
 import edu.jxslu.schedule.domain.KvcxZones
 import edu.jxslu.schedule.domain.NearbyBike
@@ -44,24 +45,47 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Overlay
 import java.io.File
 
+/** 高德栅格真实瓦片最高级别：z19 起回空瓦片。 */
+private const val AMAP_NATIVE_MAX_ZOOM = 18
+
+/** 相机允许的最高级别：z19/z20 由 MapTileApproximater 用 z18 瓦片放大。 */
+private const val AMAP_MAX_ZOOM = 20
+
 /**
- * 高德栅格瓦片（DESIGN §4.23）：512 像素档声明，主中国大陆路网底图（带注记），
- * 坐标基准 GCJ-02，与运营方给的车辆坐标同一基准，因此**不用做任何坐标转换**。
+ * 高德栅格瓦片（DESIGN §4.23）：512 像素档声明，详细路网底图（带注记）。
+ * 坐标基准是 GCJ-02，与运营方给的车辆坐标同一基准，因此**不做任何转换**。
+ *
+ * **2026-11-17 起它是回退路径**：官方高德 SDK 拿不到底图时顶上（见 [BikeMapHost]）。
+ * 天地图那套高清底图已整体删除——校区级楼栋名缺失、校名仍是旧的「南昌工程学院」，
+ * 实测不如这张栅格。
+ *
+ * **style=9、真实瓦片最高 18 级，相机上限 20 级**（2026-11-13 从 style=7 / 19 换过来）：
+ * style=7 在校区 z18 起是一整片绿地、z19 更空，放大后既没路名也没楼栋；style=9 在
+ * z17/z18 保留绿地与楼栋轮廓，还带路名（三峡西路、柘林西路、机械电气楼），观感更接近
+ * 高德矢量底图。高德栅格在 z19 起回空瓦片（实测 179 字节），所以**真实瓦片只到 18**；
+ * 相机上限放到 20，z19/z20 由 osmdroid 自带的 `MapTileApproximater` 拿 z18 瓦片放大
+ * （2 倍 / 4 倍，数字变焦，不请求 z19+ 空瓦片）。再往上 21/22 要放大 8/16 倍，绘制
+ * 明显卡顿，所以停在 20。
  *
  * **不要加 `scl=2`**（2026-09-27 试过又撤）：带了它服务器回的是"无注记纯底图"——
  * 路网、绿地块全有，**地名一个都没有**，真机上用户第一眼就报"名称没了"。
  * 不带它回的是 256px 带注记图，按 512 声明渲染会被拉大 2 倍、略有发虚——这是当前
- * 的取舍：注记优先，发虚先接受；要又高清又有注记，栅格这条路没有（得换矢量/付费）。
- * 源名保持 `AmapRoadHD`：osmdroid 瓦片缓存按源名分键，名字不变则此前缓存的 256px
- * 带注记图还能继续用，回退后不用重新下载。
+ * 的取舍：注记优先，发虚先接受。
+ *
+ * **源名从 `AmapRoadHD` 改为 `AmapRoadHD9`**：osmdroid 瓦片缓存按源名分键，沿用旧名
+ * 会把 style=7 的旧瓦片继续喂给地图（z18 一片绿），换 style 必须同时换源名。
+ *
+ * **MapView 的缩放上限要单独设**：`setTileSource` 不会把 MapView 的 `maxZoomLevel`
+ * 跟着换成新源的上限，只设瓦片源的最大级别地图仍能捏合到 20+。见 MapView 初始化处的
+ * `setMaxZoomLevel`。
  *
  * 地址是高德的非公开栅格接口：不接官方 SDK、不申请 key。属于灰色用法，页面免责声明
  * 已写明；地址失效时地图白板，底部车辆列表照常可用（降级路径见 `RideScreen`）。
  */
 private val AMAP_TILE_SOURCE: OnlineTileSourceBase = object : OnlineTileSourceBase(
-    "AmapRoadHD",
+    "AmapRoadHD9",
     /* aZoomMinLevel = */ 1,
-    /* aZoomMaxLevel = */ 19,
+    /* aZoomMaxLevel = */ AMAP_NATIVE_MAX_ZOOM,
     /* aTileSizePixels = */ 512,
     /* aImageFilenameEnding = */ "",
     arrayOf(
@@ -75,7 +99,7 @@ private val AMAP_TILE_SOURCE: OnlineTileSourceBase = object : OnlineTileSourceBa
         baseUrl + "appmaptile?x=" + MapTileIndex.getX(pMapTileIndex) +
             "&y=" + MapTileIndex.getY(pMapTileIndex) +
             "&z=" + MapTileIndex.getZoom(pMapTileIndex) +
-            "&lang=zh_cn&size=1&style=7"
+            "&lang=zh_cn&size=1&style=9"
 }
 
 /** osmdroid 自己的偏好文件（只有瓦片缓存路径这类项，与 App 的 DataStore 无关）。 */
@@ -151,7 +175,7 @@ private const val TILE_CACHE_TRIM_BYTES = 50L * 1024 * 1024
  * 所以 update 里先比对这一份，**只有画的东西真的变了才 invalidate**；回调照旧每轮都写
  * （它们是闭包，换了不需要重画）。
  */
-private data class MapOverlayInputs(
+internal data class MapOverlayInputs(
     val colors: BikeMarkerColors,
     val clusters: List<BikeCluster>,
     val selectedKey: String?,
@@ -177,7 +201,7 @@ private data class MapOverlayInputs(
  * 生命周期与 [OsmMapView] 里的 `mapView` / `overlay` 一致（同一个 `remember` 作用域），
  * 所以地图视图被重建时这一份也一起重置，不会出现"新视图什么都没画"。
  */
-private class DrawnOverlayInputs(var value: MapOverlayInputs? = null)
+internal class DrawnOverlayInputs(var value: MapOverlayInputs? = null)
 
 /**
  * 附近单车地图（DESIGN §3.9）。
@@ -207,7 +231,7 @@ internal fun OsmMapView(
     bikes: List<NearbyBike> = emptyList(),
     /** 地图显示方式：true = 每辆车一枚图标，false = 停车点聚合圈。 */
     byBike: Boolean = false,
-    /** 选中的车号（点图标 / 点列表行）：图标画加粗描边；null = 没选中。 */
+    /** 选中的车号（点地图 / 点列表行）：图标画加粗描边；null = 没选中。 */
     selectedBikeCarNum: String? = null,
     /** 点中某辆车图标（仅「按车辆」模式）。 */
     onBikeTap: (String) -> Unit = {},
@@ -236,7 +260,7 @@ internal fun OsmMapView(
      * [CameraSuppressor] 吃掉，走不到这里，那些路径各自安排查询。
      *
      * 视口半对角线（米）用于按视口缩放采样半径（`BikeNearby.sampleRadiusMeters`）：
-     * 放大到只看一条路时不必再查视界之外的几百米。拿不到包围盒时给 0，调用方按上限算。
+     * 放大到只看一条路时不必再查视界之外的几百米。拿不到包围盒时回 0，调用方按上限算。
      */
     onCenterSettled: (Double, Double, Double, Double) -> Unit,
     zones: KvcxZones,
@@ -251,6 +275,10 @@ internal fun OsmMapView(
      * 用户接管地图时，程序性跟随的缓动不能继续和手指抢。
      */
     onUserPan: () -> Unit = {},
+    /** 建图中心（GCJ-02）；null 回落到校区中心。见 [AmapMapView] 同名参数的说明。 */
+    initialCenter: GcjPoint? = null,
+    /** 建图缩放；null 用默认级别。 */
+    initialZoom: Double? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -284,7 +312,7 @@ internal fun OsmMapView(
 
     val overlay = remember {
         BikeMarkerOverlay(context.resources.displayMetrics.density).apply {
-            // 围栏顶点是常量（BikeNearby.CAMPUS_FENCE），进页面就有，不随状态变
+            // 围栏顶点是常量（BikeNearby.CAMPUS_FENCE，GCJ-02），与瓦片同基准
             fence = BikeNearby.CAMPUS_FENCE
         }
     }
@@ -294,14 +322,21 @@ internal fun OsmMapView(
         ensureOsmdroidConfiguration(context)
         MapView(context).apply {
             setTileSource(AMAP_TILE_SOURCE)
+            // 换源不会自动更新 MapView 的上限：相机 20（z19/20 由 MapTileApproximater 放大 z18）
+            setMaxZoomLevel(AMAP_MAX_ZOOM.toDouble())
             // 512 像素瓦片按屏幕像素 1:1 画，别再按 dpi 缩放一遍
             setTilesScaledToDpi(false)
             setMultiTouchControls(true)
             setUseDataConnection(true)
             // 内置的 +/- 按钮在 512 瓦片下偏占地方；捏合缩放够用
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-            controller.setZoom(BikeNearby.DEFAULT_ZOOM)
-            controller.setCenter(GeoPoint(BikeNearby.DEFAULT_CENTER_LAT, BikeNearby.DEFAULT_CENTER_LNG))
+            controller.setZoom(initialZoom ?: BikeNearby.DEFAULT_ZOOM)
+            controller.setCenter(
+                GeoPoint(
+                    initialCenter?.lat ?: BikeNearby.DEFAULT_CENTER_LAT,
+                    initialCenter?.lng ?: BikeNearby.DEFAULT_CENTER_LNG,
+                ),
+            )
             addMapListener(
                 object : MapListener {
                     override fun onScroll(event: ScrollEvent?): Boolean {
@@ -311,7 +346,12 @@ internal fun OsmMapView(
                         }
                         // 每次事件只喂给停手判定；查询由它确认"真的停了"之后再发
                         settleWatcher.onEvent(this@apply) { lat, lng, zoom ->
-                            settleCallback(lat, lng, zoom, viewportHalfDiagonalMeters(this@apply))
+                            settleCallback(
+                                lat,
+                                lng,
+                                zoom,
+                                viewportHalfDiagonalMeters(this@apply),
+                            )
                         }
                         return false
                     }
@@ -322,7 +362,12 @@ internal fun OsmMapView(
                             return false
                         }
                         settleWatcher.onEvent(this@apply) { lat, lng, zoom ->
-                            settleCallback(lat, lng, zoom, viewportHalfDiagonalMeters(this@apply))
+                            settleCallback(
+                                lat,
+                                lng,
+                                zoom,
+                                viewportHalfDiagonalMeters(this@apply),
+                            )
                         }
                         return false
                     }
@@ -382,6 +427,7 @@ internal fun OsmMapView(
                 overlay.highlightPoint = inputs.highlightPoint
                 overlay.highlightLabel = inputs.highlightLabel
                 overlay.zones = inputs.zones
+                overlay.fence = BikeNearby.CAMPUS_FENCE
                 drawn.value = inputs
                 view.invalidate()
             }
@@ -404,9 +450,12 @@ internal fun OsmMapView(
         val request = camera ?: return@LaunchedEffect
         // 还没量到尺寸：这次先不执行，也**不消费请求**。等尺寸到位后 key 变化会再来一遍
         if (mapSize.width == 0 || mapSize.height == 0) return@LaunchedEffect
-        val target = GeoPoint(request.lat, request.lng)
-        val zoom = request.zoom
-        suppressor.aim(request.lat, request.lng)
+        // CameraRequest 的坐标就是应用内部的 GCJ-02，与瓦片同基准，不需要转换
+        val targetPoint = GcjPoint(request.lat, request.lng)
+        val target = GeoPoint(targetPoint.lat, targetPoint.lng)
+        val maxZoom = AMAP_MAX_ZOOM.toDouble()
+        val zoom = request.zoom?.coerceAtMost(maxZoom)
+        suppressor.aim(targetPoint.lat, targetPoint.lng)
         // osmdroid 的 animateTo 是**非阻塞**的：启动动画就返回，帧要等后面几帧才跑。
         // 所以静默只能按时间窗开，不能"等动画结束再关"——那样第一帧就已经漏出去了
         suppressor.quietFor(if (request.animated) MOVE_QUIET_MS else RESTORE_QUIET_MS)
@@ -451,7 +500,7 @@ private const val RESTORE_QUIET_MS = 300L
  * 用时间而不是标志位：animateTo 不阻塞，协程里"动画之后"仍在第一帧之前，标志位来不及摆；
  * 时间窗还天然不会挂住，不存在"忘了清标志导致再也查不了"的故障模式。
  */
-private class CameraSuppressor {
+internal class CameraSuppressor {
     private var quietUntil = 0L
     private var lat: Double? = null
     private var lng: Double? = null

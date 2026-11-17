@@ -74,3 +74,12 @@
 -keepclassmembers class edu.jxslu.schedule.ui.life.CashierBridge {
     @android.webkit.JavascriptInterface <methods>;
 }
+
+# ── 高德地图 SDK（2026-11-17）──────────────────────────────────────────────────
+# 3dmap 的 Java 层要经 JNI 回调（地图渲染、marker 点击、相机事件都在 native 侧触发），
+# 类名/方法名一旦被 R8 改写，native 那边就找不到入口：表现为地图一片空白、点击无响应，
+# 且**只在 release 包复现**。官方给的 keep 口径就是整个 com.amap.api 包。
+-keep class com.amap.api.** { *; }
+-keep class com.autonavi.** { *; }
+-dontwarn com.amap.api.**
+-dontwarn com.autonavi.**

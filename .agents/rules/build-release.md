@@ -39,6 +39,32 @@
 理由：同包名会互相覆盖安装，数据全丢。
 启动 debug 包必须写全限定名，`adb` 命令与「装到哪台设备、谁来点验」的判据见 `AGENTS.md`「装机与验证路径」。
 
+## 高德 key 按 buildType 注入（2026-11-17 起；天地图那套已删）
+
+约束：`keystore.properties` 的 `amapKeyDebug` 只给 debug（包名 `edu.jxslu.schedule.debug`
++ 本机 `~/.android/debug.keystore` 的 SHA1），`amapKeyRelease` 只给 release
+（`edu.jxslu.schedule` + `release.jks` 的 SHA1）；`build.gradle.kts` 的 debug / release 各自
+`buildConfigField("String", "AMAP_KEY", …)` + `manifestPlaceholders["amapKey"]`，
+manifest 的 `com.amap.api.v2.apikey` 用 `${amapKey}` 占位。
+
+- **禁止**把 key 写死进 `build.gradle.kts`、源码、测试或文档；只放本地 `keystore.properties`
+  （已 gitignore）。
+- **一个 key 只能绑一个包名**：debug 包带 `.debug` 后缀，所以两个包必须两个 key，
+  不能靠「发布版 SHA1 + 调试版 SHA1」一个 key 通吃。
+- **禁止 debug / release 混用**：包名或 SHA1 对不上，SDK 校验失败、地图空白。
+- 空 key（缺文件 / 缺字段）→ `AmapMaps.prepare` 拿不到底图，10 秒超时后整层回退
+  osmdroid 栅格，不崩。
+- 换签名 / 换机器后要重新取 SHA1 并在高德控制台改 key（调试版 SHA1 是本机 `debug.keystore` 的，
+  换机器就变）：
+
+```powershell
+keytool -list -v -keystore release.jks -alias juwp | Select-String "SHA1:"
+keytool -list -v -keystore $env:USERPROFILE\.android\debug.keystore -alias androiddebugkey -storepass android | Select-String "SHA1:"
+```
+
+- 构建 release 后抽查一次：`app/build/generated/source/buildConfig/release/edu/jxslu/schedule/BuildConfig.java`
+  的 `AMAP_KEY` 应等于 `amapKeyRelease`。
+
 ## 提交与推送
 
 约束：提交信息精简，且不带个人信息。

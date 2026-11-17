@@ -119,19 +119,74 @@
   不让应用商店把「需要 GPS 硬件」当成硬条件。
 - 依赖 `android.hardware.location` 的 `isLocationEnabled` 只在 API 28+ 存在，低版本跳过检查。
 
-#### 地图实现要点（osmdroid 6.1.18）
+#### 地图实现要点（高德 SDK 主 · osmdroid 回退，2026-11-17）
+
+- **两条渲染路径，同一份参数契约**：`ui/ebike/BikeMapHost.kt` 二选一，`RideScreen` 只跟
+  host 打交道。主路径是**高德官方 3D 地图 SDK**（`com.amap.api:3dmap`），回退路径是
+  osmdroid + 高德栅格（本文下面几段讲的全是回退路径的口径）。
+- **为什么换**：天地图那套高清底图在校区**楼栋名缺失**、且校名还是旧的「南昌工程学院」；
+  高德 SDK 的矢量数据是新的——底图上直接写着「江西水利电力大学(瑶湖校区)」「段锡明图书馆」，
+  楼栋与 POI 也全。天地图相关代码（`TiandituVec` / `TiandituCva` / `MapDatum` /
+  `Gcj02.toWgs84` / `BuildConfig.TIANDITU_KEY` / `ebikeHdMap` 偏好）**已整体删除**。
+- **回退判据**：`MapsInitializer.initialize` **返回 void**（拆包确认），key 校验在服务端异步
+  做，所以「初始化成功」不等于「key 有效」。唯一可靠信号是 `AMap.OnMapLoadedListener`：
+  `AmapMapView` 起一个 **10 秒**计时，到点还没等到就整层切 osmdroid 栅格，并在地图角上
+  显示「高德地图不可用，已用基础底图」。回退是**进程内**的，下次冷启动重试。
+- **隐私合规**：8.1.0 起必须先 `updatePrivacyShow` / `updatePrivacyAgree` 才能碰 SDK。
+  本应用没有独立的隐私弹层，这件事由**首启「用户须知」**承担——那份正文里已写明地图来自
+  高德；`amapChoice` 默认 `agreed`，设置页留开关（关掉 = 走栅格，也是失效后的手动重试入口）。
+- **标记怎么画**：高德走 OpenGL，**没有自定义 Canvas overlay 的口子**，所以聚合圈 / 车标 /
+  蓝点 / 高亮 chip / P 全部**离屏渲染成位图**（`AmapMarkerBitmaps`），再交给
+  `BitmapDescriptorFactory.fromBitmap`。尺寸口径与 `BikeMarkerOverlay` 逐项对齐，
+  **改视觉要两边一起改**。围栏 / 禁停区 / 还车点范围走 `Polygon`，定位精度圈走 `Circle`
+  （半径单位就是米）。围栏原来那条虚线描边在 Polygon 上做不出来，现在是实线。
+- **闪屏**：`MapView` 底下是 SurfaceView，首帧之前那块是它自己的底色（偏白）。`TextureMapView`
+  + alpha 淡入试过一轮：闪是没了，但全屏相机动画掉帧（用户直接反馈「移动不如以前顺」），
+  **已改回 `MapView`**；闪屏改用「盖一层不透明占位 + `onMapLoaded` 后 180ms 淡出」。
+  占位底色取**高德底图在校区尺度的主色 `#A4D5A9`**（实机截图采样），不是主题深色——
+  深色底看着就是「黑屏加载中」，一秒钟后突然变亮反而更刺眼；用底图自己的绿色打底，
+  淡入时几乎看不出切换。
+- **相机**：动画时长按距离给（420ms~720ms，`cameraAnimMs`）；**相机请求必须等 `onMapLoaded`
+  之后再执行**——高德首帧会把相机重置回创建时的位置，早发的 `moveCamera` 会被吞掉，而请求
+  已经被消费，症状就是「进页面不跟到我的位置」（2026-11-17 用户报）。
+- **蓝点不进图层比对**：罗盘 10Hz 更新，把 `userPoint` / `userHeading` / `userAccuracyMeters`
+  算进 `MapOverlayInputs` 的话，每 100ms 会全量重建一次标记（几十个 remove + add），
+  拖动与相机动画都会卡。比对前先 `copy(userPoint = null, userHeading = null,
+  userAccuracyMeters = 0f)`，蓝点走 `updateUser` 增量更新。
+- **相机与停手**：`onCameraChangeFinish` 就是「相机真的停住」，比 osmdroid 那个 120ms 轮询
+  准，所以高德路径不需要 `SettleWatcher`；程序性移动仍由 `CameraSuppressor` 吃掉。
+  单指拖动仍自己看 touch（`MapTouchTracker`），用来退出自动跟随。
+- **体积**：3dmap 带 arm64 19.1MB + v7a 12.8MB 两个 `.so`。AGP 默认不压缩，release 会到
+  40.8MB；`packaging.jniLibs.useLegacyPackaging = true` 压到 **22.5MB**（安装时解压一次）。
+  再小只能砍 `armeabi-v7a`。
+- **R8**：`proguard-rules.pro` 里 `-keep class com.amap.api.**` / `com.autonavi.**`。
+  Java 层要经 JNI 回调，类名一改 native 就找不到入口，**只在 release 复现**（地图空白、
+  点击无响应）。改混淆规则后必须装 release 包冒烟到地图页。
+- **缓存**：高德 SDK 的瓦片在 `getExternalFilesDir(null)/amap`（真机约 7.5MB），
+  `EbikeMapCache` 把它和 osmdroid 的 `cache.db`、停车点 JSON 一起统计与清除。
+
+#### 回退路径：osmdroid + 高德栅格
 
 - 依赖 `org.osmdroid:osmdroid-android:6.1.18`（Maven Central，AAR，POM 无 `<dependencies>`）。
   加入后**第一次构建需要联网 resolve 一次**，之后 `--offline` 照常用。
-- 瓦片源用 `OnlineTileSourceBase` 自定义：512 像素档声明（源名 `AmapRoadHD`），四个域名
+- 瓦片源用 `OnlineTileSourceBase` 自定义：512 像素档声明（源名 `AmapRoadHD9`），四个域名
   `wprd0[1-4].is.autonavi.com` 轮询，路径
-  `appmaptile?x=&y=&z=&lang=zh_cn&size=1&style=7`，配 `setTilesScaledToDpi(false)`。
-  **不要加 `scl=2`**：2026-09-27 试过又撤——它回的是"无注记纯底图"（512px，路网齐全、
-  一个地名都没有），真机上用户第一眼就报"名称没了"。当前口径：不带 scl 的 256px 带注记图
-  按 512 声明渲染（拉大 2 倍、略有发虚），**注记优先**；要又高清又有注记得换矢量/付费方案，
-  栅格这条路没有。该地址实测返回 200 `image/png`。它是高德的非公开栅格接口：不接官方
-  SDK、不申请 key，属于灰色用法，页面免责声明要写清；地址失效时地图页降级为纯列表
-  （瓦片加载失败不影响列表）。
+  `appmaptile?x=&y=&z=&lang=zh_cn&size=1&style=9`，配 `setTilesScaledToDpi(false)`。
+  **style=9 + 真实瓦片 18 级、相机上限 20 级**（2026-11-13 从 style=7 / 19 换过来）：
+  style=7 在校区 z18 起是整片绿地、z19 更空；style=9 在 z17/z18 保留绿地、楼栋轮廓和
+  路名（三峡西路、柘林西路、机械电气楼），观感更接近高德矢量底图。高德栅格在 z19 起
+  回空瓦片（实测 179 字节），**真实瓦片只到 18**；相机上限放到 20，z19/z20 由 osmdroid
+  自带的 `MapTileApproximater` 拿 z18 瓦片放大（2 倍 / 4 倍，数字变焦，不请求 z19+ 空
+  瓦片）。再往上 21/22 要放大 8/16 倍，绘制明显卡顿，所以停在 20。源名一并改掉：
+  osmdroid 按源名分键，沿用 `AmapRoadHD` 会继续命中 style=7 的旧瓦片。**MapView 的
+  缩放上限要单独设**：`setTileSource` 不会把 `maxZoomLevel` 换成新源的上限，只设瓦片源
+  的最大级别地图仍能捏合到 20+；`MapView` 初始化处必须配套 `setMaxZoomLevel(20.0)`。
+  **不要加 `scl=2`**：2026-09-27 试过又撤——它回的是"无注记纯底图"
+  （512px，路网齐全、一个地名都没有），真机上用户第一眼就报"名称没了"。当前口径：
+  不带 scl 的 256px 带注记图按 512 声明渲染（拉大 2 倍、略有发虚），**注记优先**；
+  要又高清又有注记得换矢量/付费方案，栅格这条路没有。该地址实测返回 200 `image/png`。
+  它是高德的非公开栅格接口：不接官方 SDK、不申请 key，属于灰色用法，页面免责声明要
+  写清；地址失效时地图页降级为纯列表（瓦片加载失败不影响列表）。
 - 初始化五个坑，按顺序：
   1. `Configuration.getInstance().load(context, context.getSharedPreferences("osmdroid", MODE_PRIVATE))`，
      用平台 `SharedPreferences` 而非 `PreferenceManager`，免得为一个可选项拉进 `androidx.preference`；

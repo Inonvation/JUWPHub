@@ -55,6 +55,9 @@ import java.time.ZoneId
  * `DisplayPrefsStoreWenqu.kt`，数据模型在 `DisplayPrefsModels.kt`，键在
  * `DisplayPrefsKeys.kt`。新增功能优先加到对应扩展文件，别再往本文件堆。
  */
+/** 上次已知的用户位置（见 [DisplayPrefsStore.ebikeLastLocation]）。 */
+data class BikeLastLocation(val lat: Double, val lng: Double, val atMillis: Long)
+
 class DisplayPrefsStore(internal val context: Context) {
 
     /**
@@ -995,6 +998,36 @@ class DisplayPrefsStore(internal val context: Context) {
     }.distinctUntilChanged()
 
     /**
+     * 地图底图选择（DESIGN §3.9，2026-11-17）：`unset` / `agreed` / `declined`。
+     *
+     * **默认 `agreed`**（2026-11-17 用户口径：高德作为默认开启、栅格只做兜底）：
+     * 高德 SDK 8.1.0 起要求先声明「已向用户展示隐私政策并取得同意」，这件事由首启的
+     * 「用户须知」承担——那份正文里已写明单车地图来自高德。设置页仍留一个开关，
+     * 不想用官方底图的人可以关掉。
+     *
+     * 三个取值之外的一律按默认处理。
+     */
+    val ebikeAmapChoice: Flow<String> = context.displayDataStore.data.map { p ->
+        p[KEY_EBIKE_AMAP_CHOICE]?.takeIf { it in AMAP_CHOICE_VALUES } ?: AMAP_CHOICE_AGREED
+    }.distinctUntilChanged()
+
+    /**
+     * 上次已知的用户位置（DESIGN §3.9，2026-11-17）：骑行页拿它当建图中心。
+     *
+     * 与 `EbikeUserLocation` 那份进程内缓存分开——这份**落盘**，冷启动、隔很久再进页面
+     * 都能第一帧就落在人身上，不必等一次定位回来（用户报的「进页面有时不跟到我的位置」
+     * 就是定位慢或失败时没有可用中心）。脏值（越界 / 非有限）当没存过。
+     */
+    val ebikeLastLocation: Flow<BikeLastLocation?> = context.displayDataStore.data.map { p ->
+        val lat = p[KEY_EBIKE_LAST_LAT]?.toDouble() ?: return@map null
+        val lng = p[KEY_EBIKE_LAST_LNG]?.toDouble() ?: return@map null
+        val at = p[KEY_EBIKE_LAST_AT] ?: 0L
+        if (!lat.isFinite() || !lng.isFinite()) return@map null
+        if (lat !in -90.0..90.0 || lng !in -180.0..180.0) return@map null
+        BikeLastLocation(lat, lng, at)
+    }.distinctUntilChanged()
+
+    /**
      * 骑行页底部面板高度（dp，DESIGN §3.9）；null = 没拖过，用默认值。
      *
      * 只做范围校验，窗口缩放导致的"放不下"由渲染时再夹一道，不覆写用户拖出来的值。
@@ -1666,6 +1699,26 @@ class DisplayPrefsStore(internal val context: Context) {
     /** 记住附近单车地图的显示方式（按停车点 / 按车辆），见 [ebikeMapByBike]。 */
     suspend fun setEbikeMapByBike(value: Boolean) {
         context.displayDataStore.edit { it[KEY_EBIKE_MAP_BY_BIKE] = value }
+    }
+
+    /**
+     * 地图底图选择（DESIGN §3.9，2026-11-17）：见 [ebikeAmapChoice]。
+     * 只接受三个取值，别的一律按「还没问过」处理。
+     */
+    /** 记下上次已知位置（见 [ebikeLastLocation]）。越界坐标直接忽略。 */
+    suspend fun setEbikeLastLocation(lat: Double, lng: Double, atMillis: Long = System.currentTimeMillis()) {
+        if (!lat.isFinite() || !lng.isFinite()) return
+        if (lat !in -90.0..90.0 || lng !in -180.0..180.0) return
+        context.displayDataStore.edit {
+            it[KEY_EBIKE_LAST_LAT] = lat.toFloat()
+            it[KEY_EBIKE_LAST_LNG] = lng.toFloat()
+            it[KEY_EBIKE_LAST_AT] = atMillis
+        }
+    }
+
+    suspend fun setEbikeAmapChoice(value: String) {
+        val normalized = value.takeIf { it in AMAP_CHOICE_VALUES } ?: AMAP_CHOICE_AGREED
+        context.displayDataStore.edit { it[KEY_EBIKE_AMAP_CHOICE] = normalized }
     }
 
     /** 记住附近单车地图的最后视野（DESIGN §3.9），见 [ebikeMapViewport]。 */
