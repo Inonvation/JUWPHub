@@ -85,20 +85,17 @@ class DormRepairSync(
         if (at - lastAttemptAt < APP_OPEN_INTERVAL_MS) return CheckResult.Skipped
         val snapshot = store.snapshot.value
         if (!snapshot.tracking && snapshot.checkedOnce) return CheckResult.Skipped
-        // 已有检查在跑就不排队（手动刷新才需要排队）
-        if (!mutex.tryLock()) return CheckResult.Skipped
         // 只有「用过报修」的用户才允许自动 CAS 登录：没用过的人首查只用 WebView 会话，
         // 找不到就跳过——不能为了给一个从没用过报修的人建基线而完整登一次统一认证。
         val autoLoginDue =
             snapshot.tracking && at - snapshot.lastAutoLoginAt >= AUTO_LOGIN_INTERVAL_MS
-        return try {
+        // 已有检查在跑就不排队（手动刷新才需要排队）
+        return mutex.tryLocked {
             lastAttemptAt = at
             withContext(Dispatchers.IO) {
                 checkLocked(allowLogin = false, autoLoginDue = autoLoginDue)
             }
-        } finally {
-            mutex.unlock()
-        }
+        } ?: CheckResult.Skipped
     }
 
     /** 用户打开报修页：从这一刻起 App 打开检查会持续运行。 */

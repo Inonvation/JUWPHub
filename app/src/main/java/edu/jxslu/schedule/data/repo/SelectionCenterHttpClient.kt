@@ -42,8 +42,6 @@ class SelectionCenterHttpClient(
     private val debugDump: SelectionDebugDump? = null,
 ) : SelectionCenterClient {
 
-    override val isConfigured: Boolean = true
-
     /** 已「进入」过的轮次（进程内）；读写共用——写路径进入失败会清掉重试。 */
     private val prepared: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
 

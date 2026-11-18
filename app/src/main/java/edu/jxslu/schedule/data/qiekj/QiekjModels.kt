@@ -242,9 +242,7 @@ data class TradeOrderItem(
 data class PromotionItem(
     val promotionType: Int? = null,
     @kotlinx.serialization.Serializable(LenientStringSerializer::class) val discountAmount: String? = null,
-) {
-    fun toLine() = PromotionLine(promotionType = promotionType, discountAmount = discountAmount)
-}
+)
 
 // ── 服务端账单历史（order/list，2026-10-14 反编译补出） ──
 

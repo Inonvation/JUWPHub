@@ -346,16 +346,13 @@ private fun ImportEntryRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
-    /** false = 进行中/不可点：文案照常显示，点击与按压反馈一起禁用 */
-    enabled: Boolean = true,
 ) {
     val onSurface = MaterialTheme.colorScheme.onSurface
-    val contentAlpha = if (enabled) 1f else 0.4f
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -364,7 +361,7 @@ private fun ImportEntryRow(
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f * contentAlpha)),
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
             contentAlignment = Alignment.Center,
         ) {
             icon()
@@ -374,12 +371,12 @@ private fun ImportEntryRow(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
-                color = onSurface.copy(alpha = contentAlpha),
+                color = onSurface,
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = onSurface.copy(alpha = 0.55f * contentAlpha),
+                color = onSurface.copy(alpha = 0.55f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

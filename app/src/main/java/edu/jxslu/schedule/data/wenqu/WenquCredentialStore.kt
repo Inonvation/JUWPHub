@@ -2,8 +2,7 @@ package edu.jxslu.schedule.data.wenqu
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import edu.jxslu.schedule.data.local.EncryptedPrefs
 
 /**
  * 问渠登录凭证（DESIGN §4.45）。**密码可选**——「记住登录」默认开；关掉时只落 token，
@@ -37,33 +36,13 @@ data class WenquSession(
  * 问渠凭证加密存储（DESIGN §4.45）。
  *
  * 与 [edu.jxslu.schedule.data.qzxy.QzxySessionStore] 同方案、**不同文件**（`secure_wenqu`）：
- * 各第三方会话互不相干，混在一个文件里退登录会互相牵连。
- * 新文件同样要在 `backup_rules.xml` / `data_extraction_rules.xml` 里排除
- * （正式件 + `.fallback` 两份），免得跟着云备份或设备迁移跑到别的机子上。
+ * 各第三方会话互不相干，混在一个文件里退登录会互相牵连。创建与自愈口径见
+ * [EncryptedPrefs.open]。新文件同样要在 `backup_rules.xml` / `data_extraction_rules.xml`
+ * 里排除（正式件 + `.fallback` 两份），免得跟着云备份或设备迁移跑到别的机子上。
  */
 class WenquCredentialStore(context: Context) {
-    private val appContext = context.applicationContext
-
-    /**
-     * 带自愈的加密 prefs 创建（口径同 [edu.jxslu.schedule.data.qzxy.QzxySessionStore]）：
-     * Keystore 损坏（换机 / 云备份恢复后常见）时裸 create 在组合期抛异常 = 启动即循环崩溃；
-     * 失败先删文件重建（一次性丢会话，换功能可用），仍失败退明文空 prefs（等同未登录）。
-     */
     private val prefs: SharedPreferences by lazy {
-        fun create(): SharedPreferences = EncryptedSharedPreferences.create(
-            appContext,
-            FILE_NAME,
-            MasterKey.Builder(appContext).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
-        runCatching { return@lazy create() }
-        runCatching {
-            appContext.deleteSharedPreferences(FILE_NAME)
-            return@lazy create()
-        }
-        android.util.Log.e("WenquCredentialStore", "$FILE_NAME unrecoverable, fallback to plain")
-        appContext.getSharedPreferences("$FILE_NAME.fallback", Context.MODE_PRIVATE)
+        EncryptedPrefs.open(context, FILE_NAME, TAG)
     }
 
     fun read(): WenquSession? {
@@ -98,6 +77,7 @@ class WenquCredentialStore(context: Context) {
     }
 
     private companion object {
+        const val TAG = "WenquCredentialStore"
         const val FILE_NAME = "secure_wenqu"
         const val KEY_PHONE = "phone"
         const val KEY_PASSWORD = "password"

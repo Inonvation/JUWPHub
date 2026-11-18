@@ -48,21 +48,6 @@ class YktRepository(
     suspend fun loginForToken(username: String, password: String): YktToken =
         YktToken(login(username, password), expiresIn = 0)
 
-    /** 取 CARD 账户 + 一批付款码（内部自动登录；[cachedToken] 存在则先试它）。 */
-    suspend fun fetchPayCode(
-        username: String,
-        password: String,
-        cachedToken: String? = null,
-    ): YktBarcodeData {
-        cachedToken?.let { token ->
-            val data = tryLoadBarcodes(token)
-            if (data != null) return data
-        }
-        val token = doLogin(username, password, staleToken = cachedToken)
-        return tryLoadBarcodes(token)
-            ?: throw YktException.Protocol("登录成功但取码失败（非凭证问题），请稍后重试")
-    }
-
     /** 登录并把 token 塞进内存缓存；返回 token 供上层复用（本对象内的 cached）。强制真登录。 */
     suspend fun login(username: String, password: String): String = loginMutex.withLock {
         loginLocked(username, password)
@@ -146,23 +131,6 @@ class YktRepository(
     /** 电子账户 type（`<account>-000` 形态）；充值下单的 `yktcard` 参数用。 */
     suspend fun electricAccountType(username: String, password: String): String? =
         rechargeAccountDetail(username, password)?.first
-
-    /** 账户列表（`codebarPayinfo` 的 CARD/ACCOUNT 行，DESIGN §3.10 账户口径）。 */
-    suspend fun payAccounts(username: String, password: String): List<YktPayAccount> {
-        suspend fun load(t: String): List<YktPayAccount>? {
-            val raw = client.get("/berserker-app/ykt/tsm/codebarPayinfo", token = t)
-            if (raw.httpCode == 401) return null
-            val env = parse(raw)
-            if (env.code != 200) {
-                throw YktException.Protocol("取账户失败：${env.messageOrBlank.ifBlank { env.code.toString() }}")
-            }
-            return YktModels.payAccountsFrom(env.data)
-        }
-        val seen = cachedToken
-        seen?.let { token -> load(token)?.let { return it } }
-        val fresh = doLogin(username, password, staleToken = seen)
-        return load(fresh) ?: throw YktException.Protocol("登录成功但取账户失败")
-    }
 
     // ------------------------------------------------------------------
     // 充值（DESIGN §4.19「充值」；用户主动触发，无自动充值）
@@ -352,19 +320,6 @@ class YktRepository(
         val wechatUrl = Regex("weixin://wap/pay\\?[^\"'\\s]+").find(mid.text)?.value
             ?: return null
         return YktRechargeOrder.WechatPay(orderId = orderId, wechatUrl = wechatUrl)
-    }
-
-    /** 删除未支付订单（用户取消支付时的兜底；失败静默——收银台侧也会超时关闭）。 */
-    suspend fun rechargeCancel(orderId: String): Boolean {
-        val form = edu.jxslu.schedule.domain.YktRechargeSign.signed(mapOf("orderid" to orderId))
-        return runCatching {
-            val raw = client.postFormPlain(
-                "/charge/order/deleteOrder",
-                form,
-                referer = YktClient.BASE + "/payment/",
-            )
-            raw.httpCode in 200..299
-        }.getOrDefault(false)
     }
 
     /** 官方收银台 URL 兜底拼法（正常路径 = 服务端 302 Location 直发，不走这里）。 */

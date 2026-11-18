@@ -119,7 +119,7 @@ fun SelectionWishesScreen(onBack: () -> Unit) {
     fun loadHits() {
         val target = round ?: return
         val list = wishesState.orEmpty()
-        if (list.isEmpty() || !client.isConfigured || hitsLoading) return
+        if (list.isEmpty() || hitsLoading) return
         hitsLoading = true
         hitsError = null
         scope.launch {
@@ -168,7 +168,7 @@ fun SelectionWishesScreen(onBack: () -> Unit) {
 
     /** 头部状态行后缀：匹配中 / 失败 / 命中条数（都拿不到时不写）。 */
     val matchSummary: String? = when {
-        !client.isConfigured || round == null -> null
+        round == null -> null
         hitsLoading -> "本轮匹配中…"
         hitsError != null -> "本轮匹配失败，点右上角重试"
         else -> "本轮已开 ${hitCounts.count { it.value > 0 }} 条预选"
@@ -186,7 +186,7 @@ fun SelectionWishesScreen(onBack: () -> Unit) {
                 actions = {
                     IconButton(
                         onClick = { loadHits() },
-                        enabled = client.isConfigured && round != null && !hitsLoading,
+                        enabled = round != null && !hitsLoading,
                     ) {
                         Icon(Icons.Filled.Refresh, contentDescription = "重新匹配")
                     }

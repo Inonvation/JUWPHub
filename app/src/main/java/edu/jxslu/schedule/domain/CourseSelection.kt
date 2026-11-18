@@ -39,24 +39,6 @@ data class CourseSelection(
     val remark: String = "",
 )
 
-/** 一个学期的选课汇总（只统计、不做及格判定——选课是"选上了"的记录，没有成绩语义）。 */
-data class SelectionSummary(
-    val count: Int,
-    /** 学分合计，两位小数。 */
-    val credits: Double,
-)
-
-object SelectionCalculator {
-
-    fun summarize(rows: List<CourseSelection>): SelectionSummary? {
-        if (rows.isEmpty()) return null
-        return SelectionSummary(
-            count = rows.size,
-            credits = Math.round(rows.sumOf { it.credit } * 100.0) / 100.0,
-        )
-    }
-}
-
 /**
  * 一个选课轮次（DESIGN §4.35）：教务「学生选课中心」列表的一行
  * （接口 `/jsxsd/xsxk/xklc_list_data`）。

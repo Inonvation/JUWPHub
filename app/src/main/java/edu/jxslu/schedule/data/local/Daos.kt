@@ -77,10 +77,6 @@ interface TimeSlotDao {
     @Query("SELECT * FROM time_slots WHERE timetableId = :timetableId ORDER BY number")
     suspend fun getForTimetable(timetableId: Long): List<TimeSlotEntity>
 
-    /** 全部课表的作息表：结构性迁移要按课表逐张覆盖。 */
-    @Query("SELECT * FROM time_slots ORDER BY timetableId, number")
-    suspend fun getAll(): List<TimeSlotEntity>
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(slots: List<TimeSlotEntity>)
 
@@ -114,9 +110,6 @@ interface ScoreDao {
 
     @Query("SELECT * FROM scores ORDER BY term DESC")
     fun observeAll(): Flow<List<ScoreEntity>>
-
-    @Query("SELECT * FROM scores WHERE term = :term")
-    suspend fun getForTerm(term: String): List<ScoreEntity>
 
     /** 备份导出用全量快照（DESIGN §4.3）。 */
     @Query("SELECT * FROM scores ORDER BY term DESC")

@@ -94,62 +94,58 @@ class SelectionSync(
      * 同步选课结果。[terms] 为空时用 [resolveDefaultTerms]；显式给学期时**不受闸门约束**
      * （用户点了「加载某学期」就该立刻抓）。
      */
-    suspend fun syncResults(terms: List<String> = emptyList(), force: Boolean = false): Result {
-        if (!mutex.tryLock()) return Result.InProgress
-        try {
-            if (!force && terms.isEmpty() && recentlySynced()) return Result.Skipped
+    suspend fun syncResults(terms: List<String> = emptyList(), force: Boolean = false): Result =
+        mutex.tryLocked {
+            try {
+                if (!force && terms.isEmpty() && recentlySynced()) return@tryLocked Result.Skipped
 
-            val reason = ensureSession()
-            if (reason != null) return Result.Failed(reason)
-            val targetTerms = if (terms.isEmpty()) resolveDefaultTerms(allowCache = !force) else terms
-            val fetched = mutableMapOf<String, List<CourseSelection>>()
-            for ((index, term) in targetTerms.withIndex()) {
-                if (index > 0) delay(AutoSyncRules.interRequestDelayMs())
-                fetched[term] = fetchResults(term)
+                val reason = ensureSession()
+                if (reason != null) return@tryLocked Result.Failed(reason)
+                val targetTerms = if (terms.isEmpty()) resolveDefaultTerms(allowCache = !force) else terms
+                val fetched = mutableMapOf<String, List<CourseSelection>>()
+                for ((index, term) in targetTerms.withIndex()) {
+                    if (index > 0) delay(AutoSyncRules.interRequestDelayMs())
+                    fetched[term] = fetchResults(term)
+                }
+                // 整批一个事务：抓 2 个学期时不能留下「第 1 个已换、第 2 个还是旧的」半套数据
+                repo.replaceTerms(fetched.toList())
+                prefs.setSelectionSyncMillis(nowMillis())
+                Result.Updated(terms = fetched.keys.toList(), rowCount = fetched.values.sumOf { it.size })
+            } catch (e: CancellationException) {
+                throw e // 协程被取消（mutex 持有者在撤销），不能吞成失败
+            } catch (e: Exception) {
+                Result.Failed(e.message ?: "选课结果同步失败")
             }
-            // 整批一个事务：抓 2 个学期时不能留下「第 1 个已换、第 2 个还是旧的」半套数据
-            repo.replaceTerms(fetched.toList())
-            prefs.setSelectionSyncMillis(nowMillis())
-            return Result.Updated(terms = fetched.keys.toList(), rowCount = fetched.values.sumOf { it.size })
-        } catch (e: CancellationException) {
-            throw e // 协程被取消（mutex 持有者在撤销），不能吞成失败
-        } catch (e: Exception) {
-            return Result.Failed(e.message ?: "选课结果同步失败")
-        } finally {
-            mutex.unlock()
-        }
-    }
+        } ?: Result.InProgress
 
     /** 只抓一个学期（选课页「更多学期」选中未缓存的学期时）。 */
     suspend fun syncTerm(term: String): Result = syncResults(terms = listOf(term), force = true)
 
     /** 同步选课轮次。 */
-    suspend fun syncRounds(force: Boolean = false): RoundsResult {
-        if (!mutex.tryLock()) return RoundsResult.InProgress
-        try {
-            if (!force && recentlyCheckedRounds()) return RoundsResult.Skipped
-            val reason = ensureSession()
-            if (reason != null) return RoundsResult.Failed(reason)
-            val rounds = fetchRounds()
-            val fetchedAt = nowMillis()
-            // 写盘失败不推进检查时间：快照没更新却记下「刚查过」，下一轮会按旧轮次
-            // 判「没变化」，提醒静默失效一整轮。
-            val saved = roundsStore.save(
-                SelectionRoundsStore.Snapshot(
-                    fetchedAt = fetchedAt,
-                    rounds = rounds.map(SelectionRoundsStore::rowOf),
-                ),
-            )
-            if (saved) prefs.setSelectionRoundsCheckMillis(fetchedAt)
-            return RoundsResult.Updated(rounds = rounds, fetchedAt = fetchedAt)
-        } catch (e: CancellationException) {
-            throw e // 协程被取消，不能吞成失败
-        } catch (e: Exception) {
-            return RoundsResult.Failed(e.message ?: "选课轮次同步失败")
-        } finally {
-            mutex.unlock()
-        }
-    }
+    suspend fun syncRounds(force: Boolean = false): RoundsResult =
+        mutex.tryLocked {
+            try {
+                if (!force && recentlyCheckedRounds()) return@tryLocked RoundsResult.Skipped
+                val reason = ensureSession()
+                if (reason != null) return@tryLocked RoundsResult.Failed(reason)
+                val rounds = fetchRounds()
+                val fetchedAt = nowMillis()
+                // 写盘失败不推进检查时间：快照没更新却记下「刚查过」，下一轮会按旧轮次
+                // 判「没变化」，提醒静默失效一整轮。
+                val saved = roundsStore.save(
+                    SelectionRoundsStore.Snapshot(
+                        fetchedAt = fetchedAt,
+                        rounds = rounds.map(SelectionRoundsStore::rowOf),
+                    ),
+                )
+                if (saved) prefs.setSelectionRoundsCheckMillis(fetchedAt)
+                RoundsResult.Updated(rounds = rounds, fetchedAt = fetchedAt)
+            } catch (e: CancellationException) {
+                throw e // 协程被取消，不能吞成失败
+            } catch (e: Exception) {
+                RoundsResult.Failed(e.message ?: "选课轮次同步失败")
+            }
+        } ?: RoundsResult.InProgress
 
     /** 快照里的轮次（页面与提醒共用；坏了等于空快照）。 */
     fun cachedRounds(): List<SelectionRound> =

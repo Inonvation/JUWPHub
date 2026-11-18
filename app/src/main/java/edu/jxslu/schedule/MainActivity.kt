@@ -91,6 +91,7 @@ import edu.jxslu.schedule.ui.reminder.QiekjSignInNoticeBus
 import edu.jxslu.schedule.ui.reminder.QiekjSignInNoticeHost
 import edu.jxslu.schedule.data.prefs.OnboardingSyncOutcome
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.washerScanIntent
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.postNotice
@@ -121,13 +122,11 @@ import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.domain.quickScanTargetOf
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.ebike.AmapMaps
-import edu.jxslu.schedule.ui.ebike.EbikeScanActivity
 import edu.jxslu.schedule.ui.life.ServiceActiveFlags
 import edu.jxslu.schedule.ui.life.SideDrawerContent
 import edu.jxslu.schedule.ui.qzxy.QzxyEntrySheet
 import edu.jxslu.schedule.ui.ujing.UjingEntrySheet
 import edu.jxslu.schedule.ui.water.WaterEntrySheet
-import com.google.zxing.BarcodeFormat
 import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.ui.theme.JuwTheme
 import edu.jxslu.schedule.ui.theme.Motion
@@ -1548,16 +1547,9 @@ internal fun JuwApp(
                                 UjingScanHandoff.arm(raw)
                                 SubpageActivity.start(context, SubpageScreen.UJING)
                             },
-                            // 江水生活图标入口（2026-10-19 自生活页迁入）：
-                            // U净 弹窗副行进洗衣房页；取快递弹窗的新增/编辑进快捷方式设置
+                            // 江水生活 U净 弹窗（2026-10-19 自生活页迁入）：副行进洗衣房页
                             onOpenUjing = {
                                 SubpageActivity.start(context, SubpageScreen.UJING)
-                            },
-                            onOpenShortcuts = { focusItemId ->
-                                SubpageActivity.start(context, SubpageScreen.SHORTCUTS, focusItemId)
-                            },
-                            onOpenCainiao = {
-                                SubpageActivity.start(context, SubpageScreen.TOOLBOX_CAINIAO)
                             },
                             // 宿舍报修进度（DESIGN §4.49）：今日页卡片进原生只读详情页
                             onOpenDormRepair = {
@@ -1703,13 +1695,7 @@ internal fun JuwApp(
                     onDismiss = { showUjingSheet = false },
                     onScan = {
                         showUjingSheet = false
-                        ujingScanLauncher.launch(
-                            Intent(context, EbikeScanActivity::class.java).apply {
-                                putExtra(Intents.Scan.PROMPT_MESSAGE, "对准洗衣机机身上的二维码")
-                                putExtra(EbikeScanActivity.EXTRA_RESULT_MODE, EbikeScanActivity.MODE_RAW)
-                                putExtra(Intents.Scan.FORMATS, BarcodeFormat.QR_CODE.name)
-                            },
-                        )
+                        ujingScanLauncher.launch(washerScanIntent(context))
                     },
                     onOpenPage = {
                         showUjingSheet = false

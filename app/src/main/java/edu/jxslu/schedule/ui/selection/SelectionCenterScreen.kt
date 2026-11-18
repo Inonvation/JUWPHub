@@ -52,11 +52,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.JwImportActivity
 import edu.jxslu.schedule.data.jw.SelectionCenterParser
 import edu.jxslu.schedule.data.repo.SelectionClientException
 import edu.jxslu.schedule.data.repo.SelectionSubmitResult
-import edu.jxslu.schedule.data.repo.UnconfiguredSelectionCenterClient
 import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.domain.SelectionCourse
 import edu.jxslu.schedule.domain.SelectionCourseTypes
@@ -74,7 +72,6 @@ import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.showNotice
-import edu.jxslu.schedule.ui.jwvw.JwImportMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -241,19 +238,15 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
         }
     }
 
-    // 进页/换轮次自动拉一次（浏览全量：默认条件即可出课程）；未接入直接把原因摆出来（不打网络）
+    // 进页/换轮次自动拉一次（浏览全量：默认条件即可出课程）
     LaunchedEffect(round?.id) {
-        if (!client.isConfigured) {
-            loadError = UnconfiguredSelectionCenterClient.FATAL_HINT
-        } else if (round != null) {
-            doQuery(draft)
-        }
+        if (round != null) doQuery(draft)
     }
 
     // 预选清单变化（首帧到达 / 别处编辑后回来）时重新匹配；key 里带关键词，清单没变不重查
     val wishKey = wishes.joinToString("|") { "${it.id}:${it.nameKeyword}:${it.teacherKeyword}" }
     LaunchedEffect(round?.id, wishKey) {
-        if (client.isConfigured && round != null) loadWishHits()
+        if (round != null) loadWishHits()
     }
 
     fun submit(course: SelectionCourse) {
@@ -324,7 +317,7 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
                             doQuery(active ?: draft)
                             loadWishHits()
                         },
-                        enabled = client.isConfigured && !loading,
+                        enabled = !loading,
                     ) {
                         Icon(Icons.Filled.Refresh, contentDescription = "刷新")
                     }
@@ -377,22 +370,6 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
                             color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
                             modifier = Modifier.padding(top = 4.dp),
                         )
-                    }
-                    if (!client.isConfigured) {
-                        OutlinedButton(
-                            onClick = {
-                                JwImportActivity.start(
-                                    context,
-                                    JwImportMode.Selection,
-                                    selectionRoundId = round?.id,
-                                )
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 8.dp)
-                                // min 而不是固定高：系统大字体档位下按钮要能撑高，别把字裁了
-                                .heightIn(min = 44.dp),
-                        ) { Text("打开教务页面（备用）") }
                     }
                 }
             }
@@ -464,7 +441,7 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
                 item {
                     SelectionFilterCard(
                         draft = draft,
-                        enabled = client.isConfigured && !loading,
+                        enabled = !loading,
                         onChange = { draft = it },
                         onQuery = { doQuery(draft) },
                         onReset = {

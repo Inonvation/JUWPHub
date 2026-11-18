@@ -24,7 +24,8 @@ class GuessYouWantTest {
         usages: List<GuessUsage> = emptyList(),
         signal: ClassSignal? = null,
         roll: Double = 0.0,
-    ): GuessPick? = GuessRules.decide(day, minute, signal, usages, now, roll)
+        blocked: Set<GuessTarget> = emptySet(),
+    ): GuessPick? = GuessRules.decide(day, minute, signal, usages, now, roll, blocked)
 
     // ---------- 时段表 ----------
 
@@ -96,15 +97,65 @@ class GuessYouWantTest {
     // ---------- 上课 / 下课信号 ----------
 
     @Test
-    fun `下课二十分钟内命中且优先于上课`() {
+    fun `下课二十分钟内且后面隔得够久才命中`() {
+        // 最后一节课（今天没有后续课）：20 分钟内下课，骑车回家 / 吃饭
+        val lastClass = GuessRules.classSignal(
+            hasOngoing = true,
+            minutesToOngoingEnd = 20,
+            hasNext = false,
+            minutesToNext = null,
+        )
+        assertEquals(GuessSignalKind.AFTER_CLASS, lastClass?.kind)
+        assertEquals(20, lastClass?.minutes)
+
+        // 后面还有一节，但隔了 35 分钟：同样是下课，骑车有意义
+        val longBreak = GuessRules.classSignal(
+            hasOngoing = true,
+            minutesToOngoingEnd = 20,
+            hasNext = true,
+            minutesToNext = 55,
+        )
+        assertEquals(GuessSignalKind.AFTER_CLASS, longBreak?.kind)
+    }
+
+    @Test
+    fun `换教室的二十分钟间隔不算下课`() {
+        // 默认作息：09:55 下课、10:15 上下一大节，间隔 20 分钟
         val signal = GuessRules.classSignal(
             hasOngoing = true,
             minutesToOngoingEnd = 20,
             hasNext = true,
-            minutesToNext = 25,
+            minutesToNext = 40,
         )
-        assertEquals(GuessSignalKind.AFTER_CLASS, signal?.kind)
-        assertEquals(20, signal?.minutes)
+        assertNull("换教室不推荐骑车", signal)
+    }
+
+    @Test
+    fun `刚下课的下一节不推荐骑车`() {
+        // 09:56：上一节 1 分钟前刚下，下一节 19 分钟后开始 —— 还是换教室
+        assertNull(
+            GuessRules.classSignal(
+                hasOngoing = false,
+                minutesToOngoingEnd = null,
+                hasNext = true,
+                minutesToNext = 19,
+                minutesSincePrevEnd = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `隔了一小时的下一节推荐骑车`() {
+        // 13:35：上一节 11:40 就下了，下一节 14:00 开始 —— 午休结束，骑车去教学楼
+        val signal = GuessRules.classSignal(
+            hasOngoing = false,
+            minutesToOngoingEnd = null,
+            hasNext = true,
+            minutesToNext = 25,
+            minutesSincePrevEnd = 115,
+        )
+        assertEquals(GuessSignalKind.BEFORE_CLASS, signal?.kind)
+        assertEquals(25, signal?.minutes)
     }
 
     @Test
@@ -197,6 +248,70 @@ class GuessYouWantTest {
         assertEquals(GuessSource.HABIT, habitual?.source)
     }
 
+    @Test
+    fun `周末只推用过的功能`() {
+        // 只用过快趣（另一个时段的一单）：周末默认项从胖乖改成快趣，不再推一张要登录的胖乖卡
+        val usages = listOf(usage(6, 20 * 60, GuessTarget.KVCX))
+        val pick = decide(day = 6, minute = 15 * 60, usages = usages)
+        assertEquals(GuessTarget.KVCX, pick?.target)
+        assertEquals(GuessSource.WEEKEND_DEFAULT, pick?.source)
+    }
+
+    @Test
+    fun `周末先验过滤后仍按胖乖快趣U净顺序`() {
+        // 用过胖乖与 U净、没用过快趣：先验剩 {胖乖3, U净1}。
+        // 这个槽另有两次 U净订单（低频门槛 2），让加权抽样真的被走到。
+        val usages = listOf(
+            usage(6, 20 * 60, GuessTarget.QIEKJ),
+            usage(6, 21 * 60, GuessTarget.UJING),
+            usage(6, 15 * 60, GuessTarget.UJING),
+            usage(6, 15 * 60, GuessTarget.UJING),
+        )
+        // 无论 roll 落在哪，结果都只能在这两个「用过的」功能里，快趣不会冒出来
+        val results = (0..19).map { i ->
+            decide(day = 6, minute = 15 * 60, usages = usages, roll = i / 20.0)?.target
+        }.toSet()
+        assertTrue("未用过的快趣不该出现：$results", GuessTarget.KVCX !in results)
+        assertTrue(results.all { it == GuessTarget.QIEKJ || it == GuessTarget.UJING })
+        // 低 roll 落在先验第一名（胖乖）
+        assertEquals(
+            GuessTarget.QIEKJ,
+            decide(day = 6, minute = 15 * 60, usages = usages, roll = 0.0)?.target,
+        )
+    }
+
+    // ---------- 在案骑行时排除快趣 ----------
+
+    @Test
+    fun `骑行中时段表命中快趣时不出卡`() {
+        // 07:40 时段表就是快趣，但骑行中服务卡已经在说这件事
+        assertNull(decide(day = 2, minute = 7 * 60 + 40, blocked = setOf(GuessTarget.KVCX)))
+    }
+
+    @Test
+    fun `骑行中上课信号作废并落到习惯`() {
+        val usages = List(3) { usage(2, 7 * 60 + 40, GuessTarget.QIEKJ) }
+        val pick = decide(
+            day = 2,
+            minute = 7 * 60 + 40,
+            usages = usages,
+            signal = ClassSignal(GuessSignalKind.BEFORE_CLASS, 18),
+            blocked = setOf(GuessTarget.KVCX),
+        )
+        assertEquals(GuessTarget.QIEKJ, pick?.target)
+        assertEquals(GuessSource.HABIT, pick?.source)
+    }
+
+    @Test
+    fun `骑行中周末先验跳过快趣`() {
+        val usages = listOf(
+            usage(6, 20 * 60, GuessTarget.QIEKJ),
+            usage(6, 21 * 60, GuessTarget.KVCX),
+        )
+        val pick = decide(day = 6, minute = 15 * 60, usages = usages, blocked = setOf(GuessTarget.KVCX))
+        assertEquals(GuessTarget.QIEKJ, pick?.target)
+    }
+
     // ---------- 习惯 ----------
 
     @Test
@@ -209,8 +324,25 @@ class GuessYouWantTest {
 
     @Test
     fun `空档两次同槽订单仍不出卡`() {
-        val usages = List(2) { usage(2, 10 * 60, GuessTarget.UJING) }
+        val usages = List(2) { usage(2, 10 * 60, GuessTarget.QIEKJ) }
         assertNull(decide(day = 2, minute = 10 * 60, usages = usages))
+    }
+
+    @Test
+    fun `低频功能两次同槽就能出卡`() {
+        // 问渠报名 / U净 洗衣 60 天攒不到 3 次，门槛降到 2（DESIGN §4.51）
+        val usages = List(2) { usage(2, 10 * 60, GuessTarget.UJING) }
+        val pick = decide(day = 2, minute = 10 * 60, usages = usages)
+        assertEquals(GuessTarget.UJING, pick?.target)
+        assertEquals(GuessSource.HABIT, pick?.source)
+    }
+
+    @Test
+    fun `高频功能仍要三次`() {
+        val two = List(2) { usage(2, 10 * 60, GuessTarget.KVCX) }
+        assertNull(decide(day = 2, minute = 10 * 60, usages = two))
+        val three = List(3) { usage(2, 10 * 60, GuessTarget.KVCX) }
+        assertEquals(GuessTarget.KVCX, decide(day = 2, minute = 10 * 60, usages = three)?.target)
     }
 
     @Test

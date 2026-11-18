@@ -594,5 +594,3 @@ private data class FirstFrame(
     val weatherEnabled: Boolean,
     val guessYouWantEnabled: Boolean,
 )
-
-fun meFactory(context: Context) = MeViewModel.Factory(Graph.repository(context))

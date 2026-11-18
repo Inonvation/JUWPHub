@@ -34,6 +34,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
@@ -151,6 +154,10 @@ internal fun AmapMapView(
     // 而缩放变化不一定带来新数据，所以得由停手事件单独驱动一次重算。
     var settleTick by remember { mutableStateOf(0) }
 
+    // 底图真的画出来了才认为 SDK 可用（key 校验在服务端做，initialize 的返回值靠不住）。
+    // 声明在 mapView 之前：监听要在 onCreate 之后、组合期内就挂上（见下）。
+    var mapLoaded by remember { mutableStateOf(false) }
+
     val mapView = remember {
         // 仍然用 MapView（SurfaceView）而不是 TextureMapView（2026-11-17 两次实测）：
         // TextureMapView 参与 Compose 合成、可以整层淡入，但全屏相机动画会掉帧——
@@ -158,6 +165,19 @@ internal fun AmapMapView(
         // 解决（见下面 mapLoaded 那段），SurfaceView 的动画流畅度留住。
         MapView(context).apply {
             onCreate(null)
+            // **onCreate 之后立刻挂「底图就绪」监听**（2026-11-18 修误回退）：它原本挂在
+            // 组合结束后的 DisposableEffect 里，而 onCreate 在组合期就同步跑完了。瓦片命中
+            // 内存缓存时底图可能很快就画好，回调抢在监听挂上之前发出 → 永远等不到
+            // → 10 秒后误判「SDK 不可用」整层回退栅格。onMapLoaded 由渲染线程投回主线程，
+            // 不可能在 onCreate 调用栈内送达，所以挂在这里既无竞态、也不用碰 onCreate 之前
+            // 的 `map`（那时它是否可用取决于 SDK 实现，不赌）。
+            map.setOnMapLoadedListener {
+                // 3D 楼块要在底图就绪后再关（官方示例就写在 onMapLoaded 里）：早调会被首帧
+                // 渲染重置回默认。校园尺度下这一层是纯装饰，每帧都要重新画一遍楼体与贴图。
+                runCatching { map.showBuildings(false) }
+                    .onFailure { Log.w(TAG_MAP, "关闭 3D 楼块失败", it) }
+                mapLoaded = true
+            }
             map.uiSettings.apply {
                 isZoomControlsEnabled = false
                 isCompassEnabled = false
@@ -237,17 +257,9 @@ internal fun AmapMapView(
         if (settleTick > 0) layers.refreshSpotBadges()
     }
 
-    // 底图真的画出来了才认为 SDK 可用（key 校验在服务端做，initialize 的返回值靠不住）
-    var mapLoaded by remember { mutableStateOf(false) }
+    // 「底图就绪」监听在 mapView 的 remember 里挂（见上），这里只负责走的时候摘掉。
     val unavailableCallback by rememberUpdatedState(onSdkUnavailable)
     DisposableEffect(aMap) {
-        aMap.setOnMapLoadedListener {
-            // 3D 楼块要在底图就绪后再关（官方示例就写在 onMapLoaded 里）：早调会被首帧
-            // 渲染重置回默认。校园尺度下这一层是纯装饰，每帧都要重新画一遍楼体与贴图。
-            runCatching { aMap.showBuildings(false) }
-                .onFailure { Log.w(TAG_MAP, "关闭 3D 楼块失败", it) }
-            mapLoaded = true
-        }
         onDispose { aMap.setOnMapLoadedListener(null) }
     }
     LaunchedEffect(aMap) {
@@ -397,9 +409,25 @@ internal fun AmapMapView(
         }
     }
 
-    DisposableEffect(mapView) {
+    // 地图生命周期跟着**宿主窗口**走，不再只跟组合走（2026-11-18）。
+    //
+    // 原来只有 onResume/onPause/onDestroy 三个调用挂在 DisposableEffect 上：组合不销毁
+    // 就不会 onPause，于是 App 切后台、被别的 Activity 盖住时，AMap 的渲染线程和瓦片请求
+    // 照旧跑（真机上表现为后台继续掉电、发热）。现在监听宿主生命周期：进后台就 onPause，
+    // 回前台再 onResume。组合销毁时（离开骑行页）仍然 onPause + onDestroy 彻底释放。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(mapView, lifecycleOwner) {
         mapView.onResume()
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             mapView.onPause()
             mapView.onDestroy()
         }

@@ -1068,37 +1068,9 @@ class ScheduleRepository(
     }
 
     /**
-     * 写入日期覆盖，返回**实际插入**各行的自增 id（AI 调课的「撤销」按 id 删回）。
-     *
-     * 幂等兜底：与已生效安排**等价**（[ScheduleOverrides.sameEffect]）的条目不重复插入，
-     * 列表内部重复也只留一条——同一通知被应用两遍时不再留同指令的脏行
-     * （解析层已挡一道，这里是写入侧的第二道）。全部重复时返回空列表。
+     * 日期覆盖的写入只有两条路径：[applyChangeSet]（调课落库，去重由 `AiScheduleTool`
+     * 用 `ScheduleOverrides.sameEffect` 判）与备份恢复；没有独立的 add/remove 入口。
      */
-    suspend fun addOverrides(list: List<ScheduleOverride>, timetableId: Long? = null): List<Long> {
-        if (list.isEmpty()) return emptyList()
-        val ttId = timetableId ?: currentTimetableId.first()
-        val existing = db.dateOverrideDao().getForTimetable(ttId).map { it.toDomain() }
-        val accepted = mutableListOf<ScheduleOverride>()
-        list.forEach { candidate ->
-            val duplicate = existing.any { ScheduleOverrides.sameEffect(it, candidate) } ||
-                accepted.any { ScheduleOverrides.sameEffect(it, candidate) }
-            if (!duplicate) accepted += candidate
-        }
-        if (accepted.isEmpty()) return emptyList()
-        return db.dateOverrideDao().insertAll(accepted.map { DateOverrideEntity.of(it.copy(id = 0), ttId) })
-    }
-
-    /** 删掉指定的覆盖（覆盖清单里逐条撤销）。 */
-    suspend fun removeOverrides(ids: List<Long>) {
-        if (ids.isEmpty()) return
-        db.dateOverrideDao().deleteByIds(ids)
-    }
-
-    /** 清空某张课表的全部覆盖（删课表 / 清空课程时同步调）。 */
-    suspend fun clearOverrides(timetableId: Long? = null) {
-        val ttId = timetableId ?: currentTimetableId.first()
-        db.dateOverrideDao().deleteForTimetable(ttId)
-    }
 
     // ------------------------------------------------------------------
     // 调课检测基线（DESIGN §4.17，2026-10-04 重立；旧 detect_baselines/detect_reports
@@ -1453,9 +1425,6 @@ class ScheduleRepository(
     /** 指定课表的课程数观察流：课表设置页目标信息行（DESIGN §4.9）。 */
     fun observeCourseCountFor(timetableId: Long): Flow<Int> =
         db.courseDao().observeCountForTimetable(timetableId)
-
-    fun coursesForWeek(week: Int): Flow<List<Course>> =
-        courses.map { ScheduleCalculator.coursesInWeek(it, week) }
 
     // ------------------------------------------------------------------
     // 作息表（scope = 当前课表）

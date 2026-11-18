@@ -51,17 +51,12 @@ class TextbookSync(
 
     suspend fun syncForTerm(term: String?): Result {
         if (term.isNullOrBlank()) return Result.Skipped
-        if (!mutex.tryLock()) return Result.InProgress
-        try {
-            val result = syncLocked(term)
+        return mutex.tryLocked { syncLocked(term) }?.also {
             // 教材链路的 Result 只有一个出口，而调用点把返回值丢掉了（页面上什么都不显示），
             // 于是「导入成功但详情里没教材」在真机上无从查起（2026-10-06 用户报障）。
             // 这行日志是 release 包唯一能自证的地方；只记学期、条数与失败原因，不含任何凭证。
-            Log.i(TAG, "textbook sync $term -> $result")
-            return result
-        } finally {
-            mutex.unlock()
-        }
+            Log.i(TAG, "textbook sync $term -> $it")
+        } ?: Result.InProgress
     }
 
     /**

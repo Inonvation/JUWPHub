@@ -50,14 +50,9 @@ class TeachingCalendarSync(
      */
     suspend fun applyAfterImport(term: String?, timetableId: Long? = null): Result {
         if (term.isNullOrBlank()) return Result.Skipped
-        if (!mutex.tryLock()) return Result.InProgress
-        try {
-            val result = applyLocked(term, timetableId)
-            Log.i(TAG, "calendar apply $term -> $result")
-            return result
-        } finally {
-            mutex.unlock()
-        }
+        return mutex.tryLocked { applyLocked(term, timetableId) }?.also {
+            Log.i(TAG, "calendar apply $term -> $it")
+        } ?: Result.InProgress
     }
 
     private suspend fun applyLocked(term: String, timetableId: Long?): Result {

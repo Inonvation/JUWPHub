@@ -54,10 +54,8 @@ class InternshipBasesLoader(
         data class Failed(val reason: String) : Result
     }
 
-    suspend fun load(force: Boolean = false): Result {
-        if (!mutex.tryLock()) return Result.InProgress
-        try {
-            val result = withContext(Dispatchers.IO) { loadLocked(force) }
+    suspend fun load(force: Boolean = false): Result =
+        mutex.tryLocked { withContext(Dispatchers.IO) { loadLocked(force) } }?.also { result ->
             Log.i(
                 TAG,
                 "internship bases -> " + when (result) {
@@ -69,11 +67,7 @@ class InternshipBasesLoader(
                     is Result.Failed -> "failed: ${result.reason}"
                 },
             )
-            return result
-        } finally {
-            mutex.unlock()
-        }
-    }
+        } ?: Result.InProgress
 
     private suspend fun loadLocked(force: Boolean): Result {
         val snapshot = store.load()

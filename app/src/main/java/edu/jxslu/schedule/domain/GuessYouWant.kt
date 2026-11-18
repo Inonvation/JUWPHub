@@ -131,6 +131,14 @@ object GuessRules {
     /** 距下课多少分钟内推荐快趣。 */
     const val CLASS_END_WINDOW_MINUTES = 20
 
+    /**
+     * 两节课之间至少隔多久才值得骑车（分钟）。
+     *
+     * 默认作息里大节之间只有 20 分钟换教室（09:55→10:15），那段时间人就在教学楼里挪一层，
+     * 骑车既没意义又要计费。短于这个间隔的「下课 / 上课」一律按换教室处理，不出信号。
+     */
+    const val MIN_BREAK_FOR_RIDE_MINUTES = 30
+
     /** 平日时段表命中的基础权重。 */
     const val BASE_WEIGHT = 10
 
@@ -142,6 +150,14 @@ object GuessRules {
 
     /** 进入权重的最低证据数（cell + band）。 */
     const val EVIDENCE_GATE = 3
+
+    /**
+     * 低频功能的证据门槛（问渠报名、U净 洗衣）。
+     *
+     * 这两件事 60 天内在同一个 30 分钟槽攒到 3 次基本不可能（报名一周一次、洗衣几天一次），
+     * 用 3 次门槛等于让它们永远学不到。降到 2 次：两次同槽已经说明「这个点会干这件事」。
+     */
+    const val LOW_FREQUENCY_GATE = 2
 
     /** 单个功能的习惯权重上限：再频繁也留一部分概率给表 / 先验。 */
     const val HABIT_CAP = 40
@@ -168,7 +184,12 @@ object GuessRules {
         GuessWindow(19 * 60 + 30, 23 * 60, GuessTarget.QZXY),
     )
 
-    /** 周末先验：没有习惯证据时按这个顺序兜底（胖乖 > 快趣 > U净）。 */
+    /**
+     * 周末先验：没有习惯证据时按这个顺序兜底（胖乖 > 快趣 > U净）。
+     *
+     * 判定时会先按「历史用过至少一次」过滤（见 [decide] 第 3 步）——从没下过胖乖订单的人
+     * 不该被推一张点了还要登录的卡。一个都没用过才退回本表的原顺序。
+     */
     val weekendPriors: Map<GuessTarget, Int> = linkedMapOf(
         GuessTarget.QIEKJ to 3,
         GuessTarget.KVCX to 2,
@@ -183,27 +204,53 @@ object GuessRules {
     fun windowAt(minuteOfDay: Int): GuessWindow? =
         weekdayWindows.firstOrNull { minuteOfDay >= it.startMinute && minuteOfDay < it.endMinute }
 
+    /** 每个功能的证据门槛：低频动作（问渠报名 / U净 洗衣）用 [LOW_FREQUENCY_GATE]。 */
+    fun evidenceGate(target: GuessTarget): Int = when (target) {
+        GuessTarget.WENQU, GuessTarget.UJING -> LOW_FREQUENCY_GATE
+        else -> EVIDENCE_GATE
+    }
+
     /**
      * 上课 / 下课信号。
      *
      * 先判「快下课」（更近、且骑车是下课后的动作），再判「快上课」。
      * 两者都只在 1..窗口 内成立——0 分钟（刚好到点）不推荐，避免在下课铃响后才弹「提前扫车」。
+     *
+     * **换教室不算下课**（2026-11-18）：默认作息 09:55 下课、10:15 上下一大节，中间 20 分钟
+     * 只是换教室。所以两侧都要看间隔：
+     * - 快下课：与下一节的间隔（[minutesToNext] − [minutesToOngoingEnd]）短于
+     *   [MIN_BREAK_FOR_RIDE_MINUTES] 就不出信号；
+     * - 快上课：人还在上一节里（[hasOngoing]）不出信号；上一节刚下（[minutesSincePrevEnd] 小于
+     *   同一阈值）也不出——那还是换教室。
+     *
+     * @param minutesSincePrevEnd 今天最近一节已结束的课距现在几分钟；今天还没上完课为 null。
      */
     fun classSignal(
         hasOngoing: Boolean,
         minutesToOngoingEnd: Int?,
         hasNext: Boolean,
         minutesToNext: Int?,
+        minutesSincePrevEnd: Int? = null,
     ): ClassSignal? {
         if (hasOngoing && minutesToOngoingEnd != null &&
             minutesToOngoingEnd in 1..CLASS_END_WINDOW_MINUTES
         ) {
-            return ClassSignal(GuessSignalKind.AFTER_CLASS, minutesToOngoingEnd)
+            val gapToNext = if (hasNext && minutesToNext != null) {
+                minutesToNext - minutesToOngoingEnd
+            } else {
+                null
+            }
+            if (gapToNext == null || gapToNext >= MIN_BREAK_FOR_RIDE_MINUTES) {
+                return ClassSignal(GuessSignalKind.AFTER_CLASS, minutesToOngoingEnd)
+            }
         }
-        if (hasNext && minutesToNext != null &&
+        if (!hasOngoing && hasNext && minutesToNext != null &&
             minutesToNext in 1..CLASS_START_WINDOW_MINUTES
         ) {
-            return ClassSignal(GuessSignalKind.BEFORE_CLASS, minutesToNext)
+            val sincePrev = minutesSincePrevEnd
+            if (sincePrev == null || sincePrev >= MIN_BREAK_FOR_RIDE_MINUTES) {
+                return ClassSignal(GuessSignalKind.BEFORE_CLASS, minutesToNext)
+            }
         }
         return null
     }
@@ -212,8 +259,8 @@ object GuessRules {
      * 习惯权重：证据不足门槛返回 null（不参与竞争），否则
      * `min(4×cell + band, 40)`。抽出来是为了单测能直接钉住权重表。
      */
-    fun habitWeight(cell: Int, band: Int): Int? {
-        if (cell + band < EVIDENCE_GATE) return null
+    fun habitWeight(cell: Int, band: Int, gate: Int = EVIDENCE_GATE): Int? {
+        if (cell + band < gate) return null
         return minOf(CELL_WEIGHT * cell + BAND_WEIGHT * band, HABIT_CAP)
     }
 
@@ -230,11 +277,18 @@ object GuessRules {
         usages: List<GuessUsage>,
         nowMillis: Long,
         roll: Double,
+        /**
+         * 当前不该推荐的功能（2026-11-18）。今日页在有在案骑行时传 [GuessTarget.KVCX]：
+         * 服务卡就在推荐卡上方，再推一次快趣是同一件事说两遍。
+         * 被排除的功能不参与任何一层（信号 / 时段表 / 周末先验 / 习惯），全被排除时不出卡。
+         */
+        blocked: Set<GuessTarget> = emptySet(),
     ): GuessPick? {
         if (dayOfWeek !in 1..7 || minuteOfDay !in 0..(24 * 60 - 1)) return null
 
-        // 1. 上课信号一票决定（周末有课同样命中，不看 dayOfWeek 是否 1..5）
-        if (signal != null) {
+        // 1. 上课信号一票决定（周末有课同样命中，不看 dayOfWeek 是否 1..5）。
+        //    快趣被排除时（骑行中）信号作废，落到下面的时段 / 习惯逻辑
+        if (signal != null && GuessTarget.KVCX !in blocked) {
             return GuessPick(
                 target = GuessTarget.KVCX,
                 source = if (signal.kind == GuessSignalKind.BEFORE_CLASS) {
@@ -249,21 +303,36 @@ object GuessRules {
         // 2. 周日中午固定问渠（不参与概率；上课信号已在上面先返回）
         if (dayOfWeek == 7 &&
             minuteOfDay >= SUNDAY_NOON_START_MINUTE &&
-            minuteOfDay < SUNDAY_NOON_END_MINUTE
+            minuteOfDay < SUNDAY_NOON_END_MINUTE &&
+            GuessTarget.WENQU !in blocked
         ) {
             return GuessPick(GuessTarget.WENQU, GuessSource.SUNDAY_NOON)
         }
 
-        // 3. 基础权重：平日命中表给 10；周末无表，给先验
-        val base = if (dayOfWeek <= 5) windowAt(minuteOfDay)?.target else null
+        // 3. 基础权重：平日命中表给 10；周末给先验
+        //    周末先验只保留「历史用过至少一次」的功能：从没下过胖乖订单的人，推过去只会撞登录页。
+        //    一个都没用过（新装 / 只下过快趣以外的单）则退回原顺序，保证周末总有一张卡。
+        val base = if (dayOfWeek <= 5) {
+            windowAt(minuteOfDay)?.target?.takeIf { it !in blocked }
+        } else {
+            null
+        }
+        val everUsed = usages.mapTo(HashSet()) { it.target }
+        val priors = if (dayOfWeek >= 6) {
+            weekendPriors.filterKeys { it !in blocked && it in everUsed }.ifEmpty {
+                weekendPriors.filterKeys { it !in blocked }
+            }
+        } else {
+            emptyMap()
+        }
         val weights = LinkedHashMap<GuessTarget, Int>()
         if (base != null) {
             weights[base] = BASE_WEIGHT
-        } else if (dayOfWeek >= 6) {
-            weekendPriors.forEach { (target, weight) -> weights[target] = weight }
+        } else {
+            priors.forEach { (target, weight) -> weights[target] = weight }
         }
 
-        // 4. 习惯：只统计近 60 天、同槽；cell + band 过门槛才参与
+        // 4. 习惯：只统计近 60 天、同槽；cell + band 过该功能的门槛才参与
         val slot = slotOf(minuteOfDay)
         val cutoff = nowMillis - HISTORY_DAYS * 24L * 60L * 60L * 1000L
         val recent = usages.filter {
@@ -271,22 +340,24 @@ object GuessRules {
         }
         val habitWeights = HashMap<GuessTarget, Int>()
         GuessTarget.entries.forEach { target ->
+            if (target in blocked) return@forEach
             val cell = recent.count { it.dayOfWeek == dayOfWeek && it.target == target }
             val band = recent.count {
                 it.dayOfWeek != dayOfWeek &&
                     it.target == target &&
                     sameDayKind(it.dayOfWeek, dayOfWeek)
             }
-            val weight = habitWeight(cell, band) ?: return@forEach
+            val weight = habitWeight(cell, band, evidenceGate(target)) ?: return@forEach
             habitWeights[target] = weight
             weights[target] = (weights[target] ?: 0) + weight
         }
 
         if (weights.isEmpty()) return null
 
-        // 5. 周末完全没有习惯证据：固定胖乖（「默认优先胖乖 - 快趣 - U净」的第一名）
+        // 5. 周末完全没有习惯证据：按（已过滤的）先验第一名兜底，即「默认优先胖乖 - 快趣 - U净」
         if (dayOfWeek >= 6 && habitWeights.isEmpty()) {
-            return GuessPick(GuessTarget.QIEKJ, GuessSource.WEEKEND_DEFAULT)
+            val fallback = priors.keys.firstOrNull() ?: return null
+            return GuessPick(fallback, GuessSource.WEEKEND_DEFAULT)
         }
 
         val target = weightedPick(weights, roll) ?: return null
@@ -329,7 +400,9 @@ object GuessRules {
  *
  * 为什么需要它：页面每 30 秒 tick 一次、订单落库也会让习惯流重新发射；如果每次都重抽，
  * 用户会看到卡片自己换功能。稳定器把「什么时候重抽」收成一个 key：
- * `日期|槽|上课信号类型` 不变就沿用旧结果（null 也缓存，空档不会因一次 tick 突然出卡）。
+ * `日期|槽|上课信号类型|是否有在案骑行` 不变就沿用旧结果（null 也缓存，空档不会因一次 tick
+ * 突然出卡）。骑行状态进 key 是因为它决定快趣是否被排除（[GuessRules.decide] 的 `blocked`），
+ * 骑行开始 / 结束时卡片该跟着换。
  *
  * 开关关闭 / 打开时必须 [reset]：重新开启要求「清空习惯、重新开始」。
  */

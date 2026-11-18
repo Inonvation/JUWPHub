@@ -20,6 +20,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.BuildConfig
 import edu.jxslu.schedule.domain.BikeCluster
@@ -454,9 +457,22 @@ internal fun OsmMapView(
         },
     )
 
-    DisposableEffect(mapView) {
+    // 与 [AmapMapView] 同口径（2026-11-18）：地图生命周期跟**宿主窗口**走，不只跟组合走。
+    // 否则 App 切后台时 osmdroid 的瓦片下载与重绘照旧跑（这条是回退路径，平时不可达，
+    // 但 key 失效时它就是唯一的底图，后台掉电一样会发生）。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(mapView, lifecycleOwner) {
         mapView.onResume()
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             mapView.onPause()
             mapView.onDetach()
         }

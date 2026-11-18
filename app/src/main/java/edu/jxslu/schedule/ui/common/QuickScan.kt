@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.common
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,6 +13,24 @@ import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.domain.QuickScanTarget
 import edu.jxslu.schedule.domain.quickScanTargetOf
 import edu.jxslu.schedule.ui.ebike.EbikeScanActivity
+
+/**
+ * 「只扫洗衣机机身码」的取景 Intent（2026-11-18 收编三处逐字复制：今日页扫一扫、
+ * 侧栏 U净 弹窗、U净 页自己）。
+ *
+ * 与 [rememberQuickScan] 的区别是**只接受机身码**：那三处的回调只会交给
+ * `UjingViewModel.onQrScanned`，别的码送进去只会被服务端回「未识别到设备信息」。
+ * 所以提示语写死「对准洗衣机机身」，格式也限死二维码——机身码都是二维码，
+ * 不限定就会把商品一维码也送出去换一次无意义的请求。
+ */
+fun washerScanIntent(context: Context): Intent =
+    Intent(context, EbikeScanActivity::class.java).apply {
+        putExtra(Intents.Scan.PROMPT_MESSAGE, "对准洗衣机机身上的二维码")
+        putExtra(EbikeScanActivity.EXTRA_RESULT_MODE, EbikeScanActivity.MODE_RAW)
+        // 键走 Intents.Scan.FORMATS 的**逗号分隔字符串**（DecodeFormatManager 只读
+        // StringExtra 这一种形态，别改传 ArrayList，那样等于没设）
+        putExtra(Intents.Scan.FORMATS, BarcodeFormat.QR_CODE.name)
+    }
 
 /**
  * 扫一扫入口的组合封装（DESIGN §3.1 侧栏「扫一扫」）。

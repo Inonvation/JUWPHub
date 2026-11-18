@@ -2,6 +2,7 @@ package edu.jxslu.schedule.data.prefs
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import edu.jxslu.schedule.data.ai.AiScheduleClient
 import edu.jxslu.schedule.domain.AiScheduleConfig
@@ -69,6 +70,17 @@ class DisplayPrefsStore(internal val context: Context) {
     @Suppress("UNCHECKED_CAST")
     internal fun <T> cachedFlow(key: String, create: () -> Flow<T>): Flow<T> =
         synchronized(flowCache) { flowCache.getOrPut(key) { create() } as Flow<T> }
+
+    /**
+     * **单值写入的唯一口**（2026-11-18 收编 44 份逐字相同的 setter 体）。
+     *
+     * 只做「把 [value] 写进 [key]」，不夹带任何业务判断。需要读-改-写、范围钳制、
+     * JSON 编码、清空多个键的写路径（`updateViewPrefs`、区间夹紧、`clear*`）仍写在
+     * 调用处——别硬套这个壳，那会把「这个值其实被夹紧过」藏起来。
+     */
+    private suspend fun <T> put(key: Preferences.Key<T>, value: T) {
+        context.displayDataStore.edit { it[key] = value }
+    }
 
     /**
      * 全局显示偏好（原课表级）。JSON 解码失败退默认值：
@@ -314,17 +326,13 @@ class DisplayPrefsStore(internal val context: Context) {
     val scoreAlertEnabled: Flow<Boolean> =
         context.displayDataStore.data.map { it[KEY_SCORE_ALERT_ENABLED] ?: true }
 
-    suspend fun setScoreAlertEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_SCORE_ALERT_ENABLED] = value }
-    }
+    suspend fun setScoreAlertEnabled(value: Boolean) = put(KEY_SCORE_ALERT_ENABLED, value)
 
     /** 考试变动提醒开关。**默认开**（同成绩，2026-10-06）。 */
     val examAlertEnabled: Flow<Boolean> =
         context.displayDataStore.data.map { it[KEY_EXAM_ALERT_ENABLED] ?: true }
 
-    suspend fun setExamAlertEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EXAM_ALERT_ENABLED] = value }
-    }
+    suspend fun setExamAlertEnabled(value: Boolean) = put(KEY_EXAM_ALERT_ENABLED, value)
 
     /**
      * 考试变动后**自动合并当前课表**。**默认开**（2026-11-03 用户口径）。
@@ -335,9 +343,7 @@ class DisplayPrefsStore(internal val context: Context) {
     val examAutoMergeEnabled: Flow<Boolean> =
         context.displayDataStore.data.map { it[KEY_EXAM_AUTO_MERGE_ENABLED] ?: true }
 
-    suspend fun setExamAutoMergeEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EXAM_AUTO_MERGE_ENABLED] = value }
-    }
+    suspend fun setExamAutoMergeEnabled(value: Boolean) = put(KEY_EXAM_AUTO_MERGE_ENABLED, value)
 
     /**
      * 成绩变动提醒的检查间隔（小时）。**2026-10-04 起四条提醒链各自独立**（用户口径：
@@ -466,9 +472,7 @@ class DisplayPrefsStore(internal val context: Context) {
     val selectionAlertEnabled: Flow<Boolean> =
         context.displayDataStore.data.map { p -> p[KEY_SELECTION_ALERT_ENABLED] ?: false }
 
-    suspend fun setSelectionAlertEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_SELECTION_ALERT_ENABLED] = value }
-    }
+    suspend fun setSelectionAlertEnabled(value: Boolean) = put(KEY_SELECTION_ALERT_ENABLED, value)
 
     /**
      * 选课提醒「已发键」集合（`轮次id|start` / `轮次id|end`），闹钟与周期核对共用去重。
@@ -572,9 +576,7 @@ class DisplayPrefsStore(internal val context: Context) {
     suspend fun alertPeriodicInterval(): Int =
         context.displayDataStore.data.first()[KEY_ALERT_PERIODIC_INTERVAL] ?: 0
 
-    suspend fun setAlertPeriodicInterval(value: Int) {
-        context.displayDataStore.edit { it[KEY_ALERT_PERIODIC_INTERVAL] = value }
-    }
+    suspend fun setAlertPeriodicInterval(value: Int) = put(KEY_ALERT_PERIODIC_INTERVAL, value)
 
     /**
      * 教材的上次成功抓取日期（ISO）。空 = 从没成功过。
@@ -1089,9 +1091,7 @@ class DisplayPrefsStore(internal val context: Context) {
         p[KEY_RECHARGE_DISCLAIMER_SUPPRESS_UNTIL] ?: 0L
     }.distinctUntilChanged()
 
-    suspend fun setRechargeDisclaimerSuppressUntil(value: Long) {
-        context.displayDataStore.edit { it[KEY_RECHARGE_DISCLAIMER_SUPPRESS_UNTIL] = value }
-    }
+    suspend fun setRechargeDisclaimerSuppressUntil(value: Long) = put(KEY_RECHARGE_DISCLAIMER_SUPPRESS_UNTIL, value)
 
     /**
      * 充值免责声明的「已确认」时刻（epoch 毫秒）。0 = 从未确认过——首次弹出要锁
@@ -1291,38 +1291,26 @@ class DisplayPrefsStore(internal val context: Context) {
         context.displayDataStore.edit { it[KEY_THEME_MODE] = value.name }
     }
 
-    suspend fun setHapticsEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_HAPTICS_ENABLED] = value }
-    }
+    suspend fun setHapticsEnabled(value: Boolean) = put(KEY_HAPTICS_ENABLED, value)
 
-    suspend fun setFontScaleLocked(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_FONT_SCALE_LOCKED] = value }
-    }
+    suspend fun setFontScaleLocked(value: Boolean) = put(KEY_FONT_SCALE_LOCKED, value)
 
-    suspend fun setDynamicColor(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_DYNAMIC_COLOR] = value }
-    }
+    suspend fun setDynamicColor(value: Boolean) = put(KEY_DYNAMIC_COLOR, value)
 
     suspend fun setThemePalette(value: ThemePalette) {
         context.displayDataStore.edit { it[KEY_THEME_PALETTE] = value.id }
     }
 
-    suspend fun setFloatingNavBar(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_FLOATING_NAV_BAR] = value }
-    }
+    suspend fun setFloatingNavBar(value: Boolean) = put(KEY_FLOATING_NAV_BAR, value)
 
-    suspend fun setToolboxEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_TOOLBOX_ENABLED] = value }
-    }
+    suspend fun setToolboxEnabled(value: Boolean) = put(KEY_TOOLBOX_ENABLED, value)
 
     /** 启动页（DESIGN §3.3）。写的是用户的选择本身，不因为生活页此刻关着就改写它。 */
     suspend fun setStartPage(value: StartPage) {
         context.displayDataStore.edit { it[KEY_START_PAGE] = value.name }
     }
 
-    suspend fun setQiekjAutoSignIn(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_QIEKJ_AUTO_SIGN_IN] = value }
-    }
+    suspend fun setQiekjAutoSignIn(value: Boolean) = put(KEY_QIEKJ_AUTO_SIGN_IN, value)
 
     suspend fun setQiekjAutoSignInLastDate(value: String) {
         context.displayDataStore.edit {
@@ -1338,29 +1326,19 @@ class DisplayPrefsStore(internal val context: Context) {
         }
     }
 
-    suspend fun setReminderEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_REMINDER_ENABLED] = value }
-    }
+    suspend fun setReminderEnabled(value: Boolean) = put(KEY_REMINDER_ENABLED, value)
 
     /** 作业截止提醒开关（DESIGN §3.11）。 */
-    suspend fun setHomeworkReminderEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_HOMEWORK_REMINDER_ENABLED] = value }
-    }
+    suspend fun setHomeworkReminderEnabled(value: Boolean) = put(KEY_HOMEWORK_REMINDER_ENABLED, value)
 
     /** 共享单车免费时长提醒开关（DESIGN §3.9）。默认关：通知是打扰型能力，用户显式开启。 */
-    suspend fun setEbikeFreeReminderEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EBIKE_FREE_REMINDER_ENABLED] = value }
-    }
+    suspend fun setEbikeFreeReminderEnabled(value: Boolean) = put(KEY_EBIKE_FREE_REMINDER_ENABLED, value)
 
     /** 通知强提醒开关（DESIGN §3.3 通用设置；语义见 [strongReminderVibration]）。 */
-    suspend fun setStrongReminderVibration(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_STRONG_REMINDER_VIBRATION] = value }
-    }
+    suspend fun setStrongReminderVibration(value: Boolean) = put(KEY_STRONG_REMINDER_VIBRATION, value)
 
     /** 免扰总开关（语义见 [quietHoursEnabled]）。 */
-    suspend fun setQuietHoursEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_QUIET_HOURS_ENABLED] = value }
-    }
+    suspend fun setQuietHoursEnabled(value: Boolean) = put(KEY_QUIET_HOURS_ENABLED, value)
 
     /** 免扰时段全表（语义见 [quietHoursWindows]）。 */
     suspend fun setQuietHoursWindows(windows: List<QuietWindow>) {
@@ -1368,14 +1346,10 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /** 启动自动检查更新开关（语义见 [autoUpdateCheckEnabled]）。 */
-    suspend fun setAutoUpdateCheckEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_AUTO_UPDATE_CHECK_ENABLED] = value }
-    }
+    suspend fun setAutoUpdateCheckEnabled(value: Boolean) = put(KEY_AUTO_UPDATE_CHECK_ENABLED, value)
 
     /** 教务 WebView 电脑版预览开关（语义见 [jwDesktopMode]）。 */
-    suspend fun setJwDesktopMode(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_JW_DESKTOP_MODE] = value }
-    }
+    suspend fun setJwDesktopMode(value: Boolean) = put(KEY_JW_DESKTOP_MODE, value)
 
     /** AI 调课服务地址（DESIGN §4.39）。存 trim 后的原文，允许空串（= 用户清空待重填）。 */
     suspend fun setAiBaseUrl(value: String) {
@@ -1388,14 +1362,10 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /** AI 调课教师名脱敏开关（DESIGN §4.39）。 */
-    suspend fun setAiMaskTeacher(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_AI_MASK_TEACHER] = value }
-    }
+    suspend fun setAiMaskTeacher(value: Boolean) = put(KEY_AI_MASK_TEACHER, value)
 
     /** 首次隐私确认（DESIGN §4.39）。确认后不再弹。 */
-    suspend fun setAiPrivacyAcknowledged(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_AI_PRIVACY_ACK] = value }
-    }
+    suspend fun setAiPrivacyAcknowledged(value: Boolean) = put(KEY_AI_PRIVACY_ACK, value)
 
     /** AI 调课思考档位（DESIGN §4.39）。传 [AiScheduleClient.Effort.wire]。 */
     suspend fun setAiThinkingEffort(value: String) {
@@ -1405,14 +1375,10 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /** 是否显示思考过程（DESIGN §4.39）。 */
-    suspend fun setAiShowReasoning(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_AI_SHOW_REASONING] = value }
-    }
+    suspend fun setAiShowReasoning(value: Boolean) = put(KEY_AI_SHOW_REASONING, value)
 
     /** 该模型是否支持图片识别（DESIGN §4.39）。见 [aiSupportsImage] 的口径。 */
-    suspend fun setAiSupportsImage(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_AI_SUPPORTS_IMAGE] = value }
-    }
+    suspend fun setAiSupportsImage(value: Boolean) = put(KEY_AI_SUPPORTS_IMAGE, value)
 
     /** 共享单车免费时长提醒提前量（分钟，1~5）。 */
     suspend fun setEbikeFreeLeadMinutes(value: Int) {
@@ -1426,14 +1392,10 @@ class DisplayPrefsStore(internal val context: Context) {
      * （缓冲期内倒计时满格不走，2026-10-05 用户拍板）；本机开锁成功写开锁时刻。
      * 0 = 无进行中计时。**持久化**——进程被杀重启后状态条与兜底核对都靠它。
      */
-    suspend fun setEbikeRideStartAt(value: Long) {
-        context.displayDataStore.edit { it[KEY_EBIKE_RIDE_START_AT] = value }
-    }
+    suspend fun setEbikeRideStartAt(value: Long) = put(KEY_EBIKE_RIDE_START_AT, value)
 
     /** 用车满 15 分钟自动还车开关（DESIGN §3.9；语义见 [ebikeAutoReturnEnabled]）。 */
-    suspend fun setEbikeAutoReturnEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EBIKE_AUTO_RETURN_ENABLED] = value }
-    }
+    suspend fun setEbikeAutoReturnEnabled(value: Boolean) = put(KEY_EBIKE_AUTO_RETURN_ENABLED, value)
 
     /** 自动还车触发提前量（秒，10~60 步长 5；语义见 [ebikeAutoReturnLeadSeconds]）。 */
     suspend fun setEbikeAutoReturnLeadSeconds(value: Int) {
@@ -1450,9 +1412,7 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /** 记下自动还车已对某轮骑行执行过（键由 [EbikeAutoReturn.doneKey] 生成）。 */
-    suspend fun setEbikeAutoReturnDoneKey(value: String) {
-        context.displayDataStore.edit { it[KEY_EBIKE_AUTO_RETURN_DONE_KEY] = value }
-    }
+    suspend fun setEbikeAutoReturnDoneKey(value: String) = put(KEY_EBIKE_AUTO_RETURN_DONE_KEY, value)
 
     /**
      * 免费时长提醒已发键的统一写入口（DESIGN §3.9）：读-改-写整个集合，同值跳写
@@ -1522,22 +1482,14 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /** 「有远程用车提醒待弹」标记（见 [ebikeRemoteRidePending]）；弹出消费后写 false。 */
-    suspend fun setEbikeRemoteRidePending(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EBIKE_REMOTE_RIDE_PENDING] = value }
-    }
+    suspend fun setEbikeRemoteRidePending(value: Boolean) = put(KEY_EBIKE_REMOTE_RIDE_PENDING, value)
 
-    suspend fun setShortcutsEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_SHORTCUTS_ENABLED] = value }
-    }
+    suspend fun setShortcutsEnabled(value: Boolean) = put(KEY_SHORTCUTS_ENABLED, value)
 
     /** 「其他」分类展开态（见 [shortcutOtherExpanded]）：用户每次点标题都落盘。 */
-    suspend fun setShortcutOtherExpanded(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_SHORTCUTS_OTHER_EXPANDED] = value }
-    }
+    suspend fun setShortcutOtherExpanded(value: Boolean) = put(KEY_SHORTCUTS_OTHER_EXPANDED, value)
 
-    suspend fun setWeatherEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_WEATHER_ENABLED] = value }
-    }
+    suspend fun setWeatherEnabled(value: Boolean) = put(KEY_WEATHER_ENABLED, value)
 
     /**
      * 快趣出行的使用方式（DESIGN §3.9 / §4.32）。写的是枚举的存储 id，
@@ -1548,14 +1500,10 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /** 今日页校园卡付款码卡开关（DESIGN §3.10）。 */
-    suspend fun setCampusCardEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_CAMPUS_CARD_ENABLED] = value }
-    }
+    suspend fun setCampusCardEnabled(value: Boolean) = put(KEY_CAMPUS_CARD_ENABLED, value)
 
     /** 寝室电费提醒开关（DESIGN §3.13）。 */
-    suspend fun setPowerAlertEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_POWER_ALERT_ENABLED] = value }
-    }
+    suspend fun setPowerAlertEnabled(value: Boolean) = put(KEY_POWER_ALERT_ENABLED, value)
 
     /** 寝室电费提醒阈值（元）；夹取到候选表值域。 */
     suspend fun setPowerAlertYuan(value: Int) {
@@ -1565,9 +1513,7 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /** 一卡通余额提醒开关（DESIGN §3.10）。 */
-    suspend fun setYktAlertEnabled(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_YKT_ALERT_ENABLED] = value }
-    }
+    suspend fun setYktAlertEnabled(value: Boolean) = put(KEY_YKT_ALERT_ENABLED, value)
 
     /** 一卡通余额提醒阈值（元）；夹取到候选表值域。 */
     suspend fun setYktAlertYuan(value: Int) {
@@ -1642,9 +1588,7 @@ class DisplayPrefsStore(internal val context: Context) {
     suspend fun balancePeriodicInterval(): Int =
         context.displayDataStore.data.first()[KEY_BALANCE_PERIODIC_INTERVAL] ?: 0
 
-    suspend fun setBalancePeriodicInterval(value: Int) {
-        context.displayDataStore.edit { it[KEY_BALANCE_PERIODIC_INTERVAL] = value }
-    }
+    suspend fun setBalancePeriodicInterval(value: Int) = put(KEY_BALANCE_PERIODIC_INTERVAL, value)
 
     private fun balanceAlertCheckMillisKey(source: BalanceAlertSource) = when (source) {
         BalanceAlertSource.Power -> KEY_POWER_ALERT_CHECK_MILLIS
@@ -1662,24 +1606,16 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /** 共享单车出码自动存相册开关（DESIGN §3.9）。 */
-    suspend fun setEbikeAutoSave(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EBIKE_AUTO_SAVE] = value }
-    }
+    suspend fun setEbikeAutoSave(value: Boolean) = put(KEY_EBIKE_AUTO_SAVE, value)
 
     /** 扫完即焚开关（DESIGN §3.9）。 */
-    suspend fun setEbikeBurnAfterScan(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EBIKE_BURN_AFTER_SCAN] = value }
-    }
+    suspend fun setEbikeBurnAfterScan(value: Boolean) = put(KEY_EBIKE_BURN_AFTER_SCAN, value)
 
     /** 开锁前是否弹二次确认（DESIGN §3.9 / §4.32）。 */
-    suspend fun setEbikeUnlockConfirm(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EBIKE_UNLOCK_CONFIRM] = value }
-    }
+    suspend fun setEbikeUnlockConfirm(value: Boolean) = put(KEY_EBIKE_UNLOCK_CONFIRM, value)
 
     /** 标记「已自动申请过定位权限」（DESIGN §3.9），见 [ebikeLocationAsked]。 */
-    suspend fun setEbikeLocationAsked(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EBIKE_LOCATION_ASKED] = value }
-    }
+    suspend fun setEbikeLocationAsked(value: Boolean) = put(KEY_EBIKE_LOCATION_ASKED, value)
 
     /** 记录「已读 U净 使用须知」的时刻（DESIGN §4.37），见 [ujingNoticeSeenAt]。 */
     suspend fun setUjingNoticeSeenAt(millis: Long) {
@@ -1687,19 +1623,13 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /** 记住附近单车地图「只看可用」筛选（DESIGN §3.9），见 [ebikeMapOnlyAvailable]。 */
-    suspend fun setEbikeMapOnlyAvailable(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EBIKE_MAP_ONLY_AVAILABLE] = value }
-    }
+    suspend fun setEbikeMapOnlyAvailable(value: Boolean) = put(KEY_EBIKE_MAP_ONLY_AVAILABLE, value)
 
     /** 记住附近单车地图「只看本校」筛选（DESIGN §3.9），见 [ebikeMapOnlyOurCampus]。 */
-    suspend fun setEbikeMapOnlyOurCampus(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EBIKE_MAP_ONLY_OUR_CAMPUS] = value }
-    }
+    suspend fun setEbikeMapOnlyOurCampus(value: Boolean) = put(KEY_EBIKE_MAP_ONLY_OUR_CAMPUS, value)
 
     /** 记住附近单车地图的显示方式（按停车点 / 按车辆），见 [ebikeMapByBike]。 */
-    suspend fun setEbikeMapByBike(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_EBIKE_MAP_BY_BIKE] = value }
-    }
+    suspend fun setEbikeMapByBike(value: Boolean) = put(KEY_EBIKE_MAP_BY_BIKE, value)
 
     /**
      * 地图底图选择（DESIGN §3.9，2026-11-17）：见 [ebikeAmapChoice]。
@@ -1774,13 +1704,9 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     /** 成绩页统计口径开关（DESIGN §4.15）。 */
-    suspend fun setScoreIncludeFreeElectives(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_SCORE_INCLUDE_FREE_ELECTIVES] = value }
-    }
+    suspend fun setScoreIncludeFreeElectives(value: Boolean) = put(KEY_SCORE_INCLUDE_FREE_ELECTIVES, value)
 
-    suspend fun setScoreGroupByYear(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_SCORE_GROUP_BY_YEAR] = value }
-    }
+    suspend fun setScoreGroupByYear(value: Boolean) = put(KEY_SCORE_GROUP_BY_YEAR, value)
 
     suspend fun setScoreSortMode(value: ScoreSortMode) {
         context.displayDataStore.edit { it[KEY_SCORE_SORT_MODE] = value.name }
@@ -1894,9 +1820,7 @@ class DisplayPrefsStore(internal val context: Context) {
     suspend fun prefsMigrated(): Boolean =
         context.displayDataStore.data.first()[KEY_PREFS_MIGRATED] ?: false
 
-    suspend fun setPrefsMigrated(value: Boolean) {
-        context.displayDataStore.edit { it[KEY_PREFS_MIGRATED] = value }
-    }
+    suspend fun setPrefsMigrated(value: Boolean) = put(KEY_PREFS_MIGRATED, value)
 
     /**
      * 【遗留】旧版全局的显示偏好。

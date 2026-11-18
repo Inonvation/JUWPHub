@@ -221,7 +221,7 @@ AI 页与调课检测页顶栏的历史图标 → `SubpageScreen.AI_HISTORY`（`
   （「第 5 周周一停课 + 第 4 周周日上第 5 周周一的课」是两件事，别互相抵消）。
 - 无效条目一律跳过：学期外、日期不合法、follow 缺源槽位、`sourceWeekday` 不在 1..7。
   `ScheduleOverrides.MAX_RANGE_DAYS = 400` 防脏区间把摊平循环拖死。
-- 写路径：`ScheduleRepository.addOverrides` / `removeOverrides` / `clearOverrides`。
+- 写路径：`ScheduleRepository.applyScheduleChanges` / `applyLocalChanges` → 私有 `applyChangeSet`（事务内逐条落库）；备份恢复走 `restoreBackup`。**2026-11-18 删掉了 `addOverrides` / `removeOverrides` / `clearOverrides`**——它们当时已不是真实写路径（零调用点），别照旧名字找。
   删课表与清空课程时**同步清覆盖**（`deleteTimetable` / `clearCourses` 里已挂）。
 - **「已生效的安排」必须进 prompt**（2026-10-07 修）：`userMessage` 的
   【已生效的日期安排】段（`AiSchedulePrompt.overridesBrief`，空也要写「无」）——课表清单
@@ -229,7 +229,7 @@ AI 页与调课检测页顶栏的历史图标 → `SubpageScreen.AI_HISTORY`（`
   又报成待确认**（用户实测踩到）。解析层再兜一道：`parse/parsePartial` 收
   `existingOverrides`，与已生效安排**等价**（`ScheduleOverrides.sameEffect`：同 kind +
   同起止 + follow 同源槽位；note / id 不算）的提议进 `rejected` 并注明「已生效，无需重复」
-  ——**不静默吞**。`addOverrides` 写入侧第三道幂等：等价条目不重复插。
+  ——**不静默吞**。（写入侧那道幂等 2026-11-18 随 `addOverrides` 删除：判重只剩这一步，落库前不再复判。）
 - **同一槽位冲突的胜负 = 后应用的赢**：`plan` 摊平时后写的覆盖前面的，而 DAO 必须按
   `id ASC` 返回（写入顺序）——**别改回 `ORDER BY fromDate`**（2026-10-07 修：按日期排
   会让后应用的更早/更宽区间输给旧覆盖，胜负语义反转）。撤销删行后旧覆盖自动复活，

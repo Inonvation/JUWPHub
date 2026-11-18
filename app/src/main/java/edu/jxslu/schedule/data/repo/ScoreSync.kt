@@ -69,14 +69,8 @@ class ScoreSync(
         data class Failed(val reason: String) : Result
     }
 
-    suspend fun sync(force: Boolean = false, eager: Boolean = false): Result {
-        if (!mutex.tryLock()) return Result.InProgress
-        try {
-            return syncLocked(force, eager)
-        } finally {
-            mutex.unlock()
-        }
-    }
+    suspend fun sync(force: Boolean = false, eager: Boolean = false): Result =
+        mutex.tryLocked { syncLocked(force, eager) } ?: Result.InProgress
 
     private suspend fun syncLocked(force: Boolean, eager: Boolean): Result {
         val alertOn = prefs.scoreAlertEnabled.first()

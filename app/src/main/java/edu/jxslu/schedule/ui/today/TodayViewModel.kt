@@ -11,6 +11,7 @@ import edu.jxslu.schedule.domain.GuessPick
 import edu.jxslu.schedule.domain.GuessPickStabilizer
 import edu.jxslu.schedule.domain.GuessRules
 import edu.jxslu.schedule.domain.GuessSource
+import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.LocalTimeLike
 import edu.jxslu.schedule.domain.PendingHomework
 import edu.jxslu.schedule.domain.PendingHomework.Companion.EMPTY
@@ -61,6 +62,12 @@ class TodayViewModel(
     private val weatherRepo: WeatherRepository? = null,
     /** 天气提示的「现在」来源，独立于 [todayProvider]（它只给日期，提示要判 18:00）。 */
     private val nowProvider: () -> LocalDateTime = { LocalDateTime.now() },
+    /**
+     * 有在案骑行（快趣单例 `state.ride != null`）。为真时「猜你想用」排除快趣：
+     * 服务卡就在推荐卡上方，再推一次是同一件事说两遍（DESIGN §4.51，2026-11-18）。
+     * 默认 false：单测与旧构造点不传时行为不变。
+     */
+    private val kvcxRideActive: Flow<Boolean> = flowOf(false),
 ) : ViewModel() {
 
     private val tick = MutableStateFlow(0L)
@@ -256,7 +263,7 @@ class TodayViewModel(
      *
      * 三步：
      * 1. 开关关 / 页面还在加载 → 清缓存、不出卡；
-     * 2. 上课信号一票决定快趣（周末有课同样生效）；
+     * 2. 上课信号一票决定快趣（周末有课同样生效；骑行中快趣被排除，信号作废）；
      * 3. 其余走 [GuessRules.decide] 的时段表 / 周末先验 / 习惯权重，**每个 30 分钟槽只抽一次**。
      *
      * 上课信号的分钟数每 tick 用实时值覆盖（缓存里存的是抽样时的旧值，不能直接上屏）。
@@ -266,7 +273,8 @@ class TodayViewModel(
         repo.guessYouWantEnabled,
         repo.guessUsage,
         tick,
-    ) { state, enabled, usages, _ ->
+        kvcxRideActive,
+    ) { state, enabled, usages, _, riding ->
         if (state.loading || !enabled) {
             guessStabilizer.reset()
             return@combine null
@@ -278,9 +286,11 @@ class TodayViewModel(
             minutesToOngoingEnd = state.minutesToOngoingEnd,
             hasNext = state.next != null,
             minutesToNext = state.minutesToNext,
+            minutesSincePrevEnd = state.minutesSinceLastEnd,
         )
         val slot = GuessRules.slotOf(minuteOfDay)
-        val key = "${now.toLocalDate()}|$slot|${signal?.kind?.name ?: "none"}"
+        // 骑行状态进 key：它决定快趣是否被排除，开骑 / 还车时卡片该跟着换
+        val key = "${now.toLocalDate()}|$slot|${signal?.kind?.name ?: "none"}|$riding"
         val stable = guessStabilizer.resolve(key) {
             GuessRules.decide(
                 dayOfWeek = now.dayOfWeek.value,
@@ -289,6 +299,7 @@ class TodayViewModel(
                 usages = usages,
                 nowMillis = now.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
                 roll = Random.nextDouble(),
+                blocked = if (riding) setOf(GuessTarget.KVCX) else emptySet(),
             )
         }
         // 上课信号的倒计时必须跟实时状态走；其余来源没有分钟数
@@ -302,17 +313,6 @@ class TodayViewModel(
             },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    /**
-     * 今日页校园卡付款码卡开关（DESIGN §3.10）。默认关（涉及凭证与资金），
-     * 「我的 → 校园卡」子页控制；同样单独订阅不掺课表状态。
-     *
-     * 2026-09-24 起今日页不再展示一卡通卡（能力收进生活页，DESIGN §3.13），
-     * 该开关仅剩历史偏好值；保留 Flow 以免清理旧偏好数据。
-     */
-    val campusCardEnabled: StateFlow<Boolean> = repo.displayPrefs
-        .map { it.campusCardEnabled }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** 界面每 30 秒调一次：让「还剩 X 分钟」和课的状态跟着时间走。 */
     fun refreshTick() {
@@ -347,9 +347,16 @@ class TodayViewModel(
         private val repo: ScheduleRepository,
         private val homeworkRepo: HomeworkRepository,
             private val weatherRepo: WeatherRepository,
+        /** 在案骑行：为真时「猜你想用」排除快趣（DESIGN §4.51）。 */
+        private val kvcxRideActive: Flow<Boolean> = flowOf(false),
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                TodayViewModel(repo, homeworkRepo, weatherRepo = weatherRepo) as T
+                TodayViewModel(
+                    repo,
+                    homeworkRepo,
+                    weatherRepo = weatherRepo,
+                    kvcxRideActive = kvcxRideActive,
+                ) as T
     }
 }

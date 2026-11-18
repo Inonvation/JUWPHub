@@ -77,6 +77,13 @@ data class TodayState(
     /** 当前这节还剩几分钟下课（整门课口径，自定义时间/兜底用） */
     val minutesToOngoingEnd: Int? = null,
     /**
+     * 今天最近一节已结束的课**距现在**多少分钟；今天还没上完课（或正在上课）为 null。
+     *
+     * 「猜你想用」用它判断下一节课前是不是刚下课（DESIGN §4.51）：默认作息 09:55 下课、
+     * 10:15 上下一大节，中间 20 分钟只是换教室，不该推荐骑车。
+     */
+    val minutesSinceLastEnd: Int? = null,
+    /**
      * 正在上课时右侧的细粒度倒计时：
      * `还有 25 分钟下课` / `课间 · 还有 4 分钟上课`。
      * 不带小节序号——课时卡已有「第3-4节」，再标一个「第1节」是第二套编号。
@@ -206,6 +213,7 @@ fun buildTodayState(
         timeline = timeline,
         minutesToNext = next?.let { minutesUntilStart(slots, it, now) },
         minutesToOngoingEnd = ongoing?.let { minutesUntilEnd(slots, it, now) },
+        minutesSinceLastEnd = endedRecent?.let { minutesSinceEnd(slots, it, now) },
         ongoingCountdown = ongoingTarget?.label(now.toMinutes()),
         ongoingCountdownTarget = ongoingTarget,
         ongoingProgress = ongoing?.let { ongoingProgress(slots, it, now) },
@@ -244,6 +252,14 @@ fun minutesUntilStart(slots: List<TimeSlot>, course: Course, now: LocalTimeLike)
 fun minutesUntilEnd(slots: List<TimeSlot>, course: Course, now: LocalTimeLike): Int? =
     ScheduleCalculator.courseEndMinutes(slots, course)
         ?.let { (it - now.toMinutes()).takeIf { delta -> delta > 0 } }
+
+/**
+ * 距下课已经过去几分钟；还没下课返回 null（`endedRecent` 已保证是已结束的课，
+ * 这里的判断只防自定义时间课时钟回拨 / 时区跳变）。
+ */
+fun minutesSinceEnd(slots: List<TimeSlot>, course: Course, now: LocalTimeLike): Int? =
+    ScheduleCalculator.courseEndMinutes(slots, course)
+        ?.let { (now.toMinutes() - it).takeIf { delta -> delta >= 0 } }
 
 /** 正在上课时的整门课进度 0f..1f；缺起始/结束时间时不画。 */
 fun ongoingProgress(

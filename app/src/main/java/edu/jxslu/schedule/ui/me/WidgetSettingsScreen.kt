@@ -55,6 +55,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.LocalTimeLike
@@ -693,40 +694,48 @@ private fun rememberPreviewSnapshot(): State<WidgetSnapshot?> {
     val context = LocalContext.current
     val repo = remember { Graph.repository(context) }
     val snapshot = remember { mutableStateOf<WidgetSnapshot?>(null) }
-    // 先算再等：进页立刻有内容，之后每 30 秒一档（与改之前的刷新节奏一致）
-    LaunchedEffect(Unit) {
-        while (true) {
-            snapshot.value = runCatching {
-                val semester = repo.semester.first()
-                val slots = repo.timeSlots.first()
-                val courses = repo.courses.first()
-                val overrides = repo.overridesFor()
-                val prefs = repo.displayPrefs.first()
-                val today = LocalDate.now()
-                val now = LocalTimeLike.now()
-                val state = buildTodayState(semester, slots, courses, today, now, overrides)
-                val week = if (state.inTerm) state.week else 1
-                val highlight = state.focus?.day
-                    ?: state.tomorrowDay.takeIf { state.tomorrowVisible }
-                buildWidgetSnapshot(
-                    state,
-                    buildWidgetWeek(
-                        courses = courses,
-                        week = week,
-                        showSaturday = prefs.showSaturday,
-                        showSunday = prefs.showSunday,
-                        filter = prefs.courseFilter,
-                        highlightDay = highlight,
-                        slots = slots,
-                        semester = semester,
-                        overrides = overrides,
-                        now = now,
-                        markNow = state.focus != null || state.remaining.isNotEmpty(),
-                        nowDay = state.day,
-                    ),
-                )
-            }.getOrNull()
-            delay(30_000)
+    // 先算再等：进页立刻有内容，之后每 30 秒一档（与改之前的刷新节奏一致）。
+    //
+    // **只在 RESUMED 期间跑**（2026-11-18）：原来是裸 `while(true)`，只随组合离开才停——
+    // App 退后台/灭屏时组合还在，循环照跑，每 30 秒唤醒进程、5 次 DataStore/Room 读
+    // 加一整份 widget 快照重算。与 `ResumedTickerEffect` 同一个口径，这里手工展开是为了
+    // 保住「先算再等」（那个助手是先 delay 再 tick，进页会空一拍）。
+    val owner = LocalLifecycleOwner.current
+    LaunchedEffect(owner) {
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                snapshot.value = runCatching {
+                    val semester = repo.semester.first()
+                    val slots = repo.timeSlots.first()
+                    val courses = repo.courses.first()
+                    val overrides = repo.overridesFor()
+                    val prefs = repo.displayPrefs.first()
+                    val today = LocalDate.now()
+                    val now = LocalTimeLike.now()
+                    val state = buildTodayState(semester, slots, courses, today, now, overrides)
+                    val week = if (state.inTerm) state.week else 1
+                    val highlight = state.focus?.day
+                        ?: state.tomorrowDay.takeIf { state.tomorrowVisible }
+                    buildWidgetSnapshot(
+                        state,
+                        buildWidgetWeek(
+                            courses = courses,
+                            week = week,
+                            showSaturday = prefs.showSaturday,
+                            showSunday = prefs.showSunday,
+                            filter = prefs.courseFilter,
+                            highlightDay = highlight,
+                            slots = slots,
+                            semester = semester,
+                            overrides = overrides,
+                            now = now,
+                            markNow = state.focus != null || state.remaining.isNotEmpty(),
+                            nowDay = state.day,
+                        ),
+                    )
+                }.getOrNull()
+                delay(30_000)
+            }
         }
     }
     return snapshot

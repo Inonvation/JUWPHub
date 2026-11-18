@@ -49,14 +49,8 @@ class CurriculumSync(
     }
 
     /** @param force 用户主动点「重新导入」时传 true，绕过 7 天闸门。 */
-    suspend fun sync(force: Boolean = false): Result {
-        if (!mutex.tryLock()) return Result.InProgress
-        try {
-            return syncLocked(force)
-        } finally {
-            mutex.unlock()
-        }
-    }
+    suspend fun sync(force: Boolean = false): Result =
+        mutex.tryLocked { syncLocked(force) } ?: Result.InProgress
 
     private suspend fun syncLocked(force: Boolean): Result {
         if (!force) {

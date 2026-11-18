@@ -53,8 +53,6 @@ data class WeekUiState(
     val todayWeek: Int? = null,
     val semester: SemesterConfig? = null,
     val slots: List<TimeSlot> = emptyList(),
-    /** 当前周课程 */
-    val courses: List<Course> = emptyList(),
     /** 全量课程，供 Pager 邻页即时过滤，也用来算非本周灰态 */
     val allCourses: List<Course> = emptyList(),
     /** 日期覆盖（调休 / 停课，§4.40）；网格渲染时摊平成 plan 再查课 */
@@ -68,12 +66,10 @@ data class WeekUiState(
      * 所以不能用「列数」近似，必须显式给出可见星期序列（见 ScheduleCalculator.visibleDays）。
      */
     val visibleDays: List<Int> = (1..7).toList(),
-    val showSaturday: Boolean = true,
-    val showSunday: Boolean = true,
     val showNonCurrentWeek: Boolean = false,
     /**
      * 只看某类课程。
-     * 过滤发生在 ViewModel 而不是渲染层：`courses` / `allCourses` / `totalCourseCount` 三处
+     * 过滤发生在 ViewModel 而不是渲染层：`allCourses` / `totalCourseCount` 两处
      * 必须口径一致，否则会出现「网格是空的、但提示说课表不为空」这种自相矛盾的状态。
      */
     val courseFilter: CourseFilter = CourseFilter.All,
@@ -149,7 +145,7 @@ private data class WeekConfig(
  * - [now]：时刻线专用「现在」，每 30 秒变一次。它**不在** [uiState] 里，读取点收在
  *   `WeekGrid.NowLine`，所以一次 tick 只让那一小块重组。
  *
- * 为什么必须分开：`courses` / `visibleDays` 每次都是新 `List`，Compose 视为 unstable；
+ * 为什么必须分开：`allCourses` / `visibleDays` 每次都是新 `List`，Compose 视为 unstable；
  * 把「现在」塞进状态对象等于每 30 秒重建整页并让全部课块重新组合一遍。
  *
  * ## 显示偏好只在这里读，不在这里写
@@ -171,7 +167,7 @@ class WeekViewModel(
      * 时刻线专用的「现在」：**独立于 [uiState]**，每 30 秒 tick 只更新它。
      *
      * 为什么不并进 [uiState]：并进去的话每次 tick 都要重建整个状态对象
-     * （`courses` / `visibleDays` 是新 `List`，unstable），于是整页 + 全部课块重组，
+     * （`allCourses` / `visibleDays` 是新 `List`，unstable），于是整页 + 全部课块重组，
      * 而真正要变的只有一条 1.5dp 的时刻线。现在读取点收在 `WeekGrid.NowLine`，
      * tick 只让那一小块失效。
      */
@@ -236,13 +232,10 @@ class WeekViewModel(
                     todayWeek = todayWeek,
                     semester = semester,
                     slots = slots,
-                    courses = ScheduleCalculator.coursesInWeek(visible, week),
                     allCourses = visible,
                     // 日期覆盖（调休 / 停课，§4.40）：网格渲染用，摊平后走 coursesOnDay
                     overrides = overrides,
                     totalCourseCount = visible.size,
-                    showSaturday = prefs.showSaturday,
-                    showSunday = prefs.showSunday,
                     visibleDays = ScheduleCalculator.visibleDays(
                         prefs.showSaturday,
                         prefs.showSunday,
@@ -329,8 +322,6 @@ class WeekViewModel(
     fun selectTimetable(id: Long) {
         viewModelScope.launch { repo.setCurrentTimetable(id) }
     }
-
-    fun shiftWeek(delta: Int) = setWeek(weekFlow.value + delta)
 
     /** 回到这张课表的「本周」；今天不在学期内时没有可回的周次，动作是空操作。 */
     fun goToToday() {

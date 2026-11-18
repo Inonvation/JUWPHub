@@ -347,7 +347,7 @@ fixture 来源，默认抓「当前学期 + 下一学期」并输出 `out/select
 | `domain/SelectionCourse`（v3 起独立文件） | 字段按实测校正：`courseNo`（kch）/ `remainingSeats`（**syrs 是权威余量**，与 `pkrs−xkrs` 不恒等）/ `conflictNote`（ctsm）/ v2 补 `courseType`·`groupName`·`campus`·`teachMode`（行内 `kctype` 给的就是中文名）；`id` 保持不透明拼串 |
 | 列表查询 v2 | 查询面全接入 `SelectionQuery`（关键词/教师/星期/节次/类别/三开关，**服务端 AND 叠加**）；**「先进轮次」是会话前提**——列表请求前会话必须 GET 过 `newXsxkzx`，不进则 404，`fetchPageRetrying` 撞 404 **重进一次自愈**；空条件注入**浏览全量 `kch=0`**（编号全以 0 开头；数字扫描并集 48/48 覆盖，星期扫描会漏无排课课程），「进页即浏览」由此成立 |
 | 开关语义实测（v2，决定默认值） | `sfct=true` 把所有带 `ctsm` 的行滤掉——**连「该课堂已选」的已选行一起**（48→15）→ App 默认 `hideConflict=false`（已选课要留在列表里可退；教务页面默认勾选，不跟）；`sfym=true` 滤满员（48→46）默认关；`sfxx` 默认 true 保持既有口径 |
-| `SelectionCenterClient`（v2/v3） | `fetchPage` = 界面口径的单页拉取（`SelectionQuery` + `start`/`pageSize`，不合并、不自主翻页）；`fetchCourses` = **预选命中口径**（多关键词逐个查、分页合并去重——选课中心按清单逐条调用，教师关键词本地复核）。`UnconfiguredSelectionCenterClient` 明说「接口未接入」 |
+| `SelectionCenterClient`（v2/v3） | `fetchPage` = 界面口径的单页拉取（`SelectionQuery` + `start`/`pageSize`，不合并、不自主翻页）；`fetchCourses` = **预选命中口径**（多关键词逐个查、分页合并去重——选课中心按清单逐条调用，教师关键词本地复核）。2026-11-18 删掉不再可达的「未接入」分支：`UnconfiguredSelectionCenterClient` 与接口上的 `isConfigured` 一并移除（`Graph` 只会造出 `SelectionCenterHttpClient`），接口不可用时统一抛 `SelectionClientException(fatal = true)`，由页面照常给出提示 |
 | `domain/SelectionWishHits`（v3） | 预选命中归组（纯 JVM）：教师关键词本地复核（服务端只按课名/编号查）、同一门课归**优先级最高**的那条预选、分组按优先级降序稳定排序；`ids`/`count` 供主列表打标与区块标题 |
 | `ui/selection/SelectionCenterScreen`（v2/v3） | 进页即浏览 + 筛选表单（改动不发请求，点「查询」才查）+「加载更多」+ **预选命中区块置顶**（命中卡带徽标 + 归属行；主列表同打标不挪走；匹配失败只在该区块提示 + 重试）+ 卡片字段对齐教务列；本地筛选只剩 只看已选 + 课程属性 |
 | `ui/selection/SelectionConfirmDialog`（v3） | 选课/退课共用的二次确认弹窗：课程名 `headlineSmall` 主视觉；高亮块给**开设校区**与**时间冲突**（有冲突 error 色原文 / 无冲突中性；退课换「当前状态：已选」）；其余次级小字；可滚不裁字、按钮 ≥44dp；接 `DialogWindowFadeEffect` |
@@ -706,7 +706,8 @@ CAP 50，新在前），**栈式撤销**：只允许撤最新一条未撤销（`
 根因三件、逐条修——① **模型看不见已生效的日期安排**（课表清单只有课程行）→ `userMessage`
 补【已生效的日期安排】段（`AiSchedulePrompt.overridesBrief`，空写「无」）+ `parse/parsePartial`
 对等价提议确定性去重（`ScheduleOverrides.sameEffect`，进 `rejected` 注明「已生效，无需重复」，
-**不静默吞**）+ `addOverrides` 写入侧幂等——三处同一判据；② **预览两栏都没算已生效覆盖**
+**不静默吞**）+ 写入侧幂等（当时在 `addOverrides` 里，2026-11-18 随该方法删除——它没有
+调用点，判重只剩解析层这道）；② **预览两栏都没算已生效覆盖**
 （「应用前」看着像调课前）→「应用前」= 课程行 + 已生效安排、「应用后」= 现状 + 本轮勾选
 （同一天本轮为准）；③ **同槽位胜负被 DAO 排序破坏**（`fromDate` 排序让「后应用的赢」变成
 「日期晚的赢」）→ 改 `ORDER BY id ASC`（写入顺序），撤销删行后旧覆盖自动复活。
@@ -1491,6 +1492,14 @@ Manifest 每条都要 `exported="true"` + `android.permission.BIND_QUICK_SETTING
 5. 周末先验 + 习惯权重；
 6. 无候选 → 不出卡。
 
+**换教室不算下课**（2026-11-18）：默认作息 09:55 下课、10:15 上下一大节，中间 20 分钟只是
+换教室。所以上课 / 下课信号都带间隔闸（`GuessRules.MIN_BREAK_FOR_RIDE_MINUTES = 30`）：
+
+- 快下课：与下一节的间隔（`minutesToNext − minutesToOngoingEnd`）≥ 30 分钟，或今天没有后续课；
+- 快上课：人不在上一节里，且上一节下课已满 30 分钟（`TodayState.minutesSinceLastEnd`）。
+
+两个信号不会同时成立（间隔 ≥ 30 时 `minutesToNext` 必然 > 30），所以「快下课优先」只是代码顺序。
+
 **平日时段表**（半开区间；08:30–11:00 / 14:00–16:30 / 23:00–06:00 为空档）：
 
 | 时段 | 推荐 |
@@ -1507,12 +1516,24 @@ Manifest 每条都要 `exported="true"` + `android.permission.BIND_QUICK_SETTING
 
 **权重**：表命中 10；周末先验 胖乖 3 / 快趣 2 / U净 1；习惯按
 `cell`（同星期几 + 同槽订单数）与 `band`（同类其他日子 + 同槽订单数）计算：
-`evidence = cell + band`，过 3 才参与，权重 `min(4×cell + band, 40)`。
-平日空档只有习惯权重（证据不足 3 次就不出卡）；周末无任何习惯证据时固定胖乖。
+`evidence = cell + band`，权重 `min(4×cell + band, 40)`。
+
+**证据门槛按功能分档**（2026-11-18）：高频功能（胖乖 / 快趣 / 趣智）要 3 次；低频功能
+（问渠报名、U净 洗衣）降到 2 次——这两件事 60 天内在同一个 30 分钟槽攒到 3 次基本不可能，
+用 3 次等于让它们永远学不到。平日空档只有习惯权重（不够门槛就不出卡）。
+
+**周末先验按「用过」过滤**（2026-11-18）：先验只保留历史下过单的功能，从没下过胖乖订单的人
+不该被推一张点了还要登录的卡；一个都没用过才退回原顺序（胖乖 → 快趣 → U净）。周末完全没有
+习惯证据时，兜底项取过滤后先验的第一名，而不是固定胖乖。
+
+**在案骑行排除快趣**（2026-11-18）：`decide(..., blocked = setOf(KVCX))`。服务卡就在推荐卡上方，
+再推一次是同一件事说两遍。被排除的功能不参与任何一层（信号 / 时段表 / 先验 / 习惯），
+全被排除时不出卡。骑行状态进稳定器 key，开骑 / 还车时卡片跟着换。
 
 **抽样**：按权重加权，`roll = Random.nextDouble()` **每个 30 分钟槽只取一次**；
-`GuessPickStabilizer` 用 key `日期|槽|上课信号类型` 缓存结果，tick / 订单落库都不换卡。
-槽变化、信号类型变化、开关重置才重抽。上课信号的分钟数由 ViewModel 每 tick 覆盖为实时值。
+`GuessPickStabilizer` 用 key `日期|槽|上课信号类型|是否骑行` 缓存结果，tick / 订单落库都不换卡。
+槽变化、信号类型变化、骑行状态变化、开关重置才重抽。上课信号的分钟数由 ViewModel 每 tick
+覆盖为实时值。
 
 **订单钩子**（唯一写入口 `Graph.recordGuessOrder`）：
 

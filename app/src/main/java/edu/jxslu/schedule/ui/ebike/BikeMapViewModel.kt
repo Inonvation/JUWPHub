@@ -1477,10 +1477,16 @@ class BikeMapViewModel(
      * 围栏只削掉边缘那一两个点，不会整片空掉。
      *
      * 关着时用这一带最近的那辆（官方口径：`carNum: list[0].name`），图层跟着所看区域走。
+     *
+     * **本校一辆车都没有时退回最近那辆**（2026-11-18，用户报「骑到很远的另一个地方，
+     * 那片红色还车区一个都没有」）：原来这里直接回 null，于是 `reloadZonesForSite` 整条
+     * 不跑，图层永远停在出发时那个校区——人已经在另一个校区了，屏幕上当然一片空白。
+     * 现在拿得到"哪个校区"就问哪个校区，**围栏过滤由 `applyZones` 按图层所属校区决定**
+     * （别人校区的点用自己的围栏筛必然筛空，那种情况下不筛）。
      */
     private fun zoneContextOf(bikes: List<NearbyBike>): ZoneCarContext? {
         val car = if (_uiState.value.onlyOurCampus) {
-            bikes.firstOrNull { BikeNearby.isOurCampus(it.campusName) }
+            bikes.firstOrNull { BikeNearby.isOurCampus(it.campusName) } ?: bikes.firstOrNull()
         } else {
             bikes.firstOrNull()
         }
@@ -1571,6 +1577,9 @@ class BikeMapViewModel(
             if (zones.isEmpty) return@launch
             zonesFromNetwork = true
             fetchedZones = zones
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "zone net ok: spots=${zones.parkSpots.size} campus=${context.campusName}")
+            }
             applyZones()
             // 成功结果写回缓存（只存非空，上面已挡掉空表）
             zoneEntries = ZoneCache.put(
@@ -1583,10 +1592,25 @@ class BikeMapViewModel(
 
     /** 按当前筛选口径把 [fetchedZones] 落进状态（开关变化 / 新数据到达时都走这里）。 */
     private fun applyZones() {
-        val zones = if (_uiState.value.onlyOurCampus) {
+        // 围栏只对**本校校区的图层**有意义（2026-11-18）：`campusOnly` 用的是本校那条围栏，
+        // 拿它去筛别人校区的点必然筛空——人到了另一个校区，屏幕就什么都没了（用户报的
+        // 「骑远了红色区域一个都不出来」）。图层不是本校的就原样画，筛选只管车型/围栏那条口径。
+        val zonesOfOurCampus = lastZoneCar?.let { BikeNearby.isOurCampus(it.campusName) } ?: true
+        val zones = if (_uiState.value.onlyOurCampus && zonesOfOurCampus) {
             fetchedZones.campusOnly(BikeNearby::inCampusFence)
         } else {
             fetchedZones
+        }
+        // 还车点图层的自证日志（debug 才有）：用户报「一片 P 都没有」时先看这一行——
+        // fetched=0 是没拿到数据，fetched>0 而落进状态为 0 是筛选吃掉的，两者修法完全不同。
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                TAG,
+                "zones: fetched=${fetchedZones.parkSpots.size}/${fetchedZones.nogoZones.size}" +
+                    " -> applied=${zones.parkSpots.size}/${zones.nogoZones.size}" +
+                    "（onlyOurCampus=${_uiState.value.onlyOurCampus}" +
+                    " ourCampus=${zonesOfOurCampus} campus=${lastZoneCar?.campusName}）",
+            )
         }
         _uiState.update { it.copy(zones = zones) }
     }

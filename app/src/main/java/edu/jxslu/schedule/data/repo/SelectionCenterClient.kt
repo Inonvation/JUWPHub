@@ -28,13 +28,10 @@ class SelectionClientException(
 /**
  * 选课中心的数据接口（DESIGN §4.36）：应用内选课中心与「预选命中」查询唯一依赖的抽象。
  *
- * 真身是 [SelectionCenterHttpClient]（OkHttp + `CasSession`，2026-10-08 窗口期实测接入）；
- * [UnconfiguredSelectionCenterClient] 只在接口不可用的极端场景兜底（如实说明，不假装能选）。
+ * 真身是 [SelectionCenterHttpClient]（OkHttp + `CasSession`，2026-10-08 窗口期实测接入），
+ * 也是唯一的实现——没有「未接入」分支，接口不可用一律抛 [SelectionClientException]。
  */
 interface SelectionCenterClient {
-
-    /** 是否接了真实接口（页面据此禁用「查询」与「加载更多」并给出原因）。 */
-    val isConfigured: Boolean
 
     /**
      * 拉取候选课程（**预选命中口径**：多关键词逐个查、分页合并去重）；失败抛
@@ -69,33 +66,4 @@ interface SelectionCenterClient {
      * 退课。**只由用户在应用内逐次确认触发**（红线：没有任何自动退课路径）。
      */
     suspend fun drop(roundId: String, courseId: String): SelectionSubmitResult
-}
-
-/**
- * 未接入实现（2026-10-01 建；真身已接入后留作测试替身与兜底）。所有调用都返回可读的
- * 「未接入」，界面上明说，不假装能选。
- */
-object UnconfiguredSelectionCenterClient : SelectionCenterClient {
-
-    const val FATAL_HINT =
-        "选课接口不可用：请先登录教务，或稍后重试（DESIGN §4.36）"
-
-    override val isConfigured: Boolean = false
-
-    override suspend fun fetchCourses(roundId: String, keywords: List<String>): List<SelectionCourse> =
-        throw SelectionClientException(fatal = true, message = FATAL_HINT)
-
-    override suspend fun fetchPage(
-        roundId: String,
-        query: SelectionQuery,
-        start: Int,
-        pageSize: Int,
-    ): SelectionCenterParser.CourseListPage =
-        throw SelectionClientException(fatal = true, message = FATAL_HINT)
-
-    override suspend fun submit(roundId: String, courseId: String): SelectionSubmitResult =
-        SelectionSubmitResult.Fatal(FATAL_HINT)
-
-    override suspend fun drop(roundId: String, courseId: String): SelectionSubmitResult =
-        SelectionSubmitResult.Fatal(FATAL_HINT)
 }

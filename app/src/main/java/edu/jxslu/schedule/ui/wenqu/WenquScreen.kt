@@ -64,7 +64,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.session.SessionService
@@ -551,18 +554,24 @@ private fun LoginContent(state: WenquViewModel.UiState, vm: WenquViewModel) {
     // 记住登录（2026-10-21 用户拍板：默认开）：默认把密码一并加密存在本机，JWT 到期自动续期
     var rememberPassword by remember { mutableStateOf(true) }
 
-    // 5 分钟重发倒计时（平台实测约 5 分钟一条，见 WenquRules.RESEND_COOLDOWN_MS）
+    // 5 分钟重发倒计时（平台实测约 5 分钟一条，见 WenquRules.RESEND_COOLDOWN_MS）。
+    // 只在 RESUMED 期间走（2026-11-18）：原来是无生命周期的 while，退后台/灭屏仍每秒
+    // 醒一次、写一次状态，最长白跑 300 拍。剩余时间每拍都按绝对时刻重算，所以挂起
+    // 再回来不会接着旧的数，回前台第一拍就是真值。
     var resendRemaining by remember { mutableStateOf(0L) }
-    LaunchedEffect(state.codeSentAt) {
+    val resendOwner = LocalLifecycleOwner.current
+    LaunchedEffect(state.codeSentAt, resendOwner) {
         if (state.codeSentAt == 0L) {
             resendRemaining = 0L
             return@LaunchedEffect
         }
-        while (true) {
-            val left = WenquRules.resendRemainingMs(state.codeSentAt, System.currentTimeMillis())
-            resendRemaining = left
-            if (left <= 0L) break
-            delay(1_000)
+        resendOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                val left = WenquRules.resendRemainingMs(state.codeSentAt, System.currentTimeMillis())
+                resendRemaining = left
+                if (left <= 0L) break
+                delay(1_000)
+            }
         }
     }
 

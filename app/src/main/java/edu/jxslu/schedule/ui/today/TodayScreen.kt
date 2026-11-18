@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.today
 
 import android.app.Activity
-import android.content.Intent
 import androidx.compose.animation.AnimatedContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -74,7 +73,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.zxing.BarcodeFormat
 import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
@@ -85,18 +83,14 @@ import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.GuessPick
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.QuickScanTarget
-import edu.jxslu.schedule.domain.ShortcutSettings
 import edu.jxslu.schedule.domain.TodayState
 import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.domain.clockOf
 import edu.jxslu.schedule.domain.dayLabel
 import edu.jxslu.schedule.domain.quickScanTargetOf
 import edu.jxslu.schedule.ui.common.showNotice
-import edu.jxslu.schedule.ui.common.ShortcutLauncher
-import edu.jxslu.schedule.ui.common.ShortcutPinner
-import edu.jxslu.schedule.ui.common.ShortcutSheet
+import edu.jxslu.schedule.ui.common.washerScanIntent
 import edu.jxslu.schedule.ui.ebike.EbikeFreeRideReminder
-import edu.jxslu.schedule.ui.ebike.EbikeScanActivity
 import edu.jxslu.schedule.ui.ebike.KvcxAction
 import edu.jxslu.schedule.ui.ebike.KvcxRideState
 import edu.jxslu.schedule.ui.ebike.kvcxConfirmDialog
@@ -139,11 +133,15 @@ import edu.jxslu.schedule.ui.common.courseColor
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
+import edu.jxslu.schedule.ui.water.WaterEntrySheet
 import edu.jxslu.schedule.ui.water.WaterEvent
 import edu.jxslu.schedule.ui.water.WaterUiState
 import edu.jxslu.schedule.ui.water.WaterViewModel
 import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.CalendarOff
@@ -207,10 +205,6 @@ fun TodayScreen(
     onOpenUjingScan: (String) -> Unit = {},
     /** 江水生活 U净 弹窗的「查看洗衣房空闲情况」：U净 · 洗衣房页 */
     onOpenUjing: () -> Unit = {},
-    /** 江水生活「取快递」弹窗：「新增」/ 长按编辑 → 快捷方式设置页（null = 不定位） */
-    onOpenShortcuts: (String?) -> Unit = {},
-    /** 江水生活「取快递」弹窗里的「菜鸟批量查」：多单号一次导入取件码 */
-    onOpenCainiao: () -> Unit = {},
     /** 今日页宿舍报修卡：原生进度页（DESIGN §4.49） */
     onOpenDormRepair: () -> Unit = {},
     /** 收件箱卡「查看更多」：打开收件箱页（DESIGN §3.24，2026-10-21 起唯一入口在卡片上） */
@@ -234,6 +228,16 @@ fun TodayScreen(
             Graph.repository(LocalContext.current),
             Graph.homeworkRepository(LocalContext.current),
                 Graph.weatherRepository(LocalContext.current),
+            // 「猜你想用」：有在案骑行时排除快趣（服务卡就在推荐卡上方，别把同一件事说两遍）。
+            // 取不到控制器（地图 SDK 初始化失败等）时按「没有骑行」处理，推荐照常工作。
+            // 这里不套 remember：默认参数在组合期求值，`remember` 里的 `LocalContext.current`
+            // 属于非组合 lambda；Graph 是单例快路径，每次重组取一次的成本可以忽略。
+            kvcxRideActive = runCatching { Graph.kvcxRide(LocalContext.current) }
+                .getOrNull()
+                ?.state
+                ?.map { it.ride != null }
+                ?.distinctUntilChanged()
+                ?: flowOf(false),
         ),
     ),
 ) {
@@ -251,6 +255,22 @@ fun TodayScreen(
     val qzxyEntryState by qzxyViewModel?.uiState
         ?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(QzxyUiState()) }
+    // 页面根作用域**只读派生的两个布尔**，不读整份 uiState（2026-11-18）：
+    // 那两份状态里含着每秒自增的出水计时，根上读一次 = 出水期间整页每秒重组一遍，
+    // 而根上真正要的只是「在刷新余额吗」「在用水吗」。派生布尔去重后，计时每秒都不惊动
+    // 根作用域（`MainActivity` 里只订阅余额是同一套写法）。
+    val waterRefreshing by remember(waterViewModel) {
+        waterViewModel?.uiState
+            ?.map { it.loadingBalance || it.loadingDevices }
+            ?.distinctUntilChanged()
+            ?: flowOf(false)
+    }.collectAsStateWithLifecycle(initialValue = false)
+    val qzxyWateringActive by remember(qzxyViewModel) {
+        qzxyViewModel?.uiState
+            ?.map { it.watering != null }
+            ?.distinctUntilChanged()
+            ?: flowOf(false)
+    }.collectAsStateWithLifecycle(initialValue = false)
     // 侧栏那份 Activity 作用域 VM 关掉了 init 自动取数（从课表/教务启动时不白拉）；
     // 今日页才是开水/趣智卡片的实际展示位，进页补一次。已加载过则不再重复。
     LaunchedEffect(waterViewModel) {
@@ -271,7 +291,7 @@ fun TodayScreen(
     // 设备核对——自动关停后自动结算 / 记账切「待核对」。页面侧（SubpageActivity）
     // 有自己的同款驱动，repeatOnLifecycle(RESUMED) 保证同一时刻只有前台那个在跑
     qzxyViewModel?.let { vm ->
-        WateringReconcileEffect(viewModel = vm, enabled = qzxyEntryState.watering != null)
+        WateringReconcileEffect(viewModel = vm, enabled = qzxyWateringActive)
     }
     // 免费时长计时的两个值直接读偏好仓库：`DisplayPrefs` 那层合并读模型不带它们，
     // 而快趣卡只是展示（与 RideScreen / RideViewModel 读同一个单例）
@@ -327,9 +347,8 @@ fun TodayScreen(
 
     val scope = rememberCoroutineScope()
 
-    // 江水生活图标入口（2026-10-19 自生活页迁入）：取快递 / U净 各有弹层。
-    // U净 在案订单：打开弹窗时对一次服务端（同生活页原口径，节流窗口内不重复请求）
-    var showShortcutSheet by remember { mutableStateOf(false) }
+    // 江水生活 U净 弹窗（2026-10-19 自生活页迁入）：打开弹窗时对一次服务端
+    // （同生活页原口径，节流窗口内不重复请求）
     var showUjingSheet by remember { mutableStateOf(false) }
 
     // 「猜你想用」点击分发（2026-11-17，DESIGN §3.33）：胖乖 / 趣智 / U净 走现有入口弹窗，
@@ -353,12 +372,6 @@ fun TodayScreen(
             GuessTarget.WENQU -> onOpenWenqu()
         }
     }
-    val shortcutSettings by remember(context) { Graph.repository(context).shortcutSettings }
-        .collectAsStateWithLifecycle(initialValue = ShortcutSettings())
-    // 「其他」分类的展开态（2026-11-01）：默认折叠，与侧栏共用同一个持久化偏好。
-    val shortcutPrefs = remember(context) { Graph.displayPrefs(context) }
-    val shortcutOtherExpanded by shortcutPrefs.shortcutOtherExpanded
-        .collectAsStateWithLifecycle(initialValue = false)
     var ujingOrderRefreshedAt by remember { mutableStateOf(0L) }
     val refreshUjingOrderIfStale: () -> Unit = {
         val id = ujingRepo.currentOrder()?.orderId
@@ -521,14 +534,7 @@ fun TodayScreen(
     }
     val startUjingScan: () -> Unit = {
         quickHaptics.tap()
-        ujingScanLauncher.launch(
-            Intent(context, EbikeScanActivity::class.java).apply {
-                putExtra(Intents.Scan.PROMPT_MESSAGE, "对准洗衣机机身上的二维码")
-                putExtra(EbikeScanActivity.EXTRA_RESULT_MODE, EbikeScanActivity.MODE_RAW)
-                // 机身码是二维码：限定格式，别让商品一维码也当码送出去（同上方扫一扫）
-                putExtra(Intents.Scan.FORMATS, BarcodeFormat.QR_CODE.name)
-            },
-        )
+        ujingScanLauncher.launch(washerScanIntent(context))
     }
 
     // 趣智校园开阀要连蓝牙，权限在今日页也要能就地补——缺权限时面板里点开始用水
@@ -675,7 +681,8 @@ fun TodayScreen(
         // 650ms 驻留（manualRefreshing），守卫读的是捕获值、计时器又被 waterRefreshing 的
         // 每次变化重启，仍会漏出一次「点亮 → 收 → 再点亮」——用户报的「下拉刷新抽搐回弹」。
         // 现在点亮只认 onRefresh、busy 只续命，见 RefreshHoldGate 的 KDoc。
-        val waterRefreshing = waterEntryState.loadingBalance || waterEntryState.loadingDevices
+        // busy 读的是**派生的布尔**（页面根上面那条 waterRefreshing），不是整份 uiState：
+        // 这里在 Scaffold 内容 lambda 里，读整份状态会让整个内容区每秒重组一遍。
         val refreshHold = rememberRefreshHold(busy = waterRefreshing)
         val pullRefreshState = rememberPullToRefreshState()
         // 触感由 rememberAppHaptics 统一查开关（DisplayPrefs.hapticsEnabled），关掉时短路，
@@ -894,65 +901,26 @@ fun TodayScreen(
     }
 
     // 开水卡：点余额的开水操作面板（2026-09-23，DESIGN §3.3）——
-    // 余额/积分/开水按钮/流程态/结算明细，与开水页共享同一 WaterViewModel
+    // 余额/积分/开水按钮/流程态/结算明细，与开水页共享同一 WaterViewModel。
+    // 状态在 [WaterEntrySheetHost] 里边收：面板里的计时每秒变，读在页面根上会把整页带走。
     if (showWaterEntrySheet && waterViewModel != null) {
-        edu.jxslu.schedule.ui.water.WaterEntrySheet(
-            state = waterEntryState,
-            onUnlock = { waterViewModel.unlock() },
-            onDismissFlow = { waterViewModel.dismissFlow() },
-            onToggleUsePoints = { waterViewModel.toggleUsePoints() },
-            onEndSession = { waterViewModel.endSessionLocally() },
-            onDismiss = { showWaterEntrySheet = false },
-        )
+        WaterEntrySheetHost(vm = waterViewModel, onDismiss = { showWaterEntrySheet = false })
     }
 
     // 趣智校园：点余额的开水面板（DESIGN §3.18）——余额/设备/用水状态/结算，
     // 与趣智校园页共享同一个 QzxyViewModel，面板里开的阀在页面上状态一致
     if (showQzxyEntrySheet && qzxyViewModel != null) {
-        QzxyEntrySheet(
-            state = qzxyEntryState,
+        QzxyEntrySheetHost(
+            vm = qzxyViewModel,
             loggedIn = qzxyLoggedIn,
             onStart = startQzxyValve,
-            onResend = { qzxyViewModel.resendOpenData() },
-            onStop = { qzxyViewModel.stopWater() },
-            onAbandon = { qzxyViewModel.abandonWatering() },
-            onClearDeviceRecord = { qzxyViewModel.clearDeviceRecord() },
-            onClearAndOpen = { qzxyViewModel.clearAndOpen() },
-            onRetryOpen = { qzxyViewModel.retryOpenAfterFailure() },
-            onClearFromRecovery = { qzxyViewModel.clearFromRecovery() },
-            onDismissRecovery = { qzxyViewModel.dismissRecovery() },
-            onDismissSettlement = { qzxyViewModel.dismissSettlement() },
             onOpenDiagnostics = onOpenQzxyDebug,
             onOpenPage = onOpenQzxy,
             onDismiss = { showQzxyEntrySheet = false },
         )
     }
 
-    // 江水生活「取快递」弹窗（2026-10-19 自生活页迁入）：预设归「取快递」段、
-    // 自定义归「其他」段；条目动作由弹窗自己播完退场再交给这里执行
-    if (showShortcutSheet) {
-        ShortcutSheet(
-            settings = shortcutSettings,
-            otherExpanded = shortcutOtherExpanded,
-            onOtherExpandedChange = { expanded ->
-                scope.launch { shortcutPrefs.setShortcutOtherExpanded(expanded) }
-            },
-            onDismiss = { showShortcutSheet = false },
-            onLaunchItem = { item ->
-                ShortcutLauncher.launch(context, item)?.let { message ->
-                    showNotice(message, NoticeTone.Warning)
-                }
-            },
-            onPinItem = { item ->
-                ShortcutPinner.pin(context, item)?.let { message ->
-                    showNotice(message, NoticeTone.Warning)
-                }
-            },
-            onEdit = { itemId -> onOpenShortcuts(itemId) },
-            onAdd = { onOpenShortcuts(null) },
-            onOpenCainiao = onOpenCainiao,
-        )
-    }
+    // 江水生活「取快递」弹窗在左侧栏（SideDrawer），今日页不再承载
 
     // 江水生活 U净 弹窗（2026-10-19 自生活页迁入）：在案订单状态 + 扫码 + 进页副行
     if (showUjingSheet) {
@@ -963,6 +931,56 @@ fun TodayScreen(
         )
     }
 }
+/**
+ * 开水面板宿主（2026-11-18）：**状态在这里收**，不在今日页根上收。
+ *
+ * 为什么要单独一层：面板里的 `flow.elapsedSeconds` 每秒自增一次，而 `uiState` 是整份
+ * `StateFlow`——在页面根作用域读它等于「面板开着的时候整页每秒重组一遍」。收在这一层后，
+ * 每秒的失效范围只有面板自己。回调原地转发，语义与摊在调用处完全一致。
+ */
+@Composable
+private fun WaterEntrySheetHost(vm: WaterViewModel, onDismiss: () -> Unit) {
+    val state by vm.uiState.collectAsStateWithLifecycle()
+    WaterEntrySheet(
+        state = state,
+        onUnlock = { vm.unlock() },
+        onDismissFlow = { vm.dismissFlow() },
+        onToggleUsePoints = { vm.toggleUsePoints() },
+        onEndSession = { vm.endSessionLocally() },
+        onDismiss = onDismiss,
+    )
+}
+
+/** 趣智开水面板宿主：理由同 [WaterEntrySheetHost]（那份状态里也有每秒走的水时与步骤）。 */
+@Composable
+private fun QzxyEntrySheetHost(
+    vm: QzxyViewModel,
+    loggedIn: Boolean,
+    onStart: () -> Unit,
+    onOpenDiagnostics: (String?) -> Unit,
+    onOpenPage: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val state by vm.uiState.collectAsStateWithLifecycle()
+    QzxyEntrySheet(
+        state = state,
+        loggedIn = loggedIn,
+        onStart = onStart,
+        onResend = { vm.resendOpenData() },
+        onStop = { vm.stopWater() },
+        onAbandon = { vm.abandonWatering() },
+        onClearDeviceRecord = { vm.clearDeviceRecord() },
+        onClearAndOpen = { vm.clearAndOpen() },
+        onRetryOpen = { vm.retryOpenAfterFailure() },
+        onClearFromRecovery = { vm.clearFromRecovery() },
+        onDismissRecovery = { vm.dismissRecovery() },
+        onDismissSettlement = { vm.dismissSettlement() },
+        onOpenDiagnostics = onOpenDiagnostics,
+        onOpenPage = onOpenPage,
+        onDismiss = onDismiss,
+    )
+}
+
 /**
  * 今日页居中态（加载/空态）共用外壳：`weight(1f)` 居中区 + 贴底固定区。
  * 抽出统一壳是为了防再犯「Box 少 fillMaxWidth 贴左」的错——居中容器只有一处定义。

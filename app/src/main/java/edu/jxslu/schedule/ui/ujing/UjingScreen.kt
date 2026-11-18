@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.ujing
 
 import android.app.Activity
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -76,6 +75,7 @@ import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
 import edu.jxslu.schedule.domain.QzxyPhoneMask
 import edu.jxslu.schedule.domain.UjingState
 import edu.jxslu.schedule.ui.common.AccountHeroCard
+import edu.jxslu.schedule.ui.common.washerScanIntent
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
@@ -100,7 +100,6 @@ import edu.jxslu.schedule.ui.common.lineHeightDp
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberCloseLock
 import edu.jxslu.schedule.ui.ebike.BikeLocator
-import edu.jxslu.schedule.ui.ebike.EbikeScanActivity
 import edu.jxslu.schedule.ui.ebike.LocateResult
 import edu.jxslu.schedule.ui.ebike.showNotice
 import edu.jxslu.schedule.ui.theme.Motion
@@ -295,12 +294,7 @@ fun UjingScreen(
     }
     val startScan: () -> Unit = {
         haptics.tap()
-        scanLauncher.launch(
-            Intent(context, EbikeScanActivity::class.java).apply {
-                putExtra(Intents.Scan.PROMPT_MESSAGE, "对准洗衣机机身上的二维码")
-                putExtra(EbikeScanActivity.EXTRA_RESULT_MODE, EbikeScanActivity.MODE_RAW)
-            },
-        )
+        scanLauncher.launch(washerScanIntent(context))
     }
 
     // 订单卡退场期间快照可能已被清空（点「知道了」），AnimatedVisibility 在 exit 时

@@ -69,14 +69,7 @@ class ScholarProgressSync(
     suspend fun sync(
         force: Boolean = false,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
-    ): Result {
-        if (!mutex.tryLock()) return Result.InProgress
-        try {
-            return syncLocked(force, onProgress)
-        } finally {
-            mutex.unlock()
-        }
-    }
+    ): Result = mutex.tryLocked { syncLocked(force, onProgress) } ?: Result.InProgress
 
     private suspend fun syncLocked(
         force: Boolean,
