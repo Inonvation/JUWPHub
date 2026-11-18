@@ -14,6 +14,7 @@ import edu.jxslu.schedule.data.kqcx.ZoneCacheStore
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.domain.BikeCluster
 import edu.jxslu.schedule.domain.BikeFailure
+import edu.jxslu.schedule.domain.BikeMapViewport
 import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.CarDetailResult
 import edu.jxslu.schedule.domain.EbikeUseMode
@@ -128,8 +129,9 @@ data class BikeMapUiState(
      * 镜头是否跟着用户走（2026-10-19 用户要求）。
      *
      * 开着时连续定位的每条有效读数都会把镜头平移过去（位移 ≥
-     * [FOLLOW_RECENTER_METERS] 才动，站定的小抖动不推镜头）；**只挪镜头，不重查接口**
-     * ——「刷新只由用户动作驱动」的红线不变。
+     * [FOLLOW_RECENTER_METERS] 才动，站定的小抖动不推镜头）。**数据只在换了片区域时跟上**
+     * （2026-11-19）：离开上一次查询中心 [BikeNearby.FOLLOW_REQUERY_METERS] 以上才重查一次
+     * ——近处走动不打扰第三方接口，红线是「不轮询」，不是「跟随期间绝不查」。
      *
      * 进页自动定位、点「定位」按钮、**人就在车边时**开始骑行都会打开它；用户单指拖动地图、
      * 点「回到校区」、点某个停车点 / 车辆定位时会关掉——那些动作表达的是"我现在要看别处"，
@@ -234,17 +236,18 @@ data class BikeMapUiState(
 /**
  * 附近单车地图页（DESIGN §3.9 / §4.23）。
  *
- * 刷新由用户动作驱动，**不做后台轮询**：进页一次、拖动停稳一次、点刷新一次、
- * 定位成功后一次。拖动由 View 层判定"停手"（`SettleWatcher`：事件安静 + `scroller.isFinished`）
- * 后回调 [onMapSettled]，再经 [QUERY_CONFIRM_MS] 的合并窗口发出——滑行途中一次都不发；
- * 与上次实际请求过的中心点距离不足 30 米同样跳过。
+ * 刷新只由**用户动作**与**真实位移**驱动，**不做后台轮询**：进页一次（[initialViewport]）、
+ * 拖动停稳一次、点刷新一次、定位成功后一次、跟随态下换了一片区域一次（
+ * [BikeNearby.FOLLOW_REQUERY_METERS]）。拖动由 View 层判定"停手"（osmdroid 走 `SettleWatcher`，
+ * 高德走 `onCameraChangeFinish`）后回调 [onMapSettled]，再经 [QUERY_CONFIRM_MS] 的合并窗口
+ * 发出——滑行途中一次都不发；与上次实际请求过的中心点距离不足 30 米同样跳过。
  *
  * 还车点 / 禁停区图层在用户动作基础上多一层**落盘缓存**（2026-09-28，[ZoneCacheStore]）：
  * 命中就先摆上、新鲜就不联网，只有「刷新」按钮强制重拉——缓存省的是重复往返，不是替代接口。
  *
  * 一次刷新可能发多个请求（见 [query] / [mergeSamples]）：接口只给"离查询点最近的 20 辆"，
- * 单点查不全。稀疏区域只发 1 个，车多的区域才会加撒一圈采样点。中心点那批先落列表，
- * 撒点回来再合并刷一次，不让用户等最慢的那个请求。
+ * 单点查不全。稀疏区域只发 1 个，车多的区域才会加撒一圈采样点。中心 + 环 + 大桩补全
+ * **并行跑、合并后只落一次**（见 [query]），数字不会一段一段往上跳。
  */
 class BikeMapViewModel(
     private val client: KqcxBikeClient,
@@ -330,6 +333,31 @@ class BikeMapViewModel(
             runCatching { prefs.ebikeUseMode.first() }.getOrDefault(EbikeUseMode.Default)
         },
     )
+
+    /**
+     * 进页那一刻的视野（2026-11-19）：**建图中心与首屏查询中心共用这一份**。
+     *
+     * 中心优先级：进程内五分钟内的定位 → 落盘的上次定位 → 上次查看的视野 → 校区中心；
+     * 缩放用上次视野的（没有就默认）。前两者都是"我在哪"——这个页面第一件事就是看身边的车；
+     * 只有完全没有定位（没授权 / 从没成功过）时才退回上次拖到哪看哪。
+     *
+     * 阻塞读一次（同 [useMode] 的模式），因为地图第一帧就要用它：异步读回来再挪过去就是
+     * 用户看得见的一跳。
+     *
+     * 为什么要收进来（2026-11-19 修用户报的「刚进快趣出行有时不显示停车点和附近车辆」）：
+     * 旧版建图中心在页面里读（定位优先）、首屏查询中心在 ViewModel 里另读一份（上次视野），
+     * 两者不同源——人已经走动过时，地图落在人身上、数据却查在几百米外，屏幕上就是空的；
+     * 再加上 `AmapMapView` 里还有一次「定位回来就直接 moveCamera 到人身上」的独立镜头，
+     * 镜头动了、数据没动。现在镜头与查询只有这一个中心，谁先到都是查同一片。
+     */
+    val initialViewport: BikeMapViewport = runBlocking {
+        val saved = runCatching { prefs.ebikeMapViewport.first() }.getOrNull()
+        val center = EbikeUserLocation.fresh()?.let { it.lat to it.lng }
+            ?: runCatching { prefs.ebikeLastLocation.first() }.getOrNull()?.let { it.lat to it.lng }
+            ?: saved?.let { it.lat to it.lng }
+            ?: (BikeNearby.DEFAULT_CENTER_LAT to BikeNearby.DEFAULT_CENTER_LNG)
+        BikeMapViewport(center.first, center.second, saved?.zoom ?: BikeNearby.DEFAULT_ZOOM)
+    }
 
     /**
      * 查一次骑行状态（仅账号登录方式）。小程序方式直接不查：地图上根本没有用车入口，
@@ -423,9 +451,9 @@ class BikeMapViewModel(
     private var fetchedLat: Double? = null
     private var fetchedLng: Double? = null
 
-    private var pendingLat = BikeNearby.DEFAULT_CENTER_LAT
-    private var pendingLng = BikeNearby.DEFAULT_CENTER_LNG
-    private var pendingZoom = BikeNearby.DEFAULT_ZOOM
+    private var pendingLat = initialViewport.lat
+    private var pendingLng = initialViewport.lng
+    private var pendingZoom = initialViewport.zoom
     private var lastAttemptLat: Double? = null
     private var lastAttemptLng: Double? = null
     /** 上一次真正发出查询时的缩放（2026-11-18）：原地缩放也要能触发重查，见 [movedEnough]。 */
@@ -471,15 +499,6 @@ class BikeMapViewModel(
      * （宁可不自动开锁，也不误开；车辆卡照常展示状态与服务端原因，用户可手动点开锁）。
      */
     private var autoUnlockCar: String? = null
-
-    /**
-     * 是否已经拿到过定位。
-     *
-     * 用来解决一个真实的时序竞争：读 DataStore 里的上次视野是异步的，而定位用系统缓存
-     * 常常**先**回来。两者都对镜头下过指令，晚到的那个说了算——于是「恢复上次视野」
-     * 会把刚定位好的镜头又拉回去，表现是蓝点不在正中（2026-09-23 真机实测偏了约 75 米）。
-     */
-    private var locatedOnce = false
 
     init {
         // 自动还车 Worker 结束订单后，页面状态不会自己变——订阅进程内信号把骑行卡收起
@@ -532,20 +551,10 @@ class BikeMapViewModel(
         viewModelScope.launch {
             setByBike(prefs.ebikeMapByBike.first())
         }
-        viewModelScope.launch {
-            val saved = prefs.ebikeMapViewport.first()
-            // 定位已经先回来了：它要的是"我在哪"，不是"我上次看哪"，别再拉回去
-            if (locatedOnce) return@launch
-            // 恢复上次的视野：没定位权限的人不必每次进页面都从校园中心重拖一遍。
-            // 放在查询之前，这样首屏查的就是用户上次看的那一片
-            if (saved != null) {
-                pendingLat = saved.lat
-                pendingLng = saved.lng
-                pendingZoom = saved.zoom
-                pushCamera(saved.lat, saved.lng, saved.zoom, animated = false)
-            }
-            scheduleQuery(immediate = true)
-        }
+        // 首屏查询：中心与建图中心同源（[initialViewport]），地图第一帧落在哪就查哪一片。
+        // 旧版这里是「异步读上次视野 → pushCamera → 查」，定位先回来时整条被跳过，
+        // 于是首屏可能一次查询都没有（用户报的「刚进页面时有时一片空白」就是这么来的）。
+        scheduleQuery(immediate = true)
     }
 
     /**
@@ -570,7 +579,7 @@ class BikeMapViewModel(
         }
         pendingLat = lat
         pendingLng = lng
-        scheduleQuery(immediate = false)
+        scheduleQuery()
     }
 
     /**
@@ -581,18 +590,17 @@ class BikeMapViewModel(
         // 大桩补全与附近车辆的缓存一并作废：手动刷新要看最新的，不能吃几十秒内的旧快照
         spotFills.clear()
         nearbyCache = emptyList()
-        scheduleQuery(immediate = true, forceZones = true, useCache = false)
+        scheduleQuery(immediate = true, force = true, forceZones = true, useCache = false)
     }
 
     /**
      * 骑行结束后把查询中心拉回**用户当前位置**并重查一次（2026-11-09）。
      *
      * 为什么需要：骑行期间镜头跟着用户走（[onUserLocationChanged] → [followCameraIfMoved]），
-     * 但**跟随只挪镜头、不重查接口**（禁止轮询第三方接口，见 [BikeMapUiState.followUser]）。
-     * 于是从一个地方骑到另一个地方还车时，镜头已经在人脚下、车与还车点还是开锁那一刻那一批：
-     * 还车后停在 8 秒结算卡那段时间，当前位置周围一片空白，非要拖一下地图或点「定位」才会重查
-     * （2026-11-09 用户报的正是这个）。还车本身是用户动作，用它把两者对齐，不违反
-     * 「刷新只由用户动作驱动」。
+     * 而跟随只在**离开上一片查询中心 [BikeNearby.FOLLOW_REQUERY_METERS] 以上**时才重查，
+     * 骑完最后几百米往往还留在上一片数据里；还车那一刻车辆恢复可用、还车点也最有参考价值，
+     * 用这个转折点补一次对齐（2026-11-09 用户报的「还车后停在 8 秒结算卡那段时间，当前位置
+     * 周围一片空白」与 2026-11-19 的「骑远了新位置不刷新」是同一族问题，各修一半）。
      *
      * **只在跟随态对齐**：跟随关着说明用户自己把地图拖到了别处，那一片的视野与数据是配对的
      * （拖动停稳就重查过），这时把数据拽回人身上，地图反而整片空白。没有定位（未授权 /
@@ -612,7 +620,7 @@ class BikeMapViewModel(
         pendingLng = lng
         // 刚还的车状态变了，这一查必须走网络，不能吃平移缓存
         nearbyCache = emptyList()
-        scheduleQuery(immediate = true, useCache = false)
+        scheduleQuery(immediate = true, force = true, useCache = false)
     }
 
     /** 取定位期间置位，让按钮有个"在做事"的样子。 */
@@ -972,7 +980,7 @@ class BikeMapViewModel(
     }
 
     /**
-     * 定位成功（坐标已是 GCJ-02）。记下蓝点位置（含精度），把镜头移过去并立即重查。
+     * 定位成功（坐标已是 GCJ-02）。记下蓝点位置（含精度），把镜头移过去并重查。
      *
      * 同时**换参照点**重算距离：距离从此以"你"为准，拖动地图不会让这些数字变形。
      * 也**重新打开跟随**（2026-10-19）：用户点「定位」就是"我要看着自己"，进页自动定位
@@ -980,11 +988,14 @@ class BikeMapViewModel(
      *
      * [animated] 为 false 用于进页面那一次：直接落位。进页面又没有起点可看，
      * 从校园中心滑过去纯属多此一举；用户主动点「定位」才需要一个缓动告诉他镜头动了。
+     *
+     * 查询**仍过位移闸门**（2026-11-19）：进页那一刻的定位常常就落在建图中心上
+     * （[initialViewport] 用的也是这份缓存定位），同一个中心再查一遍只是多 5 个请求；
+     * 人真在别处时距离早超过 [BikeNearby.MIN_REQUERY_SHIFT_METERS]，照样会查。
      */
     fun onLocated(lat: Double, lng: Double, accuracyMeters: Float = 0f, animated: Boolean = true) {
         if (!lat.isFinite() || !lng.isFinite()) return
         EbikeUserLocation.update(lat, lng)
-        locatedOnce = true
         followCameraLat = lat
         followCameraLng = lng
         _uiState.update {
@@ -999,7 +1010,7 @@ class BikeMapViewModel(
         pushCamera(lat, lng, zoom = null, animated = animated)
         pendingLat = lat
         pendingLng = lng
-        scheduleQuery(immediate = true)
+        scheduleQuery(immediate = true, useCache = false)
     }
 
     /**
@@ -1007,8 +1018,11 @@ class BikeMapViewModel(
      * 挪蓝点（含精度圈）；**跟随态下也把镜头平移过去**（2026-10-19 用户要求：
      * 骑车换了地方，地图不能还停在开锁那一刻的位置）。
      *
-     * 跟随**只移动镜头、不重查接口**：程序性移动会被 `CameraSuppressor` 吃掉，走不到
-     * 「拖动停手」那条查询；车辆列表仍由用户动作驱动（禁止轮询第三方接口）。
+     * 跟随的刷新口径（2026-11-19 修订）：镜头随时跟着走，**数据只在离开上一片查询中心
+     * [BikeNearby.FOLLOW_REQUERY_METERS]（300 米）以上时重查一次**（见 [followCameraIfMoved]）。
+     * 近处走动不发请求——红线是「不轮询第三方接口」，不是「跟随期间绝不查」；旧口径一路
+     * 只挪镜头，骑到几百米外的另一片时屏幕上就只剩一张没有车的图（用户 2026-11-19 报的就是它）。
+     *
      * 用户单指拖动地图即退出跟随（[onUserPanned]），点「定位」/ 开始骑行再打开。
      *
      * **不重设列表的参照点**（2026-09-30）：蓝点每动一下就把整张列表按新位置重排，
@@ -1021,7 +1035,6 @@ class BikeMapViewModel(
     fun onUserLocationChanged(lat: Double, lng: Double, accuracyMeters: Float = 0f) {
         if (!lat.isFinite() || !lng.isFinite()) return
         EbikeUserLocation.update(lat, lng)
-        locatedOnce = true
         _uiState.update {
             it.copy(
                 userLat = lat,
@@ -1073,6 +1086,16 @@ class BikeMapViewModel(
     /**
      * 跟随态下把镜头带向最新读数：只有离上次落点够远才推——站定时的几米抖动、
      * 以及"原地精度提升"那一路读数都不该让镜头一直轻滑。
+     *
+     * **镜头到了新地方，数据跟上**（2026-11-19 用户报「骑车到较远的另一个地方后，新位置的
+     * 窗口不刷新附近的停车点和车辆」）：离开**上一次查询中心**超过
+     * [BikeNearby.FOLLOW_REQUERY_METERS]（300 米）就为这一片重查一次，查询中心随之更新。
+     * 三条口径：
+     * - **只在跟随态**走这里：用户自己拖图看别处时跟随已经关掉，那一片的视野与数据配对；
+     * - **查询在飞时不叠加**（`loading`）：查询落地要 1~2 秒，骑得快时这段时间里还会来一两条
+     *   读数，不加这道闸会反复取消上一笔，页面一直转圈、一次都落不了地；
+     * - 还没查过（`lastAttempt*` 为空）也不在这里补：首屏查询与 [onLocated] 各自会发，
+     *   跟随时补一条只会在进页那一刻多打一轮。
      */
     private fun followCameraIfMoved(lat: Double, lng: Double) {
         val lastLat = followCameraLat
@@ -1085,6 +1108,15 @@ class BikeMapViewModel(
         followCameraLat = lat
         followCameraLng = lng
         pushCamera(lat, lng, zoom = null, animated = true)
+
+        val queryLat = lastAttemptLat
+        val queryLng = lastAttemptLng
+        if (queryLat == null || queryLng == null) return
+        if (_uiState.value.loading) return
+        if (!BikeNearby.followQueryDue(queryLat, queryLng, lat, lng)) return
+        pendingLat = lat
+        pendingLng = lng
+        scheduleQuery(immediate = true, useCache = false)
     }
 
     /** 精度读数的清洗：非有限 / 非正一律当"系统没给"（0）。 */
@@ -1204,17 +1236,24 @@ class BikeMapViewModel(
     }
 
     /**
+     * 安排一次查询。三个开关各管一件事，别混：
+     *
+     * [immediate] = 跳过 [QUERY_CONFIRM_MS] 合并窗口（用户动作：进页 / 定位 / 刷新 / 回到校区 /
+     * 跟随时换了片区域）。拖动走的那条（[onMapSettled]）已经由 View 层确认"地图停了"，
+     * 留那个窗口只是合并紧随其后的收尾事件。
+     *
+     * [force] = 跳过位移闸门（[movedEnough]）。只有**用户明确要最新**的路径用：刷新按钮、
+     * 骑行结束的补查。其余一律过闸门——进页那一刻的定位常常就落在建图中心上，同一个中心
+     * 再查一遍只是多 5 个请求。
+     *
      * [forceZones] = 图层不吃新鲜缓存（只有「刷新」按钮用；「回到校区」是换视野，不是要最新）。
      *
-     * [immediate] = 跳过等待与 30 米位移闸门（进页 / 定位成功 / 回到校区 / 刷新按钮）。
-     * 拖动走的那条（[onMapSettled]）已经由 View 层确认"地图停了"，这里只留
-     * [QUERY_CONFIRM_MS] 合并收尾事件，再按 30 米位移 + 缩放变化判断要不要真发。
-     *
      * [useCache] = 允许吃附近车辆的 30 秒内存缓存（2026-11-18）：只有拖动停手这条路用，
-     * 「刷新」按钮与写动作后的重查都关掉——用户明确要最新时不能拿旧快照顶替。
+     * 其余路径都关掉——用户明确要最新、或换了片区域时不能拿旧快照顶替。
      */
     private fun scheduleQuery(
-        immediate: Boolean,
+        immediate: Boolean = false,
+        force: Boolean = false,
         forceZones: Boolean = false,
         useCache: Boolean = true,
     ) {
@@ -1224,7 +1263,7 @@ class BikeMapViewModel(
             val lat = pendingLat
             val lng = pendingLng
             val zoom = pendingZoom
-            if (!immediate && !movedEnough(lat, lng, zoom)) return@launch
+            if (!force && !movedEnough(lat, lng, zoom)) return@launch
             val cached = if (useCache) {
                 cachedNearby(lat, lng, BikeNearby.isZoomedOut(zoom))
             } else {
@@ -1260,8 +1299,12 @@ class BikeMapViewModel(
      * 要把大范围那批车补上，缩到整座校区可见则改成只查中心一页。判据两条：**跨过
      * 缩小视图线无条件查**，同一档里变化 ≥ [ZOOM_REQUERY_STEP] 级才查（捏合过程里每一小步
      * 都发请求没有意义）。
+     *
+     * 上一次**失败**时无条件重查（2026-11-19）：同一片再查一次不是浪费，用户拖一拖或点
+     * 「定位」就是在重试；不认这条的话，首查失败后再点定位会被闸门静默吞掉。
      */
     private fun movedEnough(lat: Double, lng: Double, zoom: Double): Boolean {
+        if (_uiState.value.failure != null) return true
         val lastLat = lastAttemptLat ?: return true
         val lastLng = lastAttemptLng ?: return true
         if (BikeNearby.distanceMeters(lastLat, lastLng, lat, lng) >=
@@ -1339,6 +1382,13 @@ class BikeMapViewModel(
         // 缩放**开工时定一次**：查询期间用户可能又捏了一下，这批结果该按开工时那个范围解释
         val zoom = pendingZoom
         val zoomedOut = BikeNearby.isZoomedOut(zoom)
+        // 「上次尝试过的中心 / 缩放」在**开工时**就记下（2026-11-19）：一笔查询要 0.5~2 秒才落地，
+        // 这期间进页那次定位刚好回来（[onLocated]）或用户点了一下「定位」，位移闸门必须看得见
+        // 这笔在飞的请求——否则会再发一轮、把这一笔掐掉：进页白打 5 个请求，首屏还要再晚半秒。
+        // 落地时 [applyResult] / [failQuery] 会再写一遍同样的值（缓存命中的那条路只有它们写）。
+        lastAttemptLat = lat
+        lastAttemptLng = lng
+        lastAttemptZoom = zoom
         _uiState.update { it.copy(loading = true, failure = null) }
         // 图层与车辆列表**并行**发（2026-09-28）：它只需要坐标与一个"哪类车"的上下文，
         // 车号用上一次那批车里的任意一辆即可——旧写法等中心结果回来才发，白多一个往返

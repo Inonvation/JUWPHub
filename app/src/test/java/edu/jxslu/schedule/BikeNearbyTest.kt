@@ -12,6 +12,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.cos
 
 /**
  * 附近单车（DESIGN §4.23）：响应解析容错、聚簇口径、距离计算与排序、状态推导、距离文案。
@@ -488,6 +489,29 @@ class BikeNearbyTest {
             BikeNearby.SAMPLE_RADIUS_MIN_METERS,
             BikeNearby.sampleRadiusMeters(100.0, byBike = true),
             1e-9,
+        )
+    }
+
+    @Test
+    fun `跟随镜头离开上一片查询中心才重查`() {
+        // 300 米（FOLLOW_REQUERY_METERS）：骑行几百米就换了一片车与还车点（2026-11-19 用户报
+        // 「骑到较远的另一个地方，新位置的窗口不刷新停车点和车辆」）。
+        // 阈值必须远大于 30 米的位移闸门，否则每两秒一条的定位读数会把它变成轮询。
+        assertTrue(BikeNearby.FOLLOW_REQUERY_METERS > BikeNearby.MIN_REQUERY_SHIFT_METERS)
+        val lat = BikeNearby.DEFAULT_CENTER_LAT
+        val lng = BikeNearby.DEFAULT_CENTER_LNG
+        // 站定抖动 / 一两条读数：不重查
+        assertFalse(BikeNearby.followQueryDue(lat, lng, lat, lng))
+        assertFalse(BikeNearby.followQueryDue(lat, lng, lat + 100 / 111_320.0, lng))
+        // 跨过阈值：重查（南北、东西都要认）
+        assertTrue(BikeNearby.followQueryDue(lat, lng, lat + 320 / 111_320.0, lng))
+        assertTrue(
+            BikeNearby.followQueryDue(
+                lat,
+                lng,
+                lat,
+                lng + 320 / (111_320.0 * cos(Math.toRadians(lat))),
+            ),
         )
     }
 

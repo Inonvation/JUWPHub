@@ -51,7 +51,6 @@ import com.amap.api.maps.model.Marker
 import com.amap.api.maps.model.MarkerOptions
 import com.amap.api.maps.model.Polygon
 import com.amap.api.maps.model.PolygonOptions
-import edu.jxslu.schedule.BuildConfig
 import edu.jxslu.schedule.domain.BikeCluster
 import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.GcjPoint
@@ -112,15 +111,18 @@ internal fun AmapMapView(
      */
     onSdkUnavailable: () -> Unit = {},
     /**
-     * 建图时就用这个中心（GCJ-02），null 回落到校区中心。
+     * 建图中心（GCJ-02），null 回落到校区中心。
      *
      * 为什么要它（2026-11-17 用户报「进页面不会自动到我位置」）：页面每次进入都会新建地图，
      * 而「移到用户位置」是一次性的 camera 请求——它可能在 `locate()` 返回之前就被消费，
      * 也可能因为地图还没就绪被吞掉。把**上次已知位置**直接当建图中心，第一帧就落在人身上，
      * 不再依赖那次请求。只在创建时读一次，之后的变化走 camera 请求。
+     *
+     * 2026-11-19 起这份中心由 `BikeMapViewModel.initialViewport` 统一给出，**首屏查询用的
+     * 也是同一个中心**——镜头落哪儿就查哪儿，两者不再各读一份。
      */
     initialCenter: GcjPoint? = null,
-    /** 建图时的缩放；null 用默认级别。 */
+    /** 建图时的缩放；null 用默认级别。与 [initialCenter] 同源（`initialViewport.zoom`）。 */
     initialZoom: Double? = null,
     /**
      * 高德版权标识的底边距（px）。0 = 用 SDK 默认（钉在地图左下角）。
@@ -172,10 +174,12 @@ internal fun AmapMapView(
             // 不可能在 onCreate 调用栈内送达，所以挂在这里既无竞态、也不用碰 onCreate 之前
             // 的 `map`（那时它是否可用取决于 SDK 实现，不赌）。
             map.setOnMapLoadedListener {
-                // 3D 楼块要在底图就绪后再关（官方示例就写在 onMapLoaded 里）：早调会被首帧
-                // 渲染重置回默认。校园尺度下这一层是纯装饰，每帧都要重新画一遍楼体与贴图。
-                runCatching { map.showBuildings(false) }
-                    .onFailure { Log.w(TAG_MAP, "关闭 3D 楼块失败", it) }
+                // 3D 楼块（2026-11-19 用户要求补回）：官方要求在 `onMapLoaded` 里设，早调会被
+                // 首帧渲染重置回默认。2026-11-18 为压拖动开销关过一版，用户随即报「楼没了」——
+                // 校园尺度下用户靠楼体辨认方位（「图书馆后面那排车桩」），这一层留着；
+                // 拖动开销靠关掉其余装饰层（见 trimBasemapLayers）来省。
+                runCatching { map.showBuildings(true) }
+                    .onFailure { Log.w(TAG_MAP, "开启 3D 楼块失败", it) }
                 mapLoaded = true
             }
             map.uiSettings.apply {
@@ -279,30 +283,11 @@ internal fun AmapMapView(
         label = "amapPlaceholder",
     )
 
-    /**
-     * 进页面自动跟到我的位置（2026-11-17 用户口径：别绕，进界面就把镜头落到人身上）。
-     *
-     * 为什么不用 ViewModel 那次 `camera` 请求：它是一次性的，可能在定位回来之前就被消费，
-     * 也可能被「恢复上次视野」那条请求盖掉。这里直接盯 `userLat/userLng`：地图画出来了、
-     * 拿到一次定位，就落一次镜头，**只做一次**。用户先自己拖过图（[interrupted]）就不抢。
-     */
-    var centeredOnUser by remember { mutableStateOf(false) }
-    LaunchedEffect(mapLoaded, userLat, userLng) {
-        if (centeredOnUser || !mapLoaded) return@LaunchedEffect
-        val lat = userLat ?: return@LaunchedEffect
-        val lng = userLng ?: return@LaunchedEffect
-        centeredOnUser = true
-        if (interrupted.get()) return@LaunchedEffect
-        suppressor.aim(lat, lng)
-        suppressor.quietFor(MOVE_QUIET_MS)
-        aMap.moveCamera(
-            CameraUpdateFactory.newLatLngZoom(
-                LatLng(lat, lng),
-                aMap.cameraPosition?.zoom ?: BikeNearby.DEFAULT_ZOOM.toFloat(),
-            ),
-        )
-        if (BuildConfig.DEBUG) Log.d(TAG_MAP, "首帧落到用户位置: $lat,$lng")
-    }
+    // **这一层不自己移动镜头**（2026-11-19 删掉了「定位一回来就 moveCamera 到人身上」那段）。
+    // 建图中心由 [initialCenter] 给定（与首屏查询中心同源，见 `BikeMapViewModel.initialViewport`），
+    // 之后所有镜头移动都走 ViewModel 的 `camera` 请求——只有一处能动镜头，数据才跟得上。
+    // 旧版这里是第二处：镜头到了人身上、查询中心还停在上一片，用户看到的就是「刚进页面
+    // 没有停车点也没有车」（2026-11-19 报）。
 
     // 点标记：按 Marker 上挂的 payload 分派，不依赖任何绘制顺序
     DisposableEffect(aMap, layers) {
@@ -374,12 +359,20 @@ internal fun AmapMapView(
                 userHeading = null,
                 userAccuracyMeters = 0f,
             )
-            if (drawn.value != static) {
-                layers.rebuild(inputs)
-                drawn.value = static
+            if (mapLoaded) {
+                if (drawn.value != static) {
+                    layers.rebuild(inputs)
+                    drawn.value = static
+                }
+                // 蓝点单独更新：罗盘 10Hz 跳动不该触发整层重建
+                layers.updateUser(inputs.userPoint, userAccuracyMeters, userHeading, colors)
+            } else {
+                // 底图还没画出第一帧：先不落标记（此刻 add 上去的标记也看不见），
+                // 也不记「已画」——`mapLoaded` 翻转会让这一轮重组再跑一遍，那时一次画齐。
+                // 蓝点同理：这段窗口里别把 `lastUserKey` 记成"已画"，否则底图出来后
+                // 站定不动的用户要等下一条定位读数才有蓝点。
+                drawn.value = null
             }
-            // 蓝点单独更新：罗盘 10Hz 跳动不该触发整层重建
-            layers.updateUser(inputs.userPoint, userAccuracyMeters, userHeading, colors)
             },
         )
 
@@ -560,14 +553,14 @@ private fun dispatchTap(
  * 关掉底图上**每帧都要重算、而这张图用不到**的图层（2026-11-18 用户报「拖动卡顿」）。
  *
  * 高德 3D 底图是矢量渲染：拖动时每帧都要重新走一遍几何装配与标注排版，图层越多越贵。
- * 这里关的都是纯装饰层，关掉不改变「哪条路、哪个地名、哪辆车」这些用户真要读的信息
- * （楼栋名还在，只是不再画 3D 楼体，见下面那条）：
+ * 这里关的都是纯装饰层，关掉不改变「哪条路、哪个地名、哪辆车」这些用户真要读的信息：
  * - 室内图：3D SDK 默认就关，显式写一次防上游改默认值；
  * - 路面方向箭头、施工路段：行车导航用的，我们只有校园内步行尺度；
  * - 导航类标注：同上；
  * - POI 触摸命中：我们只点自己的 Marker，不需要 SDK 再维护一份 POI 命中索引。
  *
- * **3D 楼块不在这里关**：官方要求在 `onMapLoaded` 之后调，见 [AmapMapView] 里那个监听器。
+ * **3D 楼块不在这里**（2026-11-19 用户要求保留楼体）：官方要求在 `onMapLoaded` 之后调，
+ * 见 [AmapMapView] 里那个监听器；早调会被首帧重置。
  * 每项单独 `runCatching`：某个开关在别的 SDK 版本上没了，不该把其余几项一起带走。
  */
 private fun AMap.trimBasemapLayers() {

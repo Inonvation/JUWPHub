@@ -105,9 +105,11 @@
   **连续定位流**（`updates`，页面可见期间收集）让蓝点跟着人走：先发缓存定位，再按 2 秒
   节奏挂同样的两条更新，经 `shouldMoveDot`（位移 ≥ 4 米或精度显著提升才挪，纯 JVM 可测
   `BikeLocatorLiveDotTest`）滤掉双源交替与站定抖动后逐条转 GCJ-02；**跟随态下镜头也跟着
-  人走**（`followUser`，位移 ≥ 8 米推一次相机，2026-10-19，§3.9），但**不重查车辆接口**
-  （程序性移动被 `CameraSuppressor` 吃掉；骑行结束那一下补一次重查，见 §3.9
-  `refreshNearUser`）。权限缺失等硬失败发一条 Failed 即结束，
+  人走**（`followUser`，位移 ≥ 8 米推一次相机，2026-10-19，§3.9）。**数据在换了片区域时跟上**
+  （2026-11-19 修订）：离开上一次查询中心 ≥ `BikeNearby.FOLLOW_REQUERY_METERS`（300 米，
+  纯函数 `followQueryDue` 有单测）就重查一次，查询在飞时不叠加；近处走动仍只挪镜头
+  （程序性移动被 `CameraSuppressor` 吃掉），红线是「不轮询第三方接口」，不是「跟随期间绝不查」。
+  骑行结束那一下另有 `refreshNearUser` 补一次对齐（见 §3.9）。权限缺失等硬失败发一条 Failed 即结束，
   失败提示归一次性定位管。
 - **`LocationListener` 的四个方法都要写全**（含 API 29 起废弃的 `onStatusChanged`）：
   它们在 API 30 的 `android.jar` 里才是 default 方法，编译期少写也能过，
@@ -147,9 +149,21 @@
   占位底色取**高德底图在校区尺度的主色 `#A4D5A9`**（实机截图采样），不是主题深色——
   深色底看着就是「黑屏加载中」，一秒钟后突然变亮反而更刺眼；用底图自己的绿色打底，
   淡入时几乎看不出切换。
-- **相机**：动画时长按距离给（420ms~720ms，`cameraAnimMs`）；**相机请求必须等 `onMapLoaded`
+- **相机**：动画时长与曲线照抄 osmdroid 栅格路径（带缩放 400ms、只平移 1000ms、
+  `AccelerateDecelerateInterpolator`，`cameraAnimMs`）；**相机请求必须等 `onMapLoaded`
   之后再执行**——高德首帧会把相机重置回创建时的位置，早发的 `moveCamera` 会被吞掉，而请求
-  已经被消费，症状就是「进页面不跟到我的位置」（2026-11-17 用户报）。
+  已经被消费，症状就是「进页面不跟到我的位置」（2026-11-17 用户报）。**建图中心与首屏查询
+  中心同源**（2026-11-19）：`BikeMapViewModel.initialViewport`（进程内 5 分钟内的定位 →
+  落盘的上次定位 → 上次视野 → 校区中心）同时给出 `initialCenter` / `initialZoom` 与
+  `pendingLat/Lng`，`AmapMapView` **不再自己 moveCamera**——镜头只有「建图中心」与
+  「VM 的 camera 请求」两个入口，数据才跟得上（旧版那次独立的「定位回来就落镜头」正是
+  「刚进页面没有停车点也没有车」的来路）。
+- **3D 楼块保留**（2026-11-19 用户要求补回）：`showBuildings(true)` 与相机同一条纪律——
+  必须在 `onMapLoaded` 之后设（官方要求，早调会被首帧重置）。2026-11-18 为压拖动开销关过
+  一版，楼体在校园里是辨认方位的凭据，关掉比省下的那点帧时间更亏；拖动开销改从
+  室内图 / 路面箭头 / 施工路段 / 导航标注 / POI 触摸命中这些纯装饰层压（`trimBasemapLayers`）。
+  底图首帧之前也不落标记（`mapLoaded` 为 false 时跳过 `rebuild` / `updateUser`），
+  避免把「已画」记在一个还没出图的图层上。
 - **蓝点不进图层比对**：罗盘 10Hz 更新，把 `userPoint` / `userHeading` / `userAccuracyMeters`
   算进 `MapOverlayInputs` 的话，每 100ms 会全量重建一次标记（几十个 remove + add），
   拖动与相机动画都会卡。比对前先 `copy(userPoint = null, userHeading = null,

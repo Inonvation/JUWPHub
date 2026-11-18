@@ -356,19 +356,26 @@
   加载一次头行别闪。
   **写动作开始先取消地图查询**（`BikeMapViewModel.cancelQueriesForRideAction`）：开锁 / 锁车 /
   还车共用连接池，高峰期不要让还在飞的附近车辆/图层请求排在写请求前面。
-  蓝点实时更新 + 镜头跟随（2026-09-26 / **2026-10-19 加跟随**）：页面可见期间（`repeatOnLifecycle(STARTED)`）
+  蓝点实时更新 + 镜头跟随（2026-09-26 / **2026-10-19 加跟随** / **2026-11-19 数据跟上**）：页面可见期间（`repeatOnLifecycle(STARTED)`）
   挂 `BikeLocator.updates` 连续定位流，走 `onUserLocationChanged`——挪蓝点与「距你」距离；
   **跟随态（`BikeMapUiState.followUser`）下位移 ≥ `FOLLOW_RECENTER_METERS`（8 米）就把镜头
-  平移过去**（`pushCamera(animated = true)`），**仍然不重查车辆接口**——程序性移动被
-  `CameraSuppressor` 吃掉、走不到拖动停手那条查询，接口禁止轮询的红线不变。用户口径
-  （2026-10-19）：从一个地方开锁骑到另一个地方，地图不能还停在开锁那一刻的位置。
-  **骑行结束补一次重查**（2026-11-09 用户报「还车后停在那个 8 秒结算卡时，当前位置周围
+  平移过去**（`pushCamera(animated = true)`）。**换了片区域要重查**（2026-11-19 用户报
+  「骑车从一个地方到较远的另一个地方，镜头跟过去了，新位置的窗口却没有停车点和车」）：
+  `followCameraIfMoved` 里判 `BikeNearby.followQueryDue`——离开**上一次查询中心** ≥
+  `FOLLOW_REQUERY_METERS`（300 米，`domain/BikeNearby` 有单测）时把 `pendingLat/Lng` 换成新
+  位置并 `scheduleQuery(immediate = true, useCache = false)`，车辆与还车点一起刷新。三条别拆：
+  ① 阈值不能取位移闸门那个 30 米（骑行每 2 秒一条读数就超过它，等于变成轮询）；② **`loading`
+  期间不叠加**（一次刷新要 1~2 秒，骑得快时这段时间还会来读数，不设闸会反复取消上一笔、
+  一次都落不了地）；③ `lastAttempt*` 为空时不在这里补查（首屏与 `onLocated` 各自会发）。
+  近处走动仍只挪镜头——红线是「不轮询第三方接口」，不是「跟随期间绝不查」。
+  用户口径（2026-10-19）：从一个地方开锁骑到另一个地方，地图不能还停在开锁那一刻的位置。
+  **骑行结束再补一次重查**（2026-11-09 用户报「还车后停在那个 8 秒结算卡时，当前位置周围
   没有停车点也没有车，非要拖一下地图或点定位」）：`BikeMapViewModel.refreshNearUser()`——
   ride 由非空变空（手动还车 / 自动还车 / 订单在别处结束）时把 `pendingLat/Lng` 拉回
-  `state.userLat/Lng` 再 `scheduleQuery(immediate = true)`，车与还车点这才跟镜头对齐；
-  **只在跟随态做**（跟随关着 = 用户自己把图拖到了别处，那一片的视野与数据是配对的，
-  拽回人身上地图反而整片空白），没有定位时什么都不做。触发点是 VM 里对 `kvcx.state` 的
-  转折，**不是轮询**——别把它挪进 `followCameraIfMoved`（那就成了骑行途中每 8 米查一次接口）。
+  `state.userLat/Lng` 再 `scheduleQuery(immediate = true, force = true)`，车与还车点这才跟镜头
+  对齐（最后几百米常常不到 300 米，跟随那条不会触发，这一下补齐）；**只在跟随态做**（跟随关着
+  = 用户自己把图拖到了别处，那一片的视野与数据是配对的，拽回人身上地图反而整片空白），
+  没有定位时什么都不做。触发点是 VM 里对 `kvcx.state` 的转折，**不是轮询**。
   打开跟随 = 进页自动定位 / 点「定位」/ **人就在车边时开始骑行**（`RideScreen` 的 phase
   effect 调 `startFollowing`）；关闭 = **用户单指拖动地图**（`TouchTracker` 过系统 touch slop；
   双指缩放不算、点地图不算）、点「回到校区」、点停车点 / 车辆定位 / 按车号找车——
@@ -486,6 +493,14 @@
   `CAMERA_ANIM_PAN_MS` + `animateCameraEased` 里的同一个插值器。
   **相机请求必须等 `onMapLoaded` 之后再执行**——高德首帧会重置相机，早发的会被吞掉
   （症状：进页面不跟到我的位置）。
+- **进页的镜头与数据同源**（2026-11-19，修「刚进快趣出行有时看不到停车点和车」）：
+  `BikeMapViewModel.initialViewport` 阻塞读一次（进程内 5 分钟内的定位 → 落盘的上次定位 →
+  上次视野 → 校区中心），**建图中心（`initialCenter` / `initialZoom`）与首屏查询中心（
+  `pendingLat/Lng/Zoom`）都用它**。`AmapMapView` 里**不许再自己 `moveCamera`**（旧版有个
+  `centeredOnUser` effect：定位一回来就落镜头，而查询中心还停在上一片——镜头动了数据没动）；
+  镜头只有两个入口：建图中心 + VM 的 `camera` 请求。同理，`onLocated` 的查询要过位移闸门
+  （进页那次定位通常就落在 `initialViewport` 上，重复查只是多 5 个请求），
+  而 `scheduleQuery` 的 `force` 只留给「刷新」「骑行结束补查」这类用户明确要最新的路径。
 - **「P」还车点不接点击**（2026-09-29 用户口径，2026-11-18 在高德路径补齐，同日返工一次）：
   它常和聚合圈压在一起，接点击只会挡着选车。osmdroid 那边是命中测试直接跳过它
   （`BikeMarkerOverlay.onSingleTapConfirmed`）；高德**没有**「Marker 不参与命中」的开关，
@@ -510,13 +525,18 @@
   排文字，比栅格贵是固有的，只能把每帧的量压下去。已做的五处，动到任一处先读对应注释：
   1. `AmapMaps.prepare` 关地形 / 等高线（进程级，必须早于 `initialize`）；
   2. `AmapMapView.trimBasemapLayers()` 关室内图 / 路面箭头 / 施工路段 / 导航标注 / POI 触摸命中；
-  3. `showBuildings(false)` 单独在 `onMapLoaded` 里调（官方要求，早调会被首帧重置）；
+  3. **3D 楼块保留**（2026-11-19 用户要求补回「建筑物的显示」）：`showBuildings(true)` 在
+     `onMapLoaded` 里设（官方要求，早调会被首帧重置）。2026-11-18 为压拖动开销关过一版，
+     用户随即报「楼没了」——校园尺度下楼体是辨认方位的凭据，**别再关**；要省拖动开销动其余几条。
   4. 还车点 / 禁停区轮廓在 `KvcxZones.capped()` 里抽稀到 16 / 40 个顶点（见 `PolygonSimplify`，
      解析与缓存读回都走它）；
   5. 地图整幅平移的 `translationY` 取整像素（SurfaceView 落在半像素上合成要重采样）。
   6. **图层重建只动变了的**（2026-11-18 二轮）：多边形按 `PolygonsKey` 指纹跳过整段重画
      （聚合圈每次拖动停手都刷新，而围栏 / 禁停区 / 还车点范围几乎不变）；标记的
      position / icon / zIndex / object 逐项比过再写，图标没换就不 `setIcon`（省一次纹理重绑）。
+  7. **底图首帧之前不落标记**（2026-11-19）：`AndroidView.update` 里 `mapLoaded` 为 false 时
+     直接跳过 `rebuild` / `updateUser` 并把 `drawn.value` 清空，`onMapLoaded` 翻转后的那一轮
+     重组一次画齐——否则 `drawn` 会把"已画"记在一个还没出图的图层上。
   **剩下的卡顿是矢量底图本身的每帧开销**（几何装配 + 文字排版 + 标注避让），不是我们的图层。
   还能往下压的三条，都有代价：自定义地图样式砍 POI 标注（最大头，要在高德后台生成样式
   并与 key 绑定）、`setRenderFps` 降到 30（稳但 30fps）、把地图视图高度缩到可见区
@@ -529,8 +549,9 @@
   停车点 JSON 一起在 `EbikeMapCache` 里统计与清除。
 - **R8**：`proguard-rules.pro` 必须 keep `com.amap.api.**` / `com.autonavi.**`，否则 release
   地图空白、点击无响应（Java 层要经 JNI 回调）。改混淆规则后必须装 release 包冒烟到地图页。
-- **点验**：进页面不再闪白；底图显示「江西水利电力大学」；车标 / 围栏 / 还车点 / 蓝点与底图
-  对齐；捏合能到 20 级；设置里关掉开关后重进是栅格底图。
+- **点验**：进页面不再闪白；**第一屏就有车标与还车点**（不再需要拖一下才出来）；楼体可见；
+  底图显示「江西水利电力大学」；车标 / 围栏 / 还车点 / 蓝点与底图
+  对齐；捏合能到 20 级；骑到 300 米外时车与还车点跟着换一批；设置里关掉开关后重进是栅格底图。
 
 ## 车号口径
 

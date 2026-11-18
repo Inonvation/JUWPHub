@@ -137,8 +137,9 @@ sealed interface CarDetailResult {
 enum class BikeFailure { Network, Timeout, Service, Malformed }
 
 /**
- * 上次查看的地图视野（DESIGN §3.9）。进页面还没定位时从这里恢复，
- * 免得每次都从校园中心开局、让用户重新拖一遍。
+ * 地图视野：既存「上次查看的视野」（DESIGN §3.9，进页面还没定位时从这里恢复，免得每次
+ * 都从校园中心开局），也用来表示进页那一刻的**初始视野**——建图中心与首屏查询中心共用
+ * 同一份，镜头落哪儿就查哪儿（见 `BikeMapViewModel.initialViewport`）。
  */
 data class BikeMapViewport(val lat: Double, val lng: Double, val zoom: Double)
 
@@ -175,6 +176,18 @@ object BikeNearby {
 
     /** 查询中心点位移小于该值不重复发请求（DESIGN §4.23 数据纪律）。 */
     const val MIN_REQUERY_SHIFT_METERS = 30.0
+
+    /**
+     * 跟随镜头到了新位置后，离**上一次查询的中心**超过这么远就该为这一片重查一次（米，2026-11-19）。
+     *
+     * 为什么需要它（用户 2026-11-19 报「骑车从一个地方到较远的另一个地方，镜头跟过去了，
+     * 新位置的窗口里却没有停车点也没有车」）：跟随只挪镜头，数据留在上一片。判据不能取
+     * [MIN_REQUERY_SHIFT_METERS]（30 米）——骑行时每 2 秒的定位读数就能超过它，等于把
+     * 「不轮询」偷偷变成「每 2 秒查一次接口」。300 米与聚合模式的采样环上限（350 米）
+     * 同一量级：跨过它就说明画面里能看到的已经换了一批；骑行 300 米约 1~2 分钟，
+     * 一次刷新 5 个请求，代价可以接受。
+     */
+    const val FOLLOW_REQUERY_METERS = 300.0
 
     /** 电量低于这个百分比就把数字标成警告色（纯展示阈值，与运营方的 lowBattery 无关）。 */
     const val LOW_BATTERY_HINT_PERCENT = 30.0
@@ -267,6 +280,19 @@ object BikeNearby {
      * 聚合模式仍用 [MAX_NEARBY_DISTANCE_METERS]（800 米，覆盖日常活动区）。
      */
     const val BIKE_MODE_MAX_DISTANCE_METERS = 500
+
+    /**
+     * 跟随镜头到了新位置，要不要为这一片重查附近车辆与还车点（纯函数，单测锁定）。
+     *
+     * 只有「离开上一次查询中心 ≥ [FOLLOW_REQUERY_METERS]」才算换了片区域——近处的走动
+     * 只挪镜头，不打扰接口（见那个常量的注释）。
+     */
+    fun followQueryDue(
+        lastQueryLat: Double,
+        lastQueryLng: Double,
+        lat: Double,
+        lng: Double,
+    ): Boolean = distanceMeters(lastQueryLat, lastQueryLng, lat, lng) >= FOLLOW_REQUERY_METERS
 
     /**
      * 采样环半径（纯函数，单测锁定）：按视口半对角线缩放，夹在

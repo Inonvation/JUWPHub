@@ -94,7 +94,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlin.math.roundToInt
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
@@ -677,18 +676,6 @@ fun RideScreen(
         }
     }
     val prefsStore = remember { Graph.displayPrefs(context) }
-    /**
-     * 建图中心（2026-11-17）：进程内新鲜定位 → 落盘的上次位置 → null（回落到校区中心）。
-     *
-     * 阻塞读一次 DataStore：这是「首帧真值」，与 `useMode` / 首启那几处同一条纪律——
-     * 让地图**第一帧就落在人身上**，而不是先画一帧校区再挪过去。用户报的「进页面有时不跟到
-     * 我的位置」就是定位慢 / 失败时没有可用中心。
-     */
-    val initialMapCenter = remember {
-        EbikeUserLocation.fresh()?.let { GcjPoint(it.lat, it.lng) }
-            ?: runBlocking { prefsStore.ebikeLastLocation.first() }
-                ?.let { GcjPoint(it.lat, it.lng) }
-    }
     /** 上次把位置落盘的时刻（节流用：定位每两秒来一次，不能每次都写 DataStore）。 */
     val lastLocationPersistAt = remember { longArrayOf(0L) }
     LaunchedEffect(Unit) {
@@ -938,10 +925,15 @@ fun RideScreen(
                         onUserPan = viewModel::onUserPanned,
                         // 官方 SDK 拿不到底图：本次会话降级为栅格，并在地图上给一行说明
                         onFallback = { mapFallback = true },
-                        // 建图中心直接用**上次已知的用户位置**（2026-11-17 用户报「进页面不会
-                        // 自动到我位置」）：地图每次进入都新建，靠一次性的 camera 请求不可靠，
-                        // 干脆第一帧就落在人身上。没有新鲜定位时留 null，回落到校区中心。
-                        initialCenter = initialMapCenter,
+                        // 建图中心与首屏查询中心同源（2026-11-19）：都由
+                        // `BikeMapViewModel.initialViewport` 给定（进程内新鲜定位 → 落盘的上次
+                        // 定位 → 上次视野 → 校区中心）。镜头落哪儿就查哪儿——旧版这里是页面
+                        // 自己读一份、ViewModel 另读一份，人走动过之后两者会差出几百米，
+                        // 屏幕上就是空的。
+                        initialCenter = viewModel.initialViewport.let {
+                            GcjPoint(it.lat, it.lng)
+                        },
+                        initialZoom = viewModel.initialViewport.zoom,
                         logoBottomMarginPx = mapLogoBottomMarginPx,
                         // 面板高度与底部块高度一变，就把整幅地图按两者之和的一半向上平移
                         // （见上面那段的注释）：只动图层、不 resize 视图，地图内容不跳、瓦片不重绘。
