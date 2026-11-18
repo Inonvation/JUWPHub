@@ -193,7 +193,8 @@
   **数据页的刷新不算这条**：成绩页「从教务导入」（WebView 强制路径）与考试页顶栏
   「更新」（`ExamSync.sync(force = true)`，OkHttp）都是列表数据的刷新入口，允许存在。
   注意「更新」会顺手落新基线，本次变动不再由周期任务重复通知——卡上的「新增/调整」标
-  就是这次的结果。
+  就是这次的结果。课表页顶栏的刷新图标（2026-11-18）同属这一类：一次跑课表 + 考试两条链，
+  见下面「调课检测」一节的「手动快速检测」。
 - **通知 requestCode 与 id 解耦**（3008/3009 vs 1008/1009），两落点 intent 只差 extra、
   都无 action——requestCode 撞了会互相改写落点（§3.13 3005/3006 同坑）。
 
@@ -268,6 +269,13 @@
   > = 它本身（**不推基线**）。改这条链时两个出口一起想，见 `.agents/rules/ai-schedule.md`。
 - 周期检查搭 `ScoreAlertReminder` **第四路**：`ensurePeriodicWork` 的全关判定、`check` 的
   开关列表、`onSettingsChanged` 的清时刻，三处改任何一处都要四个开关一起想。
+- **手动快速检测**（2026-11-18，课表页顶栏刷新图标 → `WeekViewModel.quickCheck`）：顺序跑
+  `ScheduleSync.check(force = true)`（理论 + 实验）与 `ExamSync.sync(force = true)`（考试安排），
+  **两条链都带 force**——手动触发不吃「提醒开关 / 间隔」闸门，那是自动检查的口径。
+  结果收成一句话（`ui/week/QuickCheckText.kt`，`QuickCheckTextTest` 钉住）：有调课差异时提示条挂
+  「查看」落处置页，**不自动跳页**；考试那一路照既有语义走（自动合并开着时当场并进课表 + 入箱）。
+  编排放在 ViewModel 而不是页面里：切 Tab 会销毁页面的 `rememberCoroutineScope`，把半分钟的
+  网络链掐成「课表缓存已写、考试基线没推进」。**它不推进调课基线、也不新增写库路径。**
 
 ## 选课（2026-10-01 建；2026-10-08 窗口期接入真实接口，DESIGN §3.19 / §3.20 / §3.21 / §3.22 / §4.35 / §4.36）
 

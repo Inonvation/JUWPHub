@@ -5,9 +5,12 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.calendar.CalendarSyncer
 import edu.jxslu.schedule.data.prefs.DisplayPrefs
+import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.ScheduleRepository
+import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.domain.CalendarSyncDefaults
 import edu.jxslu.schedule.domain.BgScale
 import edu.jxslu.schedule.domain.Course
@@ -23,6 +26,7 @@ import edu.jxslu.schedule.domain.TimetablePrefs
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.UndoableMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -357,6 +361,60 @@ class WeekViewModel(
 
     fun consumeUndoableMessage() {
         _undoableMessage.value = null
+    }
+
+    // ---- 快速检测（DESIGN §4.17，2026-11-18）：课表页顶栏刷新图标 ----
+
+    private val _checking = MutableStateFlow(false)
+
+    /** 检测进行中（顶栏图标换转圈，第二次点击不生效）。 */
+    val checking: StateFlow<Boolean> = _checking
+
+    private val _quickCheckMessage = MutableStateFlow<QuickCheckFeedback?>(null)
+
+    /** 检测结果提示，UI 侧消费后调 [consumeQuickCheckMessage] 置空（同 [shareMessage] 口径）。 */
+    val quickCheckMessage: StateFlow<QuickCheckFeedback?> = _quickCheckMessage
+
+    fun consumeQuickCheckMessage() {
+        _quickCheckMessage.value = null
+    }
+
+    /**
+     * 手动跑一次检测：**理论 + 实验课表**（[ScheduleSync.check]）与**考试安排**（[ExamSync.sync]），
+     * 两条链都带 `force`——手动触发不吃「提醒开关 / 检查间隔」的闸门（自动检查才吃）。
+     *
+     * 放在 ViewModel 而不是页面里：页面切 Tab 就会离开组合，`rememberCoroutineScope` 会把这
+     * 半分钟的网络链掐断（课表检查已经落了一半缓存、考试基线却没推进）；VM 的作用域活到
+     * 返回栈条目销毁，切回来还能读到结果。
+     *
+     * 两条链各自落库 / 落待处置缓存 / 入收件箱，这里只负责把结果收成一句话（[quickCheckFeedback]）。
+     * **不自动跳页**：发现差异时由提示条的「查看」把选择权留给用户。
+     */
+    fun quickCheck(context: Context) {
+        if (_checking.value) return
+        _checking.value = true
+        viewModelScope.launch {
+            try {
+                val appContext = context.applicationContext
+                val schedule = try {
+                    Graph.scheduleSync(appContext).check(force = true)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    ScheduleSync.CheckResult.Failed(e.message ?: "未知错误")
+                }
+                val exam = try {
+                    Graph.examSync(appContext).sync(force = true)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    ExamSync.Result.Failed(e.message ?: "未知错误")
+                }
+                _quickCheckMessage.value = quickCheckFeedback(schedule, exam)
+            } finally {
+                _checking.value = false
+            }
+        }
     }
 
     // ---- 分享（DESIGN §4.12）：日历同步 / CSV / JSON ----

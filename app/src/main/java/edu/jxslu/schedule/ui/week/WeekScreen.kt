@@ -28,6 +28,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -105,6 +106,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Eye
 import me.rerere.hugeicons.stroke.Import
+import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.hugeicons.stroke.Share08
 import android.util.Log
 import java.time.LocalDate
@@ -287,6 +289,27 @@ fun WeekScreen(
         }
     }
 
+    // 快速检测（DESIGN §4.17，2026-11-18）：理论 + 实验课表与考试安排一次核对。
+    // 有调课差异时提示条挂「查看」→ 调课处置页；不自动跳页（检测是「查一下」，
+    // 用户可能只是想确认没有变动）。
+    val checking by viewModel.checking.collectAsStateWithLifecycle()
+    val quickCheckMessage by viewModel.quickCheckMessage.collectAsStateWithLifecycle()
+    LaunchedEffect(quickCheckMessage) {
+        quickCheckMessage?.let { m ->
+            val result = snackbar.showNotice(
+                AppNoticeVisuals(
+                    message = m.text,
+                    actionLabel = if (m.hasChanges) "查看" else null,
+                    tone = m.tone,
+                ),
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                SubpageActivity.start(context, SubpageScreen.SCHEDULE_CHANGES)
+            }
+            viewModel.consumeQuickCheckMessage()
+        }
+    }
+
     // 教务导入成功的气泡（DESIGN §3.3）：导入窗口与这一页分属两个 Activity，结果经进程内
     // 单例转交过来（2026-09-29 用户口径：提醒走下方那条气泡，不弹窗）
     JwImportOutcomeEffect(snackbar)
@@ -429,11 +452,13 @@ fun WeekScreen(
                     week = displayWeek,
                     today = today,
                     timetableName = state.timetableName,
+                    checking = checking,
                     onOpenPicker = { pickerOpen = true },
                     onOpenDisplay = { displaySheetOpen = true },
                     onOpenTimetables = { switchOpen = true },
                     onOpenImport = { importOpen = true },
                     onOpenShare = { shareOpen = true },
+                    onQuickCheck = { viewModel.quickCheck(context) },
                 )
             }
         },
@@ -910,17 +935,23 @@ internal fun GridTypography(fontScale: Float, content: @Composable () -> Unit) {
  *   两个入口等于把同一动作的两种叫法摆在顶栏，去掉图标后仍可从导入弹层进入。
  * - 「回到本周」移出顶栏：它不是常驻导航，会随周次反复出现/消失把右侧图标挤来挤去；
  *   改为课表页右下角悬浮按钮（见 [BackToCurrentWeekButton]），顶栏布局因此恒定。
+ *
+ * 图标区现在四个（分享 / 显示设置 / 快速检测 / 导入），**不要再往里加**：
+ * 360dp 宽的机器上日期块只剩约 146dp，「2026/11/18」在 titleLarge 下已经贴着边界
+ * （2026-11-18 加快速检测时核过）；下一件想放顶栏的事先想别的落点。
  */
 @Composable
 private fun WeekTopBar(
     week: Int,
     today: LocalDate,
     timetableName: String,
+    checking: Boolean,
     onOpenPicker: () -> Unit,
     onOpenDisplay: () -> Unit,
     onOpenTimetables: () -> Unit,
     onOpenImport: () -> Unit,
     onOpenShare: () -> Unit,
+    onQuickCheck: () -> Unit,
 ) {
     val onSurface = MaterialTheme.colorScheme.onSurface
     val haptics = rememberAppHaptics()
@@ -1009,6 +1040,26 @@ private fun WeekTopBar(
                 tint = onSurface.copy(alpha = 0.75f),
                 modifier = Modifier.size(20.dp),
             )
+        }
+        // 快速检测（DESIGN §4.17，2026-11-18）：一次核对理论 / 实验课表与考试安排。
+        // 排在「导入」左侧而不是最右：它与导入同属「从教务取数」，最右仍留给导入
+        // （老用户的位置不变）。进行中换 20dp 转圈而不是置灰（同 PageRefreshAction 口径）。
+        if (checking) {
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
+        } else {
+            IconButton(onClick = { haptics.tap(); onQuickCheck() }) {
+                Icon(
+                    HugeIcons.Refresh,
+                    contentDescription = "检测课表与考试变动",
+                    tint = onSurface.copy(alpha = 0.75f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
         IconButton(onClick = { haptics.tap(); onOpenImport() }) {
             Icon(
