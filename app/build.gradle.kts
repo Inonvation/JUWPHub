@@ -34,6 +34,13 @@ android {
         versionCode = 34
         versionName = "3.4.0"
 
+        // 只发 64 位（2026-11-18）：高德 3dmap 带 arm64 19.1MB + v7a 12.8MB 两个 .so，
+        // 两个都留 release 是 22.5MB，砍掉 v7a 回到 ~15MB（§5 的体积目标）。
+        // minSdk 26 的设备绝大多数是 64 位；真要支持 32 位老机，把这条去掉即可。
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+
         // 只留中英（2026-11-06）：androidx / material3 / glance 会带进 89 个 locale，
         // 实测 resources.arsc 里 88% 的 string 值是外语，本项目纯中文用不上。
         // AGP 8.9 还没有 `androidResources.localeFilters`（8.13 才有），只能用这个已弃用的口子；
@@ -88,7 +95,8 @@ android {
             )
             manifestPlaceholders["amapKey"] =
                 keystoreProps.getProperty("amapKeyRelease").orEmpty()
-            // 2026-09-21 起开启 R8 + 资源压缩：§5 的体积目标 < 15MB（1.0.0 实测 17.9MB），
+            // 2026-09-21 起开启 R8 + 资源压缩：§5 的体积目标 ≤ 17MB（1.0.0 实测 17.9MB；
+            // 2026-11-18 高德 SDK 进来后单 ABI 实测 16.1MB，目标随之从 15MB 放到 17MB），
             // 且笔记/作业的渲染内核又添了二十来个类。debug 构建不受影响（便于断点排查）。
             // 反射面已由 androidx 各组件的 consumer rules + proguard-rules.pro 覆盖；
             // 改这里之后必须装一次 release 包做冒烟（R8 的问题不会在编译期暴露）。

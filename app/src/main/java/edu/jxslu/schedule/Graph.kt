@@ -12,6 +12,7 @@ import edu.jxslu.schedule.data.kqcx.KqcxBikeClient
 import edu.jxslu.schedule.data.kqcx.KqcxOrderCache
 import edu.jxslu.schedule.data.kqcx.ZoneCacheStore
 import edu.jxslu.schedule.domain.InboxKeys
+import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.ui.ebike.KvcxNotice
 import edu.jxslu.schedule.ui.ebike.KvcxRideController
@@ -20,6 +21,7 @@ import edu.jxslu.schedule.data.power.PowerDebugDump
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.data.prefs.recordGuessOrder
 import edu.jxslu.schedule.data.qiekj.QiekjOrderHistoryStore
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjTokenStore
@@ -90,6 +92,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 object Graph {
@@ -316,6 +319,19 @@ object Graph {
         prefsStore ?: synchronized(this) {
             prefsStore ?: DisplayPrefsStore(context.applicationContext).also { prefsStore = it }
         }
+
+    /**
+     * 记一次「猜你想用」的真实订单（DESIGN §4.51）。
+     *
+     * **唯一写入口**：五个业务成功点（胖乖出水 / 快趣建单 / 趣智开阀 / U净下单受理 / 问渠报名成功）
+     * 都调这里，别各自拼协程。开关关着由 store 自己短路；写失败静默（习惯数据丢一条不影响任何
+     * 业务，更不该反向把下单流程搞失败）。
+     */
+    fun recordGuessOrder(target: GuessTarget) {
+        appScope.launch {
+            runCatching { displayPrefs(appContext).recordGuessOrder(target) }
+        }
+    }
 
     fun repository(context: Context): ScheduleRepository =
         repository ?: synchronized(this) {
@@ -709,6 +725,8 @@ object Graph {
             wenquRepository ?: WenquRepository(
                 WenquCredentialStore(context.applicationContext),
                 expiry = sessionExpiry(context.applicationContext),
+                // 「猜你想用」：报名成功记一次真实订单（含预报名自动提交成功）
+                onApplied = { recordGuessOrder(GuessTarget.WENQU) },
             ).also { wenquRepository = it }
         }
 
@@ -853,6 +871,8 @@ object Graph {
                     rideNotices = notices,
                     rideUnlocked = unlocked,
                     remoteRideReminder = remoteReminder,
+                    // 「猜你想用」：建单成功记一次真实订单（不是打开骑行页）
+                    onOrderCreated = { recordGuessOrder(GuessTarget.KVCX) },
                 )
             }.also { kvcxRide = it }
         }

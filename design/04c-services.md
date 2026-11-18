@@ -86,9 +86,10 @@
   东段与瑶湖西大道同时是师大活动区域的边界（官方小程序截图佐证），两校围栏以
   此相邻不重叠。**顶点是 GCJ-02**（与车辆坐标同基准），过滤与绘制都直接用，
   不要再转。
-- 地图上的围栏由 `BikeMarkerOverlay` 常驻绘制（半透明填充 + 虚线描边，仿官方小程序的
-  整片包裹样式；画在最底层，簇标记、蓝点、中心针都压在它上面）；「只看本校」开关只管
-  过滤，不管画不画。填充与虚线样式 2026-09-27 按四轮真机反馈调定：深青 primary 从 0.16
+- 地图上的围栏由 `BikeMarkerOverlay` / 高德 `AmapLayers` 绘制（半透明填充 + 描边，仿官方小程序的
+  整片包裹样式；画在最底层，簇标记、蓝点、中心针都压在它上面）。**2026-11-18 起开关也管显示**：
+  「只看本校」关掉时围栏一起隐藏（`showCampusFence`），不再"只管过滤不管画不画"。填充与虚线样式
+  2026-09-27 按四轮真机反馈调定：深青 primary 从 0.16
   一路加到 0.32、再提亮 30% 成亮青，都被"压暗/太深"打回——问题不在浓度也不在青的深浅，
   最后**换色系为浅蓝**：填充材质蓝 300（#64B5F6）alpha 0.30、描边 #3D8BEF alpha 0.85。
   结论：**地图围栏用浅蓝，品牌深青不往地图上套**。虚线 dash/空 9/7 → 7/4（dp，略密于
@@ -157,8 +158,9 @@
   准，所以高德路径不需要 `SettleWatcher`；程序性移动仍由 `CameraSuppressor` 吃掉。
   单指拖动仍自己看 touch（`MapTouchTracker`），用来退出自动跟随。
 - **体积**：3dmap 带 arm64 19.1MB + v7a 12.8MB 两个 `.so`。AGP 默认不压缩，release 会到
-  40.8MB；`packaging.jniLibs.useLegacyPackaging = true` 压到 **22.5MB**（安装时解压一次）。
-  再小只能砍 `armeabi-v7a`。
+  40.8MB；`packaging.jniLibs.useLegacyPackaging = true` 压到 22.5MB（安装时解压一次）。
+  **2026-11-18 起只发 `arm64-v8a`**（`ndk.abiFilters`），release **16.1MB**——v7a 那 12.8MB
+  是最没性价比的一块；真要支持 32 位老机，把 `abiFilters` 那行去掉即可（体积回到 22.5MB）。
 - **R8**：`proguard-rules.pro` 里 `-keep class com.amap.api.**` / `com.autonavi.**`。
   Java 层要经 JNI 回调，类名一改 native 就找不到入口，**只在 release 复现**（地图空白、
   点击无响应）。改混淆规则后必须装 release 包冒烟到地图页。

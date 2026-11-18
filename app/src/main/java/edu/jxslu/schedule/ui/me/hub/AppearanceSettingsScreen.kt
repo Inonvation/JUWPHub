@@ -65,6 +65,7 @@ import me.rerere.hugeicons.stroke.Blur
 import me.rerere.hugeicons.stroke.ColorPicker
 import me.rerere.hugeicons.stroke.Home01
 import me.rerere.hugeicons.stroke.Palette
+import me.rerere.hugeicons.stroke.Star
 import me.rerere.hugeicons.stroke.SwatchBook
 import me.rerere.hugeicons.stroke.TextFont
 import me.rerere.hugeicons.stroke.Vibrate
@@ -85,6 +86,8 @@ fun AppearanceSettingsScreen(
     ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // 「猜你想用」开关（DESIGN §4.51）：单独一条流，不掺进 displayPrefs 合并模型
+    val guessEnabled by viewModel.guessYouWantEnabled.collectAsStateWithLifecycle()
     val haptics = rememberAppHaptics()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -187,6 +190,21 @@ fun AppearanceSettingsScreen(
                         viewModel.setStartPage(startPages[index])
                         showNotice("已保存，重启应用后生效")
                     },
+                )
+            }
+
+            // 首页展示型推荐（DESIGN §3.33 / §4.51）：默认开，关 → 开清空习惯数据。
+            // 放「外观与交互」是用户口径（2026-11-17），虽然它不是纯观感项，但同属今日页展示。
+            SettingsSection(title = "今日页") {
+                SettingSwitchRow(
+                    title = "猜你想用",
+                    subtitle = "收件箱上方按时段推荐；按真实订单学习习惯，关闭再开启会清空记录",
+                    checked = guessEnabled,
+                    onCheckedChange = { enabled ->
+                        viewModel.setGuessYouWantEnabled(enabled)
+                        if (enabled) showNotice("已清空使用习惯记录")
+                    },
+                    icon = HugeIcons.Star,
                 )
             }
         }

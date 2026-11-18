@@ -120,6 +120,7 @@ import edu.jxslu.schedule.domain.QuickScanTarget
 import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.domain.quickScanTargetOf
 import edu.jxslu.schedule.ui.common.AppPermissions
+import edu.jxslu.schedule.ui.ebike.AmapMaps
 import edu.jxslu.schedule.ui.ebike.EbikeScanActivity
 import edu.jxslu.schedule.ui.life.ServiceActiveFlags
 import edu.jxslu.schedule.ui.life.SideDrawerContent
@@ -986,6 +987,18 @@ internal fun JuwApp(
     pendingSubpages: MutableState<List<SubpageRequest>>? = null,
 ) {
     val context = LocalContext.current
+    // 高德地图 SDK 预热（2026-11-18）：等到进共享单车页才第一次 initialize 的话，那一页要多等
+    // 几百毫秒。这里在首帧之后先把它跑起来——**只在用户过完首启须知之后**，因为
+    // updatePrivacyShow / updatePrivacyAgree 声明的是「已向用户展示隐私政策并取得同意」。
+    LaunchedEffect(Unit) {
+        if (BuildConfig.AMAP_KEY.isBlank()) return@LaunchedEffect
+        val consented = runCatching { Graph.displayPrefs(context).onboardingSeen.first() }
+            .getOrDefault(false)
+        if (consented) {
+            AmapMaps.agreePrivacy(context)
+            AmapMaps.prepare(context)
+        }
+    }
     val navController = rememberNavController()
     val haptics = rememberAppHaptics()
 
@@ -1584,6 +1597,8 @@ internal fun JuwApp(
                             waterViewModel = waterViewModel,
                             // 趣智校园卡（DESIGN §4.30）：与胖乖生活并排，默认开、可关
                             onOpenQzxy = { SubpageActivity.start(context, SubpageScreen.QZXY) },
+                            // 「猜你想用」推荐问渠（DESIGN §3.33）：进问渠 · 志愿服务页
+                            onOpenWenqu = { SubpageActivity.start(context, SubpageScreen.WENQU) },
                             // 开水面板失败态「详情」的出口（DESIGN §3.18）：
                             // 带当前设备地址过去，诊断页据此选中同一台
                             onOpenQzxyDebug = { address ->

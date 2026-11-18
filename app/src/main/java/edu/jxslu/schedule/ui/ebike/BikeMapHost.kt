@@ -48,6 +48,8 @@ internal fun BikeMapHost(
     highlightLat: Double? = null,
     highlightLng: Double? = null,
     highlightLabel: String? = null,
+    /** 校区围栏画不画：与「只看本校」开关同步（2026-11-18 用户要求）。 */
+    showCampusFence: Boolean = true,
     colors: BikeMarkerColors,
     camera: CameraRequest?,
     onCenterSettled: (Double, Double, Double, Double) -> Unit,
@@ -62,6 +64,8 @@ internal fun BikeMapHost(
     initialCenter: GcjPoint? = null,
     /** 建图缩放；null 用默认级别。 */
     initialZoom: Double? = null,
+    /** 高德版权标识的底边距（px），见 [AmapMapView.logoBottomMarginPx]。 */
+    logoBottomMarginPx: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -99,6 +103,7 @@ internal fun BikeMapHost(
             highlightLat = highlightLat,
             highlightLng = highlightLng,
             highlightLabel = highlightLabel,
+            showCampusFence = showCampusFence,
             colors = colors,
             camera = camera,
             onCenterSettled = onCenterSettled,
@@ -113,6 +118,7 @@ internal fun BikeMapHost(
             },
             initialCenter = initialCenter,
             initialZoom = initialZoom,
+            logoBottomMarginPx = logoBottomMarginPx,
             modifier = modifier,
         )
     } else {
@@ -132,6 +138,7 @@ internal fun BikeMapHost(
             highlightLat = highlightLat,
             highlightLng = highlightLng,
             highlightLabel = highlightLabel,
+            showCampusFence = showCampusFence,
             colors = colors,
             camera = camera,
             onCenterSettled = onCenterSettled,

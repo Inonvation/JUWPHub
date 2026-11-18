@@ -235,6 +235,7 @@ class KvcxRideControllerTest {
         effects: KvcxSideEffects = FakeEffects(),
         located: LocateResult = LocateResult.Ok(28.68, 115.85),
         remoteRideReminder: MutableSharedFlow<Int>? = null,
+        onOrderCreated: () -> Unit = {},
     ): KvcxRideController = KvcxRideController(
         session = session,
         scope = CoroutineScope(Dispatchers.Unconfined),
@@ -245,6 +246,7 @@ class KvcxRideControllerTest {
         remoteRideReminder = remoteRideReminder,
         // 补全重拉的间隔在单测里取 0：Unconfined 下 delay(0) 不挂起，断言不需要等真时间
         unlockSyncIntervalMs = 0L,
+        onOrderCreated = onOrderCreated,
     )
 
     // ---------- 开锁 ----------
@@ -276,6 +278,31 @@ class KvcxRideControllerTest {
         val kvcx2 = controller(FakeSession(), FakeEffects(reminderWasOff = false))
         kvcx2.unlock("100000669")
         assertEquals("已创建订单，车辆保持锁定；已开始计时，通知栏已显示倒计时", notices.single().first)
+    }
+
+    @Test
+    fun `建单成功只记一次使用习惯`() {
+        val session = FakeSession()
+        var records = 0
+        val kvcx = controller(session, onOrderCreated = { records++ })
+
+        kvcx.unlock("100000669")
+        assertEquals("首次建单应记一次", 1, records)
+
+        // 已有在案订单后再点一次（重试 / 重复点）不能把同一笔记成两条
+        kvcx.unlock("100000669")
+        assertEquals("已有订单的动作不重复记", 1, records)
+    }
+
+    @Test
+    fun `未确认开锁也算建单`() {
+        val session = FakeSession()
+        session.unlockResult = { UnlockOutcome.Unconfirmed("100000669") }
+        var records = 0
+        val kvcx = controller(session, onOrderCreated = { records++ })
+
+        kvcx.unlock("100000669")
+        assertEquals("订单已建、只是开锁未确认，也要记", 1, records)
     }
 
     @Test

@@ -51,6 +51,13 @@ internal object AmapMaps {
         // 否则要白等 10 秒超时才回退栅格，进页面就是一块空地图
         if (BuildConfig.AMAP_KEY.isBlank()) return false
         if (!initialized) {
+            // 地形 / 等高线是**进程级**开关，且必须在 initialize 之前给（2026-11-18 拖动卡顿）：
+            // 这两层是附加几何，我们只画校园尺度的车与还车点，留着只是白算。
+            runCatching {
+                MapsInitializer.setTerrainEnable(false)
+                // 注意方法名里那个大写 I：SDK 自己的拼写，照着抄，别"修"
+                MapsInitializer.setContourLIneEnable(false)
+            }.onFailure { Log.w(TAG, "地形 / 等高线开关设置失败", it) }
             runCatching { MapsInitializer.initialize(context.applicationContext) }
                 .onFailure { Log.w(TAG, "initialize 抛异常，本次回退 osmdroid 栅格", it) }
             initialized = true

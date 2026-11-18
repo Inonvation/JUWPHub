@@ -1557,6 +1557,9 @@ internal fun RideBikePanel(
                                     "这一带没有可用的本校车，可关掉「只看本校」或「只看可用」看看全部"
                                 state.onlyOurCampus -> "这一带没有本校的车，关掉「只看本校」看看全部"
                                 state.onlyAvailable -> "这一带没有可用的车，关掉「只看可用」看看全部"
+                                // 缩小视图只查中心一页（2026-11-18）：没开车筛选时先解释范围
+                                state.zoomedOut ->
+                                    "视图缩得较小时只刷新中心附近的车辆；放大地图再看看，或拖到别处试试"
                                 else -> "这一带暂时没有车，把地图拖到别处再看看"
                             }
                         },
@@ -1837,7 +1840,7 @@ internal fun RideFilterSheet(
             SettingSwitchRow(
                 title = "只看本校",
                 subtitle = "快趣同时服务隔壁江西师大，不筛会把师大校园的车也画进来；" +
-                    "同时也筛还车点（禁停区不筛，那是安全提示）",
+                    "同时也筛还车点（禁停区不筛，那是安全提示）。关掉后地图上的校区描边也不显示",
                 checked = onlyOurCampus,
                 onCheckedChange = { onToggleOnlyOurCampus() },
             )

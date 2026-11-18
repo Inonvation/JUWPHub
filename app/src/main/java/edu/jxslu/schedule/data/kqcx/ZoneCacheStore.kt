@@ -67,7 +67,10 @@ class ZoneCacheStore(private val file: File) {
                 )
             },
             nogoZones = row.nogo.map { outline -> outline.map { GcjPoint(it.lat, it.lng) } },
-        ),
+        )
+            // 老版本写下的缓存可能还是几百个顶点的轮廓，升级后不会自己变干净；
+            // 读回时按当前上限重收一遍，地图层不必为历史数据买单（见 KvcxZones.capped）
+            .capped(),
     )
 
     private fun toRow(entry: ZoneCacheEntry): EntryRow = EntryRow(

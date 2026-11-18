@@ -192,6 +192,12 @@ internal data class MapOverlayInputs(
     val highlightPoint: GcjPoint?,
     val highlightLabel: String?,
     val zones: KvcxZones,
+    /**
+     * 校区围栏画不画（2026-11-18 用户要求）：跟「只看本校」开关同步——关掉筛选时地图上
+     * 也不该留着一条自家校区的蓝色描边。新绘制输入必须进这份比对（红线），否则开关
+     * 切了画面不动。
+     */
+    val showCampusFence: Boolean = true,
 )
 
 /**
@@ -222,6 +228,8 @@ internal class DrawnOverlayInputs(var value: MapOverlayInputs? = null)
  * @param rideLat / rideLng 当前用车的车位置（GCJ-02，与瓦片同基准），画成「我的车」标记；null 不画。
  * @param onRideTap 点中「我的车」标记（把镜头移过去）。
  * @param zones 还车点 / 禁停区图层（只读；空 = 不画）。「P」**不接点击**（只作信息展示）。
+ * @param showCampusFence 是否画校园围栏：跟「只看本校」开关走（2026-11-18 用户要求，
+ *   关掉筛选时连校区描边一起隐藏）。
  */
 @Composable
 internal fun OsmMapView(
@@ -248,6 +256,8 @@ internal fun OsmMapView(
     highlightLng: Double? = null,
     /** 高亮标签（如「车 …669」）；null 不画标签。 */
     highlightLabel: String? = null,
+    /** 校区围栏画不画（见 [MapOverlayInputs.showCampusFence]）。 */
+    showCampusFence: Boolean = true,
     colors: BikeMarkerColors,
     camera: CameraRequest?,
     /**
@@ -312,8 +322,9 @@ internal fun OsmMapView(
 
     val overlay = remember {
         BikeMarkerOverlay(context.resources.displayMetrics.density).apply {
-            // 围栏顶点是常量（BikeNearby.CAMPUS_FENCE，GCJ-02），与瓦片同基准
-            fence = BikeNearby.CAMPUS_FENCE
+            // 围栏顶点是常量（BikeNearby.CAMPUS_FENCE，GCJ-02），与瓦片同基准。
+            // 开关变化由下面的 update 比对驱动，这里只给首帧一个初值
+            fence = if (showCampusFence) BikeNearby.CAMPUS_FENCE else emptyList()
         }
     }
     // 上一次真正画上去的叠加层输入（见 MapOverlayInputs / DrawnOverlayInputs 的注释）
@@ -412,6 +423,7 @@ internal fun OsmMapView(
                 bikes = bikes,
                 byBike = byBike,
                 selectedBikeCarNum = selectedBikeCarNum,
+                showCampusFence = showCampusFence,
             )
             if (drawn.value != inputs) {
                 overlay.colors = inputs.colors
@@ -427,7 +439,11 @@ internal fun OsmMapView(
                 overlay.highlightPoint = inputs.highlightPoint
                 overlay.highlightLabel = inputs.highlightLabel
                 overlay.zones = inputs.zones
-                overlay.fence = BikeNearby.CAMPUS_FENCE
+                overlay.fence = if (inputs.showCampusFence) {
+                    BikeNearby.CAMPUS_FENCE
+                } else {
+                    emptyList()
+                }
                 drawn.value = inputs
                 view.invalidate()
             }

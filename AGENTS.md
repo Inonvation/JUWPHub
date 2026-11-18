@@ -95,7 +95,7 @@ Get-ChildItem -Recurse -Include *.md,*.kt | Select-String -Pattern '<旧说法>'
 | 课表网格 | 行号 = **小节号 1–11**（不是大节号）；`Course.startSection/endSection` 也是小节号 |
 | HugeIcons | `com.github.rikkahub:hugeicons-compose:1.4`（**JitPack**，**`isTransitive = false`**）。**不要**写 `me.rerere:hugeicons-compose:1.0.0`（Maven Central 不存在）；不要打开传递依赖（只用它的图标 AAR，打开会把它那一套 compose / core 版本带进来，与项目的版本边界打架） |
 | 图标用法 | `import me.rerere.hugeicons.stroke.*` + `HugeIcons.Calendar01` 等；查名用本地 JAR，勿猜 |
-| 高德地图 SDK | `com.amap.api:3dmap:10.0.600`（Maven Central，jar 里是 `lib/<abi>/*.so` 老布局，AGP 会解包）。**主底图**（2026-11-17）。两个 .so 合计 32MB：`jniLibs.useLegacyPackaging = true` 把 release 压在 22.5MB。R8 必须 keep `com.amap.api.**`，否则 release 地图空白 |
+| 高德地图 SDK | `com.amap.api:3dmap:10.0.600`（Maven Central，jar 里是 `lib/<abi>/*.so` 老布局，AGP 会解包）。**主底图**（2026-11-17）。两个 .so 合计 32MB：`jniLibs.useLegacyPackaging = true` 压缩，`ndk.abiFilters` 只留 `arm64-v8a`，release 16.1MB（CI 有体积护栏）。R8 必须 keep `com.amap.api.**`，否则 release 地图空白 |
 | Glance | `androidx.glance:glance-appwidget:1.2.0`（桌面小组件）；传递抬 compose runtime 至 1.7.8 |
 | 样例课 | **已移除**；课表默认空，从教务 WebView 导入 |
 | 包名 | release = `edu.jxslu.schedule`；debug = `edu.jxslu.schedule.debug`（两者签名不同，**必须**靠后缀区分） |

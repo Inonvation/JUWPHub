@@ -193,6 +193,14 @@ class WenquRepository(
     private val api: WenquApi = WenquApi.create(),
     /** 可注入的时钟（测试用假时钟，生产走系统钟）。 */
     private val now: () -> Long = System::currentTimeMillis,
+    /**
+     * 报名成功的一次性回调（「猜你想用」订单信号，DESIGN §4.51，2026-11-17）。
+     *
+     * 问渠没有「订单」，用**报名成功**替代；手动报名与预报名自动提交共用 [patchAfterApply]，
+     * 所以只在这里回调。平台回「已报名」的重复提交不算新订单，走 `recordUsage = false`。
+     * 默认空实现：单测构造仓库时不碰 Graph。
+     */
+    private val onApplied: () -> Unit = {},
 ) {
 
     /** 登录态流（对齐胖乖 / 趣智 / U净）：页面订阅它，登录 / 退出在任何窗口都即时生效。 */
@@ -731,7 +739,8 @@ class WenquRepository(
             WenquRules.isAlreadyAppliedMessage(envelope.msg) &&
             appliedNow(activityId) != false
         ) {
-            patchAfterApply(activityId)
+            // 目标状态本来就成立：不是新订单，不记「猜你想用」习惯
+            patchAfterApply(activityId, recordUsage = false)
             return@withContext
         }
         envelope.requireSuccess()
@@ -739,11 +748,13 @@ class WenquRepository(
     }
 
     /** 报名落地的本地收尾（乐观更新 + 作废相关缓存），手动与预报名两条路共用。 */
-    private fun patchAfterApply(activityId: Long) {
+    private fun patchAfterApply(activityId: Long, recordUsage: Boolean = true) {
         patchIndexApplied(activityId, applied = true)
         detailCache.remove(activityId)
         volunteerCache.clear()
         activityCache.clear()
+        // 「猜你想用」：只有真正新报上的那一单才记；确认核对重复调用不会重复（store 还有 3 分钟去重）
+        if (recordUsage) onApplied()
     }
 
     /**

@@ -1,5 +1,11 @@
 package edu.jxslu.schedule.ui.common
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +34,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.theme.Motion
 
 /**
  * 账号页的公共骨架（2026-11-05 统一）：身份卡 + 三列指标。
@@ -164,6 +171,10 @@ fun MetricsRow(modifier: Modifier = Modifier, content: @Composable RowScope.() -
  *
  * 标签给「这一列是什么」，说明给「数字怎么来的」（余额 / 共 260 次 / 昨天 22:10）；
  * 数值用 titleLarge 与说明拉开层级，三列并排时超长一律省略号（不换行，避免三列高低不齐）。
+ *
+ * 数值变化走一次纵向位移 + 淡入（2026-11-16）：原来刷新后数字是硬换字，页面上唯一
+ * 「不动」的元素反而是最该交代变化的那一个。四档里用 [Motion.reveal]（新内容进场）。
+ * 数值本身不含每秒 tick 的倒计时，四个调用页（快趣 / 趣智 / 水控 / U净）都是「拉一次变一次」。
  */
 @Composable
 fun MetricCell(
@@ -178,14 +189,23 @@ fun MetricCell(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
         )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        AnimatedContent(
+            targetState = value,
+            transitionSpec = {
+                (slideInVertically { it / 2 } + fadeIn(Motion.reveal())) togetherWith
+                    (slideOutVertically { -it / 2 } + fadeOut(Motion.exit()))
+            },
+            label = "metricValue",
             modifier = Modifier.padding(top = 1.dp),
-        )
+        ) { text ->
+            Text(
+                text = text,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Text(
             text = caption,
             style = MaterialTheme.typography.labelSmall,

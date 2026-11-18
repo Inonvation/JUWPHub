@@ -22,6 +22,7 @@ import edu.jxslu.schedule.domain.UnlockResult
 import edu.jxslu.schedule.domain.calculateActualCost
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.InboxKind
+import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -609,6 +610,8 @@ class WaterViewModel(
                                     goodsId = device.effectiveGoodsId,
                                 ),
                             )
+                            // 「猜你想用」：服务端确认出水 = 一次真实订单（与打开开水页无关）
+                            Graph.recordGuessOrder(GuessTarget.QIEKJ)
                         }
                         _uiState.update { s ->
                             // 与「结束用水」撞车时以后者为准（回执在 IO 线程，标记是 volatile 的）

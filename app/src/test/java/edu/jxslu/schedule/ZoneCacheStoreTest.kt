@@ -101,6 +101,36 @@ class ZoneCacheStoreTest {
     }
 
     @Test
+    fun `老缓存里顶点过多的轮廓读回时被抽稀`() = runBlocking {
+        val file = tempFile()
+        try {
+            // 旧版本写下的文件：一个 120 顶点的还车点轮廓 + 一个 120 顶点的禁停区
+            val dense = (0 until 120).joinToString(",") { index ->
+                val angle = 2 * Math.PI * index / 120
+                val lat = 28.685 + 0.001 * kotlin.math.sin(angle)
+                val lng = 116.025 + 0.001 * kotlin.math.cos(angle)
+                """{"lat":$lat,"lng":$lng}"""
+            }
+            file.writeText(
+                """[{"lat":28.685,"lng":116.025,"fetchedAt":3,""" +
+                    """"spots":[{"lat":28.685,"lng":116.025,"outline":[$dense]}],""" +
+                    """"nogo":[[$dense]]}]""",
+            )
+            val store = ZoneCacheStore(file)
+
+            val back = store.load()
+
+            assertEquals(1, back.size)
+            val outline = back[0].zones.parkSpots[0].outline
+            assertTrue("老缓存 ${outline.size} 个顶点没被收住", outline.size <= 16)
+            assertTrue(outline.size >= 3)
+            assertTrue("禁停区 ${back[0].zones.nogoZones[0].size} 个顶点没被收住", back[0].zones.nogoZones[0].size <= 40)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun `删除后读回空表`() = runBlocking {
         val file = tempFile()
         try {

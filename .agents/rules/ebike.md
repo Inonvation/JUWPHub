@@ -211,6 +211,10 @@
   唯一实现在 `domain/Gcj02.kt`，漏转或多转一次都会偏出约 500 米。
   刷新只由用户动作驱动（进页 / 拖动停稳 / 点刷新 / 定位成功），**不要加后台轮询**
   ——那是第三方接口，不是自家的。**车辆列表**只留内存不落盘（车随时被骑走）；
+  2026-11-18 起平移结果有 **30 秒内存缓存**（`domain/NearbyBikeCache`，覆盖 50 米、最多 8 条）：
+  "拖开又拖回"命中就直接落地、不联网不转圈，口径（缩小视图与否）要一致。**只有拖动停手**吃它；
+  「刷新」按钮、还车后的补查、开锁 / 锁车 / 还车都会清空（`cancelQueriesForRideAction`），
+  **别让显式刷新吃到旧快照**。
   **停车点 / 禁停区图层**从 2026-09-28 起有落盘缓存（见「还车点 / 禁停区图层」节末），
   瓦片由 osmdroid 自缓存——两块的清除见同节的「地图缓存」条。
   **「停手」判据 = 手指松开 + 地图中心连续 120ms 没动**（`SettleWatcher`，2026-09-29）：
@@ -221,16 +225,23 @@
   拿它当闸门一个查询都发不出去（这条是踩过的坑，别照直觉改回去）。
   ③ **手指还按着不算停手**（慢拖时中心几百毫秒只挪几米），靠只读的 `TouchTracker` overlay
   看 `ACTION_DOWN/UP`；它 `onTouchEvent` 返回 false，不拦地图手势。
-  ViewModel 侧只剩 80ms 合并窗口（`QUERY_CONFIRM_MS`）+ 30 米位移闸门，**别在那里再写一套
+  ViewModel 侧只剩 80ms 合并窗口（`QUERY_CONFIRM_MS`）+ 30 米位移 / 缩放变化闸门，**别在那里再写一套
   停手判定**（两处判据会互相打架）。官方小程序是 drag-end 零延迟发，这 120ms 是那点差距。
   瓦片下载线程 8（`OsmMapView` 里 `setTileDownloadThreads`；osmdroid 默认 2）：拖到没缓存过的
   地方时一屏十几块瓦片要一次下完，这是「地图半天不出来」的主要来源。
-**刷新范围**（2026-09-29 用户口径「太多了有点卡」；**2026-10-29 按视口缩放**）：采样环半径
-**150~400 米**（`BikeNearby.sampleRadiusMeters` = `min(400, 视口半对角线 × 0.45)`）、展示上限
-**1000 米**，叠加层还有屏幕外剔除（48dp 余量）——**别把这三个数随手放大**，那会同时加重列表与
-每帧绘制。**环半径必须跟着视口走**（用户口径「地图放大了范围跟着视图比例同步缩小，避免视界
-之外的位置也被刷新」）：放大到只看一条路时半径缩到 150，不再查几百米外；视口半对角线由 View
+**刷新范围**（2026-09-29 用户口径「太多了有点卡」；**2026-10-29 按视口缩放**；
+**2026-11-18 收小并加缩小视图闸**）：正常查询的采样环半径 **150~350 米**
+（`BikeNearby.sampleRadiusMeters` = `min(350, 视口半对角线 × 0.45)`）、展示上限 **800 米**，
+叠加层还有屏幕外剔除（48dp 余量）——**别把这三个数随手放大**，那会同时加重列表与每帧绘制。
+**环半径必须跟着视口走**（用户口径「地图放大了范围跟着视图比例同步缩小，避免视界之外的
+位置也被刷新」）：放大到只看一条路时半径缩到 150，不再查几百米外；视口半对角线由 View
 层在停手时用 `mapView.boundingBox` 现算、经 `onCenterSettled` 的第 4 个参数带给 VM。
+**缩小到整座校区可见（z < `BikeNearby.ZOOMED_OUT_QUERY_ZOOM` = 16.5）时不再大范围刷新**
+（2026-11-18 用户要求）：`query` 直接走轻量分支——只查中心一页（1 个请求）、不撒点、不补大桩，
+展示上限收到 `ZOOMED_OUT_MAX_DISTANCE_METERS`（600 米）。原来「z < 16.5 撒 8 个方位」那一档
+已删（请求更多、还跑在缩得最开的视野上）。**缩放变化也要能重查**：`movedEnough` 除 30 米位移
+外还看缩放——跨过 16.5 无条件查（放大回来必须补上大范围那批车），同一档里变化 ≥
+`ZOOM_REQUERY_STEP`（0.75 级）才查。
 **聚簇口径**（2026-10-29 重做，`BikeNearby.cluster`）：**同名必并 + 两点 ≤ `CLUSTER_RADIUS_METERS`
 （10 米）也并**，落点取成员坐标**中位数**。旧版「有名字按名字、没名字按 4 位小数网格」会把
 一个 30 辆的停车点切成 3~7 个格子——用户报的「同一个停车点两个数字 / 刷新后一隐一现」就是它，
@@ -252,8 +263,8 @@
   同一条路 `onPick`）；列表换成**平铺车辆列表**（`BikeMapUiState.bikes`：与簇同一套筛选、
   不吃 `MAX_CLUSTER_COUNT` 封顶），选中那辆高亮并滚过去。两种列表之间走 `Crossfade`。
 - **按车辆模式的范围与请求都更小**（2026-10-30 用户口径「刷新范围和请求少一点避免卡顿」）：
-  采样环上限 `BIKE_MODE_SAMPLE_RADIUS_METERS` **250 米**（聚合模式 400）、展示上限
-  `BIKE_MODE_MAX_DISTANCE_METERS` **500 米**（聚合模式 1000）、环固定 **4** 点（不按缩放加到 8）、
+  采样环上限 `BIKE_MODE_SAMPLE_RADIUS_METERS` **250 米**（聚合模式 350）、展示上限
+  `BIKE_MODE_MAX_DISTANCE_METERS` **500 米**（聚合模式 800；缩小视图两档都收 600）、环固定 **4** 点、
   **不跑大桩补全**（没有聚合圈、数字没人看）——一次刷新从 9 个请求降到 5 个。别把这几条
   合并回聚合模式的口径，那是给"一屏几十个聚合圈"用的。
 - 头行切换按钮在筛选左边（`RideMapModeButton`）：图标显示**当前模式**、按车辆时走主色；
@@ -278,10 +289,12 @@
   主线程（`viewModelScope` 是 Main），一次刷新几份 payload 正好顶在拖动停手那一帧上。
   **别为了"看着干净"把 withContext 去掉**；往这几个函数里加新的重活（排序、过滤、字符串）
   时也留在同一个块里。
-- **采样点数按缩放**（`ringSampleCount`，`BikeNearby.samplePoints(lat, lng, ringCount)`）：
-  z ≥ `RING_SAMPLE_ZOOM`（16.5）取 **4** 个对角点，更小取 8 个方位；请求数 9 → 5。
-  **别改成 0**：z17 在纬度 28.7° 下的视野约 1.1×1.7 公里，比采样环还大，
-  只查中心会让地图上只剩中心一小片有车。`samplePoints` 内部把点数夹在 4~8。
+- **采样点固定 4 个**（`RING_SAMPLE_POINTS`，`BikeNearby.samplePoints(lat, lng, ringCount)`）：
+  校区尺度撒 **4** 个对角点，请求数 9 → 5。**2026-11-18 起不再有 8 点分支**：更小的缩放
+  整档走缩小视图的轻量查询（只查中心，见「刷新范围」），那 8 个方位已经没有可达区间。
+  **别把正常查询的点数改成 0**：z17 在纬度 28.7° 下的视野约 1.1×1.7 公里，比采样环还大，
+  只查中心会让地图上只剩中心一小片有车。`samplePoints` 内部仍夹在 4~8（大桩补全也用这条，
+  它传 4）。
 - **列表与地图的簇封顶 `MAX_CLUSTER_COUNT`（24）**：超出部分在列表尾部给一行
   「还有 N 处更远」。**头部的车辆总数 `bikeCount` 走未封顶的那一份**——它是
   `BikeMapUiState` 里的**存储字段**（不再是 `clusters.sumOf{}` 的 getter），
@@ -317,10 +330,12 @@
   每帧写不贵），**不再喂面板上限**；③ 面板上限走固定预留 `BOTTOM_RESERVE_DP`（见上），
   旧版的 `mapReserveDp` / `measuredBlockDp` / `blockAnimating` / `barBlockShrinks` /
   `barHeightTier` / `PANEL_MAX_RATIO` 整套已删，**别当漏项加回来**。
-- 量法：debug 下 `BikeMapQuery` 打一行「落地」（中心 → 合并 → 补全三条数、环点数、半径、缩放）；
+- 量法：debug 下 `BikeMapQuery` 打一行「落地」（中心 → 合并 → 补全三条数、环点数、半径、缩放；
+  缩小视图打「缩小视图中心 N 条」、平移命中缓存打「缓存命中」）；
   `adb shell dumpsys gfxinfo <包名> framestats` 看拖动时段的掉帧。
-  **展示上限 2026-10-29 已收到 1000 米**（用户口径「范围过大可能卡顿」；校园中心到围栏四角
-  约 980 米，仍覆盖全校）。再压列表长度就动采样环半径（它已按视口缩放），别动簇封顶。
+  **展示上限 2026-10-29 收到 1000 米、2026-11-18 再收到 800 米**（用户口径「范围过大可能卡顿」
+  与「适当减小到合适范围」）；缩小视图另有 600 米一档。再压列表长度就动采样环半径（它已按视口
+  缩放），别动簇封顶。
 
   定位只走平台 `LocationManager`（`ui/ebike/BikeLocator.kt`），不引 Play Services 融合定位。
   `LocationListener` 的四个回调都要写全：少写一个在 26~29 的设备上是 `AbstractMethodError`，
@@ -437,9 +452,13 @@
   现行围栏与 131 点 fixture，跑法见脚本头；fixture 在 `app/src/test/resources/`，
   `BikeNearbyTest` 全量回归）。瑶湖西二路
   东段与瑶湖西大道同时是师大活动区域的边界，两校围栏相邻不重叠。地图上围栏由
-  `BikeMarkerOverlay` **常驻**画在最底层（半透明填充 = **浅蓝 #64B5F6 alpha 0.30** + 蓝描边 #3D8BEF，
-  dash/空 7/4dp，仿官方包裹样式；**别用主题深青**——深青 0.32 / 提亮 30% 的青真机都嫌"深、压暗"，
-  2026-09-27 定稿直接换浅蓝色系），开关只管过滤不管画不画。
+  `BikeMarkerOverlay` / 高德 `AmapLayers` 画在最底层（半透明填充 = **浅蓝 #64B5F6 alpha 0.30** +
+  蓝描边 #3D8BEF，dash/空 7/4dp，仿官方包裹样式；**别用主题深青**——深青 0.32 / 提亮 30% 的青
+  真机都嫌"深、压暗"，2026-09-27 定稿直接换浅蓝色系）。**2026-11-18 起开关也管画不画**：
+  关掉「只看本校」时校区描边一起隐藏（用户口径「筛选没有选择只看本校时，地图的校区描边同步
+  不显示」）——`showCampusFence` = `onlyOurCampus` 经 `BikeMapHost` 传到两条渲染路径，并进
+  `MapOverlayInputs` 比对（漏了就是开关切了画面不动）。两档地图的围栏都要跟这个布尔量走，
+  **别只在其中一条路径上加条件**。
 
 ## 地图底图（高德 SDK 主 · osmdroid 回退，2026-11-17）
 
@@ -459,14 +478,53 @@
 - **闪屏**：`MapView` 是 SurfaceView，首帧之前那块是它自己的底色（偏白）。`TextureMapView`
   + alpha 淡入试过——动画掉帧，**已改回 `MapView`**；闪屏用「与页面同色的不透明占位 +
   `onMapLoaded` 后 180ms 淡出」盖住。
-- **相机**：动画时长按距离 420~720ms；**相机请求必须等 `onMapLoaded` 之后再执行**——
-  高德首帧会重置相机，早发的会被吞掉（症状：进页面不跟到我的位置）。
+- **相机**（2026-11-18 用户要求「视角移动和栅格地图体验一致」）：**时长与曲线照抄 osmdroid**，
+  别再按距离插值。osmdroid 6.1.18 的 `MapController.animateTo` 走 `ValueAnimator`，只有两档：
+  带缩放 400ms、只平移 `animationSpeedDefault` = 1000ms（反编译 `MapController` /
+  `DefaultConfigurationProvider` 确认），曲线是 `ValueAnimator` 默认的
+  `AccelerateDecelerateInterpolator`。高德这边对应 `CAMERA_ANIM_ZOOM_MS` /
+  `CAMERA_ANIM_PAN_MS` + `animateCameraEased` 里的同一个插值器。
+  **相机请求必须等 `onMapLoaded` 之后再执行**——高德首帧会重置相机，早发的会被吞掉
+  （症状：进页面不跟到我的位置）。
+- **「P」还车点不接点击**（2026-09-29 用户口径，2026-11-18 在高德路径补齐，同日返工一次）：
+  它常和聚合圈压在一起，接点击只会挡着选车。osmdroid 那边是命中测试直接跳过它
+  （`BikeMarkerOverlay.onSingleTapConfirmed`）；高德**没有**「Marker 不参与命中」的开关，
+  所以在 `setOnMarkerClickListener` 里对无载荷标记（P / 选中圈 / 高亮 chip）按**手指真实
+  屏幕坐标**（`lastTouch`，高德的点击回调只给 Marker、不给坐标）重算一遍
+  `AmapLayers.clickTargetAt`：只有图标真的盖住手指的可点标记才转发，其余一律消费掉什么都不做。
+  **半径按各类图标自己的半径给**（聚合圈 15dp / 车标 12dp / 我的车 21dp）。第一版用的是
+  24dp 宽松半径，结果「点 P」会打开十几 dp 外的数字，用户反馈「停车点还是能点」——别改回去。
+  也**别退回 `else -> false`**：那会让选中圈挡住自己的车标，选中的车再也点不动。
+- **P 图标给数字让位**（2026-11-18 用户报「点击后 P 图标遮住车辆数量图标」）：`AmapLayers.refreshSpotBadges`
+  在**屏幕距离** 24dp 内发现可点标记（聚合圈 / 车标 / 我的车）就把 P 收起来（`isVisible=false`）。
+  判据必须是屏幕距离，不是经纬度——同一对标记在 z16 与 z19 下的间距差十倍。重算时机两处：
+  `rebuild()` 之后、以及**相机停稳**（`settleTick`）——缩放变了但数据没变时也要重算。
+  被收起的 P 同时从命中测试里消失，与上面那条「P 不接点击」互补。
 - **别把蓝点/朝向放进图层比对**：罗盘 10Hz 会每 100ms 全量重建标记，必卡。
   `MapOverlayInputs` 比对前先 `copy(userPoint = null, userHeading = null, userAccuracyMeters = 0f)`。
 - **停手判定**：高德的 `onCameraChangeFinish` 就是「相机真的停住」，比 osmdroid 那个 120ms
   轮询准，所以高德路径不用 `SettleWatcher`；程序性移动仍由 `CameraSuppressor` 吃掉，
   `aim` 存的就是 GCJ-02（两条路径同基准，没有显示基准转换了）。单指拖动仍自己看 touch
   （`MapTouchTracker`）用来退出自动跟随。
+- **拖动帧率**（2026-11-18 用户报「高德下拖地图还是卡卡的」）：矢量底图每帧要重算几何 +
+  排文字，比栅格贵是固有的，只能把每帧的量压下去。已做的五处，动到任一处先读对应注释：
+  1. `AmapMaps.prepare` 关地形 / 等高线（进程级，必须早于 `initialize`）；
+  2. `AmapMapView.trimBasemapLayers()` 关室内图 / 路面箭头 / 施工路段 / 导航标注 / POI 触摸命中；
+  3. `showBuildings(false)` 单独在 `onMapLoaded` 里调（官方要求，早调会被首帧重置）；
+  4. 还车点 / 禁停区轮廓在 `KvcxZones.capped()` 里抽稀到 16 / 40 个顶点（见 `PolygonSimplify`，
+     解析与缓存读回都走它）；
+  5. 地图整幅平移的 `translationY` 取整像素（SurfaceView 落在半像素上合成要重采样）。
+  6. **图层重建只动变了的**（2026-11-18 二轮）：多边形按 `PolygonsKey` 指纹跳过整段重画
+     （聚合圈每次拖动停手都刷新，而围栏 / 禁停区 / 还车点范围几乎不变）；标记的
+     position / icon / zIndex / object 逐项比过再写，图标没换就不 `setIcon`（省一次纹理重绑）。
+  **剩下的卡顿是矢量底图本身的每帧开销**（几何装配 + 文字排版 + 标注避让），不是我们的图层。
+  还能往下压的三条，都有代价：自定义地图样式砍 POI 标注（最大头，要在高德后台生成样式
+  并与 key 绑定）、`setRenderFps` 降到 30（稳但 30fps）、把地图视图高度缩到可见区
+  （省约 25% 像素，但要动面板与地图的布局契约，风险中等）。
+  **`setRenderFps` 保持 60**（= SDK 默认）：设备帧时间忽长忽短时降到 45/30 可能更稳，但那要
+  真机 A/B，没有实测数据不要凭感觉改（`AMAP_RENDER_FPS` 常量）。
+  **视口过滤车标没做**：高德 GL 渲染器自己按视口裁剪覆盖物，做了只会多一轮"拖回去要补回来"
+  的增删抖动。
 - **缓存**：高德 SDK 的瓦片在 `getExternalFilesDir(null)/amap`，与 osmdroid 的 `cache.db`、
   停车点 JSON 一起在 `EbikeMapCache` 里统计与清除。
 - **R8**：`proguard-rules.pro` 必须 keep `com.amap.api.**` / `com.autonavi.**`，否则 release

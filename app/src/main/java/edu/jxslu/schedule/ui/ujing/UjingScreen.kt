@@ -39,6 +39,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -207,12 +208,14 @@ fun UjingScreen(
     val historyStore = remember { Graph.ujingHistory(context) }
     val history by historyStore.state.collectAsStateWithLifecycle()
 
-    // 一次性提示（会话过期、看板错误等）。**语气按 Warning**：这条通道当前唯一的来源是
-    // `UjingViewModel.handleFailure` 的会话失效（`SessionExpiryStore.NOTICE_TEXT`），
-    // 属于「你要处理一下」而不是「告知你一件事」——旧实现一律用 Info，看起来像播报。
-    // 若以后真要发纯信息类事件，给 Channel 带上 tone，别在调用点再写死。
+    // 一次性提示（登录 / 下单 / 支付 / 启动 / 取消 / 会话过期）。**语气由 ViewModel 给**
+    // （`NoticeFeedback.tone`，口径见 `UjingViewModel.notify`）：成功走勾、失败走叉、
+    // 要用户处理走警告三角。2026-11-16 之前这里一律写死 Warning，于是「启动成功」顶着
+    // 警告三角出来，用户读成报错。
     LaunchedEffect(Unit) {
-        viewModel.events.collect { message -> showNotice(scope, snackbar, message, NoticeTone.Warning) }
+        viewModel.events.collect { notice ->
+            showNotice(scope, snackbar, notice.text, notice.tone)
+        }
     }
     // 一次性导航：识别成功 → 独立下单页
     LaunchedEffect(Unit) {
@@ -307,6 +310,25 @@ fun UjingScreen(
     LaunchedEffect(liveOrder) { if (liveOrder != null) lastOrder = liveOrder }
     val heroOrder = liveOrder ?: lastOrder
 
+    // 订单卡的进场时机（2026-11-16）：下单在独立的下单页里确认，那一页滑出的同时本页就在
+    // 下面展开订单卡——用户只看到「页面突然变高」，看不到卡片长出来。所以「页面已经在场时
+    // 订单从无到有」先压一个 [Motion.pageMillis] 等窗口收完；进页时已有订单不压，
+    // 否则每次进 U净 都要空等 280ms。
+    var orderVisible by remember { mutableStateOf(liveOrder != null) }
+    var firstFrameDone by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { firstFrameDone = true }
+    LaunchedEffect(liveOrder?.orderId, firstFrameDone) {
+        when {
+            liveOrder == null -> orderVisible = false
+            orderVisible -> Unit
+            firstFrameDone -> {
+                delay(Motion.pageMillis.toLong())
+                orderVisible = true
+            }
+            else -> orderVisible = true
+        }
+    }
+
     PageScaffoldColumn(
         title = "U净",
         onBack = onBack,
@@ -341,25 +363,19 @@ fun UjingScreen(
                         subtitle = "凭证仅存本机 · 不进云备份",
                         pill = "已登录",
                     )
-                    // ② 三列指标（空闲看板合计）
-                    MetricsSection(
-                        state = state,
-                        onRefresh = {
-                            haptics.tap()
-                            viewModel.refreshBoard()
-                        },
-                    )
-                    // ③ 在案订单（唯一一张英雄卡；出现 / 退场各有过渡）
+                    // ② 在案订单：紧跟身份卡（2026-11-16 从「指标之后」上移）。订单是「此刻
+                    // 正在发生的事」，位置必须固定；原来插在页面中段，每次下单都把下面的
+                    // 扫码主操作推下去一整张卡。
                     AnimatedVisibility(
-                        visible = liveOrder != null,
+                        visible = orderVisible && liveOrder != null,
                         enter = fadeIn(Motion.reveal()) +
                             expandVertically(
                                 Motion.reveal(),
                                 expandFrom = Alignment.Top,
                             ),
-                        exit = fadeOut(Motion.state()) +
+                        exit = fadeOut(Motion.revealExit()) +
                             shrinkVertically(
-                                Motion.state(),
+                                Motion.revealExit(),
                                 shrinkTowards = Alignment.Top,
                             ),
                     ) {
@@ -377,18 +393,42 @@ fun UjingScreen(
                             )
                         }
                     }
+                    // ③ 三列指标（空闲看板合计）
+                    MetricsSection(
+                        state = state,
+                        onRefresh = {
+                            haptics.tap()
+                            viewModel.refreshBoard()
+                        },
+                    )
                     // ④ 主操作：扫码（常驻区块错峰落位；订单卡由 AnimatedVisibility 管，别叠加）
                     StaggeredReveal(index = 0) {
                         ScanSection(
                             state = state,
                             draft = draft,
+                            orderActive = liveOrder != null,
                             onScan = startScan,
                             onOpenOrder = onOpenOrder,
                         )
                     }
-                    // ⑤ 记录
+                    // ⑤ 记录：没有记录时整块不占位（2026-11-16；原来常驻一张写着
+                    //    「扫码下单后自动记一笔」的空卡），第一笔落库时整块淡入 + 展开
                     StaggeredReveal(index = 1) {
-                        RecordsSection(entries = history, onOpenAll = onOpenHistory)
+                        AnimatedVisibility(
+                            visible = history.isNotEmpty(),
+                            enter = fadeIn(Motion.reveal()) +
+                                expandVertically(
+                                    Motion.reveal(),
+                                    expandFrom = Alignment.Top,
+                                ),
+                            exit = fadeOut(Motion.revealExit()) +
+                                shrinkVertically(
+                                    Motion.revealExit(),
+                                    shrinkTowards = Alignment.Top,
+                                ),
+                        ) {
+                            RecordsSection(entries = history, onOpenAll = onOpenHistory)
+                        }
                     }
                     // ⑥ 设置：收藏洗衣房看板
                     StaggeredReveal(index = 2) {
@@ -401,8 +441,15 @@ fun UjingScreen(
                 }
             }
         }
-        // 页尾：退出登录只在已登录时给（未登录时它没有意义）
-        if (state.loggedIn) {
+        // 页尾：退出登录只在已登录时给（未登录时它没有意义）。走 AnimatedVisibility 而不是
+        // 裸 if：登录成功那一刻它从无到有，硬出现会把页尾顶下去（2026-11-16）。
+        AnimatedVisibility(
+            visible = state.loggedIn,
+            enter = fadeIn(Motion.reveal()) +
+                expandVertically(Motion.reveal(), expandFrom = Alignment.Top),
+            exit = fadeOut(Motion.revealExit()) +
+                shrinkVertically(Motion.revealExit(), shrinkTowards = Alignment.Top),
+        ) {
             LogoutRow(onLogout = viewModel::logout)
         }
         FooterDisclaimer(FooterDisclaimerText)
@@ -624,6 +671,9 @@ private fun LoginSection(state: UjingUiState, viewModel: UjingViewModel) {
  * 数据源与历史账单页同一个仓（[Graph.ujingHistory]，本机留痕、新的在前）；服务端账单
  * 接口没有协议样本，**别猜端点**（口径见 `.agents/rules/ujing.md`）。
  * 行式平铺 + [AppCardDivider]：卡里不再套卡（ui-common「卡片里放列表用平铺行」）。
+ *
+ * **只在有记录时被调用**（2026-11-16）：空态不占位，原来那张「扫码下单后自动记一笔」的
+ * 空卡既占了首屏又什么也不说。出现 / 消失的过渡由调用方的 `AnimatedVisibility` 负责。
  */
 @Composable
 private fun RecordsSection(entries: List<UjingHistoryEntry>, onOpenAll: () -> Unit) {
@@ -631,16 +681,16 @@ private fun RecordsSection(entries: List<UjingHistoryEntry>, onOpenAll: () -> Un
     AppCard {
         Text("账单记录", style = MaterialTheme.typography.bodyLarge)
         Text(
-            if (entries.isEmpty()) "扫码下单后自动记一笔" else "本机留痕 · 共 ${entries.size} 笔",
+            "本机留痕 · 共 ${entries.size} 笔",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
             modifier = Modifier.padding(top = 2.dp),
         )
+        recent.forEachIndexed { index, entry ->
+            if (index > 0) AppCardDivider()
+            RecordRow(entry)
+        }
         if (recent.isNotEmpty()) {
-            recent.forEachIndexed { index, entry ->
-                if (index > 0) AppCardDivider()
-                RecordRow(entry)
-            }
             AppCardDivider()
             TextButton(onClick = onOpenAll, modifier = Modifier.fillMaxWidth()) {
                 Text("查看全部")
@@ -856,11 +906,16 @@ private fun BoardSubtitle(text: String, highlight: Boolean) {
  *
  * 识别中的反馈落在主按钮自己身上（按钮常显、就地变 loading），另起一行状态会把
  * 下方内容顶动一下，而那正是「跳变」的来源。
+ *
+ * **有在案订单时降级为次操作**（2026-11-16）：叠单会被 `confirmPreparedOrder` 拦成
+ * 「已有进行中的订单」，这时再摆一枚 48dp 主按钮就是「点了就报错」的假入口。改成 40dp
+ * 描边按钮「扫另一台洗衣机」，高度差由 [AnimatedContent] 自带的 size 过渡收平。
  */
 @Composable
 private fun ScanSection(
     state: UjingUiState,
     draft: UjingDraftStore.Draft?,
+    orderActive: Boolean,
     onScan: () -> Unit,
     onOpenOrder: () -> Unit,
 ) {
@@ -887,65 +942,118 @@ private fun ScanSection(
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
-            if (draft != null && !parsing) {
+            // 「接着选」跟着草稿出现 / 消失：硬 if 会把设备行的文字挤一下（2026-11-16）
+            AnimatedVisibility(
+                visible = draft != null && !parsing,
+                enter = fadeIn(Motion.reveal()),
+                exit = fadeOut(Motion.exit()),
+            ) {
                 TextButton(onClick = onOpenOrder) { Text("接着选") }
             }
         }
         AppCardDivider(Modifier.padding(vertical = 10.dp))
-        // 状态行：识别中 / 失败 / 空闲引导，常驻一行（切换只换内容，不新增块）
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            when {
-                parsing -> {
-                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    Text(
-                        "正在识别设备…",
+        // 状态行：识别中 / 失败 / 空闲引导，常驻一行（切换只换内容，不新增块）。
+        // 三态之间走 crossfade（高度差由 AnimatedContent 的 size 过渡收平），
+        // 原来靠 when 硬切，识别失败时整行会「啪」地换成红字。
+        AnimatedContent(
+            targetState = when {
+                parsing -> ScanPhase.Parsing
+                failed != null -> ScanPhase.Failed
+                else -> ScanPhase.Idle
+            },
+            transitionSpec = {
+                fadeIn(Motion.reveal()) togetherWith fadeOut(Motion.exit())
+            },
+            label = "ujingScanPhase",
+        ) { phase ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                when (phase) {
+                    ScanPhase.Parsing -> {
+                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                        Text(
+                            "正在识别设备…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        )
+                    }
+
+                    ScanPhase.Failed -> {
+                        Icon(
+                            HugeIcons.AlertCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            failed?.message ?: "识别失败，请重试",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    ScanPhase.Idle -> Text(
+                        "对准机身二维码即可",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     )
                 }
-
-                failed != null -> {
-                    Icon(
-                        HugeIcons.AlertCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text(
-                        failed.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                else -> Text(
-                    "对准机身二维码即可",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                )
             }
         }
-        // 主按钮：高 48dp、整行宽。识别中的反馈交给上面那行状态（常驻槽位），
+        // 主按钮 / 次操作：高 48dp、整行宽。识别中的反馈交给上面那行状态（常驻槽位），
         // 按钮自己只置灰——两处都写「正在识别」等于同一句话说两遍
-        Button(
-            onClick = onScan,
-            enabled = !parsing,
-            modifier = Modifier
-                .padding(top = 12.dp)
-                .fillMaxWidth()
-                .height(48.dp),
-        ) {
-            Icon(HugeIcons.QrCodeScan, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("扫码识别洗衣机")
+        AnimatedContent(
+            targetState = orderActive,
+            transitionSpec = {
+                fadeIn(Motion.reveal()) togetherWith fadeOut(Motion.exit())
+            },
+            label = "ujingScanCta",
+        ) { secondary ->
+            if (secondary) {
+                OutlinedButton(
+                    onClick = onScan,
+                    enabled = !parsing,
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .fillMaxWidth()
+                        .height(40.dp),
+                ) {
+                    Icon(
+                        HugeIcons.QrCodeScan,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("扫另一台洗衣机")
+                }
+            } else {
+                Button(
+                    onClick = onScan,
+                    enabled = !parsing,
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .fillMaxWidth()
+                        .height(48.dp),
+                ) {
+                    Icon(
+                        HugeIcons.QrCodeScan,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("扫码识别洗衣机")
+                }
+            }
         }
     }
 }
+
+/** 扫码卡状态行的三种形态（只用于 [AnimatedContent] 的比对键，不带数据）。 */
+private enum class ScanPhase { Idle, Parsing, Failed }
 
 // ── 订单英雄卡 ──
 
@@ -1022,17 +1130,34 @@ private fun OrderHero(
         .fillMaxWidth()
         .height(48.dp)
     StatusHeroCard(tone = tone) {
-        // 设备行
+        // 设备行（2026-11-16 拆两行）：原来把「设备 · 模式 · 价格」用「·」拼成一行、
+        // 也没设 maxLines，机型名一长就折行把卡片撑高。现在设备名独占一行（超长省略）、
+        // 价格右对齐成独立一列，模式名落到副行。
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                order.deviceName.ifBlank { "洗衣机" },
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (order.priceFen > 0) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "¥" + UjingState.fen2yuan(order.priceFen),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
         Text(
-            buildString {
-                append(order.deviceName.ifBlank { "洗衣机" })
-                append(" · ").append(order.modelName.ifBlank { "洗衣模式" })
-                if (order.priceFen > 0) {
-                    append(" · ¥").append(UjingState.fen2yuan(order.priceFen))
-                }
-            },
+            order.modelName.ifBlank { "洗衣模式" },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 1.dp),
         )
         // 状态行
         Row(
@@ -1075,7 +1200,15 @@ private fun OrderHero(
                 trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
             )
         }
-        if (payWindowRemain >= 0) {
+        // 支付窗口提示：只有未支付订单有，付完就消失。走 AnimatedVisibility 让这段高度
+        // 收起来而不是「啪」地消失（否则主按钮会往上跳 20dp，2026-11-16）。
+        AnimatedVisibility(
+            visible = payWindowRemain >= 0,
+            enter = fadeIn(Motion.reveal()) +
+                expandVertically(Motion.reveal(), expandFrom = Alignment.Top),
+            exit = fadeOut(Motion.revealExit()) +
+                shrinkVertically(Motion.revealExit(), shrinkTowards = Alignment.Top),
+        ) {
             Text(
                 if (payWindowRemain > 0) {
                     "机器已保留，请在倒计时内完成支付"
@@ -1091,7 +1224,8 @@ private fun OrderHero(
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
-        // 主按钮：按状态只出一枚（不摆点不了的按钮骗人）
+        // 主按钮：按状态只出一枚（不摆点不了的按钮骗人）。洗涤中也要占住这个槽位——
+        // 原来这一档什么都不出，卡片当场矮一截、下面的内容整体上跳（2026-11-16）。
         when {
             terminal -> Button(onClick = onDismiss, modifier = primaryModifier) { Text("知道了") }
 
@@ -1125,6 +1259,24 @@ private fun OrderHero(
                     Spacer(Modifier.width(6.dp))
                 }
                 Text("启动")
+            }
+
+            else -> Button(
+                onClick = {},
+                enabled = false,
+                modifier = primaryModifier,
+            ) {
+                // 文案跟着状态走（21 启动中 / 30 自洁中 / 40 洗涤中 …），别一律写「正在洗涤」：
+                // 这一档覆盖的是「已支付、没有可点的动作」的所有中间态。
+                Text(
+                    when (order.status) {
+                        "40" -> if (order.dryer) "正在烘干…" else "正在洗涤…"
+                        "30" -> "正在自洁…"
+                        "21" -> "正在启动…"
+                        "24" -> "正在投放洗衣液…"
+                        else -> "订单处理中…"
+                    },
+                )
             }
         }
         // 次动作行（洗涤中只有刷新；未支付可取消；终结态只留主按钮「知道了」）

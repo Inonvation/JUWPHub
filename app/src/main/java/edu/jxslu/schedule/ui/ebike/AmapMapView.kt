@@ -1,12 +1,13 @@
 package edu.jxslu.schedule.ui.ebike
 
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Point
 import android.util.Log
 import android.view.MotionEvent
-import android.view.animation.DecelerateInterpolator
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.ViewConfiguration
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -37,6 +38,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.MapView
+import com.amap.api.maps.model.BitmapDescriptor
 import com.amap.api.maps.model.BitmapDescriptorFactory
 import com.amap.api.maps.model.CameraPosition
 import com.amap.api.maps.model.Circle
@@ -52,9 +54,11 @@ import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.GcjPoint
 import edu.jxslu.schedule.domain.KvcxZones
 import edu.jxslu.schedule.domain.NearbyBike
+import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 /**
@@ -87,6 +91,8 @@ internal fun AmapMapView(
     highlightLat: Double? = null,
     highlightLng: Double? = null,
     highlightLabel: String? = null,
+    /** 校区围栏画不画（见 [MapOverlayInputs.showCampusFence]，2026-11-18）。 */
+    showCampusFence: Boolean = true,
     colors: BikeMarkerColors,
     camera: CameraRequest?,
     onCenterSettled: (Double, Double, Double, Double) -> Unit,
@@ -113,6 +119,14 @@ internal fun AmapMapView(
     initialCenter: GcjPoint? = null,
     /** 建图时的缩放；null 用默认级别。 */
     initialZoom: Double? = null,
+    /**
+     * 高德版权标识的底边距（px）。0 = 用 SDK 默认（钉在地图左下角）。
+     *
+     * 为什么需要它：底部面板会盖住地图下沿，而 logo 默认就在左下角——服务协议 4.10.7
+     * 不允许遮挡版权声明。页面按「面板高度 + 底部常驻块」算好这个值传进来，把 logo 顶到
+     * 面板上沿之上（2026-11-18）。
+     */
+    logoBottomMarginPx: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -133,6 +147,9 @@ internal fun AmapMapView(
 
     var mapSize by remember { mutableStateOf(IntSize.Zero) }
     val drawn = remember { DrawnOverlayInputs() }
+    // 每次「相机停稳」+1。P 图标的避让要看当前缩放（见 AmapLayers.refreshSpotBadges），
+    // 而缩放变化不一定带来新数据，所以得由停手事件单独驱动一次重算。
+    var settleTick by remember { mutableStateOf(0) }
 
     val mapView = remember {
         // 仍然用 MapView（SurfaceView）而不是 TextureMapView（2026-11-17 两次实测）：
@@ -151,6 +168,8 @@ internal fun AmapMapView(
             map.mapType = AMap.MAP_TYPE_NORMAL
             map.setMaxZoomLevel(MAX_ZOOM)
             map.setMinZoomLevel(MIN_ZOOM)
+            // 底图上每帧都要重算、而这张图用不到的图层先关掉（见 trimBasemapLayers）
+            map.trimBasemapLayers()
             map.moveCamera(
                 CameraUpdateFactory.newLatLngZoom(
                     LatLng(
@@ -164,6 +183,9 @@ internal fun AmapMapView(
                 override fun onCameraChange(position: CameraPosition?) = Unit
 
                 override fun onCameraChangeFinish(position: CameraPosition?) {
+                    // 停手就重算一次 P 图标的避让（缩放变了，重叠关系也变了）。
+                    // 放在吞掉回调的判断**之前**：程序性移动同样会让缩放变化。
+                    settleTick += 1
                     val target = position?.target ?: return
                     if (suppressor.shouldSwallow(target.latitude, target.longitude)) return
                     settleCallback(
@@ -178,6 +200,12 @@ internal fun AmapMapView(
         }
     }
     val aMap = remember(mapView) { mapView.map }
+    // logo 位置随面板高度变，所以不能只在建图时设一次
+    LaunchedEffect(aMap, logoBottomMarginPx) {
+        if (logoBottomMarginPx > 0) {
+            runCatching { aMap.uiSettings.setLogoBottomMargin(logoBottomMarginPx) }
+        }
+    }
     val touchTracker = remember {
         MapTouchTracker(ViewConfiguration.get(context).scaledTouchSlop.toFloat()) {
             // 用户接管地图：先停掉程序性相机动画，别让缓动继续和手指抢（与 osmdroid 版同口径）
@@ -186,20 +214,40 @@ internal fun AmapMapView(
             panCallback()
         }
     }
+    // 最近一次触摸的屏幕坐标。高德的 `OnMarkerClickListener` 只给 Marker、不给手指位置，
+    // 而「P 被点中时该不该转给它旁边的聚合圈」必须按**真实手指位置**判（2026-11-18）：
+    // 拿 P 自己的坐标当手指位置会偏出半个图标，把旁边的数字也一起算进去。
+    val lastTouch = remember { FloatArray(2) }
     DisposableEffect(mapView) {
         mapView.setOnTouchListener { _, event ->
             touchTracker.onTouch(event)
+            if (event.actionMasked == MotionEvent.ACTION_DOWN ||
+                event.actionMasked == MotionEvent.ACTION_UP
+            ) {
+                lastTouch[0] = event.x
+                lastTouch[1] = event.y
+            }
             false
         }
         onDispose { mapView.setOnTouchListener(null) }
     }
-    val layers = remember(aMap, bitmaps) { AmapLayers(aMap, bitmaps) }
+    val layers = remember(aMap, bitmaps, density) { AmapLayers(aMap, bitmaps, density) }
+    // 相机停稳后重算 P 图标的避让（见 AmapLayers.refreshSpotBadges）
+    LaunchedEffect(layers, settleTick) {
+        if (settleTick > 0) layers.refreshSpotBadges()
+    }
 
     // 底图真的画出来了才认为 SDK 可用（key 校验在服务端做，initialize 的返回值靠不住）
     var mapLoaded by remember { mutableStateOf(false) }
     val unavailableCallback by rememberUpdatedState(onSdkUnavailable)
     DisposableEffect(aMap) {
-        aMap.setOnMapLoadedListener { mapLoaded = true }
+        aMap.setOnMapLoadedListener {
+            // 3D 楼块要在底图就绪后再关（官方示例就写在 onMapLoaded 里）：早调会被首帧
+            // 渲染重置回默认。校园尺度下这一层是纯装饰，每帧都要重新画一遍楼体与贴图。
+            runCatching { aMap.showBuildings(false) }
+                .onFailure { Log.w(TAG_MAP, "关闭 3D 楼块失败", it) }
+            mapLoaded = true
+        }
         onDispose { aMap.setOnMapLoadedListener(null) }
     }
     LaunchedEffect(aMap) {
@@ -215,7 +263,7 @@ internal fun AmapMapView(
     // 用户看到的是「地图区在加载」，不是「闪了一下」。
     val placeholderVisible by animateFloatAsState(
         targetValue = if (mapLoaded) 0f else 1f,
-        animationSpec = tween(durationMillis = 180),
+        animationSpec = Motion.state(),
         label = "amapPlaceholder",
     )
 
@@ -241,29 +289,31 @@ internal fun AmapMapView(
                 aMap.cameraPosition?.zoom ?: BikeNearby.DEFAULT_ZOOM.toFloat(),
             ),
         )
-        if (BuildConfig.DEBUG) Log.d("BikeMapAmap", "首帧落到用户位置: $lat,$lng")
+        if (BuildConfig.DEBUG) Log.d(TAG_MAP, "首帧落到用户位置: $lat,$lng")
     }
 
     // 点标记：按 Marker 上挂的 payload 分派，不依赖任何绘制顺序
-    DisposableEffect(aMap) {
+    DisposableEffect(aMap, layers) {
         aMap.setOnMarkerClickListener { marker ->
-            when (val payload = marker.`object`) {
-                is MarkerPayload.Cluster -> {
-                    clusterTapCallback(payload.key)
-                    true
+            val payload = marker.`object` as? MarkerPayload
+            if (payload != null) {
+                dispatchTap(payload, clusterTapCallback, bikeTapCallback, rideTapCallback)
+                true
+            } else {
+                // 没有载荷的标记（还车点「P」/ 选中圈 / 高亮 chip）**不接点击**，与 osmdroid
+                // 那条路径同口径——`BikeMarkerOverlay.onSingleTapConfirmed` 的注释写得很清楚：
+                // 「P」常和聚合圈压在一起，接点击只会挡着选车（用户 2026-09-29 报过，2026-11-18
+                // 又提了一次）。高德没有「这个 Marker 不参与命中」的开关，所以自己按**手指真实
+                // 位置**重算一遍命中：只有图标真的盖住手指的那个可点标记才算命中。
+                //
+                // **别用宽松半径**（第一版用过 24dp）：P 与聚合圈通常只隔十几 dp，宽半径会把
+                // "点了个 P"变成"打开了旁边的数字"，用户看到的就是「停车点还是能点」。
+                val target = layers.clickTargetAt(lastTouch[0], lastTouch[1])
+                if (target != null) {
+                    dispatchTap(target, clusterTapCallback, bikeTapCallback, rideTapCallback)
                 }
-
-                is MarkerPayload.Bike -> {
-                    bikeTapCallback(payload.carNum)
-                    true
-                }
-
-                is MarkerPayload.Ride -> {
-                    rideTapCallback()
-                    true
-                }
-
-                else -> false
+                // 一律消费：P 上的一下什么都不该发生，也别让 SDK 再走它自己的默认动作
+                true
             }
         }
         onDispose { aMap.setOnMarkerClickListener(null) }
@@ -302,6 +352,7 @@ internal fun AmapMapView(
                 bikes = bikes,
                 byBike = byBike,
                 selectedBikeCarNum = selectedBikeCarNum,
+                showCampusFence = showCampusFence,
             )
             // 只比「静态图层」那一份：蓝点 / 精度 / 朝向不进这份比对（2026-11-17）。
             // 罗盘 10Hz 更新，把它们算进来会每 100ms 全量重建一次标记（几十个 remove + add），
@@ -377,23 +428,41 @@ internal fun AmapMapView(
                 },
             )
         } else {
-            // 逐帧缓动（2026-11-17 用户报「没有缓动、纯直线的死板移动」）：
-            // 高德自带的 animateCamera 是**线性**插值，这里自己按帧推进，收尾减速。
-            val duration = cameraAnimMs(aMap.cameraPosition?.target, request.lat, request.lng)
+            // 逐帧缓动（2026-11-17 起；2026-11-18 对齐栅格路径的观感）。
+            // 高德自带的 animateCamera 只有线性插值，这里自己按帧推进。
+            // 时长与曲线**照抄 osmdroid**（见 [cameraAnimMs] 的注释）：用户要求"视角移动
+            // 和栅格地图体验一致"，两边参数一样才不会一快一慢、一个匀速一个缓。
             val targetZoom = zoom ?: aMap.cameraPosition?.zoom ?: BikeNearby.DEFAULT_ZOOM.toFloat()
             interrupted.set(false)
-            animateCameraEased(aMap, target, targetZoom, duration, interrupted)
+            animateCameraEased(aMap, target, targetZoom, cameraAnimMs(zoom != null), interrupted)
         }
         appliedCallback(request.nonce)
     }
 }
 
 /**
- * 带缓动的相机动画（2026-11-17）：逐帧 `moveCamera`，位移与缩放都走
- * [DecelerateInterpolator]（起步快、收尾慢），而不是高德 `animateCamera` 的线性插值。
+ * 相机动画时长：与 osmdroid 那条路径逐项对齐。
+ *
+ * osmdroid 6.1.18 的 `MapController.animateTo` 走 `ValueAnimator`，时长只有两档
+ * （反编译 `MapController` / `DefaultConfigurationProvider` 确认）：
+ * - 带缩放（`animateTo(target, zoom, 400L)`）→ **400 ms**；
+ * - 只平移（`animateTo(target)`，时长为 null）→ `animationSpeedDefault` = **1000 ms**。
+ *
+ * 曲线也是 `ValueAnimator` 的默认值 `AccelerateDecelerateInterpolator`（两端慢、中间快），
+ * 见 [animateCameraEased]。**别改成按距离插值**：那会让"定位"与"回校区"两条路各走各的手感，
+ * 正是这次要消掉的不一致。
+ */
+private fun cameraAnimMs(withZoom: Boolean): Long =
+    if (withZoom) CAMERA_ANIM_ZOOM_MS else CAMERA_ANIM_PAN_MS
+
+/**
+ * 带缓动的相机动画：逐帧 `moveCamera`，位移与缩放共用同一个缓动进度。
  *
  * 为什么不用 SDK 自带的：`animateCamera(update, duration, cb)` 只有线性插值这一个档，
  * 长距离移动看着像「匀速平移」，用户直接反馈「死板」。
+ *
+ * 曲线用 [AccelerateDecelerateInterpolator]（= osmdroid 那边 `ValueAnimator` 的默认值），
+ * 起步与收尾都慢，与栅格路径的观感一致。
  *
  * 三个细节：
  * - 用 `withFrameMillis` 对齐屏幕帧，不自己 sleep，掉帧时不会追帧；
@@ -415,7 +484,7 @@ private suspend fun animateCameraEased(
     val startLat = start.target.latitude
     val startLng = start.target.longitude
     val startZoom = start.zoom
-    val interpolator = DecelerateInterpolator(1.8f)
+    val interpolator = AccelerateDecelerateInterpolator()
     val begin = withFrameMillis { it }
     while (!interrupted.get()) {
         val now = withFrameMillis { it }
@@ -438,19 +507,6 @@ private suspend fun animateCameraEased(
     }
 }
 
-/**
- * 相机动画时长（毫秒）：近距离 420ms、远距离最多 720ms，按两点间的球面距离线性插值。
- *
- * 取这个区间是因为两头的观感都被否过一次：400ms 跨校区像「猛甩一下」，800ms 以上又
- * 明显「慢半拍」。上限压到 720ms，配合 `MOVE_QUIET_MS` 的 1200ms 静默窗口仍然盖得住。
- */
-private fun cameraAnimMs(from: LatLng?, lat: Double, lng: Double): Long {
-    if (from == null) return CAMERA_ANIM_MS
-    val meters = BikeNearby.distanceMeters(from.latitude, from.longitude, lat, lng)
-    val ratio = (meters / CAMERA_LONG_MOVE_METERS).coerceIn(0.0, 1.0)
-    return (CAMERA_ANIM_MS + (CAMERA_MAX_ANIM_MS - CAMERA_ANIM_MS) * ratio).toLong()
-}
-
 /** 标记上挂的点击载荷。 */
 private sealed interface MarkerPayload {
     data class Cluster(val key: String) : MarkerPayload
@@ -458,21 +514,73 @@ private sealed interface MarkerPayload {
     data object Ride : MarkerPayload
 }
 
+/** 把一次点击按载荷分派给页面（点击监听与「P 转给邻近目标」两条路共用）。 */
+private fun dispatchTap(
+    payload: MarkerPayload,
+    onCluster: (String) -> Unit,
+    onBike: (String) -> Unit,
+    onRide: () -> Unit,
+) {
+    when (payload) {
+        is MarkerPayload.Cluster -> onCluster(payload.key)
+        is MarkerPayload.Bike -> onBike(payload.carNum)
+        MarkerPayload.Ride -> onRide()
+    }
+}
+
+/**
+ * 关掉底图上**每帧都要重算、而这张图用不到**的图层（2026-11-18 用户报「拖动卡顿」）。
+ *
+ * 高德 3D 底图是矢量渲染：拖动时每帧都要重新走一遍几何装配与标注排版，图层越多越贵。
+ * 这里关的都是纯装饰层，关掉不改变「哪条路、哪个地名、哪辆车」这些用户真要读的信息
+ * （楼栋名还在，只是不再画 3D 楼体，见下面那条）：
+ * - 室内图：3D SDK 默认就关，显式写一次防上游改默认值；
+ * - 路面方向箭头、施工路段：行车导航用的，我们只有校园内步行尺度；
+ * - 导航类标注：同上；
+ * - POI 触摸命中：我们只点自己的 Marker，不需要 SDK 再维护一份 POI 命中索引。
+ *
+ * **3D 楼块不在这里关**：官方要求在 `onMapLoaded` 之后调，见 [AmapMapView] 里那个监听器。
+ * 每项单独 `runCatching`：某个开关在别的 SDK 版本上没了，不该把其余几项一起带走。
+ */
+private fun AMap.trimBasemapLayers() {
+    runCatching { showIndoorMap(false) }
+        .onFailure { Log.w(TAG_MAP, "关闭室内图失败", it) }
+    runCatching { setRoadArrowEnable(false) }
+        .onFailure { Log.w(TAG_MAP, "关闭路面箭头失败", it) }
+    runCatching { setConstructingRoadEnable(false) }
+        .onFailure { Log.w(TAG_MAP, "关闭施工路段失败", it) }
+    runCatching { setNaviLabelEnable(false, 0, 0) }
+        .onFailure { Log.w(TAG_MAP, "关闭导航标注失败", it) }
+    runCatching { setTouchPoiEnable(false) }
+        .onFailure { Log.w(TAG_MAP, "关闭 POI 触摸命中失败", it) }
+    runCatching { setRenderFps(AMAP_RENDER_FPS) }
+        .onFailure { Log.w(TAG_MAP, "设置渲染帧率失败", it) }
+}
+
 /** 地图加载占位的底色：高德底图在校区尺度的主色（实机截图采样）。 */
 private const val AMAP_PLACEHOLDER_COLOR = 0xFFA4D5A9
+
+/** 日志 tag：与 [AmapMapView] 里其余几处保持一致。 */
+private const val TAG_MAP = "BikeMapAmap"
+
+/**
+ * 底图渲染循环的目标帧率。
+ *
+ * **60 就是 SDK 默认值，写在这里只是把 A/B 开关摆到明面上**：设备拖动时如果稳定在
+ * 40 帧上下、帧时间忽长忽短，把这里改成 45 或 30 往往观感更稳（稳定的 30 比抖动的 45
+ * 看着顺），代价是整体更"慢"。没有真机对比之前不要凭感觉改。
+ */
+private const val AMAP_RENDER_FPS = 60
 
 /** 高德相机允许的级别：官方矢量底图到 20 级，超过没有更多细节。 */
 private const val MAX_ZOOM = 20f
 private const val MIN_ZOOM = 3f
 
-/** 近距离相机动画时长（毫秒）：与 osmdroid 那边同一个量级。 */
-private const val CAMERA_ANIM_MS = 420L
+/** 带缩放的相机动画时长（毫秒）：osmdroid 那边传的就是 `400L`，照抄。 */
+private const val CAMERA_ANIM_ZOOM_MS = 400L
 
-/** 远距离相机动画时长上限（毫秒）。 */
-private const val CAMERA_MAX_ANIM_MS = 720L
-
-/** 超过这个距离（米）就算「远距离」，动画时长线性加到 [CAMERA_MAX_ANIM_MS]。 */
-private const val CAMERA_LONG_MOVE_METERS = 1200.0
+/** 只平移的相机动画时长（毫秒）：osmdroid 的 `animationSpeedDefault`，照抄。 */
+private const val CAMERA_ANIM_PAN_MS = 1_000L
 
 /** 等底图首帧的上限：超过就认定 key / 服务不可用，整层回退栅格。 */
 private const val SDK_LOAD_TIMEOUT_MS = 10_000L
@@ -481,18 +589,50 @@ private const val MOVE_QUIET_MS = 1_200L
 private const val RESTORE_QUIET_MS = 300L
 
 /**
- * 图层的增删（2026-11-17）。
+ * 图层的增删（2026-11-17；2026-11-18 由「全清 + 全画」改成按 key 复用）。
  *
- * 重建策略是**整层清掉再按输入画一遍**：输入变化只发生在「查询结果回来 / 换筛选 / 展开
- * 停车点」这些低频时刻，几十个 Marker 的增删在 高德 SDK 里是一次性开销，比维护 diff 简单
- * 得多。蓝点与精度圈**不进这层**，它们随罗盘 10Hz 更新，单独走 [updateUser]。
+ * 为什么不再整层重建：数据每次刷新都要 remove 掉几十上百个 Marker 再重新 add
+ * （「按车辆」模式最多 150 个），高德那边每个都要新建对象、生成纹理，刷新时肉眼能看出顿一下。
+ * 现在同一辆车 / 同一个停车点始终复用同一个 Marker，只改 position / icon / zIndex；
+ * 只有「这批数据里不再出现的 key」才 remove。
+ *
+ * 多边形（围栏 / 禁停区 / 还车点范围）按 [PolygonsKey] 指纹整段跳过：这三层几乎不变，
+ * 而聚合圈随每次拖动停手刷新，原来每刷一次都要 remove + add 一遍全部多边形（每个都要重新
+ * 上传顶点）。要改这几层时记得把新输入加进指纹，否则画面不会动。
+ *
+ * 蓝点与精度圈**不进这层**，它们随罗盘 10Hz 更新，单独走 [updateUser]。
  */
 private class AmapLayers(
     private val aMap: AMap,
     private val bitmaps: AmapMarkerBitmaps,
+    private val density: Float,
 ) {
 
-    private val dynamic = mutableListOf<Any>()
+    private val polygons = mutableListOf<Polygon>()
+
+    /** key → Marker。key 带类型前缀，见 [rebuild] 里的调用点。 */
+    private val markers = LinkedHashMap<String, Marker>()
+
+    /**
+     * key → 上一次真正设上去的位图。**图标没换就别再 `setIcon`**（2026-11-18）：
+     * 每次刷新都重设一遍，SDK 要重新绑一次纹理，而绝大多数标记的图标根本没变。
+     */
+    private val icons = HashMap<String, Bitmap>()
+
+    /**
+     * 上一次画上去的多边形输入（围栏 / 禁停区 / 还车点范围 + 六个颜色）。
+     *
+     * 为什么记它：聚合圈随每次拖动停手刷新，而这三层几乎不变。原来每次刷新都
+     * `remove` + `add` 一遍全部多边形（每个都要重新上传顶点），是白花的时间。
+     */
+    private var polygonsKey: PolygonsKey? = null
+
+    /**
+     * 位图 → descriptor。`BitmapDescriptorFactory.fromBitmap` 每次都会新建一个对象，
+     * 原来每个 Marker 每次重建都调一次；位图本身是缓存的，descriptor 也该跟着缓存。
+     */
+    private val descriptors = HashMap<Bitmap, BitmapDescriptor>()
+
     private var userMarker: Marker? = null
     private var accuracyCircle: Circle? = null
 
@@ -500,31 +640,60 @@ private class AmapLayers(
     private var lastUserKey: String? = null
 
     fun rebuild(inputs: MapOverlayInputs) {
-        dynamic.forEach { item ->
-            when (item) {
-                is Marker -> item.remove()
-                is Polygon -> item.remove()
-                is Circle -> item.remove()
-            }
-        }
-        dynamic.clear()
-
         val colors = inputs.colors
-        // 围栏压在最底层：它是背景信息，盖住任何一辆车都是本末倒置
-        if (BikeNearby.CAMPUS_FENCE.size >= 3) {
-            addPolygon(BikeNearby.CAMPUS_FENCE, colors.fenceFill, colors.fenceStroke, 2f, Z_FENCE)
-        }
-        // 图层压在围栏之上、车辆之下（与官方 zIndex：服务区 < 禁停 < 还车点 < 车 同序）
-        inputs.zones.nogoZones.forEach { outline ->
-            if (outline.size >= 3) {
-                addPolygon(outline, colors.nogoFill, colors.nogoStroke, 1f, Z_NOGO)
+        drawPolygons(inputs, colors)
+
+        val live = HashSet<String>()
+
+        /**
+         * 按 key 落一个 Marker：已存在就改，不存在才建。
+         *
+         * [payload] 决定点击时走哪条路（见 `MarkerPayload`），变了才 `setObject`。
+         * **每一项都先比再写**：值没变就不碰，SDK 才不会为一次刷新重排整个标记表。
+         */
+        fun marker(
+            key: String,
+            lat: Double,
+            lng: Double,
+            icon: Bitmap,
+            zIndex: Float,
+            payload: MarkerPayload? = null,
+            anchorY: Float = 0.5f,
+        ) {
+            live += key
+            val position = LatLng(lat, lng)
+            val existing = markers[key]
+            if (existing == null) {
+                val created = aMap.addMarker(
+                    MarkerOptions()
+                        .position(position)
+                        .icon(descriptorFor(icon))
+                        .anchor(0.5f, anchorY)
+                        .zIndex(zIndex),
+                )
+                if (created != null) {
+                    // 再显式设一次 zIndex：`MarkerOptions.zIndex` 在某些版本上不生效，
+                    // 补一次没有成本（2026-11-18 用户报「P 图标遮住车辆数量图标」时的兜底）
+                    created.zIndex = zIndex
+                    created.setObject(payload)
+                    markers[key] = created
+                    icons[key] = icon
+                }
+            } else {
+                if (existing.position != position) existing.position = position
+                if (icons[key] !== icon) {
+                    existing.setIcon(descriptorFor(icon))
+                    icons[key] = icon
+                }
+                if (existing.zIndex != zIndex) existing.zIndex = zIndex
+                if (existing.`object` != payload) existing.setObject(payload)
             }
         }
-        inputs.zones.parkSpots.forEach { spot ->
-            if (spot.outline.size >= 3) {
-                addPolygon(spot.outline, colors.spotFill, colors.spotStroke, 1.5f, Z_SPOT)
-            }
-            addMarker(
+
+        inputs.zones.parkSpots.forEachIndexed { index, spot ->
+            // 还车点没有稳定 id，用下标做 key：同一次查询里顺序固定，够用
+            marker(
+                key = "spot:$index",
                 lat = spot.lat,
                 lng = spot.lng,
                 icon = bitmaps.spotBadge(colors),
@@ -534,7 +703,8 @@ private class AmapLayers(
         // 车辆：聚合圈 / 逐辆图标
         if (inputs.byBike) {
             inputs.bikes.forEach { bike ->
-                addMarker(
+                marker(
+                    key = "bike:" + bike.carNum,
                     lat = bike.lat,
                     lng = bike.lng,
                     icon = bitmaps.bike(bike, colors),
@@ -542,7 +712,8 @@ private class AmapLayers(
                     payload = MarkerPayload.Bike(bike.carNum),
                 )
                 if (bike.carNum == inputs.selectedBikeCarNum) {
-                    addMarker(
+                    marker(
+                        key = "sel:" + bike.carNum,
                         lat = bike.lat,
                         lng = bike.lng,
                         icon = bitmaps.bikeSelection(colors),
@@ -552,7 +723,8 @@ private class AmapLayers(
             }
         } else {
             inputs.clusters.forEach { cluster ->
-                addMarker(
+                marker(
+                    key = "cluster:" + cluster.key,
                     lat = cluster.lat,
                     lng = cluster.lng,
                     icon = bitmaps.cluster(cluster, cluster.key == inputs.selectedKey, colors),
@@ -563,7 +735,8 @@ private class AmapLayers(
         }
         // 识别高亮：画在车标之上、我的车之下
         inputs.highlightPoint?.let { point ->
-            addMarker(
+            marker(
+                key = "hl",
                 lat = point.lat,
                 lng = point.lng,
                 icon = bitmaps.highlight(inputs.highlightLabel, colors),
@@ -573,13 +746,95 @@ private class AmapLayers(
         }
         // 当前用车
         inputs.ridePoint?.let { point ->
-            addMarker(
+            marker(
+                key = "ride",
                 lat = point.lat,
                 lng = point.lng,
                 icon = bitmaps.ride(colors),
                 zIndex = Z_RIDE,
                 payload = MarkerPayload.Ride,
             )
+        }
+
+        // 这批数据里不再出现的，才真的删掉
+        markers.keys.filter { it !in live }.forEach { stale ->
+            markers.remove(stale)?.remove()
+            icons.remove(stale)
+        }
+        refreshSpotBadges()
+    }
+
+    /**
+     * 围栏 / 禁停区 / 还车点范围三层多边形。**输入没变就整段跳过**（见 [polygonsKey]）。
+     *
+     * 顺序（也是 zIndex）：围栏在最底层（背景信息，盖住任何一辆车都是本末倒置），
+     * 禁停区其次，还车点范围在车辆之下——与官方 zIndex 同序（服务区 < 禁停 < 还车点 < 车）。
+     */
+    private fun drawPolygons(inputs: MapOverlayInputs, colors: BikeMarkerColors) {
+        val key = PolygonsKey(
+            fence = inputs.showCampusFence && BikeNearby.CAMPUS_FENCE.size >= 3,
+            nogo = inputs.zones.nogoZones,
+            spots = inputs.zones.parkSpots.map { it.outline },
+            fills = listOf(
+                colors.fenceFill,
+                colors.fenceStroke,
+                colors.nogoFill,
+                colors.nogoStroke,
+                colors.spotFill,
+                colors.spotStroke,
+            ),
+        )
+        if (key == polygonsKey) return
+        polygons.forEach { it.remove() }
+        polygons.clear()
+
+        // 「只看本校」关掉时不画（2026-11-18 用户要求：连校区描边一起隐藏）
+        if (key.fence) {
+            addPolygon(BikeNearby.CAMPUS_FENCE, colors.fenceFill, colors.fenceStroke, 2f, Z_FENCE)
+        }
+        inputs.zones.nogoZones.forEach { outline ->
+            if (outline.size >= 3) {
+                addPolygon(outline, colors.nogoFill, colors.nogoStroke, 1f, Z_NOGO)
+            }
+        }
+        inputs.zones.parkSpots.forEach { spot ->
+            if (spot.outline.size >= 3) {
+                addPolygon(spot.outline, colors.spotFill, colors.spotStroke, 1.5f, Z_SPOT)
+            }
+        }
+        polygonsKey = key
+    }
+
+    /**
+     * 「P」还车点图标避让（2026-11-18 用户报「点击后 P 图标遮住车辆数量图标」）。
+     *
+     * 数字才是用户要找的东西，P 只是背景提示：P 与聚合圈 / 车标挤在一起时把 P 收起来。
+     * 判据是**屏幕距离**（跟着缩放走），不是经纬度——同一对标记在 z16 和 z19 下的间距差十倍。
+     *
+     * 由 [rebuild] 与「相机停稳」两处驱动：数据没变但缩放变了，重叠关系也会变。
+     * 顺带把被收起的 P 从命中测试里一起摘掉（`isVisible=false` 的 Marker 不会被点到）。
+     */
+    fun refreshSpotBadges() {
+        if (markers.isEmpty()) return
+        val projection = runCatching { aMap.projection }.getOrNull() ?: return
+        val suppressPx = SPOT_BADGE_SUPPRESS_DP * density
+        val occupied = ArrayList<Point>(markers.size)
+        markers.forEach { (key, marker) ->
+            if (key.startsWith(SPOT_KEY_PREFIX)) return@forEach
+            // 只有「可点」的标记才值得让位：选中圈 / 高亮 chip 也是装饰
+            if (marker.`object` !is MarkerPayload) return@forEach
+            val point = runCatching { projection.toScreenLocation(marker.position) }.getOrNull()
+                ?: return@forEach
+            occupied += point
+        }
+        markers.forEach { (key, marker) ->
+            if (!key.startsWith(SPOT_KEY_PREFIX)) return@forEach
+            val point = runCatching { projection.toScreenLocation(marker.position) }.getOrNull()
+                ?: return@forEach
+            val covered = occupied.any {
+                hypot((it.x - point.x).toFloat(), (it.y - point.y).toFloat()) <= suppressPx
+            }
+            if (marker.isVisible == covered) marker.isVisible = !covered
         }
     }
 
@@ -607,7 +862,7 @@ private class AmapLayers(
         val marker = userMarker ?: aMap.addMarker(
             MarkerOptions()
                 .position(latLng)
-                .icon(BitmapDescriptorFactory.fromBitmap(bitmaps.user(colors)))
+                .icon(descriptorFor(bitmaps.user(colors)))
                 .anchor(0.5f, 0.5f)
                 .zIndex(Z_USER),
         ).also { userMarker = it }
@@ -635,23 +890,45 @@ private class AmapLayers(
         }
     }
 
-    private fun addMarker(
-        lat: Double,
-        lng: Double,
-        icon: android.graphics.Bitmap,
-        zIndex: Float,
-        payload: MarkerPayload? = null,
-        anchorY: Float = 0.5f,
-    ) {
-        val marker = aMap.addMarker(
-            MarkerOptions()
-                .position(LatLng(lat, lng))
-                .icon(BitmapDescriptorFactory.fromBitmap(icon))
-                .anchor(0.5f, anchorY)
-                .zIndex(zIndex),
-        )
-        marker?.setObject(payload)
-        marker?.let { dynamic.add(it) }
+    private fun descriptorFor(bitmap: Bitmap): BitmapDescriptor =
+        descriptors.getOrPut(bitmap) { BitmapDescriptorFactory.fromBitmap(bitmap) }
+
+    /**
+     * 按**手指屏幕坐标**判命中了哪个「可点」标记（挂了 [MarkerPayload] 的那些：聚合圈 / 车 /
+     * 我的车），只认**图标自己盖住手指**的情况。
+     *
+     * 用途见 `AmapMapView` 里的点击监听：高德**没有**「这个 Marker 不参与命中」的开关，而
+     * 「P」还车点必须不接点击。P 被点中时用这个函数重算一遍——命中就转发（选中圈挡住自己
+     * 车标那种情况靠它），没命中就什么都不做。
+     *
+     * 半径按各类图标自己的半径给（[hitRadiusDp]），**不要放大**：P 与聚合圈通常只隔十几 dp，
+     * 半径一大，点 P 就会打开旁边的数字。
+     */
+    fun clickTargetAt(screenX: Float, screenY: Float): MarkerPayload? {
+        val projection = runCatching { aMap.projection }.getOrNull() ?: return null
+        var best: MarkerPayload? = null
+        var bestDistance = Float.MAX_VALUE
+        markers.values.forEach { marker ->
+            val payload = marker.`object` as? MarkerPayload ?: return@forEach
+            val point = runCatching { projection.toScreenLocation(marker.position) }.getOrNull()
+                ?: return@forEach
+            val distance = hypot((point.x - screenX), (point.y - screenY))
+            if (distance <= hitRadiusPx(payload) && distance < bestDistance) {
+                bestDistance = distance
+                best = payload
+            }
+        }
+        return best
+    }
+
+    /** 各类可点标记的命中半径（px）：取图标位图的一半，与 [AmapMarkerBitmaps] 的尺寸对齐。 */
+    private fun hitRadiusPx(payload: MarkerPayload): Float = when (payload) {
+        // 聚合圈：12dp 圆 + 2dp 描边
+        is MarkerPayload.Cluster -> 15f * density
+        // 车标：24dp 图标
+        is MarkerPayload.Bike -> 12f * density
+        // 当前用车：42dp 图标
+        MarkerPayload.Ride -> 21f * density
     }
 
     private fun addPolygon(
@@ -667,7 +944,7 @@ private class AmapLayers(
             .strokeWidth(strokeWidthDp)
             .zIndex(zIndex)
         points.forEach { options.add(LatLng(it.lat, it.lng)) }
-        aMap.addPolygon(options)?.let { dynamic.add(it) }
+        aMap.addPolygon(options)?.let { polygons.add(it) }
     }
 
     private fun withAlpha(color: Int, factor: Float): Int {
@@ -675,7 +952,24 @@ private class AmapLayers(
         return Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
     }
 
+    /** 多边形那一层的输入指纹（见 [polygonsKey]）：任一项变了才重画。 */
+    private data class PolygonsKey(
+        val fence: Boolean,
+        val nogo: List<List<GcjPoint>>,
+        val spots: List<List<GcjPoint>>,
+        val fills: List<Int>,
+    )
+
     private companion object {
+        /** 还车点图标的 key 前缀（见 [rebuild]）。 */
+        const val SPOT_KEY_PREFIX = "spot:"
+
+        /**
+         * P 图标给数字让位的屏幕距离（dp）：聚合圈半径 15dp + P 半宽 8.5dp 再留一点余量。
+         * **别放大**：放大到几十 dp 会让整片还车点的 P 都不见了。
+         */
+        const val SPOT_BADGE_SUPPRESS_DP = 24f
+
         const val Z_FENCE = 1f
         const val Z_NOGO = 2f
         const val Z_SPOT = 3f

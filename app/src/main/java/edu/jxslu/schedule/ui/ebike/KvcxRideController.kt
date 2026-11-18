@@ -399,6 +399,15 @@ class KvcxRideController internal constructor(
      * 同步跑完；生产用 [UNLOCK_SYNC_INTERVAL_MS]（官方同款 1.5 秒节奏）。
      */
     private val unlockSyncIntervalMs: Long = UNLOCK_SYNC_INTERVAL_MS,
+    /**
+     * 建单成功的一次性回调（「猜你想用」订单信号，DESIGN §4.51，2026-11-17）。
+     *
+     * 为什么放在编排层而不是页面：建单有「确认成功」与「订单已建、开锁未确认」两条路，
+     * 页面只看到最终状态，分不清哪一次是新订单。这里在动作入口记住 `hadRide`，
+     * 只有**之前没有在案订单**时才回调——重试开锁不会把同一单记第二遍。
+     * 默认空实现：JVM 单测注入假 session 时不碰 Graph。
+     */
+    private val onOrderCreated: () -> Unit = {},
 ) {
 
     private val _state = MutableStateFlow(KvcxRideState())
@@ -581,6 +590,9 @@ class KvcxRideController internal constructor(
     fun unlock(carNum: String, sendUnlock: Boolean = false) = run(
         if (sendUnlock) KvcxAction.DIRECT_UNLOCK else KvcxAction.UNLOCK,
     ) { session ->
+        // 本动作开始时有没有在案订单：「猜你想用」只在**新单**上记一次，
+        // 重试开锁 / 已有订单再点不会重复计数（见 onOrderCreated 的 KDoc）
+        val hadRide = _state.value.ride != null
         // 结算卡上的「重新使用该车」也走这条两段式开启，但它多一层时序：刚还掉的订单与
         // 刚建的新单都在服务端异步落账，建单成功后的几秒里点解锁 / 锁车 / 还车容易撞在
         // 这段上（用户报「点了没反应」）。所以这一条即使没发解锁指令也照挂 3 秒冷却。
@@ -637,6 +649,8 @@ class KvcxRideController internal constructor(
                 }
                 // 成功触感也立即发：它属于"开锁成功"这一刻，不该被善后拖后
                 unlocked()
+                // 「猜你想用」：建单成功 = 一次真实订单（不是打开骑行页；重试不重复）
+                if (!hadRide) onOrderCreated()
                 // 免费计时与开锁**同步**：本机开锁是服务端确认的骑行
                 // 开始（比"点扫一扫"这个准备动作强得多），提醒开关关着就顺手打开——
                 // 倒计时通知因此跟着开锁一起来。开关在「快趣出行设置」里可见、可随时关掉。
@@ -686,6 +700,8 @@ class KvcxRideController internal constructor(
                         returnSummaryAt = 0L,
                     )
                 }
+                // 「猜你想用」：订单已建（只是开锁未确认），同样算一次真实订单
+                if (!hadRide) onOrderCreated()
                 notice(
                     if (sendUnlock) {
                         "订单已创建但未确认开锁；可点「重试开锁」，或到快趣小程序核对"

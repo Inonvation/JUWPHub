@@ -260,6 +260,28 @@
 - 胖乖 / U净 的入口弹窗同理从侧栏打开（`WaterEntrySheet` / `UjingEntrySheet`），
   与今日页曾经的口径一致：取快递开 `ui/common/ShortcutSheet`。
 
+## 猜你想用（2026-11-17，DESIGN §3.33 / §4.51）
+
+- 位置：收件箱列表**正上方**。正常内容在 `TodayContent` 的 `item(key = "guess")`（`active-services`
+  与 `inbox` 之间）；空态在 `TodayEmptyContent` 的 `bottomContent` 里、`InboxTodayCard` 之上。
+  **不要**塞进收件箱卡内部，它推荐的是功能入口，不是一条消息。加载态不出卡；无候选整项不渲染。
+- **习惯只认真实订单**：胖乖确认出水、快趣建单、趣智开阀、U净下单受理、问渠报名成功，
+  各记一条 `GuessUsage`。打开页面 / 弹层**不记**（上一版设计已作废）；卡片自身也不会训练模型。
+  唯一写入口是 `Graph.recordGuessOrder`，别在页面 / 导航处另写。
+- 五个记录点别挪：`WaterViewModel` 的 `sessionRegistered` 块、`KvcxRideController.unlock` 的
+  `Unlocked` / `Unconfirmed`（动作开始时无在案订单才算新单）、`QzxyViewModel` 的 `Outcome.Opened`、
+  `UjingViewModel.createAndPay` 的 `createOrder` 成功之后、`WenquRepository.patchAfterApply`
+  （`recordUsage = true`；平台回「已报名」的重复提交传 false）。
+- 上课 / 下课信号**对 7 天生效**：周末有课同样推荐快趣（30 分钟内上课 / 20 分钟内下课，下课先判）。
+  别在信号前加 `dayOfWeek <= 5` 的闸。
+- 平日时段表、周末先验、周日中午 11:00–13:00 问渠、证据门槛 / 权重 / 上限全在
+  `domain/GuessYouWant.kt` 的常量里；改口径只动那里，别在 UI 或 prefs 里写第二份。
+- 抽样**每 30 分钟槽一次**：`GuessPickStabilizer` 的 key = `日期|槽|上课信号类型`；tick、
+  订单落库、页面返回都不换卡。开关关闭时 `reset()`；关 → 开由 store 清空习惯 JSON。
+- 不按在案服务过滤、不按登录态隐藏、不做「换一个」；弹层 ViewModel 缺失时退回整页。
+- 验证：`domain/GuessYouWantTest`（时段边界、7 天信号、周末、门槛、概率、稳定器）
+  + `data/GuessUsageCodecTest`（坏数据只丢单条）+ `KvcxRideControllerTest`（建单只记一次）。
+
 ## 课程配色
 
 - 课程配色不按课程名哈希取（12 桶内必然撞色），走 `ScheduleCalculator.colorIndexesBySortedName` / `nextColorIndex`。

@@ -32,6 +32,7 @@ import edu.jxslu.schedule.domain.QzxySessionLink
 import edu.jxslu.schedule.domain.QzxySign
 import edu.jxslu.schedule.domain.QzxyWatering
 import edu.jxslu.schedule.domain.QzxyWateringFormat
+import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.SubpageScreen
@@ -1165,6 +1166,8 @@ class QzxyViewModel(
                         preDeductMilli = preDeductMoney,
                     ),
                 )
+                // 「猜你想用」：开阀成功 = 一次真实订单（与打开趣智页无关）
+                Graph.recordGuessOrder(GuessTarget.QZXY)
                 // 桌面趣智开水卡立刻切「用水中」（本地镜像，零网络）
                 pushWaterWidget()
                 // 成功也收掉自动修复弹窗：重试走通时它就是最后一步。

@@ -118,6 +118,40 @@ class KvcxZonesTest {
     }
 
     @Test
+    fun `顶点过多的轮廓在解析层就被抽稀`() {
+        // 运营方画的多边形顶点数没有上限；高德每次移图都要逐顶点重投影（见 PolygonSimplify），
+        // 所以上限在解析层统一收口，两个渲染引擎都吃这一份
+        val dense = (0 until 120).joinToString(",") { index ->
+            val angle = 2 * Math.PI * index / 120
+            val lat = 28.685 + 0.001 * kotlin.math.sin(angle)
+            val lng = 116.025 + 0.001 * kotlin.math.cos(angle)
+            """{"lat":$lat,"lng":$lng}"""
+        }
+        val json = """
+            {"resultCode":1,"errorCode":0,"result":{
+              "givecarList":[
+                {"lat":28.685,"lng":116.025,"name":"东门","scopeArray":[$dense]}
+              ],
+              "nogoZoneList":[{"scopeArray":[$dense]}]
+            }}
+        """.trimIndent()
+
+        val zones = KvcxZones.parse(json)
+
+        assertEquals(1, zones.parkSpots.size)
+        assertTrue(
+            "还车点轮廓 ${zones.parkSpots[0].outline.size} 个顶点，没压到 16 以内",
+            zones.parkSpots[0].outline.size <= 16,
+        )
+        assertTrue("抽稀后不足三点就画不出来", zones.parkSpots[0].outline.size >= 3)
+        assertEquals(1, zones.nogoZones.size)
+        assertTrue(
+            "禁停区轮廓 ${zones.nogoZones[0].size} 个顶点，没压到 40 以内",
+            zones.nogoZones[0].size <= 40,
+        )
+    }
+
+    @Test
     fun `空结果与坏 JSON 都回空图层`() {
         assertTrue(KvcxZones.parse("""{"resultCode":1,"errorCode":0,"result":{"givecarList":[],"nogoZoneList":[]}}""").isEmpty)
         assertTrue(KvcxZones.parse("""{"resultCode":0,"errorCode":500,"resultMsg":"x"}""").isEmpty)

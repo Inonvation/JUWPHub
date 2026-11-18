@@ -194,11 +194,12 @@ object BikeNearby {
      * 2026-09-29 从 700 收到 **450**（用户口径：「稍微减小视图刷新的范围，现在太多了有点卡」）。
      * 2026-10-29 再收到 **400** 并改为**按视口缩放**（用户口径：「范围适当减小一点；地图放大了
      * 范围跟着视图比例同步缩小，避免视界之外的位置也被刷新」）：实际半径 =
-     * `min(400, 视口半对角线 × 0.45)`、下限 [SAMPLE_RADIUS_MIN_METERS]。z17 默认视野约
+     * `min(上限, 视口半对角线 × 0.45)`、下限 [SAMPLE_RADIUS_MIN_METERS]。z17 默认视野约
      * 1.1×1.7 公里（半对角线 ~1 公里）算出来贴着上限；放大到只看一条路时半径跟着缩到 150，
-     * 不再去查视界之外的几百米。**别放大回去**。
+     * 不再去查视界之外的几百米。2026-11-18 收到 **350**（用户口径「车辆刷新范围适当减小到
+     * 合适范围大小」）。**别放大回去**。
      */
-    const val SAMPLE_RADIUS_METERS = 400.0
+    const val SAMPLE_RADIUS_METERS = 350.0
 
     /** 采样环半径下限（米）：放大到最大档也不小于它，否则中心那一个点查不到什么。 */
     const val SAMPLE_RADIUS_MIN_METERS = 150.0
@@ -210,10 +211,49 @@ object BikeNearby {
      * 展示距离上限（米）。多点采样会把更远的车也捞回来，那些不算"附近"，不进列表。
      *
      * 2026-09-29 从 2000 收到 **1200**（与采样环一起收，理由同上）。2026-10-29 再收到
-     * **1000**（用户口径「范围过大可能卡顿」）：校园围栏对角线约 1.4 公里，站在校园中心
-     * 到四个角约 980 米——1000 仍然覆盖全校，只是不再收拢一百多米外的邻校/校外车。
+     * **1000**（用户口径「范围过大可能卡顿」）。2026-11-18 收到 **800**（用户口径「地图车辆
+     * 刷新范围适当减小到合适范围大小内」）：校园对角约 1.4 公里，800 米覆盖日常活动区，
+     * 不再把四角与邻校边缘整片收进来。**别放大回去**。
      */
-    const val MAX_NEARBY_DISTANCE_METERS = 1000
+    const val MAX_NEARBY_DISTANCE_METERS = 800
+
+    /**
+     * **缩小视图**的判定线（缩放级别，2026-11-18 用户口径）：整座校区都能看见时
+     * （z < 16.5，1080 宽屏上是约 1.6 公里视野），不再做撒点环 + 大桩补全那套大范围刷新
+     * ——那一次要发 5~13 个请求去凑一屏聚合数字，而用户这时是在看方位、不是找某辆车。
+     * 这一档只查中心一页（1 个请求），展示上限也收小到
+     * [ZOOMED_OUT_MAX_DISTANCE_METERS]；放大回 [ZOOMED_OUT_QUERY_ZOOM] 以上再按正常范围查。
+     *
+     * 16.5 与旧的「撒 8 个方位点」判定线同值：那条旧口径已作废（更小的缩放不再发更多请求，
+     * 反而只发 1 个）。
+     */
+    const val ZOOMED_OUT_QUERY_ZOOM = 16.5
+
+    /**
+     * 缩小视图时的展示距离上限（米）：只留中心查询回来的那一小片，避免地图上几十个聚合圈
+     * 同时重排、也避免用户误以为"缩得越小查到的车越多"。
+     */
+    const val ZOOMED_OUT_MAX_DISTANCE_METERS = 600
+
+    /**
+     * 当前缩放是否属于「整座校区都看得见」的缩小视图（[ZOOMED_OUT_QUERY_ZOOM]）。
+     *
+     * 非有限值一律按"不是"处理：缩放还没量到时按正常范围查，宁可多查一圈也别首帧只查中心。
+     */
+    fun isZoomedOut(zoom: Double): Boolean = zoom.isFinite() && zoom < ZOOMED_OUT_QUERY_ZOOM
+
+    /**
+     * 当前这批结果该按多远筛（纯函数，单测锁定）。
+     *
+     * 三个上限各自服务一种场景，别合并：缩小视图 [ZOOMED_OUT_MAX_DISTANCE_METERS] 最紧
+     * （大范围刷新已停，只画中心附近）；「按车辆」[BIKE_MODE_MAX_DISTANCE_METERS] 次之
+     * （逐辆画图标时范围大了又密又慢）；聚合模式 [MAX_NEARBY_DISTANCE_METERS] 最宽。
+     */
+    fun displayMaxDistanceMeters(byBike: Boolean, zoomedOut: Boolean): Int = when {
+        zoomedOut -> ZOOMED_OUT_MAX_DISTANCE_METERS
+        byBike -> BIKE_MODE_MAX_DISTANCE_METERS
+        else -> MAX_NEARBY_DISTANCE_METERS
+    }
 
     /**
      * 「按车辆」模式的采样半径上限（米，2026-10-30 用户口径「按车辆显示刷新范围和请求可以
@@ -224,7 +264,7 @@ object BikeNearby {
 
     /**
      * 「按车辆」模式的展示距离上限（米）：与采样半径配套收小，列表与地图只留眼前这一片。
-     * 聚合模式仍用 [MAX_NEARBY_DISTANCE_METERS]（1000 米，覆盖全校）。
+     * 聚合模式仍用 [MAX_NEARBY_DISTANCE_METERS]（800 米，覆盖日常活动区）。
      */
     const val BIKE_MODE_MAX_DISTANCE_METERS = 500
 
@@ -441,8 +481,8 @@ object BikeNearby {
      * （[sampleRadiusMeters]，2026-10-29）——放大到只看一条路时，环跟着缩，视界之外不再查。
      * 「大桩补全」也用这条（半径 = 桩的半跨度，见 `BikeMapViewModel.fillBigSpot`）。
      *
-     * [ringCount] 由调用方按缩放给（2026-10-01，见 `BikeMapViewModel.ringSampleCount`）：
-     * 默认校区尺度只撒 4 个对角点（请求数 9 → 5），缩得更小才用 8 个。
+     * [ringCount] 由调用方给：**生产查询固定 4 个对角点**（`BikeMapViewModel.RING_SAMPLE_POINTS`，
+     * 请求数 9 → 5；更小的缩放整档走缩小视图的轻量查询，不撒点）；「大桩补全」也传 4。
      * **别传 0**：z17 在纬度 28.7° 下的视野约 1.1×1.7 公里，比采样环还大，只查中心
      * 会让地图上只剩中心一小片有车。
      */

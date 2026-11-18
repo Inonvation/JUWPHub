@@ -7,6 +7,10 @@ import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.domain.Course
+import edu.jxslu.schedule.domain.GuessPick
+import edu.jxslu.schedule.domain.GuessPickStabilizer
+import edu.jxslu.schedule.domain.GuessRules
+import edu.jxslu.schedule.domain.GuessSource
 import edu.jxslu.schedule.domain.LocalTimeLike
 import edu.jxslu.schedule.domain.PendingHomework
 import edu.jxslu.schedule.domain.PendingHomework.Companion.EMPTY
@@ -36,6 +40,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
+import kotlin.random.Random
 
 /**
  * 今日页 ViewModel。
@@ -235,6 +241,67 @@ class TodayViewModel(
         val courses: List<Course>,
         val overrides: List<ScheduleOverride>,
     )
+
+    /**
+     * 「猜你想用」的槽内稳定器（DESIGN §4.51）：key = `日期|槽|上课信号类型`。
+     * 页面每 30 秒 tick、订单落库也会让习惯流重新发射；稳定器保证这两类变化都不换卡。
+     */
+    private val guessStabilizer = GuessPickStabilizer()
+
+    /**
+     * 今日页「猜你想用」推荐（DESIGN §4.51）。
+     *
+     * 输入：今日课表状态（判断 30 分钟内上课 / 20 分钟内下课）、功能开关、近 60 天订单事件、
+     * 30 秒 tick（让时段边界与倒计时在页面停留期间也跟上）。
+     *
+     * 三步：
+     * 1. 开关关 / 页面还在加载 → 清缓存、不出卡；
+     * 2. 上课信号一票决定快趣（周末有课同样生效）；
+     * 3. 其余走 [GuessRules.decide] 的时段表 / 周末先验 / 习惯权重，**每个 30 分钟槽只抽一次**。
+     *
+     * 上课信号的分钟数每 tick 用实时值覆盖（缓存里存的是抽样时的旧值，不能直接上屏）。
+     */
+    val guessPick: StateFlow<GuessPick?> = combine(
+        uiState,
+        repo.guessYouWantEnabled,
+        repo.guessUsage,
+        tick,
+    ) { state, enabled, usages, _ ->
+        if (state.loading || !enabled) {
+            guessStabilizer.reset()
+            return@combine null
+        }
+        val now = nowProvider()
+        val minuteOfDay = now.hour * 60 + now.minute
+        val signal = GuessRules.classSignal(
+            hasOngoing = state.ongoing != null,
+            minutesToOngoingEnd = state.minutesToOngoingEnd,
+            hasNext = state.next != null,
+            minutesToNext = state.minutesToNext,
+        )
+        val slot = GuessRules.slotOf(minuteOfDay)
+        val key = "${now.toLocalDate()}|$slot|${signal?.kind?.name ?: "none"}"
+        val stable = guessStabilizer.resolve(key) {
+            GuessRules.decide(
+                dayOfWeek = now.dayOfWeek.value,
+                minuteOfDay = minuteOfDay,
+                signal = signal,
+                usages = usages,
+                nowMillis = now.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                roll = Random.nextDouble(),
+            )
+        }
+        // 上课信号的倒计时必须跟实时状态走；其余来源没有分钟数
+        stable?.copy(
+            minutes = if (stable.source == GuessSource.CLASS_START ||
+                stable.source == GuessSource.CLASS_END
+            ) {
+                signal?.minutes
+            } else {
+                null
+            },
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
      * 今日页校园卡付款码卡开关（DESIGN §3.10）。默认关（涉及凭证与资金），

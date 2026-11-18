@@ -124,6 +124,7 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
         FirstFrame(
             prefs = repo.displayPrefs.first(),
             weatherEnabled = repo.weatherEnabled.first(),
+            guessYouWantEnabled = repo.guessYouWantEnabled.first(),
         )
     }
 
@@ -181,6 +182,18 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
             viewModelScope,
             SharingStarted.Eagerly,
             firstFrame.weatherEnabled,
+        )
+
+    /**
+     * 今日页「猜你想用」开关（DESIGN §4.51）。**默认开**，单独一条流——理由同天气开关：
+     * `baseDisplayPrefs` 的 combine 已满员。首帧取 [firstFrame] 的同一次阻塞读，
+     * 外观与交互页的开关不会先按默认值渲染再跳一次。
+     */
+    val guessYouWantEnabled: StateFlow<Boolean> = repo.guessYouWantEnabled
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            firstFrame.guessYouWantEnabled,
         )
 
     // 2026-11-06：这里原有 `strongReminderVibration` 的 StateFlow（一次 runBlocking 读
@@ -470,6 +483,13 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
      */
     fun setWeatherEnabled(value: Boolean) = viewModelScope.launch { repo.setWeatherEnabled(value) }
 
+    /**
+     * 今日页「猜你想用」开关（DESIGN §4.51）。关 → 开时 store 会同时清空习惯数据；
+     * 页面侧负责给一句「已清空」提示。
+     */
+    fun setGuessYouWantEnabled(value: Boolean) =
+        viewModelScope.launch { repo.setGuessYouWantEnabled(value) }
+
 
     fun setShowNonCurrentWeek(value: Boolean) =
         viewModelScope.launch { repo.setShowNonCurrentWeek(value) }
@@ -572,6 +592,7 @@ private data class TargetConfig(
 private data class FirstFrame(
     val prefs: DisplayPrefs,
     val weatherEnabled: Boolean,
+    val guessYouWantEnabled: Boolean,
 )
 
 fun meFactory(context: Context) = MeViewModel.Factory(Graph.repository(context))

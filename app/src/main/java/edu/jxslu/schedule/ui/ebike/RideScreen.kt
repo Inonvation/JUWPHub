@@ -95,6 +95,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlin.math.roundToInt
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ChevronDown
@@ -861,6 +862,12 @@ fun RideScreen(
                 viewModel.clampPanelHeight(MIN_PANEL_HEIGHT_DP, maxPanelDp)
             }
             val panelHeight = state.panelHeightDp.coerceIn(MIN_PANEL_HEIGHT_DP, maxPanelDp).dp
+    /**
+     * 高德版权标识的底边距（px）：地图整体上移了 (面板 + 底部块) / 2，logo 跟着上移同样的量，
+     * 再加 6dp 余量就能落在面板上沿之上（见 [AmapMapView.logoBottomMarginPx]）。
+     */
+    val mapLogoBottomMarginPx =
+        (((panelHeight.value + liveBlockDp) / 2f + 6f) * density).toInt()
 
             // 地图在上、面板与动作区在下。地图视图**尺寸恒定**（= 整个可用区），让位全靠
             // 整幅平移 + 裁切：可见区 = 地图层减去被面板 + 底部块盖住的那段，把地图按这段的
@@ -907,6 +914,9 @@ fun RideScreen(
                         highlightLng = state.highlightedCar?.lng,
                         highlightLabel = state.highlightedCar?.carNum
                             ?.let { "车 " + EbikeQr.chipLabel(it) },
+                        // 校区描边跟着「只看本校」走：关掉筛选时地图上也不留自家校区的蓝框
+                        // （2026-11-18 用户要求）
+                        showCampusFence = state.onlyOurCampus,
                         zones = state.zones,
                         colors = markerColors,
                         camera = state.camera,
@@ -932,6 +942,7 @@ fun RideScreen(
                         // 自动到我位置」）：地图每次进入都新建，靠一次性的 camera 请求不可靠，
                         // 干脆第一帧就落在人身上。没有新鲜定位时留 null，回落到校区中心。
                         initialCenter = initialMapCenter,
+                        logoBottomMarginPx = mapLogoBottomMarginPx,
                         // 面板高度与底部块高度一变，就把整幅地图按两者之和的一半向上平移
                         // （见上面那段的注释）：只动图层、不 resize 视图，地图内容不跳、瓦片不重绘。
                         modifier = Modifier
@@ -939,7 +950,12 @@ fun RideScreen(
                             .graphicsLayer {
                                 // 整幅上移「被面板 + 底部块盖住的那段」的一半：视图中心落回
                                 // 可见区中心。视图尺寸恒定（见上面那段），只动图层、不 resize
-                                translationY = -(panelHeight.toPx() + liveBlockDp.dp.toPx()) / 2f
+                                // **取整到整像素**（2026-11-18 拖动卡顿）：面板高度是用户拖出来的
+                                // 任意 dp，除以 2 之后几乎总是小数。高德的底图是 SurfaceView
+                                // （独立图层，由 SurfaceFlinger 定位），半像素偏移会让它落不到
+                                // 整像素上，合成时多一道重采样，拖动就跟着不跟手。
+                                translationY = -((panelHeight.toPx() + liveBlockDp.dp.toPx()) / 2f)
+                                    .roundToInt().toFloat()
                             },
                     )
 

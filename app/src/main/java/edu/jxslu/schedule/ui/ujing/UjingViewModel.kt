@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.SessionExpiryStore
 import edu.jxslu.schedule.data.ujing.UjingAlipay
@@ -19,6 +20,9 @@ import edu.jxslu.schedule.data.ujing.UjingSessionExpiredException
 import edu.jxslu.schedule.data.ujing.UjingStore
 import edu.jxslu.schedule.data.ujing.UjingWashModel
 import edu.jxslu.schedule.domain.UjingState
+import edu.jxslu.schedule.domain.GuessTarget
+import edu.jxslu.schedule.ui.common.NoticeFeedback
+import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.reminder.UjingDoneReminder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -129,9 +133,13 @@ class UjingViewModel(
     private var boardJob: Job? = null
     private var boardGeneration = 0
 
-    /** 一次性提示（Snackbar）。 */
-    private val _events = Channel<String>(Channel.BUFFERED)
-    val events: Flow<String> = _events.receiveAsFlow()
+    /**
+     * 一次性提示（Snackbar）。**带语气**：U净 这条通道里成功（登录 / 支付 / 启动 / 取消）
+     * 与失败、待用户处理的话各占一档，UI 只按 [NoticeFeedback.tone] 选图标与强调色
+     * （2026-11-16 修：此前一律 Warning，启动成功的勾成了警告三角，看着像出错）。
+     */
+    private val _events = Channel<NoticeFeedback>(Channel.BUFFERED)
+    val events: Flow<NoticeFeedback> = _events.receiveAsFlow()
 
     /** 一次性导航：扫码识别成功 → 跳独立下单页。 */
     private val _openOrder = Channel<Unit>(Channel.BUFFERED)
@@ -225,7 +233,7 @@ class UjingViewModel(
     fun sendCode() {
         val state = _uiState.value
         if (!MOBILE_PATTERN.matches(state.mobile)) {
-            notify("请输入 11 位手机号")
+            notify("请输入 11 位手机号", NoticeTone.Warning)
             return
         }
         if (state.codeSending) return
@@ -240,11 +248,11 @@ class UjingViewModel(
                     _uiState.update {
                         it.copy(codeSending = false, codeSentAt = System.currentTimeMillis())
                     }
-                    notify("验证码已发送")
+                    notify("验证码已发送", NoticeTone.Success)
                 }
                 .onFailure { error ->
                     _uiState.update { it.copy(codeSending = false) }
-                    notify(error.message ?: "验证码发送失败，请稍后再试")
+                    notify(error.message ?: "验证码发送失败，请稍后再试", NoticeTone.Error)
                 }
         }
     }
@@ -252,11 +260,11 @@ class UjingViewModel(
     fun login() {
         val state = _uiState.value
         if (!MOBILE_PATTERN.matches(state.mobile)) {
-            notify("请输入 11 位手机号")
+            notify("请输入 11 位手机号", NoticeTone.Warning)
             return
         }
         if (state.captcha.isBlank()) {
-            notify("请输入短信验证码")
+            notify("请输入短信验证码", NoticeTone.Warning)
             return
         }
         if (state.loggingIn) return
@@ -266,11 +274,11 @@ class UjingViewModel(
                 .onSuccess {
                     // 看板重拉与订单对表由 loggedIn 收集器统一接（登录态一变就发）
                     _uiState.update { it.copy(loggingIn = false, captcha = "") }
-                    notify("登录成功")
+                    notify("登录成功", NoticeTone.Success)
                 }
                 .onFailure { error ->
                     _uiState.update { it.copy(loggingIn = false) }
-                    notify(error.message ?: "登录失败，请检查验证码")
+                    notify(error.message ?: "登录失败，请检查验证码", NoticeTone.Error)
                 }
         }
     }
@@ -278,7 +286,7 @@ class UjingViewModel(
     fun logout() {
         repo.logout()
         UjingDoneReminder.cancel(appContext)
-        notify("已退出登录")
+        notify("已退出登录", NoticeTone.Info)
     }
 
     // ── 空闲看板 ──
@@ -386,7 +394,7 @@ class UjingViewModel(
                 .onFailure { error ->
                     handleFailure(error)
                     _uiState.update { it.copy(pickerLoading = false) }
-                    notify(error.message ?: "附近洗衣房获取失败，请稍后再试")
+                    notify(error.message ?: "附近洗衣房获取失败，请稍后再试", NoticeTone.Error)
                 }
         }
     }
@@ -399,7 +407,7 @@ class UjingViewModel(
         val id = store.id ?: return
         houseStore.add(UjingHouse(storeId = id, name = store.name))
         _uiState.update { it.copy(houses = houseStore.list()) }
-        notify("已添加「${store.name}」")
+        notify("已添加「${store.name}」", NoticeTone.Success)
         refreshBoard()
     }
 
@@ -417,7 +425,7 @@ class UjingViewModel(
         if (!repo.loggedIn.value) {
             // 留着原文：登录成功后自动接着识别（见 init 里的 loggedIn 收集器）
             pendingScan = raw to System.currentTimeMillis()
-            notify("识别洗衣机需要先登录 U净（手机号 + 短信验证码）")
+            notify("识别洗衣机需要先登录 U净（手机号 + 短信验证码）", NoticeTone.Warning)
             return
         }
         pendingScan = null
@@ -490,7 +498,7 @@ class UjingViewModel(
                             addDisinfectant = selection.addDisinfectant,
                         )
                     } else {
-                        notify("已有进行中的订单，请先完成或取消")
+                        notify("已有进行中的订单，请先完成或取消", NoticeTone.Warning)
                     }
                 }
                 .onFailure { error ->
@@ -498,7 +506,7 @@ class UjingViewModel(
                     handleFailure(error)
                     // 会话过期的提示已由 handleFailure 发过，别叠第二条
                     if (error !is UjingSessionExpiredException) {
-                        notify(error.message ?: "订单状态获取失败，请稍后重试")
+                        notify(error.message ?: "订单状态获取失败，请稍后重试", NoticeTone.Error)
                     }
                 }
         }
@@ -532,9 +540,11 @@ class UjingViewModel(
             val snapshot = created.getOrElse { error ->
                 handleFailure(error)
                 _uiState.update { it.copy(orderBusy = false) }
-                notify(error.message ?: "下单失败，请稍后重试")
+                notify(error.message ?: "下单失败，请稍后重试", NoticeTone.Error)
                 return@launch
             }
+            // 「猜你想用」：下单受理 = 一次真实订单（支付重试不会再走 createOrder，不会重复）
+            Graph.recordGuessOrder(GuessTarget.UJING)
             val paid = runCatching {
                 // 下单即拉支付参数（2 分钟独占期宝贵，少一次用户等待）
                 repo.paymentOrderInfo(snapshot.orderId)
@@ -543,14 +553,14 @@ class UjingViewModel(
                 onSuccess = { orderInfo ->
                     _uiState.update { it.copy(orderBusy = false, order = snapshot) }
                     draftStore.close()
-                    notify("下单成功，请在 2 分钟内完成支付")
+                    notify("下单成功，请在 2 分钟内完成支付", NoticeTone.Success)
                     launchPay(snapshot.orderId, orderInfo)
                 },
                 onFailure = { error ->
                     handleFailure(error)
                     _uiState.update { it.copy(orderBusy = false, order = snapshot) }
                     draftStore.close()
-                    notify(error.message ?: "下单成功，但支付参数获取失败，可在订单卡重试支付")
+                    notify(error.message ?: "下单成功，但支付参数获取失败，可在订单卡重试支付", NoticeTone.Warning)
                 },
             )
         }
@@ -560,7 +570,7 @@ class UjingViewModel(
     private fun launchPay(orderId: String, orderInfo: String) {
         val activity = payActivityProvider()
         if (activity == null) {
-            notify("无法拉起支付宝，请在订单卡上重试支付")
+            notify("无法拉起支付宝，请在订单卡上重试支付", NoticeTone.Error)
             return
         }
         // paying 态：SDK 阻塞在支付宝界面/收银台的整个窗口里，订单卡动作不该照常可点
@@ -571,7 +581,7 @@ class UjingViewModel(
             _uiState.update { it.copy(paying = false) }
             when (outcome) {
                 UjingAlipay.Outcome.Success -> {
-                    notify("支付成功")
+                    notify("支付成功", NoticeTone.Success)
                     runCatching { repo.confirmPayment(orderId) }
                         .onFailure { handleFailure(it) }
                 }
@@ -581,24 +591,24 @@ class UjingViewModel(
                     val settled = runCatching { repo.confirmPayment(orderId) }
                     settled.fold(
                         onSuccess = { snapshot ->
-                            if (snapshot.paid) notify("支付成功")
-                            else notify("支付确认中，请稍后在订单卡刷新查看")
+                            if (snapshot.paid) notify("支付成功", NoticeTone.Success)
+                            else notify("支付确认中，请稍后在订单卡刷新查看", NoticeTone.Info)
                         },
                         onFailure = { error ->
                             handleFailure(error)
                             // 双查也失败：快照停在 paid=false，订单卡停在「去支付」且没有
                             // 自动恢复（轮询只在页面可见时跑）——补一次对表兜底
                             runCatching { repo.refreshOrder(orderId) }.onFailure { handleFailure(it) }
-                            notify("支付确认中，请稍后在订单卡刷新查看")
+                            notify("支付确认中，请稍后在订单卡刷新查看", NoticeTone.Info)
                         },
                     )
                 }
                 UjingAlipay.Outcome.Canceled -> {
-                    notify("已取消支付，订单保留 2 分钟，可在订单卡重试")
+                    notify("已取消支付，订单保留 2 分钟，可在订单卡重试", NoticeTone.Warning)
                     runCatching { repo.refreshOrder(orderId) }.onFailure { handleFailure(it) }
                 }
                 UjingAlipay.Outcome.Failed -> {
-                    notify("支付失败（$memo），可在订单卡重试")
+                    notify("支付失败（$memo），可在订单卡重试", NoticeTone.Error)
                     runCatching { repo.refreshOrder(orderId) }.onFailure { handleFailure(it) }
                 }
             }
@@ -619,7 +629,7 @@ class UjingViewModel(
                 .onFailure { error ->
                     handleFailure(error)
                     _uiState.update { it.copy(orderBusy = false) }
-                    notify(error.message ?: "支付参数获取失败")
+                    notify(error.message ?: "支付参数获取失败", NoticeTone.Error)
                 }
         }
     }
@@ -662,7 +672,7 @@ class UjingViewModel(
                     handleFailure(error)
                     _uiState.update { it.copy(orderBusy = false) }
                     // 轮询失败静默（单次失败不值得打扰，下一轮 15 秒就重试）；手动刷新才报错
-                    if (!silent) notify(error.message ?: "订单状态获取失败")
+                    if (!silent) notify(error.message ?: "订单状态获取失败", NoticeTone.Error)
                 }
         }
     }
@@ -672,7 +682,7 @@ class UjingViewModel(
         val order = _uiState.value.order ?: return
         if (orderChainBusy) return
         if (!UjingState.canCancel(order.status)) {
-            notify("当前状态不可取消（机器已锁定，等它跑完即可）")
+            notify("当前状态不可取消（机器已锁定，等它跑完即可）", NoticeTone.Warning)
             return
         }
         _uiState.update { it.copy(orderBusy = true) }
@@ -681,12 +691,12 @@ class UjingViewModel(
                 .onSuccess {
                     _uiState.update { it.copy(orderBusy = false) }
                     UjingDoneReminder.cancel(appContext)
-                    notify("订单已取消，机器已释放")
+                    notify("订单已取消，机器已释放", NoticeTone.Success)
                 }
                 .onFailure { error ->
                     handleFailure(error)
                     _uiState.update { it.copy(orderBusy = false) }
-                    notify(error.message ?: "取消失败，请刷新订单状态后重试")
+                    notify(error.message ?: "取消失败，请刷新订单状态后重试", NoticeTone.Error)
                 }
         }
     }
@@ -696,7 +706,7 @@ class UjingViewModel(
         val order = _uiState.value.order ?: return
         if (orderChainBusy) return
         if (!UjingState.canStart(order.status)) {
-            notify("当前状态不可启动")
+            notify("当前状态不可启动", NoticeTone.Warning)
             return
         }
         _uiState.update { it.copy(orderBusy = true) }
@@ -704,13 +714,17 @@ class UjingViewModel(
             runCatching { repo.startOrder(order.orderId) }
                 .onSuccess {
                     _uiState.update { it.copy(orderBusy = false) }
-                    notify("启动指令已受理")
+                    // 文案口径（2026-11-16 用户反馈）：受理判定是「服务端已接下指令」（code==0 或
+                    // 1703+errorCode==0，见 UjingState.commandAccepted），对用户就是启动这一步成了；
+                    // 原来那句「启动指令已受理」像系统日志，还配警告图标，读着像出错。机器真正转起来
+                    // 由随后 refreshOrder 的状态行呈现，所以这里补一句「留意机器是否运转」而不是断言已转。
+                    notify("启动成功，请留意洗衣机是否开始运转", NoticeTone.Success)
                     refreshOrder(order.orderId)
                 }
                 .onFailure { error ->
                     handleFailure(error)
                     _uiState.update { it.copy(orderBusy = false) }
-                    notify(error.message ?: "启动失败，请刷新订单状态后重试")
+                    notify(error.message ?: "启动失败，请刷新订单状态后重试", NoticeTone.Error)
                 }
         }
     }
@@ -734,12 +748,16 @@ class UjingViewModel(
     private fun handleFailure(error: Throwable) {
         if (error is UjingSessionExpiredException) {
             repo.markExpired()
-            notify(SessionExpiryStore.NOTICE_TEXT)
+            notify(SessionExpiryStore.NOTICE_TEXT, NoticeTone.Warning)
         }
     }
 
-    private fun notify(message: String) {
-        _events.trySend(message)
+    /**
+     * 一次性提示的唯一出口。[tone] **故意不给默认值**：新加一条提示必须当场决定语气，
+     * 免得又退回「这条通道一律 Warning」那种成功顶着警告三角的观感（2026-11-16）。
+     */
+    private fun notify(message: String, tone: NoticeTone) {
+        _events.trySend(NoticeFeedback(message, tone))
     }
 
     class Factory(

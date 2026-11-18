@@ -19,6 +19,8 @@ import edu.jxslu.schedule.domain.CarDetailResult
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.KvcxZones
 import edu.jxslu.schedule.domain.NearbyBike
+import edu.jxslu.schedule.domain.NearbyBikeCache
+import edu.jxslu.schedule.domain.NearbyBikeCacheEntry
 import edu.jxslu.schedule.domain.NearbyParseResult
 import edu.jxslu.schedule.domain.ZoneCache
 import edu.jxslu.schedule.domain.ZoneCacheEntry
@@ -44,6 +46,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 /**
  * 一次「把镜头移过去」的请求。
@@ -157,11 +160,20 @@ data class BikeMapUiState(
     /**
      * 过滤后（未封顶）的车辆列表，按距离升序：**「按车辆」模式的唯一数据源**。
      *
-     * 与 [clusters] 同一批输入（同一套筛选 + 1200/1000 米展示上限），只是不做聚簇、
+     * 与 [clusters] 同一批输入（同一套筛选 + 800 米展示上限，缩小视图 600 米），只是不做聚簇、
      * 也不吃 [MAX_CLUSTER_COUNT] 封顶——按车辆看就是要把这一带的车都摆出来。
      * 聚合模式不用它（地图与列表都走 [clusters]），所以只在 [byBike] 时被消费。
      */
     val bikes: List<NearbyBike> = emptyList(),
+    /**
+     * 当前这批结果来自**缩小视图的轻量查询**（2026-11-18）：地图缩到整座校区都看得见时
+     * 只查中心一页、不再撒点（见 [BikeNearby.isZoomedOut]），展示范围也收小到
+     * [BikeNearby.ZOOMED_OUT_MAX_DISTANCE_METERS]。
+     *
+     * 它是**这批数据的口径**，不是当前地图的缩放：拖动 / 缩放改了范围要等下一次查询落地才翻，
+     * 列表与地图才始终说同一件事。UI 只拿它解释"为什么缩小时只有中心附近的车"。
+     */
+    val zoomedOut: Boolean = false,
     /**
      * 需要在列表里定位过去的停车点；[focusNonce] 递增用来区分"又点了一次同一个点"。
      *
@@ -398,6 +410,9 @@ class BikeMapViewModel(
         debounceJob?.cancel()
         queryJob?.cancel()
         zoneJob?.cancel()
+        // 写动作会改车辆可用性（开锁后这辆车已在骑、还车后才回到桩上）：旧结果不能再被
+        // 平移回来时复用（2026-11-18）
+        nearbyCache = emptyList()
         _uiState.update { it.copy(loading = false) }
     }
 
@@ -413,7 +428,17 @@ class BikeMapViewModel(
     private var pendingZoom = BikeNearby.DEFAULT_ZOOM
     private var lastAttemptLat: Double? = null
     private var lastAttemptLng: Double? = null
+    /** 上一次真正发出查询时的缩放（2026-11-18）：原地缩放也要能触发重查，见 [movedEnough]。 */
+    private var lastAttemptZoom: Double? = null
     private var cameraNonce = 0L
+
+    /**
+     * 附近车辆的短缓存（[NearbyBikeCache]，随本页面会话存活）：拖开又拖回同一片时不再发请求。
+     *
+     * 只有拖动停手那条路吃它（[scheduleQuery] 的 `useCache`）；「刷新」按钮、写动作与
+     * 还车后的补查都会清空（见 [cancelQueriesForRideAction] / [refresh] / [refreshNearUser]）。
+     */
+    private var nearbyCache: List<NearbyBikeCacheEntry> = emptyList()
 
     /**
      * 最近一次量到的视口半对角线（米；0 = 还没量到）。采样环半径按它缩放
@@ -553,9 +578,10 @@ class BikeMapViewModel(
      * 「刷新」就是用户要看最新的意思）。
      */
     fun refresh() {
-        // 大桩补全的缓存一并作废：手动刷新要看最新的，不能吃 60 秒内的旧快照
+        // 大桩补全与附近车辆的缓存一并作废：手动刷新要看最新的，不能吃几十秒内的旧快照
         spotFills.clear()
-        scheduleQuery(immediate = true, forceZones = true)
+        nearbyCache = emptyList()
+        scheduleQuery(immediate = true, forceZones = true, useCache = false)
     }
 
     /**
@@ -584,7 +610,9 @@ class BikeMapViewModel(
         // 查询中心跟着人走：之后「继续找车」/ 8 秒自动收尾那次 refresh() 也查这一片
         pendingLat = lat
         pendingLng = lng
-        scheduleQuery(immediate = true)
+        // 刚还的车状态变了，这一查必须走网络，不能吃平移缓存
+        nearbyCache = emptyList()
+        scheduleQuery(immediate = true, useCache = false)
     }
 
     /** 取定位期间置位，让按钮有个"在做事"的样子。 */
@@ -1112,12 +1140,12 @@ class BikeMapViewModel(
         } else {
             fetched
         }
-        // 「按车辆」模式的展示范围更小（500 米，2026-10-30 用户口径「范围少一点避免卡顿」）
-        val maxDistance = if (state.byBike) {
-            BikeNearby.BIKE_MODE_MAX_DISTANCE_METERS
-        } else {
-            BikeNearby.MAX_NEARBY_DISTANCE_METERS
-        }
+        // 展示范围（2026-11-18 收小，见 BikeNearby.displayMaxDistanceMeters）：缩小视图最紧
+        // （大范围撒点已停，只留中心附近），「按车辆」次之，聚合模式最宽。
+        val maxDistance = BikeNearby.displayMaxDistanceMeters(
+            byBike = state.byBike,
+            zoomedOut = state.zoomedOut,
+        )
         val shown = anchored
             // 撒点采样会把上限外的车也捞回来，那些不算"附近"
             .filter { it.distanceMeters <= maxDistance }
@@ -1180,15 +1208,35 @@ class BikeMapViewModel(
      *
      * [immediate] = 跳过等待与 30 米位移闸门（进页 / 定位成功 / 回到校区 / 刷新按钮）。
      * 拖动走的那条（[onMapSettled]）已经由 View 层确认"地图停了"，这里只留
-     * [QUERY_CONFIRM_MS] 合并收尾事件，再按 30 米闸门判断要不要真发。
+     * [QUERY_CONFIRM_MS] 合并收尾事件，再按 30 米位移 + 缩放变化判断要不要真发。
+     *
+     * [useCache] = 允许吃附近车辆的 30 秒内存缓存（2026-11-18）：只有拖动停手这条路用，
+     * 「刷新」按钮与写动作后的重查都关掉——用户明确要最新时不能拿旧快照顶替。
      */
-    private fun scheduleQuery(immediate: Boolean, forceZones: Boolean = false) {
+    private fun scheduleQuery(
+        immediate: Boolean,
+        forceZones: Boolean = false,
+        useCache: Boolean = true,
+    ) {
         debounceJob?.cancel()
         debounceJob = viewModelScope.launch {
             if (!immediate) delay(QUERY_CONFIRM_MS)
             val lat = pendingLat
             val lng = pendingLng
-            if (!immediate && !movedEnough(lat, lng)) return@launch
+            val zoom = pendingZoom
+            if (!immediate && !movedEnough(lat, lng, zoom)) return@launch
+            val cached = if (useCache) {
+                cachedNearby(lat, lng, BikeNearby.isZoomedOut(zoom))
+            } else {
+                null
+            }
+            if (cached != null) {
+                // 命中缓存也要掐掉上一笔在飞的查询（与 [startQuery] 同一条纪律）：用户拖回
+                // 旧视野时，上一笔别的区域的响应晚到会把刚摆上的这批盖掉
+                queryJob?.cancel()
+                applyCachedNearby(cached, lat, lng, forceZones)
+                return@launch
+            }
             startQuery(lat, lng, forceZones)
         }
     }
@@ -1205,17 +1253,92 @@ class BikeMapViewModel(
         queryJob = viewModelScope.launch { query(lat, lng, forceZones) }
     }
 
-    /** 与上次**尝试过**的中心点比，位移是否够大。从没查过一律算够。 */
-    private fun movedEnough(lat: Double, lng: Double): Boolean {
+    /**
+     * 与上次**尝试过**的中心点 / 缩放比，要不要真发一次查询。从没查过一律算够。
+     *
+     * 缩放也算（2026-11-18）：原地放大 / 缩小虽然中心没动，但该查的范围变了——放大回来
+     * 要把大范围那批车补上，缩到整座校区可见则改成只查中心一页。判据两条：**跨过
+     * 缩小视图线无条件查**，同一档里变化 ≥ [ZOOM_REQUERY_STEP] 级才查（捏合过程里每一小步
+     * 都发请求没有意义）。
+     */
+    private fun movedEnough(lat: Double, lng: Double, zoom: Double): Boolean {
         val lastLat = lastAttemptLat ?: return true
         val lastLng = lastAttemptLng ?: return true
-        return BikeNearby.distanceMeters(lastLat, lastLng, lat, lng) >=
+        if (BikeNearby.distanceMeters(lastLat, lastLng, lat, lng) >=
             BikeNearby.MIN_REQUERY_SHIFT_METERS
+        ) {
+            return true
+        }
+        val lastZoom = lastAttemptZoom ?: return true
+        if (BikeNearby.isZoomedOut(lastZoom) != BikeNearby.isZoomedOut(zoom)) return true
+        return abs(zoom - lastZoom) >= ZOOM_REQUERY_STEP
+    }
+
+    /** 覆盖这个点的新鲜结果（见 [NearbyBikeCache]）；口径（缩小视图与否）必须一致。 */
+    private fun cachedNearby(
+        lat: Double,
+        lng: Double,
+        zoomedOut: Boolean,
+    ): NearbyBikeCacheEntry? =
+        NearbyBikeCache.bestCovering(nearbyCache, lat, lng, System.currentTimeMillis(), zoomedOut)
+
+    /**
+     * 用上一批结果落地：车辆接口一个请求都不发，图层照旧走它自己的落盘缓存 / 网络。
+     * 落地走 [applyResult] 同一条路（参照点、聚簇、待定位车都由它统一处理）。
+     *
+     * [lat] / [lng] 是**这次请求的中心**（与缓存中心最多差 [NearbyBikeCache.COVER_RADIUS_METERS]）：
+     * 按它落状态，距离与「距中心」才对应现在看到的这一片；缓存条目的时间仍按原查询时刻记。
+     */
+    private suspend fun applyCachedNearby(
+        entry: NearbyBikeCacheEntry,
+        lat: Double,
+        lng: Double,
+        forceZones: Boolean,
+    ) {
+        fetchZones(lat, lng, forceZones)
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "缓存命中（${entry.bikes.size} 条 · 缩小视图=${entry.zoomedOut}）")
+        }
+        applyResult(
+            lat = lat,
+            lng = lng,
+            bikes = entry.bikes,
+            stillLoading = false,
+            zoom = pendingZoom,
+            zoomedOut = entry.zoomedOut,
+            updatedAtMillis = entry.fetchedAt,
+        )
+        // 缓存命中也补齐图层编排（与正常查询同一套）：本次会话第一次查询若曾把图层请求挂在
+        // 「还没有车当上下文」上，这里趁 fetched 已就位补发；换校区时也用这片的车号纠正
+        flushPendingZone()
+        reloadZonesForSite(lat, lng, entry.bikes)
+    }
+
+    /** 记一条结果供下一次平移复用（只在内存，见 [NearbyBikeCache]）。 */
+    private fun rememberNearby(
+        lat: Double,
+        lng: Double,
+        bikes: List<NearbyBike>,
+        zoomedOut: Boolean,
+    ) {
+        nearbyCache = NearbyBikeCache.put(
+            nearbyCache,
+            NearbyBikeCacheEntry(
+                lat = lat,
+                lng = lng,
+                fetchedAt = System.currentTimeMillis(),
+                bikes = bikes,
+                zoomedOut = zoomedOut,
+            ),
+        )
     }
 
     private suspend fun query(lat: Double, lng: Double, forceZones: Boolean) {
         // 两段耗时只在 debug 打：量「松手 → 首屏落地」与「→ 撒点合并落地」，用法见 rules/ebike.md
         val startedAt = SystemClock.elapsedRealtime()
+        // 缩放**开工时定一次**：查询期间用户可能又捏了一下，这批结果该按开工时那个范围解释
+        val zoom = pendingZoom
+        val zoomedOut = BikeNearby.isZoomedOut(zoom)
         _uiState.update { it.copy(loading = true, failure = null) }
         // 图层与车辆列表**并行**发（2026-09-28）：它只需要坐标与一个"哪类车"的上下文，
         // 车号用上一次那批车里的任意一辆即可——旧写法等中心结果回来才发，白多一个往返
@@ -1230,11 +1353,11 @@ class BikeMapViewModel(
             when (parsed) {
                 is NearbyParseResult.Ok -> parsed.bikes
                 NearbyParseResult.ServiceError -> {
-                    failQuery(lat, lng, BikeFailure.Service)
+                    failQuery(lat, lng, BikeFailure.Service, zoom)
                     return
                 }
                 NearbyParseResult.Malformed -> {
-                    failQuery(lat, lng, BikeFailure.Malformed)
+                    failQuery(lat, lng, BikeFailure.Malformed, zoom)
                     return
                 }
             }
@@ -1242,7 +1365,7 @@ class BikeMapViewModel(
             // 取消要原样抛出去：吞掉它会让协程的取消变成一次"查询失败"，页面留下假错误
             throw cancel
         } catch (error: Exception) {
-            failQuery(lat, lng, KqcxBikeClient.classify(error))
+            failQuery(lat, lng, KqcxBikeClient.classify(error), zoom)
             return
         }
 
@@ -1250,15 +1373,31 @@ class BikeMapViewModel(
         val sampling = centerBikes.size >= SAMPLE_PAGE_SIZE
         // 记视野。写完这一次就够了，不需要在退出时再写一遍。
         // 不占关键路径：DataStore 写入是磁盘事务，压在两批请求之间只是白等它
-        val zoomForViewport = pendingZoom
-        viewModelScope.launch { prefs.setEbikeMapViewport(lat, lng, zoomForViewport) }
+        viewModelScope.launch { prefs.setEbikeMapViewport(lat, lng, zoom) }
         // 没有车当上下文时（本次会话第一次查询）在这里补发一次图层
         flushPendingZone()
         // 换校区了（比如从本校拖到隔壁师大）：图层要用这一带的车号重拉，官方同口径
         reloadZonesForSite(lat, lng, centerBikes)
 
+        // 缩小视图（2026-11-18 用户要求）：整座校区都在屏幕里时，用户是在看方位、不是找车，
+        // 不再撒点 + 补全（那一次要 5~13 个请求），只留中心这一页、展示范围也收小。
+        // 放大回来会因缩放变化触发一次正常查询（见 [movedEnough]），大范围那批车会补上。
+        if (zoomedOut) {
+            applyResult(lat, lng, centerBikes, stillLoading = false, zoom = zoom)
+            rememberNearby(lat, lng, centerBikes, zoomedOut = true)
+            if (BuildConfig.DEBUG) {
+                Log.d(
+                    TAG,
+                    "落地 +${SystemClock.elapsedRealtime() - startedAt}ms" +
+                        "（缩小视图中心 ${centerBikes.size} 条 · z${"%.1f".format(zoom)}）",
+                )
+            }
+            return
+        }
+
         if (!sampling) {
-            applyResult(lat, lng, centerBikes, stillLoading = false)
+            applyResult(lat, lng, centerBikes, stillLoading = false, zoom = zoom)
+            rememberNearby(lat, lng, centerBikes, zoomedOut = false)
             if (BuildConfig.DEBUG) {
                 Log.d(TAG, "落地 +${SystemClock.elapsedRealtime() - startedAt}ms（${centerBikes.size} 条）")
             }
@@ -1273,10 +1412,11 @@ class BikeMapViewModel(
         // 环半径按视口缩放（[BikeNearby.sampleRadiusMeters]）：放大到只看一条路时不再查
         // 视界之外的几百米（2026-10-29 用户口径「范围跟着视图比例缩小」）。
         // 「按车辆」模式上限更小（250 米，见 [BikeNearby.BIKE_MODE_SAMPLE_RADIUS_METERS]）。
+        //
+        // 采样点固定 4 个（2026-11-18）：更小的缩放已经走上面的缩小视图分支（只查中心），
+        // 原来的「z < 16.5 撒 8 个方位」不再有可达区间，一并删掉——少 4 个请求。
         val byBike = _uiState.value.byBike
-        // 「按车辆」模式固定 4 个采样点：环半径只有 250 米，缩得很小时再撒 8 个方位
-        // 纯属多发 4 个请求（2026-10-30 用户口径「请求少一点」）
-        val ring = if (byBike) 4 else ringSampleCount(pendingZoom)
+        val ring = RING_SAMPLE_POINTS
         val radius = BikeNearby.sampleRadiusMeters(viewportHalfDiagonalMeters, byBike = byBike)
         val (ringBikes, fillBikes) = coroutineScope {
             val ringJob = async { mergeSamples(lat, lng, centerBikes, ring, radius) }
@@ -1288,27 +1428,17 @@ class BikeMapViewModel(
             ringJob.await() to (fillJob?.await().orEmpty())
         }
         val merged = BikeNearby.mergeBikes(ringBikes, fillBikes)
-        applyResult(lat, lng, merged, stillLoading = false)
+        applyResult(lat, lng, merged, stillLoading = false, zoom = zoom)
+        rememberNearby(lat, lng, merged, zoomedOut = false)
         if (BuildConfig.DEBUG) {
             Log.d(
                 TAG,
                 "落地 +${SystemClock.elapsedRealtime() - startedAt}ms" +
                     "（中心 ${centerBikes.size} → 合并 ${ringBikes.size} → 补全 ${merged.size} 条" +
-                    " · 环 $ring 点 · 半径 ${radius.toInt()} 米 · z${"%.1f".format(pendingZoom)}）",
+                    " · 环 $ring 点 · 半径 ${radius.toInt()} 米 · z${"%.1f".format(zoom)}）",
             )
         }
     }
-
-    /**
-     * 采样环上的点数按缩放给（2026-10-01）。
-     *
-     * 默认的校区尺度（z ≥ [RING_SAMPLE_ZOOM]）撒 **4** 个对角点，请求数从 9 砍到 5；
-     * 缩得更小、一屏看得更远时才用 8 个方位。
-     *
-     * **别改成 0**：z17 在纬度 28.7° 下的视野约 1.1×1.7 公里，比采样环（≤400 米）还大，
-     * 只查中心会让地图上只剩中心一小片有车。
-     */
-    private fun ringSampleCount(zoom: Double): Int = if (zoom >= RING_SAMPLE_ZOOM) 4 else 8
 
     /**
      * 拉还车点 / 禁停区图层。[fetched] 里挑第一辆车当 `carNum` 上下文——没有车就不发请求
@@ -1466,12 +1596,19 @@ class BikeMapViewModel(
      *
      * [stillLoading] = true 用于撒点在飞的中间态：列表已经可用，头部留着进度圈。
      * 聚簇与排序（最多一百多辆车）放 Default：它跟解析一样压在同一帧上。
+     *
+     * [zoom] 是**这批查询开工时的缩放**：结果口径（[BikeMapUiState.zoomedOut]）与下一次
+     * 「要不要重查」的缩放闸门都用它，不用落地那一刻的 `pendingZoom`（查询期间用户又捏了
+     * 一下的话，那已经不是这批数据的口径了）。
      */
     private suspend fun applyResult(
         lat: Double,
         lng: Double,
         bikes: List<NearbyBike>,
         stillLoading: Boolean,
+        zoom: Double,
+        zoomedOut: Boolean = BikeNearby.isZoomedOut(zoom),
+        updatedAtMillis: Long = System.currentTimeMillis(),
     ) {
         withContext(Dispatchers.Default) {
             fetched = bikes
@@ -1479,6 +1616,7 @@ class BikeMapViewModel(
             fetchedLng = lng
             lastAttemptLat = lat
             lastAttemptLng = lng
+            lastAttemptZoom = zoom
             // 参照点只在**查询落地时**定一次：拖动过程中不翻，列表顺序才稳（2026-09-30 用户反馈）
             val current = _uiState.value
             val userLat = current.userLat
@@ -1490,7 +1628,8 @@ class BikeMapViewModel(
                     loading = stillLoading,
                     queried = true,
                     failure = null,
-                    updatedAtMillis = System.currentTimeMillis(),
+                    zoomedOut = zoomedOut,
+                    updatedAtMillis = updatedAtMillis,
                     anchorLat = if (fromUser) userLat else lat,
                     anchorLng = if (fromUser) userLng else lng,
                     anchorFromUser = fromUser,
@@ -1502,9 +1641,10 @@ class BikeMapViewModel(
         }
     }
 
-    private fun failQuery(lat: Double, lng: Double, failure: BikeFailure) {
+    private fun failQuery(lat: Double, lng: Double, failure: BikeFailure, zoom: Double) {
         lastAttemptLat = lat
         lastAttemptLng = lng
+        lastAttemptZoom = zoom
         // 带车号进页那条路若还卡在「等首查」上，这一轮没查成就等于没结论——自动开锁目标
         // 随之作废（别留一个悬空目标被后面某次成功刷新意外触发；见 `autoUnlockCar`）。
         // `pendingFocusCar` 本身保留：下次查询成功仍照旧定位 / 高亮（那是只读动作）
@@ -1514,7 +1654,8 @@ class BikeMapViewModel(
 
     /**
      * 撒点补齐：中心的结果不够（返回满 20 辆，说明还有更远的没给），
-     * 就在周围各查一次，按车号合并。[ringCount] 由 [ringSampleCount] 按缩放给（4 或 8）；
+     * 就在周围各查一次，按车号合并。[ringCount] 固定为
+     * [RING_SAMPLE_POINTS]（缩小视图不撒点，走 [query] 里的轻量分支）；
      * [radiusMeters] 由 [BikeNearby.sampleRadiusMeters] 按视口给（放大时环跟着缩）。
      *
      * 采样请求并行发，单个点失败只丢这个点——少看到一辆车，总比整页报错强。
@@ -1635,8 +1776,19 @@ class BikeMapViewModel(
          */
         private const val MAX_CLUSTER_COUNT = 24
 
-        /** 低于这个缩放才撒 8 个方位点；否则 4 个（见 [ringSampleCount]）。 */
-        private const val RING_SAMPLE_ZOOM = 16.5
+        /**
+         * 正常查询撒几个采样点（2026-11-18 固定 4）。
+         *
+         * 更小的缩放整档走缩小视图的轻量查询（只查中心，见 `query`），所以这里不再有
+         * 「z < 16.5 撒 8 个方位」那一档。
+         */
+        private const val RING_SAMPLE_POINTS = 4
+
+        /**
+         * 同一档缩放里变化多少级才重查（2026-11-18）。捏合过程会连续触发停手回调，
+         * 每一小步都发请求纯属浪费；0.75 级已是肉眼可见的视野变化。
+         */
+        private const val ZOOM_REQUERY_STEP = 0.75
 
         /**
          * 大桩补全（2026-10-29，见 [fillBigSpot]）的**挑桩**门槛：中心那一页只有 20 条，

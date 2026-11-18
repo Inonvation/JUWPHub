@@ -82,6 +82,8 @@ import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.DormRepairRecord
 import edu.jxslu.schedule.domain.DormRepairRules
 import edu.jxslu.schedule.domain.EbikeUseMode
+import edu.jxslu.schedule.domain.GuessPick
+import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.QuickScanTarget
 import edu.jxslu.schedule.domain.ShortcutSettings
 import edu.jxslu.schedule.domain.TodayState
@@ -195,6 +197,8 @@ fun TodayScreen(
     onOpenWater: () -> Unit = {},
     /** 趣智校园开热水页（DESIGN §4.30）：与胖乖生活并排的半行卡，独立窗口 */
     onOpenQzxy: () -> Unit = {},
+    /** 「猜你想用」推荐问渠：进入问渠 · 志愿服务页（2026-11-17，DESIGN §3.33） */
+    onOpenWenqu: () -> Unit = {},
     /** 趣智校园「诊断与调试」页：开水面板失败态「详情」的出口，带当前设备地址 */
     onOpenQzxyDebug: (String?) -> Unit = {},
     /** 快趣出行 · 骑行页（DESIGN §3.9，SubpageActivity 独立窗口；地图 + 抽屉三态） */
@@ -236,6 +240,8 @@ fun TodayScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
         // 顶栏天气提示（DESIGN §3.29）：功能关着 / 取不到数据时是 null，顶栏不占位
         val weatherLine by viewModel.weatherLine.collectAsStateWithLifecycle()
+    // 「猜你想用」（DESIGN §3.33/§4.51）：每个 30 分钟槽一次的推荐；null = 当前不出卡
+    val guessPick by viewModel.guessPick.collectAsStateWithLifecycle()
     // 开水面板（WaterEntrySheet）的实时状态：弹窗打开时逐帧跟随流程态，
     // 不能用打开瞬间的快照（Working 计时不会动）
     val waterEntryState by waterViewModel?.uiState
@@ -325,6 +331,28 @@ fun TodayScreen(
     // U净 在案订单：打开弹窗时对一次服务端（同生活页原口径，节流窗口内不重复请求）
     var showShortcutSheet by remember { mutableStateOf(false) }
     var showUjingSheet by remember { mutableStateOf(false) }
+
+    // 「猜你想用」点击分发（2026-11-17，DESIGN §3.33）：胖乖 / 趣智 / U净 走现有入口弹窗，
+    // 快趣 / 问渠 进二级页。弹层依赖的 ViewModel 缺失时退回整页——卡片不能点不动。
+    val openGuess: (GuessPick) -> Unit = { pick ->
+        when (pick.target) {
+            GuessTarget.QIEKJ -> if (waterViewModel != null) {
+                showWaterEntrySheet = true
+            } else {
+                onOpenWater()
+            }
+
+            GuessTarget.QZXY -> if (qzxyViewModel != null) {
+                showQzxyEntrySheet = true
+            } else {
+                onOpenQzxy()
+            }
+
+            GuessTarget.UJING -> showUjingSheet = true
+            GuessTarget.KVCX -> onOpenEbike()
+            GuessTarget.WENQU -> onOpenWenqu()
+        }
+    }
     val shortcutSettings by remember(context) { Graph.repository(context).shortcutSettings }
         .collectAsStateWithLifecycle(initialValue = ShortcutSettings())
     // 「其他」分类的展开态（2026-11-01）：默认折叠，与侧栏共用同一个持久化偏好。
@@ -712,6 +740,8 @@ fun TodayScreen(
                         onOpenInbox = onOpenInbox,
                         onOpenRepair = onOpenDormRepair,
                         repair = dormRepair,
+                        guessPick = guessPick,
+                        onOpenGuess = openGuess,
                     )
                 }
 
@@ -723,6 +753,8 @@ fun TodayScreen(
                     onOpenInbox = onOpenInbox,
                     onOpenRepair = onOpenDormRepair,
                     repair = dormRepair,
+                    guessPick = guessPick,
+                    onOpenGuess = openGuess,
                 )
 
                 state.totalCourseCount == 0 -> TodayEmptyContent(
@@ -733,6 +765,8 @@ fun TodayScreen(
                     onOpenInbox = onOpenInbox,
                     onOpenRepair = onOpenDormRepair,
                     repair = dormRepair,
+                    guessPick = guessPick,
+                    onOpenGuess = openGuess,
                 )
 
                 else -> TodayContent(
@@ -744,6 +778,8 @@ fun TodayScreen(
                     onOpenInbox = onOpenInbox,
                     onOpenRepair = onOpenDormRepair,
                     repair = dormRepair,
+                    guessPick = guessPick,
+                    onOpenGuess = openGuess,
                     kvcxRideState = kvcxRideState?.takeIf { kvcxInAppRide && kvcxLoggedIn },
                     // 卡片位置判据（2026-11-12）：**只认同步状态**（快趣单例的 state + 登录态）。
                     // `ebikeUseMode` 是 DataStore 冷流，新组合的第一帧恒是 `Default`（小程序方式，
@@ -985,13 +1021,22 @@ private fun TodayEmptyContent(
     onOpenRepair: () -> Unit = {},
     /** 报修当前该展示的那条（收件箱卡内置顶行）；null = 无可见记录。 */
     repair: DormRepairRecord? = null,
+    /** 「猜你想用」推荐（DESIGN §3.33）；null = 当前时段不出卡。 */
+    guessPick: GuessPick? = null,
+    onOpenGuess: (GuessPick) -> Unit = {},
 ) {
     val bottom: @Composable () -> Unit = {
-        InboxTodayCard(
-            repair = repair,
-            onOpenInbox = onOpenInbox,
-            onOpenRepair = onOpenRepair,
-        )
+        Column {
+            // 推荐卡的落点与正常内容一致：收件箱列表正上方；空态也挂，因为它只依赖时间 / 课程 / 订单
+            guessPick?.let { pick ->
+                GuessYouWantCard(pick = pick, onClick = { onOpenGuess(pick) })
+            }
+            InboxTodayCard(
+                repair = repair,
+                onOpenInbox = onOpenInbox,
+                onOpenRepair = onOpenRepair,
+            )
+        }
     }
     TodayCenteredShell(bottomContent = bottom) {
         EmptyHint(title, body, actionLabel, onAction)
@@ -1010,6 +1055,9 @@ private fun TodayContent(
     onOpenRepair: () -> Unit = {},
     /** 报修当前该展示的那条（收件箱卡内置顶行）；null = 无可见记录。 */
     repair: DormRepairRecord? = null,
+    /** 「猜你想用」推荐（DESIGN §3.33）；null = 当前时段不出卡。 */
+    guessPick: GuessPick? = null,
+    onOpenGuess: (GuessPick) -> Unit = {},
     // ── 进行中服务卡（2026-10-21）：数据在 TodayScreen 收集，卡片按需渲染 ──
     /** 快趣骑行状态（能力闸 + 登录双闸已在调用侧滤过）；null = 行不出现。 */
     kvcxRideState: KvcxRideState? = null,
@@ -1181,6 +1229,18 @@ private fun TodayContent(
             // 位置 = 作业卡与收件箱卡之间（没有在案骑行时）；有骑行时已在课程区之前渲染。
             if (!rideInProgress) {
                 item(key = "active-services") { activeServicesCard(Modifier.animateItem()) }
+            }
+
+            // 「猜你想用」（DESIGN §3.33/§4.51）：收件箱列表**正上方**。
+            // 空档 / 开关关 / 无候选时整个 item 不渲染，不留空隙；跨槽进出场走 animateItem。
+            guessPick?.let { pick ->
+                item(key = "guess") {
+                    GuessYouWantCard(
+                        pick = pick,
+                        onClick = { onOpenGuess(pick) },
+                        modifier = Modifier.animateItem(),
+                    )
+                }
             }
 
             // 收件箱卡（DESIGN §3.24，2026-10-21 收口）：收件箱的唯一展示入口。

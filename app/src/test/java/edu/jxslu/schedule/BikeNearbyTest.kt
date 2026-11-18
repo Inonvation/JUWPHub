@@ -456,7 +456,11 @@ class BikeNearbyTest {
             1e-9,
         )
         // 视口很大（缩得很小）：夹到上限，不再放大
-        assertEquals(400.0, BikeNearby.sampleRadiusMeters(2000.0), 1e-9)
+        assertEquals(
+            BikeNearby.SAMPLE_RADIUS_METERS,
+            BikeNearby.sampleRadiusMeters(2000.0),
+            1e-9,
+        )
         // 放大到视口半对角线 500 米：0.45 倍 = 225
         assertEquals(225.0, BikeNearby.sampleRadiusMeters(500.0), 1e-9)
         // 放到最大档：夹到下限 150
@@ -484,6 +488,39 @@ class BikeNearbyTest {
             BikeNearby.SAMPLE_RADIUS_MIN_METERS,
             BikeNearby.sampleRadiusMeters(100.0, byBike = true),
             1e-9,
+        )
+    }
+
+    @Test
+    fun `缩到整座校区可见时按轻量范围查`() {
+        // 16.5 是"整座校区都看得见"的判定线（2026-11-18 用户要求「整个校区都能被看到时
+        // 不再刷新大范围车辆」）：更小只查中心一页
+        assertTrue(BikeNearby.isZoomedOut(16.49))
+        assertFalse(BikeNearby.isZoomedOut(16.5))
+        assertFalse(BikeNearby.isZoomedOut(BikeNearby.DEFAULT_ZOOM))
+        // 缩放还没量到（非有限）按正常范围查，别在首帧只查中心
+        assertFalse(BikeNearby.isZoomedOut(Double.NaN))
+        assertFalse(BikeNearby.isZoomedOut(Double.POSITIVE_INFINITY))
+        // 展示上限三档：缩小视图最紧、「按车辆」次之、聚合最宽
+        assertEquals(
+            BikeNearby.ZOOMED_OUT_MAX_DISTANCE_METERS,
+            BikeNearby.displayMaxDistanceMeters(byBike = false, zoomedOut = true),
+        )
+        assertEquals(
+            BikeNearby.ZOOMED_OUT_MAX_DISTANCE_METERS,
+            BikeNearby.displayMaxDistanceMeters(byBike = true, zoomedOut = true),
+        )
+        assertEquals(
+            BikeNearby.BIKE_MODE_MAX_DISTANCE_METERS,
+            BikeNearby.displayMaxDistanceMeters(byBike = true, zoomedOut = false),
+        )
+        assertEquals(
+            BikeNearby.MAX_NEARBY_DISTANCE_METERS,
+            BikeNearby.displayMaxDistanceMeters(byBike = false, zoomedOut = false),
+        )
+        // 缩小视图的展示上限必须小于聚合模式，否则"缩小"只是换个方式全量展示
+        assertTrue(
+            BikeNearby.ZOOMED_OUT_MAX_DISTANCE_METERS < BikeNearby.MAX_NEARBY_DISTANCE_METERS,
         )
     }
 

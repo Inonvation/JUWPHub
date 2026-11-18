@@ -18,6 +18,9 @@ import edu.jxslu.schedule.data.local.TimetableEntity
 import edu.jxslu.schedule.data.prefs.DisplayPrefs
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.prefs.ReminderKeyKind
+import edu.jxslu.schedule.data.prefs.guessUsage
+import edu.jxslu.schedule.data.prefs.guessYouWantEnabled
+import edu.jxslu.schedule.data.prefs.setGuessYouWantEnabled
 import edu.jxslu.schedule.domain.AiScheduleConfig
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.courseRemarksCarriedOver
@@ -25,6 +28,7 @@ import edu.jxslu.schedule.domain.CourseFilter
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.domain.ExamMerge
 import edu.jxslu.schedule.domain.ExamMapper.ExamEntry
+import edu.jxslu.schedule.domain.GuessUsage
 import edu.jxslu.schedule.domain.CourseTweaker
 import edu.jxslu.schedule.domain.AppliedEntry
 import edu.jxslu.schedule.domain.ScheduleDiff
@@ -293,9 +297,24 @@ class ScheduleRepository(
      */
     val weatherEnabled: Flow<Boolean> = prefs.weatherEnabled
 
+    /**
+     * 今日页「猜你想用」开关（DESIGN §4.51）。**默认开**，单独一条流——
+     * `baseDisplayPrefs` 的 combine 已满员，不进合并模型；今日页 ViewModel 与设置页各取所需。
+     */
+    val guessYouWantEnabled: Flow<Boolean> = prefs.guessYouWantEnabled
+
+    /**
+     * 「猜你想用」的订单事件（近 60 天，最多 400 条）。只由五个业务成功点写入，
+     * 今日页 ViewModel 只读它算权重；空表 = 还没下过单，时段表照常工作。
+     */
+    val guessUsage: Flow<List<GuessUsage>> = prefs.guessUsage
+
     // ------------------------------------------------------------------
     // 偏好写入：视图偏好写全局 DataStore 键，主题等全局项同层
     // ------------------------------------------------------------------
+
+    /** 今日页「猜你想用」开关（DESIGN §4.51）。关 → 开时由 store 清空习惯数据。 */
+    suspend fun setGuessYouWantEnabled(value: Boolean) = prefs.setGuessYouWantEnabled(value)
 
     // 快捷方式（DESIGN §4.16）：开关与条目列表统一走 store 的 updateShortcuts
     suspend fun setShortcutsEnabled(value: Boolean) = prefs.setShortcutsEnabled(value)

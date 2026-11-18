@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
@@ -318,29 +319,39 @@ private fun OrderReadyContent(
 /** 水温默认档：常温（协议枚举 1，与 [UjingState.temperatureOptions] 同源）。 */
 private const val TEMPERATURE_DEFAULT_ID = 1
 
-/** 设备信息卡：机型 + 状态徽标 + 机号 + 通信模块（点验时看「通信模块」行）。 */
+/**
+ * 设备信息卡：机型 + 状态徽标 + 机号 + 通信模块（点验时看「通信模块」行）。
+ *
+ * **平铺，不再套卡**（2026-11-16）：[SettingsSection] 本身就是一张 tonal 底的卡，里面再套
+ * 一张描边 [AppCard] 是「卡里套卡」——同一块信息出现两层边界，读起来像两张卡叠着
+ * （口径见 `.agents/rules/ui-common.md`「卡片里放列表用平铺行」）。
+ */
 @Composable
 private fun DeviceCard(scan: UjingScanResult, program: UjingProgramData, dryer: Boolean) {
     SettingsSection(title = "设备", subtitle = program.storeName.ifBlank { null }) {
-        AppCard {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    program.deviceTypeName.ifBlank { if (dryer) "烘干机" else "洗衣机" },
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f),
-                )
-                ScanBadgePill(UjingState.scanBadge(scan.createOrderEnabled, scan.status, scan.reason))
-            }
-            program.deviceNo?.takeIf { it.isNotBlank() }?.let { deviceNo ->
-                Text(
-                    "机号 $deviceNo",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                )
-            }
+        Row(
+            modifier = Modifier.padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                program.deviceTypeName.ifBlank { if (dryer) "烘干机" else "洗衣机" },
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            ScanBadgePill(UjingState.scanBadge(scan.createOrderEnabled, scan.status, scan.reason))
+        }
+        program.deviceNo?.takeIf { it.isNotBlank() }?.let { deviceNo ->
+            Text(
+                "机号 $deviceNo",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp),
+            )
         }
         // 通信模块是给点验看的（判蓝牙机型要不要做 BLE），对下单没有意义——降为分区注记
         SettingsNote("通信模块：${UjingState.moduleTypeLabel(scan.moduleType)}")
@@ -626,13 +637,23 @@ private fun OrderActionBar(
                         },
                         label = "ujingOrderSummary",
                     ) { current ->
+                        // 摘要限一行 + 省略（2026-11-16）：原来档位 / 时长 / 价格 / 水温 / 投放
+                        // 五段全塞进来，窄屏折成两行会把动作条顶高、按钮跟着往下走。
+                        // 完整明细本来就在上面的档位卡和确认弹层里，这里只留一眼能比的关键项。
                         Column {
-                            Text(current.title, style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                current.title,
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                             current.detail?.let { detail ->
                                 Text(
                                     detail,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
                         }

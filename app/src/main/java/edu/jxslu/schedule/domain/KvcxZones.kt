@@ -28,6 +28,10 @@ import kotlinx.serialization.json.jsonObject
  * **服务区那层不画**：我们已有手绘的校园围栏（`BikeNearby.CAMPUS_FENCE`，用户对照官方逐边复核过），
  * 语义相同，再叠一层只会两片蓝糊在一起；校园围栏还兼着「只看本校」的过滤，不能拿它替。
  *
+ * **轮廓顶点在进图层之前就压住**（[capped]，2026-11-18）：`scopeArray` 的顶点数没有上限，
+ * 而地图层每次移图都要逐顶点重投影，几百个顶点的多边形会直接拖累拖动帧率。绘制层只管画，
+ * 不必各管一套上限。
+ *
  * 字段一律宽容取值（数值可能给字符串——与 `KqcxAuth` 同一教训）；解析失败回 [EMPTY]：
  * 图层是装饰，少画一层远好过报错打扰。
  */
@@ -75,12 +79,27 @@ data class KvcxZones(
                 )
             }
             val nogo = result.arr("nogoZoneList").mapNotNull { item ->
-                val outline = (item as? JsonObject)?.outline() ?: return@mapNotNull null
-                outline.takeIf { it.size >= 3 }
+                (item as? JsonObject)?.outline()?.takeIf { it.size >= 3 }
             }
-            return KvcxZones(parkSpots = spots, nogoZones = nogo)
+            return KvcxZones(parkSpots = spots, nogoZones = nogo).capped()
         }
     }
+
+    /**
+     * 把轮廓顶点按上限重收一遍（见 [PolygonSimplify]）。
+     *
+     * 两个渲染引擎每帧都要重投影每个顶点，所以顶点数在**进图层之前**统一压住，绘制层不必各管一套。
+     * 解析时收一次（[parse]），缓存读回时再收一次（`ZoneCacheStore`）——磁盘上可能留着旧版本
+     * 写下的几百个顶点的老数据，它不会因为升级就自己变干净。
+     */
+    internal fun capped(): KvcxZones = copy(
+        parkSpots = parkSpots.map { spot ->
+            spot.copy(outline = PolygonSimplify.simplify(spot.outline, MAX_SPOT_OUTLINE_POINTS))
+        },
+        nogoZones = nogoZones
+            .map { PolygonSimplify.simplify(it, MAX_NOGO_OUTLINE_POINTS) }
+            .filter { it.size >= 3 },
+    )
 }
 
 /**
@@ -98,6 +117,17 @@ data class KvcxParkSpot(
     /** 列表里的标题：没有名字时退回通用说法，不留空行。 */
     val displayName: String get() = name.ifBlank { "还车点" }
 }
+
+/**
+ * 还车点轮廓的顶点上限：一个点位的范围就是一小块停车区，16 个顶点足够描出形状。
+ * 上限的理由见 [PolygonSimplify]。
+ */
+private const val MAX_SPOT_OUTLINE_POINTS = 16
+
+/**
+ * 禁停区轮廓的顶点上限：可能是沿路的一条长条，形状比还车点复杂，给宽一点。
+ */
+private const val MAX_NOGO_OUTLINE_POINTS = 40
 
 // ---------- 宽容取值（与 KqcxAuth 同口径，但这里只用得上 Double 与数组） ----------
 
