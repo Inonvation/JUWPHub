@@ -14,6 +14,10 @@ enum class InboxKind {
     SCORE,
     /** 调课检测发现新差异（`ScheduleSync.check`）。 */
     SCHEDULE_CHANGE,
+    /** 学期归档完成（`ScheduleTermImport.archive`，2026-11-19）：历史课表已按学期建好表。 */
+    SCHEDULE_ARCHIVE,
+    /** 新学期课表已出并自动导入（`ScheduleTermImport.probeNextTerm`，2026-11-19）。 */
+    SCHEDULE_NEW_TERM,
     /** 选课轮次开始前 / 截止前的提醒落点（`SelectionAlertReminder`）。 */
     SELECTION_ROUND,
     /** 寝室电费低于提醒线（状态型：回升即消解）。 */
@@ -73,6 +77,15 @@ object InboxKeys {
 
     /** 调课：`schedule|` + [edu.jxslu.schedule.domain.ScheduleDiff.fingerprintOf]。 */
     const val SCHEDULE_PREFIX = "schedule|"
+
+    /**
+     * 学期归档：`schedule|archive|` + 最早学期|最晚学期|学期数。
+     * 带范围是因为「用户删表后重新归档出不同范围」是新事实；同范围重复跑只刷新原消息。
+     */
+    const val SCHEDULE_ARCHIVE_PREFIX = "schedule|archive|"
+
+    /** 新学期课表已出：`schedule|term|` + 学期号。一学期只留一条。 */
+    const val SCHEDULE_TERM_PREFIX = "schedule|term|"
 
     /** 选课轮次：`selection|` + 提醒键（`轮次id|start` / `轮次id|end`，与已发键同源）。 */
     const val SELECTION_PREFIX = "selection|"

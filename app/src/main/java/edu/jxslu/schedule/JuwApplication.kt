@@ -20,6 +20,7 @@ import edu.jxslu.schedule.ui.reminder.ClassReminder
 import edu.jxslu.schedule.ui.reminder.QuietHoursGate
 import edu.jxslu.schedule.ui.reminder.UjingDoneReminder
 import edu.jxslu.schedule.ui.reminder.LoginStateNotifier
+import edu.jxslu.schedule.ui.reminder.ScheduleAlertReminder
 import edu.jxslu.schedule.ui.reminder.ScoreAlertReminder
 import edu.jxslu.schedule.ui.reminder.SelectionAlertReminder
 import edu.jxslu.schedule.ui.reminder.WenquWeeklyAlertReminder
@@ -179,6 +180,40 @@ class JuwApplication : Application() {
                 // AutoSyncRules）。教材非空 / 闸门未到 / 课表没学期号都是零网络的空跑。
                 delay(AutoSyncRules.interRequestDelayMs())
                 runCatching { Graph.textbookSync(this@JuwApplication).backfillIfMissing() }
+            }
+        }
+        // 学期归档与当前课表自动切换（DESIGN §4.17，2026-11-19）：
+        // - 归档：老用户升级后首次冷启动补跑一次（新装用户在引导流程里已跑过），
+        //   成功落标记后再也不跑；失败留 6 小时退避，不每次启动都打一轮教务。
+        // - 当前课表：按日期落在哪个学期自动切换（假期退回教务当前学期那张），
+        //   跨开学日 / 上一轮归档补齐后都要重算。
+        appScope.launch {
+            delay(STARTUP_ARCHIVE_DEFER_MILLIS)
+            runCatching {
+                val prefs = Graph.displayPrefs(this@JuwApplication)
+                val now = System.currentTimeMillis()
+                val done = prefs.scheduleArchiveDoneAt() > 0
+                val cooling = now - prefs.scheduleArchiveAttemptAt() <
+                    edu.jxslu.schedule.data.repo.ScheduleTermImport.ARCHIVE_RETRY_WINDOW_MS
+                if (!done && !cooling) {
+                    val result = Graph.scheduleTermImport(this@JuwApplication).archive(manual = false)
+                    // 老用户升级后的首次归档：导入成功给一条通知（入箱在导入器内部完成）。
+                    // 新装用户走引导结果弹窗，不会到这里第二次。
+                    if (result is edu.jxslu.schedule.data.repo.ScheduleTermImport.Result.Archived &&
+                        result.createdTerms.isNotEmpty()
+                    ) {
+                        ScheduleAlertReminder.notifyArchive(this@JuwApplication, result)
+                    }
+                }
+                // 默认名 → 学期标签（「我的课表」→「大三上」，2026-11-19 用户口径）。
+                // 放在归档闸门之外：归档早就完成的老设备重启一次也会改名；幂等、零网络。
+                Graph.scheduleTermImport(this@JuwApplication).normalizeTimetableNames()
+                Graph.repository(this@JuwApplication).syncCurrentTimetableToDate(
+                    today = java.time.LocalDate.now(),
+                    preferredTerm = prefs.scheduleJwCurrentTerm(),
+                )
+            }.onFailure {
+                CrashReporter.logCoroutine(this@JuwApplication, "scheduleArchive", it)
             }
         }
         // 校历镜像（DESIGN §4.34）：冷启动静默刷一次，7 天闸门在 store 内部——
@@ -348,6 +383,12 @@ private const val ATTACHMENT_SWEEP_INTERVAL_MILLIS = 24L * 60 * 60 * 1000
 private const val STARTUP_CAS_DEFER_MILLIS = 2_000L
 private const val STARTUP_CALENDAR_DEFER_MILLIS = 3_000L
 private const val STARTUP_UPDATE_DEFER_MILLIS = 3_000L
+
+/**
+ * 学期归档的冷启动延迟：排在 CAS 会话与首屏之后。归档要串行抓 10+ 个页面
+ * （每学期理论 + 实验两页），不该和用户点开应用的那一刻抢网络。
+ */
+private const val STARTUP_ARCHIVE_DEFER_MILLIS = 5_000L
 
 /** 更新检查失败退避：网络或镜像源可能长期不可达，失败后一天内不再自动重试。 */
 private const val UPDATE_CHECK_PREFS = "update_check_gate"

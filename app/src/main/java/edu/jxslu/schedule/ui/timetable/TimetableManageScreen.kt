@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.ui.timetable
 
+import android.app.Application
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.repo.ScheduleRepository
+import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.domain.TermNaming
 import edu.jxslu.schedule.domain.Timetable
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
@@ -73,29 +76,55 @@ import me.rerere.hugeicons.stroke.Delete02
 import me.rerere.hugeicons.stroke.Edit02
 import me.rerere.hugeicons.stroke.MoreVertical
 
+/**
+ * 课表管理页的显示顺序（2026-11-19 用户要求「按学期排序」）。
+ *
+ * 按学期从新到旧——当前学期就在最上面，不用滚到底去找；**没有学期号的手建表排最后**
+ * （它们不属于任何学期，插在中间只会打断时间线）。同 term 的复制表按 `sortOrder` 排。
+ *
+ * 只影响显示，不改 `sortOrder`：那个值是「新建课表时的相对顺序」，别处也在读。
+ */
+internal fun sortTimetablesForDisplay(list: List<Timetable>): List<Timetable> =
+    list.sortedWith(
+        compareByDescending<Timetable> { TermNaming.sortKey(it.term) ?: Int.MIN_VALUE }
+            .thenBy { it.sortOrder }
+            .thenBy { it.id },
+    )
+
 data class ManageUiState(
     val timetables: List<Timetable> = emptyList(),
     val currentId: Long = 0L,
     val defaultSourceId: Long? = null,
     val counts: Map<Long, Int> = emptyMap(),
     val message: String? = null,
+    /** 归档进度：null = 没在导入；非 null 时按钮禁用并显示「正在导入 3/6 大二上」。 */
+    val archive: ArchiveProgress? = null,
 )
 
-class TimetableViewModel(private val repo: ScheduleRepository) : ViewModel() {
+/** 学期归档的进度（DESIGN §4.17）：[total] 为 0 表示还在取学期清单。 */
+data class ArchiveProgress(val done: Int, val total: Int, val term: String)
+
+class TimetableViewModel(
+    private val repo: ScheduleRepository,
+    private val app: Application,
+) : ViewModel() {
 
     private val message = MutableStateFlow<String?>(null)
+    private val archive = MutableStateFlow<ArchiveProgress?>(null)
 
     val uiState: StateFlow<ManageUiState> = combine(
         repo.timetables,
         repo.currentTimetableId,
         message,
-    ) { list, currentId, msg ->
+        archive,
+    ) { list, currentId, msg, progress ->
         ManageUiState(
-            timetables = list,
+            timetables = sortTimetablesForDisplay(list),
             currentId = currentId,
             defaultSourceId = repo.defaultConfigSourceId(),
             counts = list.associate { it.id to repo.timetableCourseCount(it.id) },
             message = msg,
+            archive = progress,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ManageUiState())
 
@@ -144,10 +173,40 @@ class TimetableViewModel(private val repo: ScheduleRepository) : ViewModel() {
         }
     }
 
-    class Factory(private val repo: ScheduleRepository) : ViewModelProvider.Factory {
+    /**
+     * 从教务导入全部学期（DESIGN §4.17，2026-11-19）。
+     *
+     * [manual] = true：清掉「用户删除过的学期」标记并重建——这是「删了想找回来」的唯一入口。
+     * 已有同学期课表仍跳过（历史学期不做覆盖重导）。离开本页会取消本轮（已导入的学期保留）。
+     */
+    fun archiveAllTerms() {
+        if (archive.value != null) return
+        archive.value = ArchiveProgress(0, 0, "")
+        viewModelScope.launch {
+            val result = runCatching {
+                Graph.scheduleTermImport(app).archive(manual = true) { done, total, term ->
+                    archive.value = ArchiveProgress(done, total, term)
+                }
+            }.getOrNull()
+            archive.value = null
+            message.value = when (result) {
+                is ScheduleTermImport.Result.Archived -> when {
+                    result.createdTerms.isNotEmpty() ->
+                        "已导入 ${result.createdTerms.size} 个学期课表（共 ${result.courseCount} 门）"
+                    result.failed.isNotEmpty() -> "没有导入成功：${result.failed.first().second}"
+                    else -> "没有需要补的学期，课表已是最新"
+                }
+                is ScheduleTermImport.Result.Failed -> "导入失败：${result.reason}"
+                is ScheduleTermImport.Result.InProgress -> "正在导入中，请稍后再试"
+                null -> "导入失败，请检查网络与教务登录状态"
+            }
+        }
+    }
+
+    class Factory(private val repo: ScheduleRepository, private val app: Application) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            TimetableViewModel(repo) as T
+            TimetableViewModel(repo, app) as T
     }
 }
 
@@ -163,7 +222,10 @@ class TimetableViewModel(private val repo: ScheduleRepository) : ViewModel() {
 fun TimetableManageScreen(
     onBack: () -> Unit,
     viewModel: TimetableViewModel = viewModel(
-        factory = TimetableViewModel.Factory(Graph.repository(LocalContext.current)),
+        factory = TimetableViewModel.Factory(
+            Graph.repository(LocalContext.current),
+            LocalContext.current.applicationContext as Application,
+        ),
     ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -208,6 +270,8 @@ fun TimetableManageScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
+            // 学期归档（DESIGN §4.17）：删掉的学期从这里找回来；已导入的学期一律跳过
+            TimetableArchiveRow(progress = state.archive, onArchive = viewModel::archiveAllTerms)
             state.timetables.forEach { t ->
                 TimetableCard(
                     timetable = t,
@@ -294,8 +358,51 @@ fun TimetableManageScreen(
     }
 }
 
-/** 单张课表卡：名称 + 徽标 + 课程数；主操作「设为当前」，其余操作收进「⋮」菜单。 */
+/**
+ * 「从教务导入全部学期」入口（DESIGN §4.17，2026-11-19）。
+ *
+ * 放在课表管理页而不是设置页：导入的产物就是这张列表本身，进度与结果（新增的行）
+ * 在同一个视野里，不用两个入口各说一遍。
+ */
 @Composable
+private fun TimetableArchiveRow(progress: ArchiveProgress?, onArchive: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                "从教务导入全部学期",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                when {
+                    progress == null -> "每个学期各建一张课表（大一上…大四下），已导入的学期会跳过；离开本页会中断，已完成的保留"
+                    progress.total == 0 -> "正在读取教务学期清单…"
+                    else -> "正在导入 ${progress.done}/${progress.total}：${progress.term}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+            Spacer(Modifier.height(8.dp))
+            FilledTonalButton(
+                onClick = onArchive,
+                enabled = progress == null,
+                modifier = Modifier.height(34.dp),
+            ) {
+                Text(if (progress == null) "开始导入" else "导入中…", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+/** 单张课表卡：名称 + 徽标 + 课程数；主操作「设为当前」，其余操作收进「⋮」菜单。 */@Composable
 private fun TimetableCard(
     timetable: Timetable,
     isCurrent: Boolean,
@@ -341,6 +448,16 @@ private fun TimetableCard(
                     if (isCurrent) Badge("当前", MaterialTheme.colorScheme.primary)
                     if (isDefaultSource) Badge("默认配置", MaterialTheme.colorScheme.secondary)
                 }
+            }
+            // 学期号（2026-11-19）：归档建出的「大二下」要对得上教务的 2026-2027-2，
+            // 否则同一学年两张表在列表里分不清
+            timetable.term?.takeIf { it.isNotBlank() }?.let { term ->
+                Text(
+                    term,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
             Spacer(Modifier.height(4.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))

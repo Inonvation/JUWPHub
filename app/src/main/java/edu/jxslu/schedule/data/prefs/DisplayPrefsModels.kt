@@ -243,6 +243,11 @@ data class OnboardingSyncOutcome(
     val scheduleOk: Boolean = false,
     /** 写库条数（scheduleOk 时有意义）；教务本学期没课的情况不会走到这里（按失败报）。 */
     val scheduleCount: Int = 0,
+    /**
+     * 归档建起来的课表数（2026-11-19 起首启改为全学期归档：一个学期一张表）。
+     * 0 = 没有新表（已有同学期课表 / 教务没课），弹窗据此改用另一套文案。
+     */
+    val scheduleTerms: Int = 0,
     val scoreTried: Boolean = false,
     val scoreOk: Boolean = false,
     val scoreCount: Int = 0,

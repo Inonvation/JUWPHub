@@ -2,6 +2,7 @@ package edu.jxslu.schedule.ui.week
 
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.ScheduleSync
+import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.domain.ExamChangeDetector
@@ -121,10 +122,41 @@ class QuickCheckTextTest {
 
     @Test
     fun `课表跳过要说清原因`() {
-        // force 下只有「课表没有学期号」会走到这里；报「间隔未到」会误导用户
+        // force 下只有「没有带学期号的课表」会走到这里；报「间隔未到」会误导用户
         val feedback = quickCheckFeedback(ScheduleSync.CheckResult.Skipped, examUpdated())
 
-        assertEquals("课表未比对（当前课表缺少学期信息，先从教务导入一次）；考试无变动", feedback.text)
+        assertEquals("课表未比对（没有带学期号的课表，先从教务导入一次）；考试无变动", feedback.text)
         assertFalse(feedback.hasChanges)
+    }
+
+    /** 新学期课表已出：必须单独占一句，并说清已导入——否则用户不知道多了一张表。 */
+    @Test
+    fun `新学期课表已出要占一句`() {
+        val feedback = quickCheckFeedback(
+            schedule = scheduleOk(emptyList()),
+            exam = examUpdated(),
+            probe = ScheduleTermImport.ProbeResult.Found("2025-2026-2", 20, 7L),
+            firstTerm = "2023-2024-1",
+        )
+
+        assertEquals(
+            "已检查：课表无变动；考试无变动；新学期课表已出：大三下（20 门，已导入，可在课表管理里切换）",
+            feedback.text,
+        )
+        // 新表没有差异，提示条不该冒出「查看」入口（那是调课差异专用）
+        assertFalse(feedback.hasChanges)
+        assertEquals(NoticeTone.Info, feedback.tone)
+    }
+
+    /** 没排课是常态：NotYet 不占句，否则这条提示每次都要多读一句废话。 */
+    @Test
+    fun `新学期还没排课不占句`() {
+        val feedback = quickCheckFeedback(
+            schedule = scheduleOk(emptyList()),
+            exam = examUpdated(),
+            probe = ScheduleTermImport.ProbeResult.NotYet("2026-2027-2", "学期已开放但还没有课程"),
+        )
+
+        assertEquals("已检查：课表无变动；考试无变动", feedback.text)
     }
 }

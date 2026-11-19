@@ -169,9 +169,9 @@ fun SettingsScreen(
                     onClick = { onOpen(SubpageScreen.COURSE_TWEAK) },
                 )
                 SettingItem(
-                    title = "调课检测",
+                    title = "变动检测",
                     titleTag = if (pendingCount > 0) "${pendingCount}处差异" else null,
-                    subtitle = "与教务最新课表比对，发现变动提醒并可选合并",
+                    subtitle = "与教务课表比对差异 · 下学期课表已出也会提醒",
                     icon = HugeIcons.Alert02,
                     onClick = { onOpen(SubpageScreen.SCHEDULE_CHANGES) },
                 )

@@ -25,10 +25,12 @@ import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.PendingLaunch
 import edu.jxslu.schedule.data.repo.PendingNotification
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.domain.ExamChangeDetector
 import edu.jxslu.schedule.domain.ExamChangeText
 import edu.jxslu.schedule.domain.ScheduleAlertDefaults
 import edu.jxslu.schedule.domain.ScoreAlertDefaults
+import edu.jxslu.schedule.domain.TermNaming
 import edu.jxslu.schedule.domain.WenquRules
 import edu.jxslu.schedule.subpageLaunchIntent
 import java.util.concurrent.TimeUnit
@@ -128,13 +130,9 @@ object ScoreAlertReminder {
             val selectionOn = prefs.selectionAlertEnabled.first()
             val scheduleOn = prefs.scheduleAlertEnabled.first()
             val wenquOn = prefs.wenquActivityAlertEnabled.first()
-            if (!scoreOn && !examChainOn && !selectionOn && !scheduleOn && !wenquOn && !pinned) {
-                workManager.cancelUniqueWork(PERIODIC_WORK)
-                prefs.setAlertPeriodicInterval(0)
-                return
-            }
-            // 只取**已开启**链的最小档：关着的链不该把周期带快（此前全量参与，
-            // 只开 24h 调课提醒也会被关着的 6h 成绩/考试档拖成 6h 醒来）。
+            // 注意：**不再有「全关撤销」分支**（2026-11-19）。新学期课表探测是恒开的
+            // （用户口径：不设开关，跟首启自动导入一样），它必须搭这趟周期任务，所以任务常驻。
+            // 间隔取「已开启各链」与探测固定档（24h）的最小值。
             val intervalHours = buildList {
                 if (scoreOn) add(ScoreAlertDefaults.coerceIntervalHours(prefs.scoreAlertIntervalHours.first()))
                 if (examChainOn) add(ScoreAlertDefaults.coerceIntervalHours(prefs.examAlertIntervalHours.first()))
@@ -149,6 +147,8 @@ object ScoreAlertReminder {
                 }
                 // 盯了活动时这一路要 1 小时一轮（其它路的检查时刻各自自判，不会被带快）
                 if (pinned) add(WenquRules.GRAB_PIN_CHECK_INTERVAL_HOURS)
+                // 新学期探测固定 24 小时档（`ScheduleTermImport.NEW_TERM_PROBE_INTERVAL_MS`）
+                add(ScheduleTermImport.NEW_TERM_PROBE_INTERVAL_HOURS)
             }.min()
             val request = PeriodicWorkRequestBuilder<ScoreAlertCheckWorker>(intervalHours.toLong(), TimeUnit.HOURS)
                 .setConstraints(connectedConstraint())
@@ -248,18 +248,48 @@ object ScoreAlertReminder {
             val selectionOn = prefs.selectionAlertEnabled.first()
             val scheduleOn = prefs.scheduleAlertEnabled.first()
             val wenquOn = prefs.wenquActivityAlertEnabled.first()
-            if (!scoreOn && !examChainOn && !selectionOn && !scheduleOn && !wenquOn && !wenquPinned) return
             val notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+            // 新学期课表探测**恒开**（DESIGN §4.17，2026-11-19 用户口径：不设开关，跟首启
+            // 自动导入课表同口径）。它有自己的 24h 闸门、已有课表与「用户删过」两重判定，
+            // 所以放在开关判断之前——全关的用户也要探测，否则新学期课表永远不会自动出现。
+            checkNewTerm(context, notificationsEnabled, force = false)
+            if (!scoreOn && !examChainOn && !selectionOn && !scheduleOn && !wenquOn && !wenquPinned) return
             if (scoreOn) checkScores(context, notificationsEnabled, eager)
             if (examChainOn) checkExams(context, notificationsEnabled, eager, notify = examOn)
             // 选课提醒自带落盘去重与闹钟重排（DESIGN §4.35），这里只负责按周期叫醒它
             if (selectionOn) SelectionAlertReminder.check(context)
-            // 调课检测（DESIGN §4.17 重立）：第四路搭同一趟车，闸门与静默纪律在 ScheduleSync.check
+            // 变动检测的差异段（DESIGN §4.17 重立）：闸门与静默纪律在 ScheduleSync.check
             if (scheduleOn) ScheduleAlertReminder.check(context)
             // 问渠新活动（DESIGN §4.45）：第五路，自带开关 / 间隔闸门与首跑建基线
             // （盯了指定活动时也走它——那一路自判，不受新活动开关与间隔影响）
             if (wenquOn || wenquPinned) WenquActivityAlertReminder.check(context)
         }.onFailure { Log.w(TAG, "check failed", it) }
+    }
+
+    /**
+     * 下一学期课表探测（DESIGN §4.17，2026-11-19）：教务把下学期课表排出来后，
+     * 自动建一张新课表并提醒。恒开，不受任何提醒开关控制；入箱在 `ScheduleTermImport`
+     * 内部完成，通知受系统通知权限与免扰时段约束。
+     *
+     * [force] = 手动快速检测：不吃 24 小时闸门。
+     */
+    internal suspend fun checkNewTerm(context: Context, notificationsEnabled: Boolean, force: Boolean) {
+        runCatching {
+            when (val probe = Graph.scheduleTermImport(context).probeNextTerm(force = force)) {
+                is ScheduleTermImport.ProbeResult.Found -> {
+                    Log.i(TAG, "new term ready: ${probe.term} (${probe.courseCount} courses)")
+                    if (!notificationsEnabled) return@runCatching
+                    val label = TermNaming.gradeLabel(
+                        probe.term,
+                        Graph.displayPrefs(context).scheduleFirstTerm(),
+                    )
+                    ScheduleAlertReminder.notifyNewTerm(context, probe.term, label, probe.courseCount)
+                }
+                is ScheduleTermImport.ProbeResult.Failed -> Log.i(TAG, "new term probe failed: ${probe.reason}")
+                // NotYet / Skipped 是正常空态（没排课 / 闸门未到 / 已有课表），静默
+                else -> Unit
+            }
+        }.onFailure { Log.w(TAG, "new term probe error", it) }
     }
 
     // ------------------------------------------------------------------

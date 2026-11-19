@@ -22,7 +22,10 @@ class ScheduleBaselineStore(context: Context) {
 
     @Serializable
     data class Snapshot(
-        /** 基线归属的课表。调课检查只对「当前活跃课表」做，id 不匹配 = 首跑。 */
+        /**
+         * 基线归属的课表。变动检测只对**term 最大的那张课表**做（2026-11-19 起，
+         * 此前是「当前活跃课表」），id 不匹配 = 首跑。
+         */
         val timetableId: Long = 0,
         /** 基线的学年学期（如 2026-2027-1）；与抓取学期不一致 = 换学期，按首跑处理。 */
         val term: String = "",

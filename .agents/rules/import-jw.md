@@ -193,16 +193,56 @@
   **数据页的刷新不算这条**：成绩页「从教务导入」（WebView 强制路径）与考试页顶栏
   「更新」（`ExamSync.sync(force = true)`，OkHttp）都是列表数据的刷新入口，允许存在。
   注意「更新」会顺手落新基线，本次变动不再由周期任务重复通知——卡上的「新增/调整」标
-  就是这次的结果。课表页顶栏的刷新图标（2026-11-18）同属这一类：一次跑课表 + 考试两条链，
-  见下面「调课检测」一节的「手动快速检测」。
+  就是这次的结果。课表页顶栏的刷新图标（2026-11-18）同属这一类：一次跑课表差异 + 考试
+  + 下一学期探测三条链，见下面「变动检测」一节的「手动快速检测」。
 - **通知 requestCode 与 id 解耦**（3008/3009 vs 1008/1009），两落点 intent 只差 extra、
   都无 action——requestCode 撞了会互相改写落点（§3.13 3005/3006 同坑）。
 
-## 调课检测与首启自动导课表（2026-10-04 重立，DESIGN §4.17）
+## 学期归档 · 变动检测 · 首启自动导入（2026-10-04 重立；2026-11-19 扩成归档 + 新学期探测）
 
 - 旧版 2026-09-24 下线的理由是「独立凭证 + 后台自动登录」的成本；重立版没有这两项
   （统一会话层 + 搭既有周期任务）。改这条链前先想清楚：**不要再造出需要单独配置或
   后台自动登录的形态**。
+- **整批归档走 `ScheduleTermImport`**（2026-11-19，取代 `ScheduleSync.importIfEmpty`——
+  那个方法已删，别再照旧文档把它加回来）：候选学期**只认教务下拉**（`JwHtml.termOptions`，
+  实测 12 项、起点是入学学年），只取不晚于教务当前学期的项；已存在同 term 的课表一律跳过
+  （**历史学期永不覆盖重导**）；0 门课的学期不建空表。命名用 `TermNaming`（按学期号推算，
+  不按导入序号——休学一学期时序号会错位）。
+- **默认名自动改学期标签**（2026-11-19 用户口径：当前那张「我的课表」应叫「大三上」）：
+  `ScheduleTermImport.normalizeTimetableNames()` 只认 `ScheduleRepository.DEFAULT_TIMETABLE_NAMES`
+  两个串（「我的课表」/「新课表」），**用户自己起过名的一律不动**；没有 term 的手建表、
+  没有 `first_term` 基准时也不改。归档成功后调一次、冷启动也调（老设备重启即改名），
+  幂等零网络。别把它做成「按学期重命名所有表」——那是替用户做主。
+- **课表管理页按学期从新到旧显示**（`sortTimetablesForDisplay`，当前学期在最上、手建表在
+  最后）。**只排显示、不动 `sortOrder`**：那个值决定「新建课表」的相对顺序与其它读它的地方。
+- **删除与重建的语义**：带 term 的课表被删时 `deleteTimetable` 写一条「已删除学期」  （`schedule_dismissed_terms`），自动归档与新学期探测都跳过它。**用户手动入口**
+  （课表管理页「从教务导入全部学期」，`archive(manual = true)`）才会清标记并重建——
+  「删了想找回来」只有这一条路。备份恢复（`importJson`）同样清标记。
+  别让自动链无视这个标记：删掉又自己回来，用户会认为删除失效。
+- **首启自动导入**：引导第 1 步登录成功后跑一次归档；**老用户升级后首次冷启动也补跑一次**
+  （`schedule_archive_done_at` 落标记，失败留 6 小时退避且不落标记）。结果写
+  `OnboardingSyncOutcome`（含 `scheduleTerms`），startAtJw（改密码重进）不写不弹。
+  **实验页结构不可信时按失败报告**：静默导入会把实验课整批漏掉，用户看不到分项条数。
+- **当前课表按日期自动选**（`CurrentTimetableRules` + `repo.syncCurrentTimetableToDate`）：
+  今天落在哪张表的学期区间就切哪张；假期退回「教务最近给出的当前学期」。触发点只有
+  导入完成 / 冷启动 / 周期检查三处，**不要**在页面切换或 Compose 重组里调——那会把用户
+  正在翻看的历史课表顶掉。只认带 term 的表。
+- **变动检测的目标是 term 最大的那张课表**（`repo.latestTermTimetable()`，不是当前课表）。
+  同一 term 有复制表时取 id 最小的那张（`timetableByTerm` 同口径）——否则检测目标在两张表
+  之间跳，每轮都按「首跑」重建基线、永远报不出差异。
+- **处置页按缓存里的 `timetableId` 合并**：检测目标可能不是当前课表，`belongsToCurrent`
+  那套判定已删，拦的是「那张表已被删除」。合并要传 `applyScheduleChanges(..., timetableId)`，
+  冲突判定读 `repo.observeCoursesFor(targetId)`，别退回 `repo.courses`（当前课表）。
+- **新学期探测**（`ScheduleTermImport.probeNextTerm`）：目标 = 库内最大 term 的下一学期，
+  库里已有该学期课表就不探；**恒开无开关**，固定 24 小时档，搭同一趟周期任务（因此
+  `ScoreAlertReminder.ensurePeriodicWork` **不再有「全关撤销」分支**，别再把它加回来——
+  撤销任务等于让新学期课表永远不出现）。判定四态：学期未开放 / 未排课 / 页面不可信 / 已出；
+  **1 门课即算已出**，后续加课由差异段报出。命中后自动建表 + 导入 + 入箱 + 通知，
+  **不切当前课表**（开学后由按日期自动选接管）。
+- **失败原因要带类型**（`FetchResult.Failed.kind`：`TermNotOpen` / `PageUnreliable` / `Network`）。
+  探测靠它区分「教务还没开放这一学期」（正常空态，静默）与「页面结构变了」（失败，下轮重试）。
+  别再退回字符串比对。实测：请求下拉外的学期（如 `2019-2020-1`）返回完整网格但**无选中项**；
+  请求未来学期（`2027-2028-1`）返回 6 个 `kbDataTd` 的空网格 + 学期参数被尊重。
 - **课表直取只有一个入口**：`ScheduleSync.fetch`（OkHttp + `CasSession.fetchHtml`），
   解析用 `QiangzhiScheduleParser.parseFromHtml` / `SyjxScheduleParser.parseFromHtml`
   （与 WebView 注入同一套算法的备用路径），合成复用 `OneClickImport.combine`。
@@ -225,16 +265,14 @@
 - **整类课「有 → 零」闸门**（`vanishingKindError`，2026-10-07 复核补）：理论 / 实验一整类
   解析为 0 条而基线里该类有货 → 判 Failed（不报差异、不落检查时刻，下周期重试）。只守
   这一侧：基线没有、教务新有的（0 → N）是正常新增，照报。
-- **首启自动导入只此一次**：`importIfEmpty` 对非空课表一律 Skipped。把它的调用点挪到
-  周期任务、或放宽成「覆盖合并用户课表」，等于让 App 静默改用户的课表——禁止。
-  结果弹窗（`OnboardingSyncOutcome`）消费即清，startAtJw（改密码重进）不写不弹。
-  **实验页结构不可信时按失败报告**（2026-10-07 复核补）：静默导入会把实验课整批漏掉而
-  用户看不到分项条数，报失败让他手动导入一次核对（手动弹窗有分项提示）。
 - **基线语义**：`ScheduleBaselineStore`（filesDir JSON）=「上次与教务达成一致时的课表
   状态」。推进点只有三个：导入写库成功（`importParsedCourses` / `importJson` **收口在
   repo 内**，新导入入口不许绕过）、合并差异成功、检查首跑（不通知）。**检查成功不推进
   基线**——这点与 `ExamSync` 相反（考试基线是「上次抓到什么」，调课基线是「用户认可了
   什么」），照抄考试链会让差异永远消失。基线只存 Theory+Lab（教务抓不到考试）。
+  **基线是单快照**：整批归档建了多张表之后，必须显式 `refreshBaselineFromDb`
+  指向 term 最大的那张（`archive` 结尾有这一步），否则最后写入的历史学期会抢走基线，
+  第一次检测就整表报「教务删除」。
   **基线只装教务口径的条目**（2026-10-07 复核补）：
   - 合并路径的推进 = 旧基线套用已应用的改动（`ScheduleDiff.baselineAfter`），**不是**
     拿写库后的课表整体重建——重建会把手动添加 / AI 调课加进来的本机条目塞进基线，
@@ -267,15 +305,19 @@
   > `applyScheduleChanges` = 它 + `advanceBaselineFromApplied`（旧基线 + 已应用改动，
   > 见上「基线只装教务口径的条目」），AI 调课走 `applyLocalChanges`
   > = 它本身（**不推基线**）。改这条链时两个出口一起想，见 `.agents/rules/ai-schedule.md`。
-- 周期检查搭 `ScoreAlertReminder` **第四路**：`ensurePeriodicWork` 的全关判定、`check` 的
-  开关列表、`onSettingsChanged` 的清时刻，三处改任何一处都要四个开关一起想。
+- 周期检查搭 `ScoreAlertReminder` **第四路**：`ensurePeriodicWork` 的间隔计算、`check` 的
+  开关列表、`onSettingsChanged` 的清时刻，三处改任何一处都要各链开关一起想。
+  **2026-11-19 起没有「全关撤销」分支**：新学期探测恒开，任务常驻；间隔 = min(已开各链, 24h)。
 - **手动快速检测**（2026-11-18，课表页顶栏刷新图标 → `WeekViewModel.quickCheck`）：顺序跑
-  `ScheduleSync.check(force = true)`（理论 + 实验）与 `ExamSync.sync(force = true)`（考试安排），
-  **两条链都带 force**——手动触发不吃「提醒开关 / 间隔」闸门，那是自动检查的口径。
+  `ScheduleSync.check(force = true)`（理论 + 实验）、`ExamSync.sync(force = true)`（考试安排）、
+  `ScheduleTermImport.probeNextTerm(force = true)`（下一学期是否已出），**三条链都带 force**
+  ——手动触发不吃「提醒开关 / 间隔 / 24 小时探测档」闸门，那是自动检查的口径。
   结果收成一句话（`ui/week/QuickCheckText.kt`，`QuickCheckTextTest` 钉住）：有调课差异时提示条挂
-  「查看」落处置页，**不自动跳页**；考试那一路照既有语义走（自动合并开着时当场并进课表 + 入箱）。
+  「查看」落处置页，**不自动跳页**；考试那一路照既有语义走（自动合并开着时当场并进课表 + 入箱）；
+  探测命中时只说一句「新学期课表已出…已导入」，**不再发通知**（提示条已经说了，一次点击两条提醒）。
   编排放在 ViewModel 而不是页面里：切 Tab 会销毁页面的 `rememberCoroutineScope`，把半分钟的
-  网络链掐成「课表缓存已写、考试基线没推进」。**它不推进调课基线、也不新增写库路径。**
+  网络链掐成「课表缓存已写、考试基线没推进」。**它不推进调课基线、也不新增写库路径**
+  （探测建表走的是归档同一条 `importParsedCourses`）。
 
 ## 选课（2026-10-01 建；2026-10-08 窗口期接入真实接口，DESIGN §3.19 / §3.20 / §3.21 / §3.22 / §4.35 / §4.36）
 

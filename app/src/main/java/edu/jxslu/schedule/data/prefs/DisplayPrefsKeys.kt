@@ -205,11 +205,25 @@ internal val KEY_SELECTION_WISHES_JSON = stringPreferencesKey("selection_wishes_
         // 抢课三键（interval/disclaimer/auto_start）随自动抢课于 2026-10-08 v3 下线删除；
         // 设备上残留的旧键不再读写（DataStore 不清理孤儿键，无副作用）。
 
-        // 调课检测（DESIGN §4.17，2026-10-04 重立）：提醒开关 + 检查时刻 + 已阅指纹 + 待处置差异
+        // 变动检测（DESIGN §4.17，2026-10-04 重立）：提醒开关 + 检查时刻 + 已阅指纹 + 待处置差异
 internal val KEY_SCHEDULE_ALERT_ENABLED = booleanPreferencesKey("schedule_alert_enabled")
 internal val KEY_SCHEDULE_CHECK_MILLIS = longPreferencesKey("schedule_check_millis")
 internal val KEY_SCHEDULE_IGNORED_FP = stringPreferencesKey("schedule_ignored_fingerprint")
 internal val KEY_SCHEDULE_PENDING_JSON = stringPreferencesKey("schedule_pending_changes_json")
+
+        // 学期归档与新学期探测（DESIGN §4.17，2026-11-19）：
+        //   first_term          —— 入学学期（大一上），年级命名的基准
+        //   archive_done_at     —— 全量归档成功的时刻（0 = 从没成功过）
+        //   archive_attempt_at  —— 上次尝试时刻（失败也记，6 小时退避，避免每次冷启动重打教务）
+        //   dismissed_terms     —— 用户主动删掉的学期：自动链不再重建，手动导入才清
+        //   jw_current_term     —— 教务最近一次给出的当前学期（自动选表的假期兜底）
+        //   new_term_probe_at   —— 下一学期探测的上次成功时刻（固定 24h 档，不跟用户间隔设置）
+internal val KEY_SCHEDULE_FIRST_TERM = stringPreferencesKey("schedule_first_term")
+internal val KEY_SCHEDULE_ARCHIVE_DONE_AT = longPreferencesKey("schedule_archive_done_at")
+internal val KEY_SCHEDULE_ARCHIVE_ATTEMPT_AT = longPreferencesKey("schedule_archive_attempt_at")
+internal val KEY_SCHEDULE_DISMISSED_TERMS = stringSetPreferencesKey("schedule_dismissed_terms")
+internal val KEY_SCHEDULE_JW_CURRENT_TERM = stringPreferencesKey("schedule_jw_current_term")
+internal val KEY_SCHEDULE_NEW_TERM_PROBE_AT = longPreferencesKey("schedule_new_term_probe_at")
 
         // AI 调课（DESIGN §4.39，2026-10-06）：服务地址 / 模型名 / 教师名脱敏 / 首次隐私确认。
         // API Key **不在这里**——它是账号凭据，走 AiCredentialStore 加密存储（secure_ai.xml）。

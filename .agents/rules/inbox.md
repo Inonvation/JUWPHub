@@ -26,7 +26,8 @@
 - 投递只发生在各业务链「数据已到手并完成对比」的结果点上（`ExamSync` 落快照后 /
   `ScoreSync` 写库后 / `ScheduleSync.check` 落待处置缓存处 / `SelectionAlertReminder`
   发通知成功处 / `BalanceAlertReminder` 判定处 / `DormRepairSync` 对比出
-  「上次未结束 → 这次结束」处）。**收件箱链路自己不发任何网络请求**；
+  「上次未结束 → 这次结束」处 / `ScheduleTermImport` 归档完成与新学期已出处）。
+  **收件箱链路自己不发任何网络请求**；
   `InboxRepository` 的每个写操作内部吞错只留日志——留痕失败不能让主链路跟着失败。
 - **已读的来路**（2026-11-12 补齐）：点行（`markRead(id)`）/ 收件箱页「全部已读」/ 多选标已读 /
   调课处置完成（`markKindRead`）/ **打开消息落点页**（`markRouteRead(route)`，收口在
@@ -38,6 +39,11 @@
 - 去重语义三条（`domain/InboxRules`，`InboxRulesTest` 钉住）：无键插入；未删重投刷新并
   **重新置未读**（状态型「已读后次日仍低 → 重新未读」靠它）；**已删重投只刷新不复活**。
   消息键见 `domain/InboxKeys`，调课与轮次的键必须与既有指纹/已发键**同源**，别另写一套。
+- **学期归档 / 新学期**（2026-11-19）：
+  - `SCHEDULE_ARCHIVE`，键 `schedule|archive|<最早term>|<最晚term>|<学期数>`——带范围是因为
+    「删表后重新归档出不同范围」是新事实，同范围重复跑只刷新原消息；
+  - `SCHEDULE_NEW_TERM`，键 `schedule|term|<term>`——一学期只留一条；
+  - 两者 route 都是 `TIMETABLE_MANAGE`，打开课表管理页即由 `markRouteRead` 置已读。
 - **宿舍报修办结**（§4.49）：`InboxKind.DORM_REPAIR`，key `repair|done|<formUserId>`，
   按**单条报修**去重；只有「上次同一条未结束 → 这次结束」才投递，首跑只建基线。
   完成时间超过 3 天的仍入箱（可回查）但不发通知；route = `DORM_REPAIR`，

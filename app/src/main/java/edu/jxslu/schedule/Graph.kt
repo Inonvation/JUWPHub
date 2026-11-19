@@ -63,6 +63,7 @@ import edu.jxslu.schedule.data.repo.ScheduleBaselineStore
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleShareStore
 import edu.jxslu.schedule.data.repo.ScheduleSync
+import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import kotlinx.coroutines.sync.Mutex
 import edu.jxslu.schedule.data.repo.ScholarProgressRepository
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
@@ -127,6 +128,7 @@ object Graph {
 
     @Volatile
     private var scheduleSync: ScheduleSync? = null
+    private var scheduleTermImport: ScheduleTermImport? = null
 
     @Volatile
     private var prefsStore: DisplayPrefsStore? = null
@@ -344,8 +346,8 @@ object Graph {
         }
 
     /**
-     * 课表直取与调课检查单例（DESIGN §4.17，2026-10-04 重立）：首启自动导课表 +
-     * 周期调课检查共用这一条直取链（OkHttp + 同一套解析算法）。
+     * 课表直取与变动检测单例（DESIGN §4.17，2026-10-04 重立）：学期归档、新学期探测与
+     * 周期差异检查共用这一条直取链（OkHttp + 同一套解析算法）。
      */
     fun scheduleSync(context: Context): ScheduleSync =
         scheduleSync ?: synchronized(this) {
@@ -357,8 +359,23 @@ object Graph {
             ).also { scheduleSync = it }
         }
 
-    /** 成绩仓库单例（DESIGN §4.15）：与课表共用数据库，按学期整体替换。 */
-    fun scoreRepository(context: Context): ScoreRepository =
+    /**
+     * 学期归档与新学期探测单例（DESIGN §4.17，2026-11-19）：按教务学期下拉给每个学期
+     * 各建一张课表，并探测下一学期是否已排课。抓取复用 [scheduleSync] 的同一条直取链，
+     * 不另写解析。
+     */
+    fun scheduleTermImport(context: Context): ScheduleTermImport =
+        scheduleTermImport ?: synchronized(this) {
+            scheduleTermImport ?: ScheduleTermImport(
+                cas = casSession(context),
+                repo = repository(context),
+                prefs = displayPrefs(context),
+                inbox = inboxRepository(context),
+                sync = scheduleSync(context),
+            ).also { scheduleTermImport = it }
+        }
+
+    /** 成绩仓库单例（DESIGN §4.15）：与课表共用数据库，按学期整体替换。 */    fun scoreRepository(context: Context): ScoreRepository =
         scoreRepository ?: synchronized(this) {
             scoreRepository ?: ScoreRepository(JuwDatabase.get(context)).also { scoreRepository = it }
         }

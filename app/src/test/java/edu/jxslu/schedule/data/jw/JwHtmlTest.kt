@@ -40,4 +40,31 @@ class JwHtmlTest {
         val html = """<select><option value="2025-2026-2" selected>2025-2026-2</option></select>"""
         assertEquals("2025-2026-2", JwHtml.selectedTerm(html, selectId = null))
     }
+
+    /** 归档链的候选学期：下拉全量、按学期升序、非法值丢弃（实测教务降序输出 12 项）。 */
+    @Test
+    fun termOptionsSortedAscendingAndFiltered() {
+        val html = """
+            <select id="xnxq01id">
+              <option value="2026-2027-2">2026-2027-2</option>
+              <option value="2026-2027-1" selected>2026-2027-1</option>
+              <option value="0">请选择</option>
+              <option value="2024-2025-1">2024-2025-1</option>
+            </select>
+        """.trimIndent()
+        assertEquals(
+            listOf("2024-2025-1", "2026-2027-1", "2026-2027-2"),
+            JwHtml.termOptions(html, "xnxq01id"),
+        )
+    }
+
+    /** 有下拉但没选中项 = 教务没开放该学期（探测链据此判「未开放」，不是结构异常）。 */
+    @Test
+    fun selectWithoutSelectedOptionIsStillPresent() {
+        val html = """<select id="xnxq01id"><option value="2019-2020-1">2019-2020-1</option></select>"""
+        assertNull(JwHtml.selectedTerm(html, "xnxq01id"))
+        assertEquals(listOf("2019-2020-1"), JwHtml.termOptions(html, "xnxq01id"))
+        assertEquals(true, JwHtml.hasTermSelect(html, "xnxq01id"))
+        assertEquals(false, JwHtml.hasTermSelect(html, "nope"))
+    }
 }

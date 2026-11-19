@@ -11,6 +11,7 @@ import edu.jxslu.schedule.data.prefs.DisplayPrefs
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
+import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.domain.CalendarSyncDefaults
 import edu.jxslu.schedule.domain.BgScale
 import edu.jxslu.schedule.domain.Course
@@ -372,7 +373,8 @@ class WeekViewModel(
 
     /**
      * 手动跑一次检测：**理论 + 实验课表**（[ScheduleSync.check]）与**考试安排**（[ExamSync.sync]），
-     * 两条链都带 `force`——手动触发不吃「提醒开关 / 检查间隔」的闸门（自动检查才吃）。
+     * 三条链都带 `force`——手动触发不吃「提醒开关 / 检查间隔 / 24 小时探测」的闸门
+     * （自动检查才吃）。
      *
      * 放在 ViewModel 而不是页面里：页面切 Tab 就会离开组合，`rememberCoroutineScope` 会把这
      * 半分钟的网络链掐断（课表检查已经落了一半缓存、考试基线却没推进）；VM 的作用域活到
@@ -401,7 +403,22 @@ class WeekViewModel(
                 } catch (e: Throwable) {
                     ExamSync.Result.Failed(e.message ?: "未知错误")
                 }
-                _quickCheckMessage.value = quickCheckFeedback(schedule, exam)
+                // 第三段：探测下一学期课表是否已出（2026-11-19）。手动触发带 force，
+                // 不吃 24 小时闸门；命中时自动建表并导入，但**不发通知**——提示条已经说了，
+                // 再来一条系统通知就是一次点击两条提醒。
+                val probe = try {
+                    Graph.scheduleTermImport(appContext).probeNextTerm(force = true)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    ScheduleTermImport.ProbeResult.Failed(e.message ?: "未知错误")
+                }
+                _quickCheckMessage.value = quickCheckFeedback(
+                    schedule = schedule,
+                    exam = exam,
+                    probe = probe,
+                    firstTerm = Graph.displayPrefs(appContext).scheduleFirstTerm(),
+                )
             } finally {
                 _checking.value = false
             }

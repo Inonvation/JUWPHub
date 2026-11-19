@@ -31,7 +31,9 @@ import edu.jxslu.schedule.domain.ExamMapper.ExamEntry
 import edu.jxslu.schedule.domain.GuessUsage
 import edu.jxslu.schedule.domain.CourseTweaker
 import edu.jxslu.schedule.domain.AppliedEntry
+import edu.jxslu.schedule.domain.CurrentTimetableRules
 import edu.jxslu.schedule.domain.ScheduleDiff
+import edu.jxslu.schedule.domain.TermNaming
 import edu.jxslu.schedule.domain.ScheduleUndo
 import edu.jxslu.schedule.domain.ScheduleOverride
 import edu.jxslu.schedule.domain.ScheduleOverrides
@@ -67,6 +69,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.SharingStarted
+import java.time.LocalDate
 
 /**
  * 课表仓储：课表 / 课程 / 作息 / 学期 / 教材 / 调课 / 导入导出的唯一入口。
@@ -81,6 +84,20 @@ class ScheduleRepository(
 ) {
 
     private val json = CourseJsonFormat
+
+    companion object {
+        /** 首装建表的名字（`ensureDefaults`）。 */
+        const val DEFAULT_TIMETABLE_NAME = "我的课表"
+
+        /** 新建对话框留空时的兜底名。 */
+        const val BLANK_TIMETABLE_NAME = "新课表"
+
+        /**
+         * 「用户没给这张表起过名」的两个默认值。学期归档据此把默认名改成学期标签
+         * （「大三上」），**只认这两个串**——用户自己起的名字一律不动。
+         */
+        val DEFAULT_TIMETABLE_NAMES = setOf(DEFAULT_TIMETABLE_NAME, BLANK_TIMETABLE_NAME)
+    }
 
     /** displayPrefs 合并用的全局偏好切片（combine 参数上限的收拢容器）。 */
     private data class GlobalPrefs(
@@ -609,7 +626,7 @@ class ScheduleRepository(
         val source = sourceId?.let { db.timetableDao().getById(it) }
         val sortOrder = (db.timetableDao().getAll().maxOfOrNull { it.sortOrder } ?: 0) + 1
         return createTimetableInternal(
-            name = name.trim().ifEmpty { "新课表" },
+            name = name.trim().ifEmpty { BLANK_TIMETABLE_NAME },
             source = source,
             sortOrder = sortOrder,
         )
@@ -677,9 +694,16 @@ class ScheduleRepository(
     /**
      * 删除课表。返回 false 表示拒绝执行：至少要保留一张课表。
      * 删除当前课表时自动切到剩下第一张；删除默认配置源时清回内置默认。
+     *
+     * 带学期号的课表被删时记一笔「用户主动放弃的学期」（[DisplayPrefsStore.scheduleDismissedTerms]）：
+     * 自动归档 / 新学期探测据此不再把它重建回来，否则用户删掉、下个周期又自动出现。
+     * 手动「导入全部学期」会清掉标记并重建（见 `ScheduleTermImport`）。
      */
     suspend fun deleteTimetable(id: Long): Boolean {
         if (db.timetableDao().count() <= 1) return false
+        db.timetableDao().getById(id)?.term?.takeIf { it.isNotBlank() }?.let { term ->
+            prefs.addScheduleDismissedTerm(term)
+        }
         db.courseDao().clearForTimetable(id)
         db.timeSlotDao().clearForTimetable(id)
         db.semesterConfigDao().deleteForTimetable(id)
@@ -698,6 +722,65 @@ class ScheduleRepository(
 
     suspend fun timetableCourseCount(id: Long): Int = db.courseDao().countForTimetable(id)
 
+    suspend fun allTimetables(): List<Timetable> = db.timetableDao().getAll().map { it.toDomain() }
+
+    /**
+     * 按学期找课表（DESIGN §4.17 归档链的幂等键）。同一学期原则上只有一张；用户复制
+     * 课表会造出两张同 term 的，取 id 最小的那张（最早创建），复制品不参与自动链。
+     */
+    suspend fun timetableByTerm(term: String): Timetable? =
+        db.timetableDao().getAll()
+            .filter { it.term == term }
+            .minByOrNull { it.id }
+            ?.toDomain()
+
+    /**
+     * term 最大的课表 = 变动检测与新学期探测的基准（见 `ScheduleSync.check`）。
+     *
+     * 同一学期理论上只有一张；用户「复制课表」会造出第二张同 term 的，此时取 **id 最小**
+     * （最早创建）那张——与 [timetableByTerm] 同一口径，否则检测目标与基线归属会在两张
+     * 表之间来回跳（每次都按「首跑」重建基线、永远不报差异）。
+     */
+    suspend fun latestTermTimetable(): Timetable? =
+        db.timetableDao().getAll()
+            .mapNotNull { entity -> TermNaming.sortKey(entity.term)?.let { it to entity } }
+            .maxWithOrNull(
+                compareBy<Pair<Int, edu.jxslu.schedule.data.local.TimetableEntity>> { it.first }
+                    .thenByDescending { it.second.id },
+            )
+            ?.second
+            ?.toDomain()
+
+    suspend fun setTimetableTerm(id: Long, term: String) {
+        db.timetableDao().getById(id)?.let { db.timetableDao().upsert(it.copy(term = term)) }
+    }
+
+    /**
+     * 当前课表按日期自动选定（DESIGN §4.17）：今天落在哪个学期就切到那张表，假期退回
+     * [preferredTerm]（教务最近给出的当前学期）对应的表。返回 true = 真的换了表，调用方
+     * 据此刷桌面小组件。
+     *
+     * 触发点只有三个：导入完成 / 冷启动 / 周期检查——**不在页面切换时**，否则用户翻看
+     * 历史学期课表会被立刻弹回当前学期。
+     */
+    suspend fun syncCurrentTimetableToDate(today: LocalDate, preferredTerm: String?): Boolean {
+        val entities = db.timetableDao().getAll()
+        if (entities.isEmpty()) return false
+        val candidates = entities.map { entity ->
+            val config = db.semesterConfigDao().getForTimetable(entity.id)
+            CurrentTimetableRules.Candidate(
+                timetableId = entity.id,
+                term = entity.term,
+                startDate = config?.startDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+                totalWeeks = config?.totalWeeks ?: 0,
+            )
+        }
+        val picked = CurrentTimetableRules.pick(candidates, today, preferredTerm) ?: return false
+        if (prefs.currentTimetableId.first() == picked) return false
+        prefs.setCurrentTimetable(picked)
+        return true
+    }
+
     // ------------------------------------------------------------------
     // 启动初始化与迁移
     // ------------------------------------------------------------------
@@ -705,7 +788,7 @@ class ScheduleRepository(
     suspend fun ensureDefaults() {
         // 课表兜底：全新安装建第一张；升级安装已由 MIGRATION_2_3 插入 id=1
         if (db.timetableDao().count() == 0) {
-            createTimetableInternal(name = "我的课表", source = null, sortOrder = 0)
+            createTimetableInternal(name = DEFAULT_TIMETABLE_NAME, source = null, sortOrder = 0)
         }
         globalizeViewPrefs()
         migrateTimeSlotSchema()
@@ -1177,8 +1260,15 @@ class ScheduleRepository(
     suspend fun applyScheduleChanges(
         changes: List<ScheduleDiff.Change>,
         acceptedIndexes: Set<Int>,
+        /**
+         * 目标课表；null = 当前课表。
+         *
+         * 2026-11-19 起变动检测的目标是「term 最大的那张课表」，它可能**不是**当前课表
+         * （用户正在翻历史学期），处置页按待处置缓存里的 timetableId 传进来。
+         */
+        timetableId: Long? = null,
     ): ApplyReport {
-        val (report, ttId) = applyChangeSet(changes, acceptedIndexes)
+        val (report, ttId) = applyChangeSet(changes, acceptedIndexes, timetableId)
         advanceBaselineFromApplied(ttId, report.entries)
         return report
     }
@@ -1237,8 +1327,9 @@ class ScheduleRepository(
     private suspend fun applyChangeSet(
         changes: List<ScheduleDiff.Change>,
         acceptedIndexes: Set<Int>,
+        timetableId: Long? = null,
     ): Pair<ApplyReport, Long> = db.withTransaction {
-        val ttId = currentTimetableId.first()
+        val ttId = timetableId ?: currentTimetableId.first()
         var current = getTimetableCourses(ttId)
         var applied = 0
         var skipped = 0
@@ -1425,6 +1516,14 @@ class ScheduleRepository(
     /** 指定课表的课程数观察流：课表设置页目标信息行（DESIGN §4.9）。 */
     fun observeCourseCountFor(timetableId: Long): Flow<Int> =
         db.courseDao().observeCountForTimetable(timetableId)
+
+    /**
+     * 指定课表的课程流（变动检测处置页用，DESIGN §4.17）：检测目标 2026-11-19 起是
+     * **term 最大的那张课表**，它可能不是当前课表——冲突判定必须读那张表自己的课程，
+     * 不能读 `courses`（当前课表）。
+     */
+    fun observeCoursesFor(timetableId: Long): Flow<List<Course>> =
+        db.courseDao().observeForTimetable(timetableId).map { list -> list.map { it.toDomain() } }
 
     // ------------------------------------------------------------------
     // 作息表（scope = 当前课表）
@@ -1716,6 +1815,9 @@ class ScheduleRepository(
         // 写完之后**——此前调用点写得太早，基线存的是恢复前的旧课表，恢复完再检查
         // 全是假差异（2026-10-07 复核修）。旧基线与已阅指纹整体作废。
         refreshBaselineFromDb(ttId)
+        // 恢复出来的学期重新参与自动链（2026-11-19）：用户删过某学期的课表、又从备份
+        // 恢复回来时，那条「已删除」标记必须清掉，否则新学期探测与归档都会跳过它。
+        export.term?.takeIf { it.isNotBlank() }?.let { prefs.removeScheduleDismissedTerms(listOf(it)) }
         return ImportResult.Success(
             added = if (merge) addedByMerge else domain.size,
             total = domain.size,

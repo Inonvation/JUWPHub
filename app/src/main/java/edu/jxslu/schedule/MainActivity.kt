@@ -890,7 +890,12 @@ private fun OnboardingSyncResultDialog(
                 OnboardingSyncLine(
                     ok = outcome.scheduleOk,
                     shown = outcome.scheduleTried,
-                    okText = "课表已导入" + (if (outcome.scheduleCount > 0) "（${outcome.scheduleCount} 门）" else ""),
+                    okText = if (outcome.scheduleTerms > 0) {
+                        "已归档 ${outcome.scheduleTerms} 个学期课表" +
+                            (if (outcome.scheduleCount > 0) "（共 ${outcome.scheduleCount} 门）" else "")
+                    } else {
+                        "课表已导入" + (if (outcome.scheduleCount > 0) "（${outcome.scheduleCount} 门）" else "")
+                    },
                     failText = "课表未能自动导入",
                     failReason = outcome.scheduleFailReason,
                     failHint = "在课表页点「导入课表」手动导一遍即可",

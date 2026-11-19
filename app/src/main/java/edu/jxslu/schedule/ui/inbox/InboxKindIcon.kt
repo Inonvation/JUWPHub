@@ -7,6 +7,8 @@ import me.rerere.hugeicons.stroke.Alert02
 import me.rerere.hugeicons.stroke.Bicycle
 import me.rerere.hugeicons.stroke.BookEdit
 import me.rerere.hugeicons.stroke.Calendar01
+import me.rerere.hugeicons.stroke.CalendarAdd01
+import me.rerere.hugeicons.stroke.CalendarSetting01
 import me.rerere.hugeicons.stroke.Droplet
 import me.rerere.hugeicons.stroke.Exchange01
 import me.rerere.hugeicons.stroke.Flash
@@ -29,6 +31,8 @@ internal fun inboxKindIcon(kind: String): ImageVector = when (
     InboxKind.EXAM -> HugeIcons.Calendar01
     InboxKind.SCORE -> HugeIcons.GraduationScroll
     InboxKind.SCHEDULE_CHANGE -> HugeIcons.Exchange01
+    InboxKind.SCHEDULE_ARCHIVE -> HugeIcons.CalendarSetting01
+    InboxKind.SCHEDULE_NEW_TERM -> HugeIcons.CalendarAdd01
     InboxKind.SELECTION_ROUND -> HugeIcons.BookEdit
     InboxKind.POWER_LOW -> HugeIcons.Alert02
     InboxKind.YKT_LOW -> HugeIcons.Wallet01

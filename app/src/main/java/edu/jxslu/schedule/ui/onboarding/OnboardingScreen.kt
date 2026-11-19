@@ -117,6 +117,7 @@ import edu.jxslu.schedule.SubpageActivity
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.prefs.OnboardingSyncOutcome
 import edu.jxslu.schedule.data.repo.ScheduleSync
+import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.repo.TeachingCalendarSync
@@ -299,8 +300,9 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
      *    rememberCoroutineScope 在跳进 MainActivity 时就被取消，
      *    挂上去会让抓取半路夭折（可能只写了一半维度）。
      *    结果写进 [bgSyncPhase]：组合销毁后再写孤儿状态无害，完成页活着就能看到收敛。
-     * 3. **课表只在为空时导**（DESIGN §4.17 重立，2026-10-04）：`importIfEmpty` 对
-     *    非空课表一律让位——静默导入是一次性的首启便利，绝不周期性覆盖用户已编辑的课表。
+     * 3. **课表整批归档**（DESIGN §4.17，2026-11-19）：`archive()` 从教务学期下拉取
+     *    全部学期，每个学期各建一张课表（大一上…），已有同学期课表一律跳过——
+     *    静默导入只补缺，绝不覆盖用户已编辑的课表。
      *
      * 三项全部 settle 后把结果落盘（[OnboardingSyncOutcome]）：主界面在引导结束后弹
      * 「已导入」结果弹窗（查看入口 / 失败给手动导入的出路）。startAtJw（改密码重进）
@@ -315,19 +317,30 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
         Graph.appScope.launch {
             val score = runCatching { Graph.scoreSync(appContext).sync(force = true) }
             val scholar = runCatching { Graph.scholarProgressSync(appContext).sync(force = true) }
-            val schedule = runCatching { Graph.scheduleSync(appContext).importIfEmpty() }
-            // 教材钩子同手动导入（import-jw.md「触发点只有一个」）：写库成功后抓导入学期教材，静默失败
-            (schedule.getOrNull() as? ScheduleSync.AutoImportResult.Imported)?.let { imported ->
+            // 全学期归档（2026-11-19，DESIGN §4.17）：教务学期下拉里每个学期各建一张课表，
+            // 命名「大一上 / 大一下 …」。已有同学期课表一律跳过，绝不覆盖。
+            val schedule = runCatching { Graph.scheduleTermImport(appContext).archive() }
+            val archived = schedule.getOrNull() as? ScheduleTermImport.Result.Archived
+            // 教材钩子同手动导入（import-jw.md「触发点只有一个」）：写库成功后抓导入学期教材，静默失败。
+            // 归档会建多张表，教材只为教务当前学期抓（历史学期看教材没有使用价值，且每学期多 6 次请求）
+            archived?.currentTerm?.let { term ->
                 Graph.appScope.launch {
-                    runCatching { Graph.textbookSync(appContext).syncForTerm(imported.term) }
+                    runCatching { Graph.textbookSync(appContext).syncForTerm(term) }
                 }
-                // 开学日校准（DESIGN §4.42）：与教材同一个触发点（写库成功才跑），教务为准。
-                // 目标课表用导入结果携带的 id（不是「apply 时的当前课表」——中间隔着数秒抓取，
-                // 用户切了课表就会写错表）；失败静默，气泡只在值变化时发（60 秒新鲜期窗口）。
+            }
+            // 开学日校准（DESIGN §4.42）：同一个触发点，只校准教务当前学期那张表——
+            // 历史学期用估算开学日（`ExamMapper.estimatedTermStart`），不再逐个打教学日历
+            val currentArchived = archived?.takeIf {
+                it.currentTerm != null && it.createdTerms.contains(it.currentTerm)
+            }
+            if (currentArchived?.currentTerm != null) {
                 Graph.appScope.launch {
+                    val timetableId = runCatching {
+                        Graph.repository(appContext).timetableByTerm(currentArchived.currentTerm)?.id
+                    }.getOrNull() ?: return@launch
                     val result = runCatching {
                         Graph.teachingCalendarSync(appContext)
-                            .applyAfterImport(imported.term, imported.timetableId)
+                            .applyAfterImport(currentArchived.currentTerm, timetableId)
                     }.getOrNull()
                     if (result is TeachingCalendarSync.Result.Applied && result.changed) {
                         JwImportResultBus.publish("开学日已按教务教学日历设为 ${result.startDate}")
@@ -337,7 +350,7 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
             val okScore = score.getOrNull()?.let { it !is ScoreSync.Result.Failed } == true
             val okScholar = scholar.getOrNull()?.let { it !is ScholarProgressSync.Result.Failed } == true
             val scheduleResult = schedule.getOrNull()
-            val okSchedule = scheduleResult is ScheduleSync.AutoImportResult.Imported
+            val okSchedule = archived != null && (archived.createdTerms.isNotEmpty() || archived.skipped > 0)
             bgSyncPhase = if (okScore || okScholar || okSchedule) BgSyncPhase.DoneOk else BgSyncPhase.DoneFailed
             if (!isRepeatEntry) {
                 val scoreResult = score.getOrNull()
@@ -346,10 +359,12 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
                     Graph.displayPrefs(appContext).setOnboardingSyncOutcome(
                         OnboardingSyncOutcome(
                             finishedAt = System.currentTimeMillis(),
-                            scheduleTried = scheduleResult !is ScheduleSync.AutoImportResult.Skipped,
+                            scheduleTried = scheduleResult is ScheduleTermImport.Result.Archived ||
+                                scheduleResult is ScheduleTermImport.Result.Failed,
                             scheduleOk = okSchedule,
-                            scheduleCount = (scheduleResult as? ScheduleSync.AutoImportResult.Imported)?.count ?: 0,
-                            scheduleFailReason = (scheduleResult as? ScheduleSync.AutoImportResult.Failed)?.reason,
+                            scheduleCount = archived?.courseCount ?: 0,
+                            scheduleTerms = archived?.createdTerms?.size ?: 0,
+                            scheduleFailReason = (scheduleResult as? ScheduleTermImport.Result.Failed)?.reason,
                             scoreTried = true,
                             scoreOk = okScore,
                             scoreCount = (scoreResult as? ScoreSync.Result.Updated)?.records ?: 0,

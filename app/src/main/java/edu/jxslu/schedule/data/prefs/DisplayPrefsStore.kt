@@ -376,7 +376,7 @@ class DisplayPrefsStore(internal val context: Context) {
         context.displayDataStore.edit { p -> p[KEY_SELECTION_INTERVAL_HOURS] = value }
     }
 
-    /** 调课检测的检查间隔（小时），独立设置；默认低频档（每次核对抓两张课表页）。 */
+    /** 变动检测的检查间隔（小时），独立设置；默认低频档（每次核对抓两张课表页）。 */
     val scheduleAlertIntervalHours: Flow<Int> = context.displayDataStore.data.map { p ->
         p[KEY_SCHEDULE_INTERVAL_HOURS] ?: p[KEY_ALERT_INTERVAL_HOURS] ?: ScheduleAlertDefaults.INTERVAL_DEFAULT
     }
@@ -506,7 +506,8 @@ class DisplayPrefsStore(internal val context: Context) {
 
     // ---- 调课检测（DESIGN §4.17，2026-10-04 重立）----
 
-    /** 调课提醒开关。默认关（通知是打扰型能力，与成绩/考试/选课提醒同一口径）。 */
+    /** 课表变动提醒开关。默认关（通知是打扰型能力，与成绩/考试/选课提醒同一口径）。
+     *  只管「差异提醒」；新学期课表探测**不受它控制**（2026-11-19 起恒开）。 */
     val scheduleAlertEnabled: Flow<Boolean> =
         context.displayDataStore.data.map { p -> p[KEY_SCHEDULE_ALERT_ENABLED] ?: false }
 
@@ -550,6 +551,74 @@ class DisplayPrefsStore(internal val context: Context) {
         context.displayDataStore.edit { p ->
             p[KEY_SCHEDULE_PENDING_JSON] = value?.encode().orEmpty()
         }
+    }
+
+    // ---- 学期归档与新学期探测（DESIGN §4.17，2026-11-19）----
+
+    /** 入学学期（大一上）：年级标签的基准，由归档写入；没有时命名退回学期号。 */
+    suspend fun scheduleFirstTerm(): String? =
+        context.displayDataStore.data.first()[KEY_SCHEDULE_FIRST_TERM]?.takeIf { it.isNotBlank() }
+
+    suspend fun setScheduleFirstTerm(term: String?) {
+        context.displayDataStore.edit { p ->
+            if (term.isNullOrBlank()) p.remove(KEY_SCHEDULE_FIRST_TERM) else p[KEY_SCHEDULE_FIRST_TERM] = term
+        }
+    }
+
+    /** 全量归档上次成功的时刻；0 = 从没成功过（老用户升级后的首次冷启动据此补跑一次）。 */
+    suspend fun scheduleArchiveDoneAt(): Long =
+        context.displayDataStore.data.first()[KEY_SCHEDULE_ARCHIVE_DONE_AT] ?: 0L
+
+    suspend fun setScheduleArchiveDoneAt(millis: Long) {
+        context.displayDataStore.edit { p -> p[KEY_SCHEDULE_ARCHIVE_DONE_AT] = millis }
+    }
+
+    /** 上次归档尝试的时刻（失败也落）——只做退避，不是「已完成」的判据。 */
+    suspend fun scheduleArchiveAttemptAt(): Long =
+        context.displayDataStore.data.first()[KEY_SCHEDULE_ARCHIVE_ATTEMPT_AT] ?: 0L
+
+    suspend fun setScheduleArchiveAttemptAt(millis: Long) {
+        context.displayDataStore.edit { p -> p[KEY_SCHEDULE_ARCHIVE_ATTEMPT_AT] = millis }
+    }
+
+    /**
+     * 用户主动删掉的学期：自动归档与新学期探测都不再重建它们（否则删了又回来）。
+     * 手动「导入全部学期」会清掉标记——那是用户明确要回来的动作。
+     */
+    suspend fun scheduleDismissedTerms(): Set<String> =
+        context.displayDataStore.data.first()[KEY_SCHEDULE_DISMISSED_TERMS] ?: emptySet()
+
+    suspend fun addScheduleDismissedTerm(term: String) {
+        if (term.isBlank()) return
+        context.displayDataStore.edit { p ->
+            p[KEY_SCHEDULE_DISMISSED_TERMS] = (p[KEY_SCHEDULE_DISMISSED_TERMS] ?: emptySet()) + term
+        }
+    }
+
+    suspend fun removeScheduleDismissedTerms(terms: Collection<String>) {
+        if (terms.isEmpty()) return
+        context.displayDataStore.edit { p ->
+            val left = (p[KEY_SCHEDULE_DISMISSED_TERMS] ?: emptySet()) - terms.toSet()
+            if (left.isEmpty()) p.remove(KEY_SCHEDULE_DISMISSED_TERMS) else p[KEY_SCHEDULE_DISMISSED_TERMS] = left
+        }
+    }
+
+    /** 教务最近一次给出的当前学期（课表页学期下拉选中项）：自动选表的假期兜底。 */
+    suspend fun scheduleJwCurrentTerm(): String? =
+        context.displayDataStore.data.first()[KEY_SCHEDULE_JW_CURRENT_TERM]?.takeIf { it.isNotBlank() }
+
+    suspend fun setScheduleJwCurrentTerm(term: String?) {
+        context.displayDataStore.edit { p ->
+            if (term.isNullOrBlank()) p.remove(KEY_SCHEDULE_JW_CURRENT_TERM) else p[KEY_SCHEDULE_JW_CURRENT_TERM] = term
+        }
+    }
+
+    /** 下一学期探测的上次成功时刻（固定 24 小时档，与用户的差异检测间隔无关）。 */
+    suspend fun scheduleNewTermProbeAt(): Long =
+        context.displayDataStore.data.first()[KEY_SCHEDULE_NEW_TERM_PROBE_AT] ?: 0L
+
+    suspend fun setScheduleNewTermProbeAt(millis: Long) {
+        context.displayDataStore.edit { p -> p[KEY_SCHEDULE_NEW_TERM_PROBE_AT] = millis }
     }
 
     /**

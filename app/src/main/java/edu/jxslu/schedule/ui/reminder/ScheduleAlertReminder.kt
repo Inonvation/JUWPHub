@@ -14,9 +14,11 @@ import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.repo.PendingLaunch
 import edu.jxslu.schedule.data.repo.PendingNotification
 import edu.jxslu.schedule.data.repo.ScheduleSync
+import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.domain.AiSchedulePrompt
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.ScheduleDiff
+import edu.jxslu.schedule.domain.TermNaming
 import edu.jxslu.schedule.subpageLaunchIntent
 
 /**
@@ -50,6 +52,20 @@ object ScheduleAlertReminder {
     private const val NOTIFICATION_ID = 1011
     private const val NOTIFICATION_TAG = "schedule_alert"
     private const val REQUEST_CODE = 3011
+
+    /**
+     * 学期归档完成（2026-11-19）：id/tag/requestCode 与差异、成绩(1008/3008)、考试(1009/3009)、
+     * 选课(1010/3010)、U净(1011/3012)、问渠(1013/3013、1015/3014、1016/3015、1017/3016)
+     * 全部错开——requestCode 撞了会互相改写通知落点。
+     */
+    private const val ARCHIVE_NOTIFICATION_ID = 1014
+    private const val ARCHIVE_NOTIFICATION_TAG = "schedule_archive"
+    private const val ARCHIVE_REQUEST_CODE = 3019
+
+    /** 新学期课表已出（2026-11-19）：同上，另起一套 id/requestCode。 */
+    private const val NEW_TERM_NOTIFICATION_ID = 1019
+    private const val NEW_TERM_NOTIFICATION_TAG = "schedule_new_term"
+    private const val NEW_TERM_REQUEST_CODE = 3020
 
     /** 通知正文最多列出的差异条数，多出的折叠。 */
     private const val MAX_LINES = 4
@@ -162,14 +178,125 @@ object ScheduleAlertReminder {
         }.onFailure { Log.w(TAG, "notify schedule changes failed", it) }
     }
 
+    /**
+     * 学期归档完成的通知（DESIGN §4.17，2026-11-19）。
+     *
+     * 只给「老用户升级后首次冷启动自动补跑」这一条路用：新装用户在引导结果弹窗里已经
+     * 看到，手动入口有页面气泡。入箱由 `ScheduleTermImport` 自己落（不依赖通知权限）。
+     */
+    suspend fun notifyArchive(context: Context, archived: ScheduleTermImport.Result.Archived) {
+        if (archived.createdTerms.isEmpty()) return
+        val earliest = archived.createdTerms.first()
+        val latest = archived.createdTerms.last()
+        val eLabel = TermNaming.gradeLabel(earliest, archived.firstTerm) ?: earliest
+        val lLabel = TermNaming.gradeLabel(latest, archived.firstTerm) ?: latest
+        val title = "已归档 ${archived.createdTerms.size} 个学期课表"
+        val text = if (earliest == latest) {
+            "$eLabel 课表已导入，可在课表管理里切换查看"
+        } else {
+            "$eLabel 至 $lLabel 课表已导入，可在课表管理里切换查看"
+        }
+        // 免扰时段（DESIGN §3.7）：事实型通知，拦下入队待时段结束后补发
+        val held = QuietHoursGate.intercept(
+            context,
+            PendingNotification(
+                tag = ARCHIVE_NOTIFICATION_TAG,
+                notificationId = ARCHIVE_NOTIFICATION_ID,
+                channelId = CHANNEL_ID,
+                category = NotificationCompat.CATEGORY_REMINDER,
+                title = title,
+                text = text,
+                enqueuedAt = System.currentTimeMillis(),
+                launch = PendingLaunch(
+                    kind = PendingLaunch.Kind.SUBPAGE,
+                    requestCode = ARCHIVE_REQUEST_CODE,
+                    screen = SubpageScreen.TIMETABLE_MANAGE.name,
+                    clearTask = true,
+                ),
+            ),
+        )
+        if (held) return
+        ensureChannel(context)
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_bell)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setAutoCancel(true)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    context,
+                    ARCHIVE_REQUEST_CODE,
+                    subpageLaunchIntent(context, SubpageRequest(SubpageScreen.TIMETABLE_MANAGE))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ),
+            )
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(context).notify(ARCHIVE_NOTIFICATION_TAG, ARCHIVE_NOTIFICATION_ID, notification)
+        }.onFailure { Log.w(TAG, "notify archive failed", it) }
+    }
+
+    /**
+     * 新学期课表已出的通知（DESIGN §4.17，2026-11-19）：不带开关，只要系统通知权限。
+     * 入箱由 `ScheduleTermImport.probeNextTerm` 自己落。
+     */
+    suspend fun notifyNewTerm(context: Context, term: String, label: String?, courseCount: Int) {
+        val shown = label ?: term
+        val title = "${shown}课表已出"
+        val text = "教务已发布 $term 课表（共 $courseCount 门），已自动导入，可在课表管理里查看"
+        val held = QuietHoursGate.intercept(
+            context,
+            PendingNotification(
+                tag = NEW_TERM_NOTIFICATION_TAG,
+                notificationId = NEW_TERM_NOTIFICATION_ID,
+                channelId = CHANNEL_ID,
+                category = NotificationCompat.CATEGORY_REMINDER,
+                title = title,
+                text = text,
+                enqueuedAt = System.currentTimeMillis(),
+                launch = PendingLaunch(
+                    kind = PendingLaunch.Kind.SUBPAGE,
+                    requestCode = NEW_TERM_REQUEST_CODE,
+                    screen = SubpageScreen.TIMETABLE_MANAGE.name,
+                    clearTask = true,
+                ),
+            ),
+        )
+        if (held) return
+        ensureChannel(context)
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_bell)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setAutoCancel(true)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    context,
+                    NEW_TERM_REQUEST_CODE,
+                    subpageLaunchIntent(context, SubpageRequest(SubpageScreen.TIMETABLE_MANAGE))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ),
+            )
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(context).notify(NEW_TERM_NOTIFICATION_TAG, NEW_TERM_NOTIFICATION_ID, notification)
+        }.onFailure { Log.w(TAG, "notify new term failed", it) }
+    }
+
     private fun ensureChannel(context: Context) {
-        // IMPORTANCE_DEFAULT：调课不是「马上要做的事」，不值得横幅打断
+        // IMPORTANCE_DEFAULT：课表变动不是「马上要做的事」，不值得横幅打断
         ensureReminderChannel(
             context,
             CHANNEL_ID,
-            "调课提醒",
+            "课表变动提醒",
             NotificationManager.IMPORTANCE_DEFAULT,
-            "教务课表与你的课表出现差异（可能调课）时提醒",
+            "教务课表与你的课表出现差异、或下学期课表已出时提醒",
         )
     }
 }

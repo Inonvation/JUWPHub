@@ -104,19 +104,24 @@ fun ScheduleChangesScreen(
     LaunchedEffect(Unit) {
         baseline = repo.loadScheduleBaseline().courses.map { it.toCourse() }
     }
-    val currentCourses by repo.courses.collectAsStateWithLifecycle(initialValue = emptyList())
-    val alertOn by prefs.scheduleAlertEnabled.collectAsStateWithLifecycle(initialValue = false)
-    // 缓存归属校验：差异是按课表存的，活跃课表被切走后这里的合并会落到错误的表
+    // 差异归属校验（2026-11-19 改）：检测目标已从「当前课表」改成 term 最大的那张，
+    // 缓存里的差异可能属于一张眼下不是当前课表的表——合并目标必须跟着缓存走，
+    // 不能用「当前课表」近似。唯一挡的是「那张表已被用户删除」。
+    val timetables by repo.timetables.collectAsStateWithLifecycle(initialValue = emptyList())
     val currentTimetableId by repo.currentTimetableId.collectAsStateWithLifecycle(initialValue = 0L)
-    val belongsToCurrent = pending == null || pending?.timetableId == currentTimetableId
+    val alertOn by prefs.scheduleAlertEnabled.collectAsStateWithLifecycle(initialValue = false)
+    val targetTimetableId = pending?.timetableId ?: currentTimetableId
+    val targetExists = pending == null || timetables.any { it.id == targetTimetableId }
+    val targetCoursesFlow = remember(targetTimetableId) { repo.observeCoursesFor(targetTimetableId) }
+    val targetCourses by targetCoursesFlow.collectAsStateWithLifecycle(initialValue = emptyList())
     // 调课检查间隔独立设置（默认 24h：每次核对抓两张整页，低频起步）
     val scheduleIntervalHours by prefs.scheduleAlertIntervalHours
         .collectAsStateWithLifecycle(initialValue = ScheduleAlertDefaults.INTERVAL_DEFAULT)
     var showIntervalPicker by remember { mutableStateOf(false) }
 
     val changes = remember(pending) { pending?.toChanges().orEmpty() }
-    val conflicts = remember(changes, currentCourses) {
-        changes.map { ScheduleDiff.isConflicted(it, currentCourses) }
+    val conflicts = remember(changes, targetCourses) {
+        changes.map { ScheduleDiff.isConflicted(it, targetCourses) }
     }
     // 展示按「一次调课」分组：单周调课在教务课表里是两行（原行减一周 + 新行只含目标周），
     // 逐条展示会把一次调课报成两条。勾选仍落到组内每个条目，写库路径不变。
@@ -159,8 +164,8 @@ fun ScheduleChangesScreen(
             busy = false
             val message = when (val r = result.getOrNull()) {
                 is ScheduleSync.CheckResult.Ok ->
-                    if (r.changes.isEmpty()) "已检查：暂无新的调课差异"
-                    else "发现 ${ScheduleDiff.group(r.changes).size} 处差异"
+                    if (r.changes.isEmpty()) "已检查：暂无新的课程变动"
+                    else "发现 ${ScheduleDiff.group(r.changes).size} 处课表变动"
                 is ScheduleSync.CheckResult.Failed -> r.reason
                 else -> "检查被跳过（提醒开关未开启或间隔未到）"
             }
@@ -169,13 +174,13 @@ fun ScheduleChangesScreen(
     }
 
     fun mergeSelected() {
-        if (busy || pending == null || !belongsToCurrent) return
+        if (busy || pending == null || !targetExists) return
         val snapshot = pending ?: return
         busy = true
         scope.launch {
             val accepted = effectiveSelection
             val report = runCatching {
-                repo.applyScheduleChanges(changes, accepted)
+                repo.applyScheduleChanges(changes, accepted, targetTimetableId)
             }.getOrNull()
             if (report == null) {
                 busy = false
@@ -241,7 +246,7 @@ fun ScheduleChangesScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("调课检测", style = MaterialTheme.typography.titleMedium) },
+                title = { Text("变动检测", style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -275,7 +280,7 @@ fun ScheduleChangesScreen(
                     Column(Modifier.weight(1f)) {
                         Text("自动检查间隔", style = MaterialTheme.typography.titleSmall)
                         Text(
-                            "独立于成绩/考试提醒，互不影响",
+                            "下学期课表排出来会单独提醒，不占这一档",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         )
@@ -297,13 +302,13 @@ fun ScheduleChangesScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "当前没有待处理的调课差异",
+                            "当前没有待处理的课程变动",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         )
                         Spacer(Modifier.padding(top = 6.dp))
                         Text(
-                            "开启调课提醒后，每次核对会与教务最新课表比对，发现差异会在这里列出",
+                            "开启变动检测后，每次核对会与教务最新课表比对，发现差异会在这里列出",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                         )
@@ -319,7 +324,7 @@ fun ScheduleChangesScreen(
                         groupConflicts.count { it }.takeIf { it > 0 }?.let {
                             append("，其中 ${it} 处与你修改过的课相关")
                         }
-                        append("。勾选要合并进当前课表的变动：")
+                        append("。勾选要合并进课表的变动：")
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
@@ -327,10 +332,9 @@ fun ScheduleChangesScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 22.dp, vertical = 10.dp),
                 )
-                if (!belongsToCurrent) {
+                if (!targetExists) {
                     Text(
-                        "这批差异属于另一张课表（当前活跃课表已切换）。请先「重新检查」刷新，" +
-                            "或回到原课表再合并。",
+                        "这批差异所属的课表已被删除，无法合并。请「重新检查」刷新。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier
@@ -369,7 +373,7 @@ fun ScheduleChangesScreen(
                 ) {
                     Button(
                         onClick = ::mergeSelected,
-                        enabled = !busy && belongsToCurrent && effectiveSelection.isNotEmpty(),
+                        enabled = !busy && targetExists && effectiveSelection.isNotEmpty(),
                         modifier = Modifier
                             .weight(1f)
                             .heightIn(min = 44.dp),
@@ -442,9 +446,9 @@ private fun AlertSwitchRow(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("调课提醒", style = MaterialTheme.typography.titleSmall)
+                Text("课表变动提醒", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "开启后按成绩提醒的间隔自动与教务比对，发现变动发通知",
+                    "开启后按下方间隔自动与教务比对，发现差异发通知",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
@@ -453,8 +457,8 @@ private fun AlertSwitchRow(
                 scope.launch {
                     prefs.setScheduleAlertEnabled(value)
                     // 两个方向都重排周期任务：开 → 本开关立即生效（清检查时刻后当场评估
-                    // 一次）；关 → 若其余三路提醒也全关，ensurePeriodicWork 会撤销周期任务。
-                    // 重排不会丢已有相位（KEEP 策略，档位没变就保留）
+                    // 一次）。注意周期任务**不再因全关而撤销**（2026-11-19：新学期探测恒开，
+                    // 任务常驻），所以这里只是让开关尽快生效，不涉及撤销。
                     if (value) prefs.setScheduleCheckMillis(0)
                     ScoreAlertReminder.ensurePeriodicWork(context)
                     if (value) ScoreAlertReminder.enqueueCheck(context)
