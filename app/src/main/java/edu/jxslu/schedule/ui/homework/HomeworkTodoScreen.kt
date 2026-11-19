@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.homework
 
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -30,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
@@ -38,6 +36,8 @@ import edu.jxslu.schedule.domain.homeworkDisplayTitle
 import edu.jxslu.schedule.domain.pendingHomework
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.rememberRevealSpacePx
+import edu.jxslu.schedule.ui.common.scrollToReveal
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.LoadingHint
@@ -80,21 +80,10 @@ fun HomeworkTodoScreen(
     val collapsed = remember { mutableStateMapOf<String, Boolean>() }
     val pending = remember(all) { all?.let { pendingHomework(it, today) } }
     val listState = rememberLazyListState()
+    val revealSpacePx = rememberRevealSpacePx()
     var viewer by remember { mutableStateOf<String?>(null) }
-    val revealSpacePx = with(LocalDensity.current) { 240.dp.toPx() }
 
     /** 展开时只补足下方缺的空间（与作业库同款）。 */
-    fun scrollToReveal(key: String) {
-        val layout = listState.layoutInfo
-        val info = layout.visibleItemsInfo.firstOrNull { it.key == key } ?: return
-        val leftover = layout.viewportEndOffset - (info.offset + info.size)
-        val need = revealSpacePx - leftover
-        if (need <= 0f) return
-        val maxScroll = (info.offset - layout.viewportStartOffset).coerceAtLeast(0).toFloat()
-        val delta = minOf(need, maxScroll)
-        if (delta > 0f) scope.launch { listState.animateScrollBy(delta) }
-    }
-
     Scaffold(
         snackbarHost = { AppSnackbarHost(snackbar) },
         topBar = {
@@ -147,7 +136,7 @@ fun HomeworkTodoScreen(
                             onToggle = {
                                 haptics.tap()
                                 collapsed[courseName] = expanded
-                                if (!expanded) scrollToReveal(courseName)
+                                if (!expanded) listState.scrollToReveal(courseName, revealSpacePx, scope)
                             },
                             onAdd = null,
                             onOpenItem = { id -> onOpenHomework(courseName, id, false) },

@@ -52,6 +52,7 @@ import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.ui.common.AppBarChart
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
+import edu.jxslu.schedule.ui.common.LabelValueRow
 import edu.jxslu.schedule.ui.common.AppRatioBar
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.BarChartItem
@@ -554,21 +555,15 @@ private fun TurnoverDetail(record: YktTurnoverEntity) {
 }
 
 @Composable
-private fun DetailRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            modifier = Modifier.width(92.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
+/** 流水详情行：标签 92dp、0.55 透明度、无行距——与流水卡其余行同款。 */
+private fun DetailRow(label: String, value: String) = LabelValueRow(
+    label,
+    value,
+    labelWidth = 92.dp,
+    labelAlpha = 0.55f,
+    verticalPadding = 0.dp,
+    skipBlank = false,
+)
 
 @Composable
 private fun EmptyState(syncing: Boolean, hasRecords: Boolean) {

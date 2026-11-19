@@ -156,9 +156,6 @@ private const val CLOCK_TICK_MS = 15_000L
 /** 骑行态列出的还车点条数：再往下看也没人看，列表越短越干净。 */
 private const val SPOT_LIST_LIMIT = 6
 
-/** 停车点卡里最多列几辆车，多出来的走「看全部」。 */
-private const val SPOT_PREVIEW_LIMIT = 3
-
 /** 还车点标记的官方色相（DESIGN §3.9，与地图图层同一口径）。 */
 private val SPOT_COLOR = Color(0xFFD7535D)
 

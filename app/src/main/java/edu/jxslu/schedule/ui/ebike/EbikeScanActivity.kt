@@ -97,7 +97,6 @@ class EbikeScanActivity : ComponentActivity() {
          * [MODE_RAW] 把二维码原文原样回传（U净 扫码复用，见类注释）。
          */
         const val EXTRA_RESULT_MODE = "scan_result_mode"
-        const val MODE_BIKE = "bike"
         const val MODE_RAW = "raw"
     }
 

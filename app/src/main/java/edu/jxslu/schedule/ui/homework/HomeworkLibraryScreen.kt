@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,7 +44,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,6 +53,8 @@ import edu.jxslu.schedule.domain.Homework
 import edu.jxslu.schedule.domain.courseHomeworkOrder
 import edu.jxslu.schedule.domain.homeworkDisplayTitle
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.rememberRevealSpacePx
+import edu.jxslu.schedule.ui.common.scrollToReveal
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
@@ -102,22 +102,11 @@ fun HomeworkLibraryScreen(
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
+    val revealSpacePx = rememberRevealSpacePx()
     var viewer by remember { mutableStateOf<String?>(null) }
 
-    val revealSpacePx = with(LocalDensity.current) { 240.dp.toPx() }
 
     /** 展开时只补足下方缺的空间，上限是课程头贴到视口顶部（与培养方案同款）。 */
-    fun scrollToReveal(key: String) {
-        val layout = listState.layoutInfo
-        val info = layout.visibleItemsInfo.firstOrNull { it.key == key } ?: return
-        val leftover = layout.viewportEndOffset - (info.offset + info.size)
-        val need = revealSpacePx - leftover
-        if (need <= 0f) return
-        val maxScroll = (info.offset - layout.viewportStartOffset).coerceAtLeast(0).toFloat()
-        val delta = minOf(need, maxScroll)
-        if (delta > 0f) scope.launch { listState.animateScrollBy(delta) }
-    }
-
     Scaffold(
         snackbarHost = { AppSnackbarHost(snackbar) },
         topBar = {
@@ -175,7 +164,7 @@ fun HomeworkLibraryScreen(
                             haptics.tap()
                             val opening = expanded[group.courseName] != true
                             expanded[group.courseName] = opening
-                            if (opening) scrollToReveal(group.courseName)
+                            if (opening) listState.scrollToReveal(group.courseName, revealSpacePx, scope)
                         },
                         onAdd = { onOpenHomework(group.courseName, 0L, false) },
                         onOpenItem = { id -> onOpenHomework(group.courseName, id, false) },

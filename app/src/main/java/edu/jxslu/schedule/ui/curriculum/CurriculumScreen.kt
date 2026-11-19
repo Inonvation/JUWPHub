@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,6 +49,9 @@ import edu.jxslu.schedule.domain.CurriculumCourse
 import edu.jxslu.schedule.domain.CurriculumRules
 import edu.jxslu.schedule.domain.CurriculumYear
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.rememberRevealSpacePx
+import edu.jxslu.schedule.ui.common.scrollToReveal
+import edu.jxslu.schedule.ui.common.LabelValueRow
 import edu.jxslu.schedule.ui.common.PageEmpty
 import edu.jxslu.schedule.ui.common.PageRefreshAction
 import edu.jxslu.schedule.ui.common.PageScaffold
@@ -108,6 +109,7 @@ fun CurriculumScreen(onBack: () -> Unit) {
      */
     var expanded by remember { mutableStateOf<Set<Int>>(emptySet()) }
     val listState = rememberLazyListState()
+    val revealSpacePx = rememberRevealSpacePx()
 
     fun runSync(force: Boolean, silent: Boolean) {
         if (busy) return
@@ -137,33 +139,12 @@ fun CurriculumScreen(onBack: () -> Unit) {
         }
     }
 
-    /** 展开时希望卡片下方能露出来的纵向空间（≈半屏）。见 [scrollToReveal]。 */
-    val revealSpacePx = with(LocalDensity.current) { 240.dp.toPx() }
-
-    /**
-     * 展开长卡片时**只滚最小必要距离**，不把卡片顶到视口顶部（与学业完成情况同款）。
-     *
-     * 卡头在屏幕下半部时点开，明细大多落在屏幕外，用户会怀疑「点了没反应」；
-     * 这里只补足下方缺的那点空间，上限是卡头贴到视口顶部。用 `animateScrollBy`
-     * 滚固定距离——展开动画期间卡片还在变高，`animateScrollToItem` 会追着它抖。
-     */
-    fun scrollToReveal(key: String) {
-        val layout = listState.layoutInfo
-        val info = layout.visibleItemsInfo.firstOrNull { it.key == key } ?: return
-        val leftover = layout.viewportEndOffset - (info.offset + info.size)
-        val need = revealSpacePx - leftover
-        if (need <= 0f) return
-        val maxScroll = (info.offset - layout.viewportStartOffset).coerceAtLeast(0).toFloat()
-        val delta = minOf(need, maxScroll)
-        if (delta > 0f) scope.launch { listState.animateScrollBy(delta) }
-    }
-
     fun toggleTerm(termKey: Int, itemKey: String) {
         if (termKey in expanded) {
             expanded = expanded - termKey
         } else {
             expanded = expanded + termKey
-            scrollToReveal(itemKey)
+            listState.scrollToReveal(itemKey, revealSpacePx, scope)
         }
     }
 
@@ -474,16 +455,16 @@ private fun CourseDetailSheet(course: CurriculumCourse, onDismiss: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(14.dp))
-            DetailRow("课程编号", course.courseNo)
-            DetailRow("开设学期", termText(course.term))
-            DetailRow("课程性质", course.kind)
-            DetailRow("课程属性", course.attr)
-            DetailRow("学分", course.credit?.let { trimNum(it) + " 学分" }.orEmpty())
-            DetailRow("理论学时", course.hoursTheory)
-            DetailRow("实践学时", course.hoursPractice)
-            DetailRow("讲座学时", course.hoursLecture)
-            DetailRow("实验学时", course.hoursExperiment)
-            DetailRow("总学时", course.hoursTotal)
+            LabelValueRow("课程编号", course.courseNo)
+            LabelValueRow("开设学期", termText(course.term))
+            LabelValueRow("课程性质", course.kind)
+            LabelValueRow("课程属性", course.attr)
+            LabelValueRow("学分", course.credit?.let { trimNum(it) + " 学分" }.orEmpty())
+            LabelValueRow("理论学时", course.hoursTheory)
+            LabelValueRow("实践学时", course.hoursPractice)
+            LabelValueRow("讲座学时", course.hoursLecture)
+            LabelValueRow("实验学时", course.hoursExperiment)
+            LabelValueRow("总学时", course.hoursTotal)
         }
     }
 }
@@ -492,25 +473,6 @@ private fun CourseDetailSheet(course: CurriculumCourse, onDismiss: () -> Unit) {
 private fun termText(term: Int): String {
     if (term !in 1..CurriculumRules.TERM_MAX) return "未标注"
     return "第 $term 学期 · ${CurriculumRules.termLabel(term)}"
-}
-
-/** key-value 行。空值直接不显示——教务有整格不输出的时候。 */
-@Composable
-private fun DetailRow(label: String, value: String) {
-    if (value.isBlank()) return
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            modifier = Modifier.width(84.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f),
-        )
-    }
 }
 
 /** 数值展示：整数不带小数点，小数最多两位（161.0 → 161，23.75 → 23.75）。 */

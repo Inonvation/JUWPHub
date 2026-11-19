@@ -16,6 +16,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.EbikeAutoReturn
+import edu.jxslu.schedule.ui.reminder.broadcastPendingIntent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -232,12 +233,8 @@ object EbikeAutoReturnReminder {
         }.onFailure { Log.w(TAG, "cancelAlarm failed", it) }
     }
 
-    private fun alarmPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
-        context,
-        ALARM_REQUEST_CODE,
-        Intent(context, EbikeAutoReturnAlarmReceiver::class.java),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    private fun alarmPendingIntent(context: Context): PendingIntent =
+        broadcastPendingIntent<EbikeAutoReturnAlarmReceiver>(context, ALARM_REQUEST_CODE)
 }
 
 /**

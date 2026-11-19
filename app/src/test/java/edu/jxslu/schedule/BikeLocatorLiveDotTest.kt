@@ -17,8 +17,7 @@ class BikeLocatorLiveDotTest {
         lat: Double,
         lng: Double,
         accuracy: Float = 20f,
-        time: Long = 0L,
-    ): LocationFix = LocationFix(lat, lng, accuracy, time)
+    ): LocationFix = LocationFix(lat, lng, accuracy)
 
     /** 第一次有读数：不管准不准，蓝点先画上再说。 */
     @Test

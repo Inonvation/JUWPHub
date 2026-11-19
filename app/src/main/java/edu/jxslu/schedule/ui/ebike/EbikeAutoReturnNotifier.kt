@@ -14,6 +14,7 @@ import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.domain.EbikeAutoReturn
 import edu.jxslu.schedule.subpageLaunchIntent
 import edu.jxslu.schedule.ui.reminder.ReminderVibration
+import edu.jxslu.schedule.ui.reminder.ensureReminderChannel
 
 /**
  * 自动还车结果通知（DESIGN §3.9，2026-10-10）：**每次尝试一条**——成功一条，
@@ -44,20 +45,16 @@ internal object EbikeAutoReturnNotifier {
 
     /** channel 创建（幂等）。 */
     fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
         runCatching {
-            if (manager.getNotificationChannel(EbikeAutoReturn.NotificationIds.CHANNEL) == null) {
-                manager.createNotificationChannel(
-                    NotificationChannel(
-                        EbikeAutoReturn.NotificationIds.CHANNEL,
-                        "自动还车",
-                        NotificationManager.IMPORTANCE_HIGH,
-                    ).apply {
-                        description = "用车满 15 分钟前的自动还车结果：成功，或每次失败的原因"
-                        enableVibration(true)
-                        vibrationPattern = ReminderVibration.PATTERN
-                    },
-                )
+            ensureReminderChannel(
+                context,
+                EbikeAutoReturn.NotificationIds.CHANNEL,
+                "自动还车",
+                NotificationManager.IMPORTANCE_HIGH,
+                "用车满 15 分钟前的自动还车结果：成功，或每次失败的原因",
+            ) {
+                enableVibration(true)
+                vibrationPattern = ReminderVibration.PATTERN
             }
         }.onFailure { Log.w(TAG, "ensureChannel failed", it) }
     }

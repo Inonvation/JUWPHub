@@ -53,6 +53,7 @@ import edu.jxslu.schedule.data.power.PowerTurnover
 import edu.jxslu.schedule.ui.common.AppBarChart
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
+import edu.jxslu.schedule.ui.common.LabelValueRow
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.BarChartItem
@@ -501,21 +502,15 @@ private fun feeRangeLabel(raw: String?): String? {
 }
 
 @Composable
-private fun DetailRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            modifier = Modifier.width(92.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
+/** 账单详情行：标签 92dp、0.55 透明度、无行距——与账单卡其余行同款。 */
+private fun DetailRow(label: String, value: String) = LabelValueRow(
+    label,
+    value,
+    labelWidth = 92.dp,
+    labelAlpha = 0.55f,
+    verticalPadding = 0.dp,
+    skipBlank = false,
+)
 
 /** 空态：该月没有记录 / 还在读第一次。 */
 @Composable

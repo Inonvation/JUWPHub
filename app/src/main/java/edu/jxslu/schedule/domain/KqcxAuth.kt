@@ -300,7 +300,7 @@ object KqcxAuth {
         throw KvcBusinessError(env.errorCode, env.resultMsg ?: "查询未支付订单失败")
     }
 
-    // ---------- 账户资产（2026-09-30：余额 / 卡券 / 会员卡，全部只读） ----------
+    // ---------- 账户资产（2026-09-30：余额 / 卡券，全部只读） ----------
 
     /** 只判信封成功、不消费 `result`（响铃寻车这类"成功本身就是全部信息"的接口用）。 */
     fun parseSuccess(jsonText: String) {
@@ -388,43 +388,16 @@ object KqcxAuth {
     }
 
     /**
-     * 会员卡（`queryUserMemberCoupon` 的 `list` 项）。官方卡券详情页把 `discount` 乘 10
-     * 显示成「X 折」（服务端给 0.9 → 「9 折」）。
-     */
-    data class AssetMember(
-        val discount: Double?,
-        val endAt: String?,
-    ) {
-        /** 「9 折」/「8.5 折」；折扣未知时为 null（不给「无折扣」这种编造）。 */
-        val discountText: String?
-            get() = discount?.let { times10 ->
-                val folded = times10 * 10
-                val rounded = Math.round(folded * 10.0) / 10.0
-                if (rounded == Math.floor(rounded)) "${rounded.toLong()} 折" else "$rounded 折"
-            }
-    }
-
-    fun parseMembers(jsonText: String): List<AssetMember> {
-        val env = parseEnvelope(jsonText)
-        val list = (env.result as? JsonObject)?.get("list") as? JsonArray ?: return emptyList()
-        return list.mapNotNull { element ->
-            val obj = element as? JsonObject ?: return@mapNotNull null
-            AssetMember(discount = obj.double("discount"), endAt = obj.text("endTime"))
-        }
-    }
-
-    /**
-     * 账户资产的聚合（快趣账号页「快趣资产」区）。三个接口**并行拉**，单个失败不影响
-     * 其它块——余额失败时 [balance] 为 null，卡券 / 会员失败给空列表。
+     * 账户资产的聚合（快趣账号页「快趣资产」区）。两个接口**并行拉**，单个失败不影响
+     * 其它块——余额失败时 [balance] 为 null，卡券失败给空列表。
      */
     data class Assets(
         val balance: Balance?,
         val coupons: List<AssetCoupon>,
-        val members: List<AssetMember>,
     ) {
-        /** 三块全空 = 这次查询什么都没拿到，调用方按"查询失败"提示而不是画一个空区。 */
+        /** 两块全空 = 这次查询什么都没拿到，调用方按"查询失败"提示而不是画一个空区。 */
         val isEmpty: Boolean
-            get() = balance == null && coupons.isEmpty() && members.isEmpty()
+            get() = balance == null && coupons.isEmpty()
     }
 
     /** 官方「无限次数卡」的次数阈值（卡券详情页 `remainFrequency > 1e5`）。 */

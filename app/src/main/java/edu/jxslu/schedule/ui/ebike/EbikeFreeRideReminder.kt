@@ -20,6 +20,7 @@ import edu.jxslu.schedule.data.repo.PendingLaunch
 import edu.jxslu.schedule.data.repo.PendingNotification
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.ui.reminder.QuietHoursGate
+import edu.jxslu.schedule.ui.reminder.broadcastPendingIntent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -338,12 +339,8 @@ object EbikeFreeRideReminder {
         prefs.updateEbikePendingDelete { it - deleted }
     }
 
-    private fun alarmPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
-        context,
-        ALARM_REQUEST_CODE,
-        Intent(context, EbikeFreeRideAlarmReceiver::class.java),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    private fun alarmPendingIntent(context: Context): PendingIntent =
+        broadcastPendingIntent<EbikeFreeRideAlarmReceiver>(context, ALARM_REQUEST_CODE)
 
     /**
      * 周期核对兜底：闹钟被 ROM 丢掉、或通知被用户在通知栏划掉时补一次。

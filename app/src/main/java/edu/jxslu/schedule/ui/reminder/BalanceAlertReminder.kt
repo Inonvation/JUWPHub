@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.reminder
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -474,13 +473,14 @@ object BalanceAlertReminder {
     }
 
     private fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        // IMPORTANCE_DEFAULT 而非 HIGH：余额偏低不是「马上要做的事」，
-        // 不值得横幅打断当前操作（上课/作业提醒才用 HIGH）。
-        val channel = NotificationChannel(CHANNEL_ID, "余额提醒", NotificationManager.IMPORTANCE_DEFAULT)
-            .apply { description = "寝室电费或校园卡余额低于设定值时提醒" }
-        manager.createNotificationChannel(channel)
+        // IMPORTANCE_DEFAULT：余额偏低不是「马上要做的事」，不值得横幅打断
+        ensureReminderChannel(
+            context,
+            CHANNEL_ID,
+            "余额提醒",
+            NotificationManager.IMPORTANCE_DEFAULT,
+            "寝室电费或校园卡余额低于设定值时提醒",
+        )
     }
 
     // ------------------------------------------------------------------

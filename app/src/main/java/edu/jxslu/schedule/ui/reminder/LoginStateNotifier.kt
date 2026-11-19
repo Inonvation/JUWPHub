@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.reminder
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -118,16 +117,14 @@ object LoginStateNotifier {
     }
 
     private fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        // DEFAULT 而非 HIGH：失效不紧急（功能仍可用，只是不再自动登录），
-        // 不值得横幅打断当前操作
-        val channel = NotificationChannel(
+        // DEFAULT 而非 HIGH：失效不紧急（功能仍可用，只是不再自动登录），不值得横幅打断
+        ensureReminderChannel(
+            context,
             CHANNEL_ID,
             "登录状态",
             NotificationManager.IMPORTANCE_DEFAULT,
-        ).apply { description = "学校账号或一卡通登录失效时提醒更新密码" }
-        manager.createNotificationChannel(channel)
+            "学校账号或一卡通登录失效时提醒更新密码",
+        )
     }
 
     /** 状态卡上的显示名，与 §3.16 三格一致。 */

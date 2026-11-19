@@ -44,7 +44,6 @@ internal data class LocationFix(
     val lng: Double,
     /** 精度半径（米）；0 = 系统没给。 */
     val accuracyMeters: Float,
-    val timeMillis: Long,
 )
 
 /**
@@ -248,7 +247,7 @@ internal object BikeLocator {
     }
 
     private fun Location.toFix(): LocationFix =
-        LocationFix(latitude, longitude, accuracy, time)
+        LocationFix(latitude, longitude, accuracy)
 
     /** 缓存定位的三个来源，`PASSIVE` 是别的应用请求定位时顺带拿到的结果。 */
     private val ALL_PROVIDERS = listOf(

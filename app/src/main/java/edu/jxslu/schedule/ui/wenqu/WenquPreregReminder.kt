@@ -2,7 +2,6 @@ package edu.jxslu.schedule.ui.wenqu
 
 import android.app.AlarmManager
 import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -22,6 +21,8 @@ import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.wenqu.WenquActivity
 import edu.jxslu.schedule.domain.WenquRules
 import edu.jxslu.schedule.ui.reminder.ReminderVibration
+import edu.jxslu.schedule.ui.reminder.broadcastPendingIntent
+import edu.jxslu.schedule.ui.reminder.ensureReminderChannel
 import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
 import edu.jxslu.schedule.data.prefs.clearWenquPrereg
@@ -283,18 +284,16 @@ object WenquPreregReminder {
     }
 
     private fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        val channel = NotificationChannel(
+        ensureReminderChannel(
+            context,
             CHANNEL_ID,
             "预报名抢活动",
             NotificationManager.IMPORTANCE_HIGH,
-        ).apply {
-            description = "预报名执行的进度与结果（报名成功 / 没抢到）"
+            "预报名执行的进度与结果（报名成功 / 没抢到）",
+        ) {
             enableVibration(true)
             vibrationPattern = ReminderVibration.PATTERN
         }
-        manager.createNotificationChannel(channel)
     }
 
     /**
@@ -308,12 +307,8 @@ object WenquPreregReminder {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
-    private fun alarmPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
-        context,
-        ALARM_REQUEST_CODE,
-        Intent(context, WenquPreregAlarmReceiver::class.java),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    private fun alarmPendingIntent(context: Context): PendingIntent =
+        broadcastPendingIntent<WenquPreregAlarmReceiver>(context, ALARM_REQUEST_CODE)
 
     private fun clockPendingIntent(context: Context): PendingIntent = PendingIntent.getActivity(
         context,

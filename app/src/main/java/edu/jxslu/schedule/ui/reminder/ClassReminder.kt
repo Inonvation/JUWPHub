@@ -191,20 +191,12 @@ object ClassReminder {
             .enqueueUniquePeriodicWork(PERIODIC_WORK, ExistingPeriodicWorkPolicy.KEEP, request)
     }
 
-    private fun alarmPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
-        context,
-        ALARM_REQUEST_CODE,
-        Intent(context, ReminderAlarmReceiver::class.java),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    private fun alarmPendingIntent(context: Context): PendingIntent =
+        broadcastPendingIntent<ReminderAlarmReceiver>(context, ALARM_REQUEST_CODE)
 
     /** 分钟刻度的落点（与提醒闹钟分开的 PendingIntent，理由见 [scheduleLiveTick]）。 */
-    private fun liveTickPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
-        context,
-        LIVE_TICK_REQUEST_CODE,
-        Intent(context, ReminderAlarmReceiver::class.java),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    private fun liveTickPendingIntent(context: Context): PendingIntent =
+        broadcastPendingIntent<ReminderAlarmReceiver>(context, LIVE_TICK_REQUEST_CODE)
 
     /**
      * 倒计时卡片的「分钟刻度」闹钟：**非精确**（`setAndAllowWhileIdle`），[at] 为 null 时撤销。

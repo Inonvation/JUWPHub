@@ -46,6 +46,7 @@ import edu.jxslu.schedule.data.repo.InternshipBasesLoader
 import edu.jxslu.schedule.domain.InternshipBase
 import edu.jxslu.schedule.domain.InternshipBaseRules
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.LabelValueRow
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
@@ -296,38 +297,19 @@ private fun BaseDetailSheet(base: InternshipBase, onDismiss: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(14.dp))
-            DetailRow("基地编号", base.no)
-            DetailRow("所属单位", base.unit)
-            DetailRow("所属院系", base.college)
-            DetailRow("基地负责人", base.leader)
-            DetailRow("基地电话", base.phone)
-            DetailRow("基地地址", base.address)
-            DetailRow("建成时间", base.builtDate)
-            DetailRow("挂牌时限", base.listedYears)
-            DetailRow("容纳人数", base.capacity)
-            DetailRow("校内联系人", base.campusContact)
-            DetailRow("校内电话", base.campusPhone)
-            DetailRow("基地简介", base.intro)
+            LabelValueRow("基地编号", base.no)
+            LabelValueRow("所属单位", base.unit)
+            LabelValueRow("所属院系", base.college)
+            LabelValueRow("基地负责人", base.leader)
+            LabelValueRow("基地电话", base.phone)
+            LabelValueRow("基地地址", base.address)
+            LabelValueRow("建成时间", base.builtDate)
+            LabelValueRow("挂牌时限", base.listedYears)
+            LabelValueRow("容纳人数", base.capacity)
+            LabelValueRow("校内联系人", base.campusContact)
+            LabelValueRow("校内电话", base.campusPhone)
+            LabelValueRow("基地简介", base.intro)
         }
-    }
-}
-
-/** key-value 行。空值直接不显示——教务有整格不输出的时候。 */
-@Composable
-private fun DetailRow(label: String, value: String) {
-    if (value.isBlank()) return
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            modifier = Modifier.width(84.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f),
-        )
     }
 }
 

@@ -42,6 +42,7 @@ import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.RideRecord
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppInfoDialog
+import edu.jxslu.schedule.ui.common.LabelValueRow
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
@@ -364,21 +365,16 @@ private fun OrderDetailDialog(order: KqcxAuth.OrderItem, onDismiss: () -> Unit) 
 }
 
 @Composable
-private fun DetailRow(label: String, value: String) {
-    Row(verticalAlignment = Alignment.Top) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            modifier = Modifier.width(72.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
+/** 订单详情行：标签 72dp、小字号——订单卡内行距本就比正文页紧。 */
+private fun DetailRow(label: String, value: String) = LabelValueRow(
+    label,
+    value,
+    labelWidth = 72.dp,
+    labelAlpha = 0.55f,
+    verticalPadding = 0.dp,
+    textStyle = MaterialTheme.typography.bodySmall,
+    skipBlank = false,
+)
 
 /** 列表副行：结束时刻 · 时长 ·（有调度费时补一条）。 */
 private fun orderSubtitle(order: KqcxAuth.OrderItem): String = buildString {

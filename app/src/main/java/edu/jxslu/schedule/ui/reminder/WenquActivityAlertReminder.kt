@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.reminder
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -310,11 +309,13 @@ object WenquActivityAlertReminder {
     }
 
     private fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         // IMPORTANCE_DEFAULT：新活动不是「马上要做的事」，不值得横幅打断
-        val channel = NotificationChannel(CHANNEL_ID, "志愿活动提醒", NotificationManager.IMPORTANCE_DEFAULT)
-            .apply { description = "问渠平台上出现新的可报名志愿活动时提醒" }
-        manager.createNotificationChannel(channel)
+        ensureReminderChannel(
+            context,
+            CHANNEL_ID,
+            "志愿活动提醒",
+            NotificationManager.IMPORTANCE_DEFAULT,
+            "问渠平台上出现新的可报名志愿活动时提醒",
+        )
     }
 }

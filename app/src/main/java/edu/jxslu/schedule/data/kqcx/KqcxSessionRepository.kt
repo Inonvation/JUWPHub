@@ -404,8 +404,7 @@ class KqcxSessionRepository(
      * 账户资产（快趣账号页「快趣资产」区，只读）：余额 / 卡券，两个接口**并行**拉。
      * 单个接口失败不影响其它块（余额给 null、列表给空）；登录缺失 / 失效照常抛错。
      *
-     * **不再拉会员卡**（2026-11-05 减少请求）：账号页的会员行早已删除（学校用不到），
-     * `Assets.members` 只参与「三块全空」判断——少一个请求，那个判断还更准。
+     * **不拉会员卡**（2026-11-05 减少请求）：账号页的会员行早已删除（学校用不到）。
      */
     suspend fun queryAssets(): KqcxAuth.Assets {
         ensureSession()
@@ -418,7 +417,7 @@ class KqcxSessionRepository(
                 runCatching { KqcxAuth.parseCoupons(client.userCouponJson(current)) }
                     .getOrDefault(emptyList())
             }
-            KqcxAuth.Assets(balance = balance.await(), coupons = coupons.await(), members = emptyList())
+            KqcxAuth.Assets(balance = balance.await(), coupons = coupons.await())
         }
     }
 

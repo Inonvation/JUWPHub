@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.reminder
 
 import android.app.AlarmManager
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -192,12 +191,8 @@ object WenquWeeklyAlertReminder {
         context.getSystemService(AlarmManager::class.java)?.cancel(alarmPendingIntent(context))
     }
 
-    private fun alarmPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
-        context,
-        ALARM_REQUEST_CODE,
-        Intent(context, WenquWeeklyAlertReceiver::class.java),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    private fun alarmPendingIntent(context: Context): PendingIntent =
+        broadcastPendingIntent<WenquWeeklyAlertReceiver>(context, ALARM_REQUEST_CODE)
 
     /** 通知文案。到点前说「提前 N 分钟」，迟到补发时不提提前量（那时说提前反而奇怪）。 */
     internal fun alertCopy(
@@ -243,16 +238,17 @@ object WenquWeeklyAlertReminder {
     }
 
     private fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        // IMPORTANCE_HIGH：这是「到点就得动手」的事，值得横幅（弹不弹由系统 / ROM 决定）
-        val channel = NotificationChannel(CHANNEL_ID, "志愿活动开抢提醒", NotificationManager.IMPORTANCE_HIGH)
-            .apply {
-                description = "每周日 12:00 前提醒你去抢新发布的志愿活动"
-                enableVibration(true)
-                vibrationPattern = ReminderVibration.PATTERN
-            }
-        manager.createNotificationChannel(channel)
+        // IMPORTANCE_HIGH：到点就得动手，值得横幅（弹不弹由系统 / ROM 决定）
+        ensureReminderChannel(
+            context,
+            CHANNEL_ID,
+            "志愿活动开抢提醒",
+            NotificationManager.IMPORTANCE_HIGH,
+            "每周日 12:00 前提醒你去抢新发布的志愿活动",
+        ) {
+            enableVibration(true)
+            vibrationPattern = ReminderVibration.PATTERN
+        }
     }
 }
 

@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.reminder
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -436,12 +435,14 @@ object ScoreAlertReminder {
     }
 
     private fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        // IMPORTANCE_DEFAULT 而非 HIGH：出分不是「马上要做的事」，不值得横幅打断
-        val channel = NotificationChannel(CHANNEL_ID, "成绩与考试提醒", NotificationManager.IMPORTANCE_DEFAULT)
-            .apply { description = "新出成绩、复查改分或考试安排变动时提醒" }
-        manager.createNotificationChannel(channel)
+        // IMPORTANCE_DEFAULT：出分不是「马上要做的事」，不值得横幅打断
+        ensureReminderChannel(
+            context,
+            CHANNEL_ID,
+            "成绩与考试提醒",
+            NotificationManager.IMPORTANCE_DEFAULT,
+            "新出成绩、复查改分或考试安排变动时提醒",
+        )
     }
 
     private fun connectedConstraint(): Constraints =

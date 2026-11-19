@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.reminder
 
 import android.app.AlarmManager
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -56,8 +55,6 @@ object QuietHoursGate {
      * 「requestCode + Intent.filterEquals」，撞了互相顶掉（历史坑，§3.9）。
      */
     private const val ALARM_REQUEST_CODE = 4006
-
-    private const val FLUSH_CHANNEL_ID = "quiet_hours_flush"
 
     // ------------------------------------------------------------------
     // 拦截
@@ -237,11 +234,7 @@ object QuietHoursGate {
      * 重要性以用户系统设置为准（渠道一旦建出，代码里的 importance 只在首次生效）。
      */
     private fun ensureChannel(context: Context, channelId: String) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(channelId) != null) return
-        manager.createNotificationChannel(
-            NotificationChannel(channelId, "提醒", NotificationManager.IMPORTANCE_DEFAULT),
-        )
+        ensureReminderChannel(context, channelId, "提醒", NotificationManager.IMPORTANCE_DEFAULT)
     }
 }
 

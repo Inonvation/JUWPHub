@@ -180,6 +180,25 @@
   电费明细 `BillRow`，卡内直排 + 细线）。平铺块自己 `clickable` + `rememberAppHaptics`，
   不要再包 `AppCard` / `AppCardRow`。
 
+## 「标签 + 值」详情行只有一处定义（2026-11-19 起）
+
+- 详情 / 账单 / 订单里的「标签 + 值」行走 `ui/common/LabelValueRow.kt` 的 `LabelValueRow`。
+  此前 10 个页面各抄一份 `private fun DetailRow`，其中 6 份逐字相同，差异只在标签宽度、
+  透明度、行内边距、字号——这些差异现在是**参数**：`labelWidth` / `labelAlpha` /
+  `verticalPadding` / `textStyle` / `skipBlank`。默认值对应「卡内详情列表」那一族
+  （84dp / 0.6 / 6dp / 跳过空值）。
+- 值一律 `weight(1f)` 换行、标签顶对齐。要右对齐的值、固定标签盒、带复制按钮的行**不在**
+  这里，各自保留（侧栏余额卡、课程详情、开水页、问渠活动详情）——它们不是同一种版式。
+- 新增页面别再写 `Row { Text(标签, width=…); Text(值, weight(1f)) }`。
+
+## 展开长卡片时的「只滚最小必要距离」只有一处定义（2026-11-19 起）
+
+- `ui/common/RevealScroll.kt`：`rememberRevealSpacePx()` 取「卡片下方希望露出的空间」，
+  `LazyListState.scrollToReveal(key, revealSpacePx, scope)` 做「补足缺的那点距离」。
+  此前培养方案 / 学业完成 / 笔记库 / 作业库 / 作业待办各抄一份。
+- **必须用 `animateScrollBy` 滚固定距离**，不要换回 `animateScrollToItem`：展开动画期间
+  卡片还在变高，后者会追着它抖（真机表现为「先跳上去再刷出内容」）。
+
 ## 金额大字只有一处定义
 
 - 钱类弹窗 / 结果步的「主角金额」**只有一处实现**：`ui/common/AmountText.kt` 的

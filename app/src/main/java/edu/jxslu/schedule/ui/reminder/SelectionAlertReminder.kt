@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.reminder
 
 import android.app.AlarmManager
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -191,12 +190,8 @@ object SelectionAlertReminder {
         context.getSystemService(AlarmManager::class.java)?.cancel(alarmPendingIntent(context))
     }
 
-    private fun alarmPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
-        context,
-        ALARM_REQUEST_CODE,
-        Intent(context, SelectionAlertReceiver::class.java),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    private fun alarmPendingIntent(context: Context): PendingIntent =
+        broadcastPendingIntent<SelectionAlertReceiver>(context, ALARM_REQUEST_CODE)
 
     /** 提醒的标题与正文：通知与收件箱共用同一份文案，两处各写迟早漂。 */
     internal fun reminderCopy(
@@ -251,12 +246,14 @@ object SelectionAlertReminder {
     }
 
     private fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         // IMPORTANCE_HIGH：选课是「到点就得动手」的事，值得横幅（弹不弹由系统/ROM 决定）
-        val channel = NotificationChannel(CHANNEL_ID, "选课提醒", NotificationManager.IMPORTANCE_HIGH)
-            .apply { description = "选课轮次开始前 30 分钟、截止前 6 小时提醒" }
-        manager.createNotificationChannel(channel)
+        ensureReminderChannel(
+            context,
+            CHANNEL_ID,
+            "选课提醒",
+            NotificationManager.IMPORTANCE_HIGH,
+            "选课轮次开始前 30 分钟、截止前 6 小时提醒",
+        )
     }
 
     /** 事件时刻的展示：当天只给 `HH:mm`，跨天带 `MM-dd`（本地时区）。 */

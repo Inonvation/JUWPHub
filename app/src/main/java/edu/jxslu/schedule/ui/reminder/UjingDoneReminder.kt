@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.reminder
 
 import android.app.AlarmManager
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -210,12 +209,8 @@ object UjingDoneReminder {
         }.onFailure { Log.w(TAG, "check failed", it) }
     }
 
-    private fun alarmPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
-        context,
-        ALARM_REQUEST_CODE,
-        Intent(context, UjingDoneReceiver::class.java),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    private fun alarmPendingIntent(context: Context): PendingIntent =
+        broadcastPendingIntent<UjingDoneReceiver>(context, ALARM_REQUEST_CODE)
 
     /** 完成提醒正文（拦截入队与即时发送共用同一份）。 */
     private fun completedText(deviceName: String): String = buildString {
@@ -250,15 +245,14 @@ object UjingDoneReminder {
     }
 
     private fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         // IMPORTANCE_HIGH：衣服放着不取会被别人拿出来，值得横幅（弹不弹由系统/ROM 决定）
-        val channel = NotificationChannel(CHANNEL_ID, "洗衣完成提醒", NotificationManager.IMPORTANCE_HIGH)
-            .apply {
-                description = "U净 订单洗涤结束到点提醒"
-                enableVibration(true)
-            }
-        manager.createNotificationChannel(channel)
+        ensureReminderChannel(
+            context,
+            CHANNEL_ID,
+            "洗衣完成提醒",
+            NotificationManager.IMPORTANCE_HIGH,
+            "U净 订单洗涤结束到点提醒",
+        ) { enableVibration(true) }
     }
 }
 

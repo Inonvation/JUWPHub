@@ -292,7 +292,7 @@ class KqcxAuthTest {
         assertEquals("兜底", KqcxAuth.errorMessage(null, "兜底"))
     }
 
-    // ── 账户资产（2026-09-30：余额 / 卡券 / 会员卡） ──
+    // ── 账户资产（2026-09-30：余额 / 卡券） ──
 
     @Test
     fun `余额解析与文案`() {
@@ -358,22 +358,6 @@ class KqcxAuthTest {
         } catch (e: KvcBusinessError) {
             assertEquals(20001, e.errorCode)
         }
-    }
-
-    @Test
-    fun `会员卡折扣折算`() {
-        // 官方卡券详情页 discount*10 显示为「X 折」：服务端 0.9 → 9 折
-        val json = """{"resultCode":1,"errorCode":0,"result":{"list":[
-            {"discount":0.9,"endTime":"2026-12-01 00:00:00"},
-            {"discount":"0.85"}
-        ]}}"""
-        val members = KqcxAuth.parseMembers(json)
-        assertEquals(2, members.size)
-        assertEquals("9 折", members[0].discountText)
-        assertEquals("2026-12-01", members[0].endAt!!.split(" ").first())
-        assertEquals("8.5 折", members[1].discountText)
-        // 折扣缺失不给「无折扣」这种编造
-        assertNull(members[1].endAt)
     }
 
     // ── 服务端订单历史（queryOrderList，2026-11-05 解包补出） ──

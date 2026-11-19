@@ -86,8 +86,6 @@ class KqcxAuthClient private constructor(private val http: OkHttpClient) {
         /** 用户持有卡券（`queryUserCoupon`）：`list[]`，剩余次数与免费时长。只读。 */
         private const val ENDPOINT_USER_COUPON = "$BASE/v2.0.0/queryUserCoupon"
 
-        /** 会员卡（`queryUserMemberCoupon`，官方传 `{page:1,rows:20}`）。只读。 */
-        private const val ENDPOINT_USER_MEMBER = "$BASE/v1.0.0/queryUserMemberCoupon"
 
         /** 小程序请求头的 `client-type: 1`；服务端按 token 认人，此头照抄即可。 */
         private const val CLIENT_TYPE = "1"
@@ -287,21 +285,13 @@ class KqcxAuthClient private constructor(private val http: OkHttpClient) {
             execute(request.post(body).build(), "单车查询")
         }
 
-    /** 账户资产三件套（只读）：余额 / 卡券 / 会员卡，参数都是空表单（会员卡带分页）。 */
+    /** 账户资产（只读）：余额 / 卡券，参数都是空表单。 */
     suspend fun userInfoJson(token: String): String = withContext(Dispatchers.IO) {
         execute(authed(ENDPOINT_USER_INFO, token).post(FormBody.Builder().build()).build(), "资产查询")
     }
 
     suspend fun userCouponJson(token: String): String = withContext(Dispatchers.IO) {
         execute(authed(ENDPOINT_USER_COUPON, token).post(FormBody.Builder().build()).build(), "卡券查询")
-    }
-
-    suspend fun userMemberJson(token: String): String = withContext(Dispatchers.IO) {
-        val body = FormBody.Builder()
-            .add("page", "1")
-            .add("rows", "20")
-            .build()
-        execute(authed(ENDPOINT_USER_MEMBER, token).post(body).build(), "会员卡查询")
     }
 
     /** 公共头：form + `client-type: 1` + UA（对齐小程序 client 构造）。 */

@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -56,7 +55,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,7 +68,10 @@ import edu.jxslu.schedule.domain.ScholarGroup
 import edu.jxslu.schedule.domain.ScholarProgressRules
 import edu.jxslu.schedule.domain.ScholarTotals
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.rememberRevealSpacePx
+import edu.jxslu.schedule.ui.common.scrollToReveal
 import edu.jxslu.schedule.ui.common.AppCardDefaults
+import edu.jxslu.schedule.ui.common.LabelValueRow
 import edu.jxslu.schedule.ui.common.PageEmpty
 import edu.jxslu.schedule.ui.common.PageScaffold
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
@@ -134,6 +135,7 @@ fun ScholarScreen(onBack: () -> Unit) {
     /** 点了明细行、正在看完整字段的那门课（null = 没开弹层）。 */
     var detailCourse by remember { mutableStateOf<ScholarCourse?>(null) }
     val listState = rememberLazyListState()
+    val revealSpacePx = rememberRevealSpacePx()
 
     val dimension = ScholarDimension.fromId(dimensionId) ?: ScholarDimension.System
     val dimGroups = remember(groups, dimensionId) { groups.filter { it.dimension == dimensionId } }
@@ -190,33 +192,6 @@ fun ScholarScreen(onBack: () -> Unit) {
                 }
             }
         }
-    }
-
-    /** 展开后希望卡片下方能露出来的纵向空间（≈半屏）。见 [scrollToReveal]。 */
-    val revealSpacePx = with(LocalDensity.current) { 240.dp.toPx() }
-
-    /**
-     * 展开长卡片时**只滚最小必要距离**，而不是把这张卡顶到视口顶部。
-     *
-     * 之前用 `animateScrollToItem` 顶到顶部，和 250ms 的展开动画叠在一起：卡片先「跳」上去、
-     * 内容再从下方刷出来，点击的位置和内容出现的位置对不上，因果感就散了（用户反馈的
-     * 「视觉展开反馈在屏幕下方」）。现在分两种情况：
-     * - 卡片下方本来就够放（[revealSpacePx] 之内）→ **不滚**，就地展开，位置感不被打断；
-     * - 不够 → 只往上滚刚好补足的那点距离，上限是卡片自身贴到视口顶部
-     *   （再滚卡片就跑出屏幕，用户会不知道自己在看哪一组）。
-     *
-     * 用 `animateScrollBy` 而不是 `animateScrollToItem`：滚固定距离，不追着还在变高的卡片跑，
-     * 展开动画期间不会抖。
-     */
-    fun scrollToReveal(key: String) {
-        val layout = listState.layoutInfo
-        val info = layout.visibleItemsInfo.firstOrNull { it.key == key } ?: return
-        val leftover = layout.viewportEndOffset - (info.offset + info.size)
-        val need = revealSpacePx - leftover
-        if (need <= 0f) return
-        val maxScroll = (info.offset - layout.viewportStartOffset).coerceAtLeast(0).toFloat()
-        val delta = minOf(need, maxScroll)
-        if (delta > 0f) scope.launch { listState.animateScrollBy(delta) }
     }
 
     // 进页自动尝试一次：闸门在 sync 内部判，数据还新时是零网络的空跑。
@@ -351,7 +326,7 @@ fun ScholarScreen(onBack: () -> Unit) {
                         // 否则再展开又是一下子几千 dp
                         fullyExpanded = fullyExpanded - key
                         expanded = expanded + key
-                        scrollToReveal(key)
+                        listState.scrollToReveal(key, revealSpacePx, scope)
                     } else {
                         expanded = expanded - key
                     }
@@ -440,40 +415,21 @@ private fun CourseDetailSheet(course: ScholarCourse, onDismiss: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(14.dp))
-            DetailRow("课程编号", course.courseNo)
-            DetailRow("修读学期", course.term)
-            DetailRow("学分", trimNum(course.credit) + " 学分")
-            DetailRow("课程类别", course.category)
-            DetailRow("课程属性", course.attribute)
-            DetailRow("课程性质", course.nature)
-            DetailRow("修读情况", StatusLabel(course.status))
-            DetailRow("课程成绩", course.scoreText)
-            DetailRow("计划性质", course.planned?.let { if (it) "计划内" else "计划外" }.orEmpty())
-            DetailRow(
+            LabelValueRow("课程编号", course.courseNo)
+            LabelValueRow("修读学期", course.term)
+            LabelValueRow("学分", trimNum(course.credit) + " 学分")
+            LabelValueRow("课程类别", course.category)
+            LabelValueRow("课程属性", course.attribute)
+            LabelValueRow("课程性质", course.nature)
+            LabelValueRow("修读情况", StatusLabel(course.status))
+            LabelValueRow("课程成绩", course.scoreText)
+            LabelValueRow("计划性质", course.planned?.let { if (it) "计划内" else "计划外" }.orEmpty())
+            LabelValueRow(
                 "是否学位课",
                 course.degreeCourse?.let { if (it) "是" else "否" }.orEmpty(),
             )
-            DetailRow("备注", course.remark)
+            LabelValueRow("备注", course.remark)
         }
-    }
-}
-
-/** key-value 行。空值直接不显示——教务有整列不输出的时候（比如公选课维度没有课程属性）。 */
-@Composable
-private fun DetailRow(label: String, value: String) {
-    if (value.isBlank()) return
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            modifier = Modifier.width(84.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f),
-        )
     }
 }
 

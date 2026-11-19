@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.reminder
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -143,13 +142,12 @@ object DormRepairReminder {
     }
 
     private fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        val channel = NotificationChannel(
+        ensureReminderChannel(
+            context,
             CHANNEL_ID,
             "报修进度",
             NotificationManager.IMPORTANCE_DEFAULT,
-        ).apply { description = "宿舍报修办结时提醒" }
-        manager.createNotificationChannel(channel)
+            "宿舍报修办结时提醒",
+        )
     }
 }
