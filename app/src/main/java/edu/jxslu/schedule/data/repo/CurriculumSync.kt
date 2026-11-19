@@ -5,6 +5,7 @@ import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
+import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.domain.CurriculumRules
 import java.time.LocalDate
@@ -65,8 +66,10 @@ class CurriculumSync(
             else -> return Result.Failed(ScholarProgressSync.describe(ensured))
         }
 
-        val html = cas.fetchHtml(JwUrls.CURRICULUM)
-            ?: return Result.Failed("没取到页面（会话可能已失效）")
+        val html = when (val fetched = cas.fetchHtml(JwUrls.CURRICULUM)) {
+            is CasFetchResult.Ok -> fetched.body
+            is CasFetchResult.Failed -> return Result.Failed("没取到培养方案页面，${fetched.reason}")
+        }
         val parsed = CurriculumParser.parse(html)
             ?: return Result.Failed("页面结构可能已变，本次未更新")
         CurriculumRules.validate(parsed)?.let { return Result.Failed(it) }

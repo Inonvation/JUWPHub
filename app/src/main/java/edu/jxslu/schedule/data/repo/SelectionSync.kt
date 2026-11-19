@@ -4,6 +4,7 @@ import edu.jxslu.schedule.data.jw.SelectionParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
+import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.domain.CourseSelection
 import edu.jxslu.schedule.domain.SelectionRound
@@ -181,8 +182,10 @@ class SelectionSync(
             val options = prefs.selectionTerms()
             return listOfNotNull(cachedTerm, next?.takeIf { term -> options.isEmpty() || term in options })
         }
-        val shell = cas.fetchHtml(SelectionParser.SHELL_URL)
-            ?: throw IllegalStateException("没取到选课结果页面（会话可能已失效）")
+        val shell = when (val fetched = cas.fetchHtml(SelectionParser.SHELL_URL)) {
+            is CasFetchResult.Ok -> fetched.body
+            is CasFetchResult.Failed -> throw IllegalStateException("没取到选课结果页面，${fetched.reason}")
+        }
         val current = SelectionParser.shellTerm(shell)
             ?: throw IllegalStateException("选课结果页没有学期下拉（教务结构可能变了）")
         val options = SelectionParser.shellTerms(shell)
@@ -200,8 +203,10 @@ class SelectionSync(
             if (page > 1) delay(AutoSyncRules.interRequestDelayMs())
             val url = SelectionParser.listUrl(term, page)
                 ?: throw IllegalStateException("学期号不合法：$term")
-            val body = cas.fetchHtml(url)
-                ?: throw IllegalStateException("没取到选课数据（会话可能已失效）")
+            val body = when (val fetched = cas.fetchHtml(url)) {
+                is CasFetchResult.Ok -> fetched.body
+                is CasFetchResult.Failed -> throw IllegalStateException("没取到选课数据，${fetched.reason}")
+            }
             val parsed = SelectionParser.parseFetchJson(body)
             count = parsed.count
             rows += parsed.rows
@@ -211,8 +216,10 @@ class SelectionSync(
     }
 
     private suspend fun fetchRounds(): List<SelectionRound> {
-        val body = cas.fetchHtml(SelectionParser.ROUNDS_URL)
-            ?: throw IllegalStateException("没取到选课轮次（会话可能已失效）")
+        val body = when (val fetched = cas.fetchHtml(SelectionParser.ROUNDS_URL)) {
+            is CasFetchResult.Ok -> fetched.body
+            is CasFetchResult.Failed -> throw IllegalStateException("没取到选课轮次，${fetched.reason}")
+        }
         return SelectionParser.parseRounds(body).rounds
     }
 

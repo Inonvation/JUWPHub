@@ -2,6 +2,7 @@ package edu.jxslu.schedule.data.session
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -61,7 +62,7 @@ class LoginGateRulesTest {
         assertFalse(s.suspended)
         assertEquals(1, s.consecutiveCredentialFailures)
 
-        s = LoginGateRules.afterTransientFailure(s, t0 + 1)
+        s = LoginGateRules.afterTransientFailure(s, t0 + 1, LoginFailureKind.Network)
         assertEquals(1, s.consecutiveCredentialFailures)
         assertFalse(s.suspended)
 
@@ -74,9 +75,85 @@ class LoginGateRulesTest {
     @Test
     fun transientFailures_neverSuspend() {
         var s = LoginGateState()
-        repeat(10) { s = LoginGateRules.afterTransientFailure(s, t0 + it) }
+        repeat(10) { s = LoginGateRules.afterTransientFailure(s, t0 + it, LoginFailureKind.Network) }
         assertEquals(0, s.consecutiveCredentialFailures)
         assertFalse(s.suspended)
+    }
+
+    /**
+     * 网络 / 平台异常只等短冷却：一次网络抖动不该让整条教务链 5 分钟不可用。
+     *
+     * 旧行为把网络失败也塞进 5 分钟窗口，用户点「检测」只会看到「刚刚登录失败过」
+     * （2026-11-19 用户报障）。
+     */
+    @Test
+    fun networkFailure_retriesAfterShortCooldown() {
+        val failed = LoginGateRules.afterTransientFailure(
+            LoginGateState(),
+            t0,
+            LoginFailureKind.Network,
+        )
+        assertFalse("连点仍要挡住", LoginGateRules.canAttempt(failed, t0 + 1))
+        assertTrue(
+            "冷却过后放行",
+            LoginGateRules.canAttempt(failed, t0 + LoginGateRules.TRANSIENT_RETRY_MS),
+        )
+        assertTrue(
+            "远早于 5 分钟",
+            LoginGateRules.TRANSIENT_RETRY_MS < LoginGateRules.REPEAT_WINDOW_MS,
+        )
+    }
+
+    @Test
+    fun serverFailure_retriesAfterShortCooldown() {
+        val failed = LoginGateRules.afterTransientFailure(
+            LoginGateState(),
+            t0,
+            LoginFailureKind.Server,
+        )
+        assertFalse(LoginGateRules.canAttempt(failed, t0 + LoginGateRules.TRANSIENT_RETRY_MS - 1))
+        assertTrue(LoginGateRules.canAttempt(failed, t0 + LoginGateRules.TRANSIENT_RETRY_MS))
+    }
+
+    /** 凭证错 / 验证码仍然等满 5 分钟——只有这两个的下一步是「别动」。 */
+    @Test
+    fun credentialAndCaptcha_keepFullWindow() {
+        val credential = LoginGateRules.afterCredentialFailure(LoginGateState(), t0)
+        assertFalse(
+            LoginGateRules.canAttempt(credential, t0 + LoginGateRules.TRANSIENT_RETRY_MS),
+        )
+        assertTrue(LoginGateRules.canAttempt(credential, t0 + LoginGateRules.REPEAT_WINDOW_MS))
+
+        val captcha = LoginGateRules.afterTransientFailure(
+            LoginGateState(),
+            t0,
+            LoginFailureKind.Captcha,
+        )
+        assertFalse(LoginGateRules.canAttempt(captcha, t0 + LoginGateRules.TRANSIENT_RETRY_MS))
+        assertTrue(LoginGateRules.canAttempt(captcha, t0 + LoginGateRules.REPEAT_WINDOW_MS))
+    }
+
+    /** 被挡住时说的话必须点出真实原因，不能再是那句什么都说一点的旧文案。 */
+    @Test
+    fun blockedMessage_namesTheRealCause() {
+        val network = LoginGateRules.blockedMessage(LoginFailureKind.Network)
+        val credential = LoginGateRules.blockedMessage(LoginFailureKind.Credential)
+        val server = LoginGateRules.blockedMessage(LoginFailureKind.Server)
+        assertTrue(network.contains("网络"))
+        assertTrue(credential.contains("密码"))
+        assertTrue(server.contains("教务"))
+        val legacy = LoginGateRules.blockedMessage(LoginFailureKind.None)
+        assertNotEquals(legacy, network)
+        assertNotEquals(legacy, credential)
+        assertNotEquals(legacy, server)
+    }
+
+    /** 升级前落盘的闸门（没有失败种类）不该把陈旧失败变成门。 */
+    @Test
+    fun legacyStateWithoutKind_isNotBlocked() {
+        val legacy = LoginGateState(lastSuccessMs = 0L, lastAttemptMs = t0)
+        assertEquals(LoginFailureKind.None, legacy.lastFailure)
+        assertTrue(LoginGateRules.canAttempt(legacy, t0 + 1))
     }
 
     /** 成功一次把计数清零，但不解除停用（停用只能靠更新密码 reset）。 */

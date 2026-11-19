@@ -6,6 +6,7 @@ import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.data.session.ProfileSyncRules
+import edu.jxslu.schedule.data.session.bodyOrNull
 import java.time.LocalDate
 import kotlinx.coroutines.flow.first
 
@@ -44,7 +45,8 @@ class ProfileSync(
         // 连会话都建不起来（没存密码、WebView 里也没有可用会话）= 这次**根本没试成**：
         // 不落「试过」日期，否则用户当天再去导入页手登一次，这一整天都不会补抓。
         if (cas.ensureValid() == CasEnsureResult.NoCredential) return false
-        val html = cas.fetchHtml(JwUrls.STUDENT_CARD) ?: return false
+        // 静默降级（姓名 / 班级是锦上添花）：只关心拿没拿到，不要错误文案 → bodyOrNull
+        val html = cas.fetchHtml(JwUrls.STUDENT_CARD).bodyOrNull() ?: return false
         // 「试过」在**拿到页面之后**才落：抓不到页面（会话没了、网不通、被退回登录页）
         // 就不算试过，下次进页还能补抓。真正该挡的是「页面拿到了但解析不出」——
         // 那是页面结构变了，一天一次足够，落在这里正好。

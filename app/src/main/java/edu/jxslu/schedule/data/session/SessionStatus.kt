@@ -81,6 +81,18 @@ object SessionStatus {
         return true
     }
 
+    /**
+     * 重登**没成功**：把 [tryAcquireRelogin] 刚取到的许可退回去（2026-11-19）。
+     *
+     * 许可的意义是「同一分钟内不重复重登」；一次失败的重登本来就没建立新会话，留着这个
+     * 时刻只会让同一次同步里后面的 URL 连尝试机会都没有，而错误还会被报成「会话已失效」。
+     * 退回**不会**造成登录风暴：真正的登录频率由 `LoginGateRules` 的重复窗口管
+     * （网络 / 平台异常 30 秒，凭证错 5 分钟）。
+     */
+    fun releaseRelogin() {
+        lastReloginMs = 0L
+    }
+
     /** 用户手动登录成功、或测试里复位时调用。 */
     fun clearAutoLoginThrottle() {
         lastAutoLoginMs = 0L

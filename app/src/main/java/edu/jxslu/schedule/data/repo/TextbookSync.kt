@@ -5,6 +5,7 @@ import edu.jxslu.schedule.data.jw.TextbookParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
+import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
@@ -99,8 +100,10 @@ class TextbookSync(
         // 单学期教材远小于一页上限，单次 GET 拿全；count 超了也只抓一页
         // （教材是确认清单不是流水，异常大的 count 更可能是接口行为变化，
         // 静默失败比拿着半页数据写库安全）
-        val body = cas.fetchHtml(url)
-            ?: return Result.Failed("没取到教材数据（会话可能已失效）")
+        val body = when (val fetched = cas.fetchHtml(url)) {
+            is CasFetchResult.Ok -> fetched.body
+            is CasFetchResult.Failed -> return Result.Failed("没取到教材数据，${fetched.reason}")
+        }
         val parsed = try {
             TextbookParser.parseFetchJson(body, term)
         } catch (e: CancellationException) {

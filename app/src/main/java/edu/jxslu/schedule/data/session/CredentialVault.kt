@@ -128,6 +128,11 @@ class CredentialVault(context: Context) : CredentialStore, YktTokenCache {
         suspended = gatePrefs.getBoolean(key(target, SUFFIX_SUSPENDED), false),
         lastSuccessMs = gatePrefs.getLong(key(target, SUFFIX_LAST_SUCCESS), 0L),
         lastAttemptMs = gatePrefs.getLong(key(target, SUFFIX_LAST_ATTEMPT), 0L),
+        // 升级前落盘的闸门没有这个键：读回 `None` = 「没有待冷却的失败」，
+        // 窗口按 0 处理（否则旧数据会把一次陈旧失败变成 5 分钟的门）。
+        lastFailure = LoginFailureKind.entries
+            .firstOrNull { it.name == gatePrefs.getString(key(target, SUFFIX_LAST_FAILURE), null) }
+            ?: LoginFailureKind.None,
     )
 
     override fun writeGate(target: LoginTarget, state: LoginGateState) {
@@ -136,6 +141,7 @@ class CredentialVault(context: Context) : CredentialStore, YktTokenCache {
             .putBoolean(key(target, SUFFIX_SUSPENDED), state.suspended)
             .putLong(key(target, SUFFIX_LAST_SUCCESS), state.lastSuccessMs)
             .putLong(key(target, SUFFIX_LAST_ATTEMPT), state.lastAttemptMs)
+            .putString(key(target, SUFFIX_LAST_FAILURE), state.lastFailure.name)
             .apply()
     }
 
@@ -173,5 +179,6 @@ class CredentialVault(context: Context) : CredentialStore, YktTokenCache {
         const val SUFFIX_SUSPENDED = "suspended"
         const val SUFFIX_LAST_SUCCESS = "last_success"
         const val SUFFIX_LAST_ATTEMPT = "last_attempt"
+        const val SUFFIX_LAST_FAILURE = "last_failure"
     }
 }

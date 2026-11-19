@@ -5,7 +5,9 @@ import edu.jxslu.schedule.data.jw.ScholarProgressParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
+import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.notReadyReason
 import edu.jxslu.schedule.domain.ScholarCourse
 import edu.jxslu.schedule.domain.ScholarDimension
 import edu.jxslu.schedule.domain.ScholarGroup
@@ -96,8 +98,11 @@ class ScholarProgressSync(
             // 进度条停在 0/4 上不动比没有进度条更让人怀疑是不是卡了
             onProgress(index + 1, dimensions.size)
             if (index > 0) delay(AutoSyncRules.interRequestDelayMs())
-            val html = cas.fetchHtml(JwUrls.scholarUrl(dimension))
-                ?: return Result.Failed("${dimension.label}：没取到页面（会话可能已失效）")
+            val html = when (val fetched = cas.fetchHtml(JwUrls.scholarUrl(dimension))) {
+                is CasFetchResult.Ok -> fetched.body
+                is CasFetchResult.Failed ->
+                    return Result.Failed("${dimension.label}：没取到页面，${fetched.reason}")
+            }
             val parsed = ScholarProgressParser.parse(dimension, html)
                 ?: return Result.Failed("${dimension.label}：页面结构可能已变，本次未更新")
             ScholarProgressRules.validate(parsed)?.let {
@@ -121,14 +126,12 @@ class ScholarProgressSync(
     }
 
     companion object {
-        /** 把会话层的失败翻译成给用户看的一句话。口径与 `ProfileSync` 一致：只说下一步该做什么。 */
-        fun describe(result: CasEnsureResult): String = when (result) {
-            is CasEnsureResult.Ready -> ""
-            CasEnsureResult.NoCredential ->
-                "还没保存统一认证账号，去「我的 → 教务账户」登录一次即可自动导入"
-            CasEnsureResult.Suspended -> "密码连续错误，已暂停自动登录，请更新密码后重试"
-            is CasEnsureResult.NeedsManualLogin -> result.message
-            is CasEnsureResult.Failed -> result.message
-        }
+        /**
+         * 把会话层的失败翻译成给用户看的一句话。口径与 `ProfileSync` 一致：只说下一步该做什么。
+         *
+         * 文案实体在 [notReadyReason]（`data.session`）：`CasSession.fetchHtml` 自己也要拼这句，
+         * 而会话层不该反向依赖本包。这里保留入口是因为既有调用点都用它。
+         */
+        fun describe(result: CasEnsureResult): String = result.notReadyReason()
     }
 }

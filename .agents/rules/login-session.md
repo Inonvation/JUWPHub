@@ -13,10 +13,11 @@
   （本校 CAS 错误凭证返回 401 + 重渲染登录页，页面无凭证文案却必带 captcha 脚本字样）；
   **凭证特征先于验证码特征比对**（登录页本身就含 captcha 字样，倒序会把密码错全判成
   「要求输入验证码」）。见 `CasLoginResult.kt` 注释与 `CasLoginClassifierTest` 两条回归。
-  四条别改坏：① **闸门只有「凭证错」计数**，验证码 / 网络 / 5xx 一律不计——旧实现把
+  五条别改坏：① **闸门只有「凭证错」计数**，验证码 / 网络 / 5xx 一律不计——旧实现把
   「CAS 无 Location」一律当凭证错，会把对的密码记成错的、累计还把账号停用，所以
   `CasLoginClassifier` 必须四分类（详情页 / 认不出的 200 走 `Manual`，转 WebView）；
-  ② `ensureValid` 有 10 分钟可信期、5 分钟重复窗口、`Mutex` 串行化，**别为了「实时」去掉**
+  ② `ensureValid` 有 10 分钟可信期、**按失败性质分档的重复窗口**（凭证错 / 验证码 5 分钟，
+  网络 / 平台异常 30 秒，2026-11-19 起）、`Mutex` 串行化，**别为了「实时」去掉**
   （并发登录正是风控最敏感的形状）。但两条判据必须带上「会话还在不在」：**可信期要同时
   要求 `http.hasCookies()`**——`last_success` 落盘、cookie 不落盘，进程重启后时间戳还在而
   jar 已空，只看时间戳会把「空会话」当「可用会话」；**`canAttempt` 里
@@ -40,6 +41,13 @@
   另开一条读盘路径。
   `YktCredentialStore` 现在只是 `CredentialVault` 的薄适配器，**公开签名不要动**（8 个调用点，
   改内部就够——构造点只有 `Graph` 一处）。
+  ⑤ **重复窗口分两档，被挡时照实说原因**（2026-11-19 用户报障：快速检测两条链同时报
+  「刚刚登录失败过，请稍后再试」）。`lastFailure`（`LoginFailureKind`）随闸门落盘，
+  `windowFor` 定窗口、`blockedMessage` 定文案：凭证错 / 验证码等满 `REPEAT_WINDOW_MS`（5 分钟，
+  防连撞风控），网络与平台异常只等 `TRANSIENT_RETRY_MS`（30 秒，只为挡连点）——按 5 分钟处理
+  会让一次网络抖动把课表 / 考试 / 成绩 / 教材整条链锁 5 分钟。**会话探针 `verifySession` 失败
+  不写闸门**：那是 GET 学生主页的探活，不是一次登录。升级兼容：`login_gate` 没有
+  `last_failure` 键时读作 `None`、窗口 0，别改回「无键按失败算」。
 
 ## 网页会话也算登录态（2026-09-27 修「我的」页一直显示未登录）
 
@@ -208,10 +216,17 @@
   - WebView：`SESSION_PROBE_JS` 输出 `conflict` token（与
     `JwImportDiagnosis.SESSION_CONFLICT_TOKEN` 逐字对齐）→ `sessionConflict` 诊断。
   单看 `flag1` 会误伤正常 layui 应答（代价：清 cookie + 白登一次 + 这次数据拿不回来）。
-- **`CasSession.fetchHtml` 只对 `SessionInvalid` 作废会话（`clearCookies`）后重试一次**。
+- **`CasSession.fetchHtml` / `postForm` 只对 `SessionInvalid` 作废会话（`clearCookies`）后重试一次**。
   信任期内 `ensureValid` 不验会话，所以不作废就会一路用一份死会话——所有 OkHttp 取数
   （教材 / 成绩 / 学业 / 学籍卡）同时静默失效，而 WebView 导入照常成功。
   重试**不动闸门的失败计数**（作废的是会话不是凭证，那是防锁号的计数器）。
+- **失败必须带回原因**（2026-11-19）：两个方法返回 `CasFetchResult`（`Ok` / `Failed(reason)`），
+  不再回 `null`——原先十几个调用点只能统一写「没取到 XX（会话可能已失效）」，把网络断、
+  5xx 都说成登录问题。取数链用 `when` 拼「没取到 XX，${reason}」；只有**明确要静默降级**的
+  地方（学籍卡补抓、报修兜底）才用 `bodyOrNull()`，别把 `bodyOrNull()` 当默认写法。
+  重登窗口（60 秒）挡下时给 [SessionStatus.RELOGIN_WINDOW_MS] 的说法，不报「会话失效」。
+- **重登失败要把许可退回**（`SessionStatus.releaseRelogin`）：一次没成功的重登本来就没建立
+  新会话，占着 60 秒只会让同一次同步里后面的 URL 连试都试不了；登录频率由闸门管。
 - 排查提示：用 `scripts/fetch_*.py` 抓数据会**顶掉手机上那份会话**（同一个学号），
   别在用户正在点验时跑。
 

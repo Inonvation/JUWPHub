@@ -8,6 +8,7 @@ import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
+import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.domain.ExamChangeDetector
 import edu.jxslu.schedule.domain.ExamChangeText
@@ -106,8 +107,11 @@ class ExamSync(
         ) {
             cachedTerm
         } else {
-            val shell = cas.fetchHtml(JwUrls.EXAM_QUERY)
-                ?: return Result.Failed("没取到考试安排页面（会话可能已失效）")
+            val shell = when (val fetched = cas.fetchHtml(JwUrls.EXAM_QUERY)) {
+                is CasFetchResult.Ok -> fetched.body
+                is CasFetchResult.Failed ->
+                    return Result.Failed("没取到考试安排页面，${fetched.reason}")
+            }
             termFromShell(shell)
                 ?.also { prefs.setExamShellTerm(it, nowMillis()) }
                 ?: return Result.Failed("考试安排页没有学期下拉（教务结构可能变了）")
@@ -118,8 +122,10 @@ class ExamSync(
         var page = 1
         do {
             if (page > 1) delay(AutoSyncRules.interRequestDelayMs())
-            val body = cas.fetchHtml(listUrl(term, page))
-                ?: return Result.Failed("没取到考试数据（会话可能已失效）")
+            val body = when (val fetched = cas.fetchHtml(listUrl(term, page))) {
+                is CasFetchResult.Ok -> fetched.body
+                is CasFetchResult.Failed -> return Result.Failed("没取到考试数据，${fetched.reason}")
+            }
             val parsed = try {
                 ExamScheduleParser.parseFetchJson(body)
             } catch (e: CancellationException) {

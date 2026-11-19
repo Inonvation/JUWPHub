@@ -3,6 +3,7 @@ package edu.jxslu.schedule.data.repo
 import android.util.Log
 import edu.jxslu.schedule.data.jw.InternshipBaseParser
 import edu.jxslu.schedule.data.session.CasEnsureResult
+import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.domain.InternshipBase
 import edu.jxslu.schedule.domain.InternshipCacheRules
@@ -93,8 +94,10 @@ class InternshipBasesLoader(
             )
             else -> return Result.Failed(ScholarProgressSync.describe(ensured))
         }
-        val body = cas.fetchHtml(InternshipBaseParser.listUrl(page = 1))
-            ?: return staleOrFail(snapshot, "没取到实习基地数据（会话失效或网络不通）")
+        val body = when (val fetched = cas.fetchHtml(InternshipBaseParser.listUrl(page = 1))) {
+            is CasFetchResult.Ok -> fetched.body
+            is CasFetchResult.Failed -> return staleOrFail(snapshot, "没取到实习基地数据，${fetched.reason}")
+        }
         val parsed = try {
             InternshipBaseParser.parsePage(body)
         } catch (e: CancellationException) {

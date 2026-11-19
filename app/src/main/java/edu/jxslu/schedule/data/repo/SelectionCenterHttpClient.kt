@@ -4,6 +4,7 @@ import edu.jxslu.schedule.data.jw.JwHttpSession.JwHttpException
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.jw.SelectionCenterParser
 import edu.jxslu.schedule.data.session.AutoSyncRules
+import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.domain.SelectionCourse
 import edu.jxslu.schedule.domain.SelectionQuery
@@ -113,16 +114,22 @@ class SelectionCenterHttpClient(
         if (roundId in prepared) return
         val entryUrl = JwUrls.selectionRoundUrl(roundId)
             ?: throw SelectionClientException(fatal = true, message = "轮次 id 不合法：$roundId")
-        val entry = cas.fetchHtml(entryUrl)
-            ?: throw SelectionClientException(fatal = true, message = SESSION_UNAVAILABLE)
+        val entry = when (val fetched = cas.fetchHtml(entryUrl)) {
+            is CasFetchResult.Ok -> fetched.body
+            is CasFetchResult.Failed ->
+                throw SelectionClientException(fatal = true, message = "没取到选课进入页，${fetched.reason}")
+        }
         if (SelectionCenterParser.notInWindow(entry)) {
             throw SelectionClientException(fatal = true, message = SelectionCenterParser.NOT_IN_WINDOW_TEXT)
         }
         if (SelectionCenterParser.noOpen(entry)) {
             throw SelectionClientException(fatal = true, message = "教务选课功能暂未开放（no-open 页）")
         }
-        val shell = cas.fetchHtml(JwUrls.SELECTION_PLAN_LIST_SHELL)
-            ?: throw SelectionClientException(fatal = true, message = SESSION_UNAVAILABLE)
+        val shell = when (val fetched = cas.fetchHtml(JwUrls.SELECTION_PLAN_LIST_SHELL)) {
+            is CasFetchResult.Ok -> fetched.body
+            is CasFetchResult.Failed ->
+                throw SelectionClientException(fatal = true, message = "没取到选课列表壳页，${fetched.reason}")
+        }
         if (SelectionCenterParser.captchaEnabled(shell)) {
             throw SelectionClientException(
                 fatal = true,
@@ -168,13 +175,23 @@ class SelectionCenterHttpClient(
         pageSize: Int,
     ): SelectionCenterParser.CourseListPage {
         val url = listUrl(query)
-        var text = cas.postForm(url, SelectionCenterParser.listBody(start = start, pageSize = pageSize))
-            ?: throw SelectionClientException(fatal = true, message = SESSION_UNAVAILABLE)
+        var text = when (
+            val fetched = cas.postForm(url, SelectionCenterParser.listBody(start = start, pageSize = pageSize))
+        ) {
+            is CasFetchResult.Ok -> fetched.body
+            is CasFetchResult.Failed ->
+                throw SelectionClientException(fatal = true, message = "没取到选课列表，${fetched.reason}")
+        }
         if (SelectionCenterParser.qzNotFound(text)) {
             prepared.remove(roundId)
             prepare(roundId)
-            text = cas.postForm(url, SelectionCenterParser.listBody(start = start, pageSize = pageSize))
-                ?: throw SelectionClientException(fatal = true, message = SESSION_UNAVAILABLE)
+            text = when (
+                val fetched = cas.postForm(url, SelectionCenterParser.listBody(start = start, pageSize = pageSize))
+            ) {
+                is CasFetchResult.Ok -> fetched.body
+                is CasFetchResult.Failed ->
+                    throw SelectionClientException(fatal = true, message = "没取到选课列表，${fetched.reason}")
+            }
         }
         return try {
             SelectionCenterParser.parseList(text)

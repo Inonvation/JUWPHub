@@ -33,6 +33,46 @@ sealed interface CasEnsureResult {
 }
 
 /**
+ * 带会话取一页数据的结果（DESIGN §4.27，2026-11-19）。
+ *
+ * **[Failed.reason] 必须能区分「网络不通 / 5xx / 会话被顶」**：这一层原先只回 `null`，
+ * 于是十几个取数调用点只能统一写「没取到 XX（会话可能已失效）」——网络断一次就把用户
+ * 往「重新登录」上带（2026-11-19 与「刚刚登录失败过」同批修）。
+ */
+sealed interface CasFetchResult {
+
+    data class Ok(val body: String) : CasFetchResult
+
+    /** 取数失败的一句话原因（调用方再加「没取到 XX」前缀，不要在这里拼场景）。 */
+    data class Failed(val reason: String) : CasFetchResult
+}
+
+/**
+ * 只关心「拿到没拿到」的静默降级路径用（`bodyOrNull() ?: return false`）。
+ *
+ * 要给用户解释原因的调用方**不要**用它——用 `when` 取 [CasFetchResult.Failed.reason]，
+ * 否则又回到「所有失败一个笼统说法」的老问题。
+ */
+fun CasFetchResult.bodyOrNull(): String? = (this as? CasFetchResult.Ok)?.body
+
+/**
+ * 会话不可用时给用户的一句话（**唯一口径**，DESIGN §4.27 / §3.16）。
+ *
+ * 与 `ScholarProgressSync.describe` 是同一份文案（那里委托到这里）：取数层也要拼这句话
+ * （[CasSession.fetchHtml] 拿不到会话时），而 `data.session` 不该反向依赖 `data.repo`。
+ * 唯一的例外是学工报修：它没有「自动导入」这回事，NoCredential 自己写了一句
+ * （`DormRepairSync.describeCas`），其余分支仍走这里。
+ */
+fun CasEnsureResult.notReadyReason(): String = when (this) {
+    is CasEnsureResult.Ready -> ""
+    CasEnsureResult.NoCredential ->
+        "还没保存统一认证账号，去「我的 → 教务账户」登录一次即可自动导入"
+    CasEnsureResult.Suspended -> "密码连续错误，已暂停自动登录，请更新密码后重试"
+    is CasEnsureResult.NeedsManualLogin -> message
+    is CasEnsureResult.Failed -> message
+}
+
+/**
  * 学校统一认证（CAS）会话的唯一持有者（DESIGN §4.27）。
  *
  * 覆盖教务、学工、签章三个系统——它们共用一套 CAS，但**各自的业务会话要各自建立**
@@ -103,11 +143,14 @@ class CasSession(
         // 有 cookie 就先探：探通比完整登录便宜，探不通再走登录。
         // 探针的失败要全接住（它和登录一样会抛 Network / Protocol），否则异常会穿透
         // 到调用方——那里只当它是「会话不可用」，反而把真实原因丢了。
+        //
+        // **探针失败不写闸门**（2026-11-19）：它是一次 GET 学生主页的会话探活，不是登录，
+        // 不消耗 CAS 的任何尝试次数。旧行为把它记成「一次尝试」，于是探针超时之后的 5 分钟里
+        // 连登录都不许——用户点检测只会看到「刚刚登录失败过」，实际起因只是一次读超时。
         if (http.hasCookies()) {
             val verified = try {
                 http.verifySession()
             } catch (e: JwHttpException) {
-                vault.writeGate(LoginTarget.Jw, LoginGateRules.afterTransientFailure(gate, clock()))
                 return CasEnsureResult.Failed(e.message ?: "会话校验失败")
             }
             if (verified) {
@@ -145,7 +188,9 @@ class CasSession(
             return CasEnsureResult.Ready()
         }
         if (!LoginGateRules.canAttempt(gate, now)) {
-            return CasEnsureResult.Failed("刚刚登录失败过，请稍后再试")
+            // 文案按上一次的失败性质给：凭证错 / 网络断 / 验证码的下一步动作完全不同，
+            // 一句「刚刚登录失败过」会把用户往「再等等」的死路上带（2026-11-19 用户报障）。
+            return CasEnsureResult.Failed(LoginGateRules.blockedMessage(gate.lastFailure))
         }
 
         return try {
@@ -161,13 +206,22 @@ class CasSession(
             else CasEnsureResult.Failed(e.message ?: "统一认证登录失败")
         } catch (e: JwHttpException.Manual) {
             // 验证码 / 认不出的页面：停手转人工，**不计失败**
-            vault.writeGate(LoginTarget.Jw, LoginGateRules.afterTransientFailure(gate, clock()))
+            vault.writeGate(
+                LoginTarget.Jw,
+                LoginGateRules.afterTransientFailure(gate, clock(), LoginFailureKind.Captcha),
+            )
             CasEnsureResult.NeedsManualLogin(e.message ?: "需要在网页里重新登录一次")
         } catch (e: JwHttpException.Network) {
-            vault.writeGate(LoginTarget.Jw, LoginGateRules.afterTransientFailure(gate, clock()))
+            vault.writeGate(
+                LoginTarget.Jw,
+                LoginGateRules.afterTransientFailure(gate, clock(), LoginFailureKind.Network),
+            )
             CasEnsureResult.Failed(e.message ?: "网络不可用")
         } catch (e: JwHttpException.Protocol) {
-            vault.writeGate(LoginTarget.Jw, LoginGateRules.afterTransientFailure(gate, clock()))
+            vault.writeGate(
+                LoginTarget.Jw,
+                LoginGateRules.afterTransientFailure(gate, clock(), LoginFailureKind.Server),
+            )
             CasEnsureResult.Failed(e.message ?: "教务链路异常")
         }
     }
@@ -197,22 +251,33 @@ class CasSession(
             if (next.suspended) CasEnsureResult.Suspended
             else CasEnsureResult.Failed(e.message ?: "统一认证登录失败")
         } catch (e: JwHttpException.Manual) {
-            vault.writeGate(LoginTarget.Jw, LoginGateRules.afterTransientFailure(gate, clock()))
+            vault.writeGate(
+                LoginTarget.Jw,
+                LoginGateRules.afterTransientFailure(gate, clock(), LoginFailureKind.Captcha),
+            )
             CasEnsureResult.NeedsManualLogin(e.message ?: "需要在网页里登录一次")
         } catch (e: JwHttpException.Network) {
-            vault.writeGate(LoginTarget.Jw, LoginGateRules.afterTransientFailure(gate, clock()))
+            vault.writeGate(
+                LoginTarget.Jw,
+                LoginGateRules.afterTransientFailure(gate, clock(), LoginFailureKind.Network),
+            )
             CasEnsureResult.Failed(e.message ?: "网络不可用")
         } catch (e: JwHttpException.Protocol) {
-            vault.writeGate(LoginTarget.Jw, LoginGateRules.afterTransientFailure(gate, clock()))
+            vault.writeGate(
+                LoginTarget.Jw,
+                LoginGateRules.afterTransientFailure(gate, clock(), LoginFailureKind.Server),
+            )
             CasEnsureResult.Failed(e.message ?: "教务链路异常")
         }
     }
 
     /**
-     * 带会话取一个教务页面；会话不可用或取数失败返回 **null**（静默降级）。
+     * 带会话取一个教务页面（读语义，所有教务取数链的入口）。
      *
-     * 给「我的」页补抓班级用（DESIGN §3.3）：抓不到就维持现状（只显示学号），
-     * 一个锦上添花的字段不该把页面弄成错误态，也不该打断任何主流程。
+     * 失败**一定带回原因**（[CasFetchResult.Failed]）：网络断、5xx、会话被顶、重登窗口
+     * 由调用方拼进「没取到 XX」里。原先这里只回 `null`，十几个调用点只能统一写
+     * 「会话可能已失效」，把一次网络抖动说成登录问题（2026-11-19 与「刚刚登录失败过」
+     * 同批修）。要静默降级的地方用 [bodyOrNull]。
      *
      * **会话被别处登录顶掉时会作废本地会话并重试一次**（2026-10-06）：强智是单会话，
      * 而信任期内 [ensureValid] 不会去验会话，于是一份已经作废的会话会被一路用下去，
@@ -221,32 +286,58 @@ class CasSession(
      * 重试也**只做一次**（失败不重试的纪律不变）。作废的是会话不是凭证，
      * 所以不动闸门里的失败计数（那是「防锁号」的计数器）。
      */
-    suspend fun fetchHtml(url: String): String? {
-        if (ensureValid() !is CasEnsureResult.Ready) return null
+    suspend fun fetchHtml(url: String): CasFetchResult {
+        val ensured = ensureValid()
+        if (ensured !is CasEnsureResult.Ready) return CasFetchResult.Failed(ensured.notReadyReason())
         val first = runCatchingCancellable { http.fetchHtml(url) }
-        first.getOrNull()?.let { return it }
-        if (first.exceptionOrNull() !is JwHttpException.SessionInvalid) return null
+        first.getOrNull()?.let { return CasFetchResult.Ok(it) }
+        if (first.exceptionOrNull() !is JwHttpException.SessionInvalid) {
+            return CasFetchResult.Failed(reasonOf(first.exceptionOrNull()))
+        }
         // 重登要过一道**独立窗口**：一次同步里多个 URL 各自都能触发重登，
         // 而每次重登都会把对方顶掉（强智单会话），不加冷却就是登录乒乓
-        if (!SessionStatus.tryAcquireRelogin(clock())) return null
-        if (relogin() !is CasEnsureResult.Ready) return null
-        return runCatchingCancellable { http.fetchHtml(url) }.getOrNull()
+        if (!SessionStatus.tryAcquireRelogin(clock())) {
+            return CasFetchResult.Failed(reloginDeniedReason())
+        }
+        val relogined = relogin()
+        if (relogined !is CasEnsureResult.Ready) {
+            // 许可退回：一次**失败**的重登不该占掉下一分钟（后面还有别的 URL 要试）
+            SessionStatus.releaseRelogin()
+            return CasFetchResult.Failed(relogined.notReadyReason())
+        }
+        return runCatchingCancellable { http.fetchHtml(url) }.fold(
+            onSuccess = { CasFetchResult.Ok(it) },
+            onFailure = { CasFetchResult.Failed(reasonOf(it)) },
+        )
     }
 
     /**
      * 带会话 **POST 表单**（读语义，2026-10-08 起；选课中心的列表查询用它）。
      *
-     * 与 [fetchHtml] 同一套编排：会话被顶（[JwHttpException.SessionInvalid]）时作废本地会话、
-     * 重登**一次**、重试**一次**；其余失败静默回 null。查询没有副作用，重试安全。
+     * 与 [fetchHtml] 同一套编排（含失败原因与「重登许可失败即退回」）：会话被顶
+     * （[JwHttpException.SessionInvalid]）时作废本地会话、重登**一次**、重试**一次**；
+     * 其余失败带回原因。查询没有副作用，重试安全。
      */
-    suspend fun postForm(url: String, form: List<Pair<String, String>>): String? {
-        if (ensureValid() !is CasEnsureResult.Ready) return null
+    suspend fun postForm(url: String, form: List<Pair<String, String>>): CasFetchResult {
+        val ensured = ensureValid()
+        if (ensured !is CasEnsureResult.Ready) return CasFetchResult.Failed(ensured.notReadyReason())
         val first = runCatchingCancellable { http.postForm(url, form) }
-        first.getOrNull()?.let { return it }
-        if (first.exceptionOrNull() !is JwHttpException.SessionInvalid) return null
-        if (!SessionStatus.tryAcquireRelogin(clock())) return null
-        if (relogin() !is CasEnsureResult.Ready) return null
-        return runCatchingCancellable { http.postForm(url, form) }.getOrNull()
+        first.getOrNull()?.let { return CasFetchResult.Ok(it) }
+        if (first.exceptionOrNull() !is JwHttpException.SessionInvalid) {
+            return CasFetchResult.Failed(reasonOf(first.exceptionOrNull()))
+        }
+        if (!SessionStatus.tryAcquireRelogin(clock())) {
+            return CasFetchResult.Failed(reloginDeniedReason())
+        }
+        val relogined = relogin()
+        if (relogined !is CasEnsureResult.Ready) {
+            SessionStatus.releaseRelogin()
+            return CasFetchResult.Failed(relogined.notReadyReason())
+        }
+        return runCatchingCancellable { http.postForm(url, form) }.fold(
+            onSuccess = { CasFetchResult.Ok(it) },
+            onFailure = { CasFetchResult.Failed(reasonOf(it)) },
+        )
     }
 
     /**
@@ -275,6 +366,34 @@ class CasSession(
         http.clearCookies()
         ensureValidLocked()
     }
+
+    /**
+     * 取数失败 → 一句给用户的话（调用方再补「没取到 XX」前缀）。
+     *
+     * 只归类、不改写：`Protocol` / `SessionInvalid` 的 message 本身就是人话（「教务登录没走通
+     * …」「账号在其它地方登录」），原样透出比换成笼统说法有用；网络层那句是 OkHttp 原文
+     * （`timeout` / `Failed to connect to …`），前面补「网络不可用」才看得出该换网络还是重登。
+     */
+    private fun reasonOf(error: Throwable?): String = when (error) {
+        is JwHttpException.Network ->
+            "网络不可用（${error.message?.takeIf { it.isNotBlank() } ?: "连接失败"}）"
+        is JwHttpException.SessionInvalid -> error.message ?: "教务会话已失效"
+        is JwHttpException.Protocol -> error.message ?: "教务链路异常"
+        else -> error?.message?.takeIf { it.isNotBlank() } ?: "取数失败"
+    }
+
+    /**
+     * 重登许可拿不到时的原因（[fetchHtml] / [postForm] 共用）。
+     *
+     * 两种成因要说不同的话：已停用（凭证被判错到阈值）要等用户改密码，
+     * 而「60 秒内刚重登过」是一次同步里多个 URL 同时撞到被顶的正常情形，不是失败。
+     */
+    private fun reloginDeniedReason(): String =
+        if (SessionStatus.isSuspended(LoginTarget.Jw)) {
+            CasEnsureResult.Suspended.notReadyReason()
+        } else {
+            RELOGIN_WINDOW_HINT
+        }
 
     /**
      * 与 `runCatching` 同形，但让 [CancellationException] 穿透。
@@ -338,6 +457,14 @@ class CasSession(
     companion object {
         /** 代理出口的提示。文案唯一来源 [NetworkHint]（引导页给输入框留位置，别在这加长句）。 */
         const val PROXY_HINT: String = NetworkHint.VPN
+
+        /**
+         * 会话被顶、但重登许可还被 [SessionStatus.RELOGIN_WINDOW_MS] 的窗口挡着时的话。
+         *
+         * 60 秒内第二次撞到「账号在别处登录」的正常情形（一次同步多个 URL），
+         * 重登不是失败——别让用户以为要重新登录。
+         */
+        private const val RELOGIN_WINDOW_HINT = "会话刚在别处登录过，已重新登过，请稍后再试"
 
         /**
          * 回灌时要读的域。

@@ -5,6 +5,7 @@ import edu.jxslu.schedule.data.DefaultData
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.jw.TeachingCalendarParser
 import edu.jxslu.schedule.data.session.CasEnsureResult
+import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -61,8 +62,10 @@ class TeachingCalendarSync(
             is CasEnsureResult.Ready -> Unit
             else -> return Result.Failed(ScholarProgressSync.describe(ensured))
         }
-        val html = cas.fetchHtml(url)
-            ?: return Result.Failed("没取到教学日历（会话可能已失效）")
+        val html = when (val fetched = cas.fetchHtml(url)) {
+            is CasFetchResult.Ok -> fetched.body
+            is CasFetchResult.Failed -> return Result.Failed("没取到教学日历，${fetched.reason}")
+        }
         val calendar = TeachingCalendarParser.parse(html, term)
             ?: return Result.Failed("教学日历解析失败或学期不符")
 

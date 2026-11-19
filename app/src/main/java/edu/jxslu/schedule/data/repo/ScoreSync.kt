@@ -5,6 +5,7 @@ import edu.jxslu.schedule.data.jw.ScoreParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
+import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
@@ -102,8 +103,10 @@ class ScoreSync(
         do {
             if (page > 1) delay(AutoSyncRules.interRequestDelayMs())
             // 学期传空 = 全部学期，与成绩页导入同一个口径
-            val body = cas.fetchHtml(ScoreParser.listUrl(term = "", page = page))
-                ?: return Result.Failed("没取到成绩数据（会话可能已失效）")
+            val body = when (val fetched = cas.fetchHtml(ScoreParser.listUrl(term = "", page = page))) {
+                is CasFetchResult.Ok -> fetched.body
+                is CasFetchResult.Failed -> return Result.Failed("没取到成绩数据，${fetched.reason}")
+            }
             val parsed = try {
                 ScoreParser.parseFetchJson(body)
             } catch (e: CancellationException) {

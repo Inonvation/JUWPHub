@@ -4,6 +4,8 @@ import android.util.Log
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.bodyOrNull
+import edu.jxslu.schedule.data.session.notReadyReason
 import edu.jxslu.schedule.data.xg.DormRepairParser
 import edu.jxslu.schedule.data.xg.DormRepairWebClient
 import edu.jxslu.schedule.data.xg.XgUrls
@@ -188,15 +190,17 @@ class DormRepairSync(
         }
         if (ensure is CasEnsureResult.Ready) {
             val viaCas = runCatching {
-                val sso = cas.fetchHtml(XgUrls.SSO_LOGIN)
-                val office = cas.fetchHtml(XgUrls.OFFICE)
+                // 报修这条链是「WebView 优先、CAS 兜底」：CAS 失败的原因由下面的兜底文案承担，
+                // 这里只要 body，不要逐条错误文案（bodyOrNull）
+                val sso = cas.fetchHtml(XgUrls.SSO_LOGIN).bodyOrNull()
+                val office = cas.fetchHtml(XgUrls.OFFICE).bodyOrNull()
                 if (sso == null || office == null) {
                     null
                 } else {
                     cas.postForm(
                         XgUrls.OFFICE_RECORD_LIST,
                         XgUrls.REPAIR.recordListForm(DormRepairParser.MAX_RECORDS),
-                    )
+                    ).bodyOrNull()
                 }
             }.getOrNull()
             // 只认 JSON：手登链路偶尔会回一张 CAS 登录页 HTML（200），那是「会话没建好」，
@@ -209,7 +213,7 @@ class DormRepairSync(
             DormRepairWebClient.Result.NoSession -> when {
                 ensure == null -> Fetch.NoSession
                 ensure is CasEnsureResult.Ready ->
-                    Fetch.Failed("没取到学工报修数据（学工会话可能已失效）")
+                    Fetch.Failed("没取到学工报修数据（学工会话或网络异常）")
                 else -> Fetch.Failed(describeCas(ensure))
             }
             is DormRepairWebClient.Result.Failed -> Fetch.Failed(fallback.message)
@@ -227,13 +231,11 @@ class DormRepairSync(
         }
     }
 
+    /** 学工这条链的 NoCredential 文案与教务取数不同（这里没有「自动导入」这回事），其余同一份口径。 */
     private fun describeCas(result: CasEnsureResult?): String = when (result) {
-        is CasEnsureResult.Ready -> ""
-        CasEnsureResult.NoCredential -> "还没保存统一认证账号，可在「我的 → 教务账户」登录"
-        CasEnsureResult.Suspended -> "密码连续错误，已暂停自动登录，请更新密码后重试"
-        is CasEnsureResult.NeedsManualLogin -> result.message
-        is CasEnsureResult.Failed -> result.message
         null -> "统一认证会话不可用"
+        CasEnsureResult.NoCredential -> "还没保存统一认证账号，可在「我的 → 教务账户」登录"
+        else -> result.notReadyReason()
     }
 
     private sealed interface Fetch {

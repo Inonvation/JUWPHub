@@ -196,15 +196,29 @@ class CasSessionTest {
         assertEquals(1, http.loginCalls)
     }
 
-    /** 探针自身网络失败：不该接着去走登录（那时大概率也连不上，白撞一次）。 */
+    /**
+     * 探针自身网络失败：不该接着去走登录（那时大概率也连不上，白撞一次）。
+     *
+     * **也不该占用登录的重复窗口**（2026-11-19）：探针是一次 GET 学生主页，不是登录。
+     * 旧行为把它记成「一次尝试」，于是一次读超时之后的 5 分钟里连登录都不许，
+     * 用户点检测只会看到「刚刚登录失败过」。
+     */
     @Test
     fun probeNetworkFailure_reportsFailedWithoutLogin() = runBlocking {
         store.cas = SessionCredentials("1", "p")
         http.cookiePresent = true
         http.verifyError = JwHttpException.Network(IOException("boom"))
-        val result = newSession().ensureValid()
+        val session = newSession()
+        val result = session.ensureValid()
         assertTrue(result is CasEnsureResult.Failed)
         assertEquals(0, http.loginCalls)
+        assertEquals("探针失败不写闸门", 0L, store.gate.lastAttemptMs)
+
+        // 下一次调用照常探（而不是被窗口挡掉），探通即 Ready
+        http.verifyError = null
+        http.verifyResult = true
+        assertEquals(CasEnsureResult.Ready(), session.ensureValid())
+        assertEquals(2, http.verifyCalls)
     }
 
     @Test
@@ -255,11 +269,19 @@ class CasSessionTest {
         assertEquals(0, store.gate.consecutiveCredentialFailures)
     }
 
-    /** 会话不可用时返回 null（静默降级），不抛异常打断调用方。 */
+    /**
+     * 会话不可用时**带回原因**（2026-11-19）：原先回 null，所有调用点只能统一写
+     * 「会话可能已失效」，没保存凭证的用户也被指去「重新登录」之外的错方向。
+     */
     @Test
-    fun fetchHtml_returnsNullWhenSessionUnavailable() = runBlocking {
+    fun fetchHtml_reportsReasonWhenSessionUnavailable() = runBlocking {
         http.cookiePresent = false
-        assertEquals(null, newSession().fetchHtml("http://jiaowu/xsxx"))
+        val result = newSession().fetchHtml("http://jiaowu/xsxx")
+        assertTrue(result is CasFetchResult.Failed)
+        assertEquals(
+            CasEnsureResult.NoCredential.notReadyReason(),
+            (result as CasFetchResult.Failed).reason,
+        )
         assertEquals(0, http.fetchHtmlCalls)
     }
 
@@ -267,18 +289,33 @@ class CasSessionTest {
     fun fetchHtml_returnsBodyWhenSessionReady() = runBlocking {
         store.cas = SessionCredentials("1", "p")
         http.fetchHtmlResult = "<html>学籍卡</html>"
-        assertEquals("<html>学籍卡</html>", newSession().fetchHtml("http://jiaowu/xsxx"))
+        assertEquals(
+            CasFetchResult.Ok("<html>学籍卡</html>"),
+            newSession().fetchHtml("http://jiaowu/xsxx"),
+        )
         assertEquals(1, http.fetchHtmlCalls)
     }
 
-    /** 取页面失败也吞掉：它是锦上添花的数据，不该把调用方拖进异常分支。 */
+    /** 取数失败不再吞成 null：原因原样交回调用方拼文案。 */
     @Test
-    fun fetchHtml_swallowsErrors() = runBlocking {
+    fun fetchHtml_reportsFailureReason() = runBlocking {
         store.cas = SessionCredentials("1", "p")
         http.fetchHtmlError = JwHttpException.Protocol("页面结构变了")
-        assertEquals(null, newSession().fetchHtml("http://jiaowu/xsxx"))
+        val result = newSession().fetchHtml("http://jiaowu/xsxx")
+        assertEquals(CasFetchResult.Failed("页面结构变了"), result)
         // 只有「会话被顶掉」才值得重试：5xx / 结构变化重试没有意义
         assertEquals(1, http.fetchHtmlCalls)
+    }
+
+    /** 网络断 ≠ 会话失效：原因里要看得出该换网络还是重登（2026-11-19）。 */
+    @Test
+    fun fetchHtml_networkFailure_saysNetworkNotSession() = runBlocking {
+        store.cas = SessionCredentials("1", "p")
+        val session = newSession()
+        session.ensureValid()
+        http.fetchHtmlError = JwHttpException.Network(IOException("timeout"))
+        val result = session.fetchHtml("http://jiaowu/xsjcqr")
+        assertEquals(CasFetchResult.Failed("网络不可用（timeout）"), result)
     }
 
     /**
@@ -297,7 +334,10 @@ class CasSessionTest {
         http.fetchHtmlErrorOnce = JwHttpException.SessionInvalid("账号在其它地方登录")
         http.fetchHtmlResult = "<html>教材</html>"
 
-        assertEquals("<html>教材</html>", session.fetchHtml("http://jiaowu/xsjcqr"))
+        assertEquals(
+            CasFetchResult.Ok("<html>教材</html>"),
+            session.fetchHtml("http://jiaowu/xsjcqr"),
+        )
         assertEquals("必须重登一次", loginsBefore + 1, http.loginCalls)
         assertEquals("必须重取一次", 2, http.fetchHtmlCalls)
     }
@@ -312,18 +352,19 @@ class CasSessionTest {
         http.postFormErrorOnce = JwHttpException.SessionInvalid("账号在其它地方登录")
         http.postFormResult = """{"aaData":[]}"""
 
-        assertEquals("""{"aaData":[]}""", session.postForm("http://jiaowu/xsxkkc/xsxkBxqjhxk", listOf("a" to "b")))
+        assertEquals(
+            CasFetchResult.Ok("""{"aaData":[]}"""),
+            session.postForm("http://jiaowu/xsxkkc/xsxkBxqjhxk", listOf("a" to "b")),
+        )
         assertEquals("必须重登一次", loginsBefore + 1, http.loginCalls)
         assertEquals("必须重发一次", 2, http.postFormCalls)
     }
 
     @Test
-    fun postForm_returnsNullWhenSessionUnavailable() = runBlocking {
+    fun postForm_reportsReasonWhenSessionUnavailable() = runBlocking {
         http.cookiePresent = false
-        assertEquals(
-            null,
-            newSession().postForm("http://jiaowu/xsxkkc/xsxkBxqjhxk", listOf("a" to "b")),
-        )
+        val result = newSession().postForm("http://jiaowu/xsxkkc/xsxkBxqjhxk", listOf("a" to "b"))
+        assertTrue(result is CasFetchResult.Failed)
         assertEquals(0, http.postFormCalls)
     }
 
@@ -364,11 +405,47 @@ class CasSessionTest {
         http.loginError = JwHttpException.Network(IOException("net"))   // 之后重登失败
         http.fetchHtmlErrorOnce = JwHttpException.SessionInvalid("被顶")
 
-        assertEquals(null, session.fetchHtml("http://jiaowu/xsjcqr"))
+        val result = session.fetchHtml("http://jiaowu/xsjcqr")
+        assertTrue(result is CasFetchResult.Failed)
         assertEquals(1, http.fetchHtmlCalls)
+        // 失败的重登要把 60 秒许可退回：否则同一轮里后面的 URL 连试都试不了
+        assertTrue("许可必须退回", SessionStatus.tryAcquireRelogin(now))
     }
 
-    /** 刚失败过：窗口内连请求都不发。 */
+    /**
+     * 60 秒窗口内第二次「被顶」不再重登，并给出可读原因。
+     *
+     * 一次同步里有多个 URL（学业四个维度、成绩翻页…）：第一个 URL 重登成功、把会话建好之后，
+     * 第二个 URL 再撞到冲突时不该再登一次——强智单会话，重登会把刚建立的会话顶掉。
+     */
+    @Test
+    fun fetchHtml_secondConflictWithinWindow_doesNotReloginAgain() = runBlocking {
+        store.cas = SessionCredentials("1", "p")
+        val session = newSession()
+        session.ensureValid()
+        val loginsAfterInit = http.loginCalls
+        http.fetchHtmlErrorOnce = JwHttpException.SessionInvalid("被顶")
+        http.fetchHtmlResult = "<html/>"
+        assertEquals(CasFetchResult.Ok("<html/>"), session.fetchHtml("http://jiaowu/a"))
+        assertEquals(loginsAfterInit + 1, http.loginCalls)
+
+        http.fetchHtmlError = JwHttpException.SessionInvalid("被顶")
+        val second = session.fetchHtml("http://jiaowu/b")
+        assertTrue(second is CasFetchResult.Failed)
+        assertEquals("窗口内不再重登", loginsAfterInit + 1, http.loginCalls)
+        assertTrue(
+            "要说「刚重登过」，不是「会话失效」",
+            (second as CasFetchResult.Failed).reason.contains("别处登录"),
+        )
+    }
+
+    /**
+     * 刚失败过：短冷却内连请求都不发，**冷却一过就该重试**（2026-11-19 修）。
+     *
+     * 钉的是用户报障的形状：一次网络失败之后，5 分钟内点「检测」只回
+     * 「刚刚登录失败过，请稍后再试」，课表与考试两条链同时失败。网络失败不是凭证问题，
+     * 只该挡连点（[LoginGateRules.TRANSIENT_RETRY_MS]），不该挡满 5 分钟。
+     */
     @Test
     fun withinRepeatWindow_doesNotAttemptAgain() = runBlocking {
         store.cas = SessionCredentials("1", "p")
@@ -377,6 +454,34 @@ class CasSessionTest {
         val again = newSession().ensureValid()
         assertEquals(1, http.loginCalls)
         assertTrue(again is CasEnsureResult.Failed)
+        assertEquals(
+            "被挡住时说出真实原因，不是「刚刚登录失败过」",
+            LoginGateRules.blockedMessage(LoginFailureKind.Network),
+            (again as CasEnsureResult.Failed).message,
+        )
+
+        // 冷却过后真的重试一次（网络已恢复）
+        now += LoginGateRules.TRANSIENT_RETRY_MS
+        http.loginError = null
+        assertEquals(CasEnsureResult.Ready(loggedInNow = true), newSession().ensureValid())
+        assertEquals(2, http.loginCalls)
+    }
+
+    /** 凭证错仍然等满 5 分钟：那是「别连着把账号试锁」。 */
+    @Test
+    fun credentialFailure_blocksFullRepeatWindow() = runBlocking {
+        store.cas = SessionCredentials("1", "p")
+        http.loginError = JwHttpException.Credential("账号或密码错误")
+        newSession().ensureValid()
+
+        now += LoginGateRules.TRANSIENT_RETRY_MS
+        val blocked = newSession().ensureValid()
+        assertTrue(blocked is CasEnsureResult.Failed)
+        assertEquals(1, http.loginCalls)
+
+        now += LoginGateRules.REPEAT_WINDOW_MS
+        newSession().ensureValid()
+        assertEquals(2, http.loginCalls)
     }
 
     @Test

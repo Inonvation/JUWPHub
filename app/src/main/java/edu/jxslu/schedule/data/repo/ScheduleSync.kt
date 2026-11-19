@@ -12,6 +12,7 @@ import edu.jxslu.schedule.data.jw.SyjxScheduleParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
+import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseKind
@@ -118,8 +119,10 @@ class ScheduleSync(
 
         val safeTerm = term?.takeIf { JwUrls.TERM_PATTERN.matches(it) }
         val theoryUrl = if (safeTerm != null) "${JwUrls.SCHEDULE_LIST}&xnxq01id=$safeTerm" else JwUrls.SCHEDULE_LIST
-        val theoryHtml = cas.fetchHtml(theoryUrl)
-            ?: return FetchResult.Failed("没取到理论课表页（会话可能已失效）")
+        val theoryHtml = when (val fetched = cas.fetchHtml(theoryUrl)) {
+            is CasFetchResult.Ok -> fetched.body
+            is CasFetchResult.Failed -> return FetchResult.Failed("没取到理论课表页，${fetched.reason}")
+        }
         val pageTerm = termFromHtml(theoryHtml)
             ?: return FetchResult.Failed("课表页没有学期下拉（教务结构可能变了）")
         if (safeTerm != null && pageTerm != safeTerm) {
@@ -140,8 +143,10 @@ class ScheduleSync(
 
         delay(AutoSyncRules.interRequestDelayMs())
 
-        val labHtml = cas.fetchHtml(JwUrls.labScheduleUrl(pageTerm))
-            ?: return FetchResult.Failed("没取到实验课表页（会话可能已失效）")
+        val labHtml = when (val fetched = cas.fetchHtml(JwUrls.labScheduleUrl(pageTerm))) {
+            is CasFetchResult.Ok -> fetched.body
+            is CasFetchResult.Failed -> return FetchResult.Failed("没取到实验课表页，${fetched.reason}")
+        }
         // 实验页同样带学期下拉，必须与理论页一致（2026-10-07 复核补）：教务若忽略
         // 实验页的学期参数、按自己的默认学期渲染，直取会把两个学期的课混在一起比对。
         labTermError(pageTerm, labHtml)?.let { return FetchResult.Failed(it) }

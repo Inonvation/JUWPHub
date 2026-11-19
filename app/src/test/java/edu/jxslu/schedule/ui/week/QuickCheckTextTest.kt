@@ -96,24 +96,27 @@ class QuickCheckTextTest {
     @Test
     fun `课表检测失败 = Error 且去掉已检查前缀`() {
         val feedback = quickCheckFeedback(
-            ScheduleSync.CheckResult.Failed("没取到理论课表页（会话可能已失效）"),
+            ScheduleSync.CheckResult.Failed("没取到理论课表页，网络不可用（timeout）"),
             examUpdated(),
         )
 
         assertEquals(NoticeTone.Error, feedback.tone)
         assertFalse(feedback.hasChanges)
-        assertEquals("课表检测失败（没取到理论课表页（会话可能已失效））；考试无变动", feedback.text)
+        assertEquals(
+            "课表检测失败（没取到理论课表页，网络不可用（timeout））；考试无变动",
+            feedback.text,
+        )
     }
 
     @Test
     fun `考试检测失败也是 Error`() {
         val feedback = quickCheckFeedback(
             scheduleOk(emptyList()),
-            ExamSync.Result.Failed("没取到考试数据（会话可能已失效）"),
+            ExamSync.Result.Failed("没取到考试数据，教务会话已失效"),
         )
 
         assertEquals(NoticeTone.Error, feedback.tone)
-        assertEquals("课表无变动；考试检测失败（没取到考试数据（会话可能已失效））", feedback.text)
+        assertEquals("课表无变动；考试检测失败（没取到考试数据，教务会话已失效）", feedback.text)
     }
 
     @Test
