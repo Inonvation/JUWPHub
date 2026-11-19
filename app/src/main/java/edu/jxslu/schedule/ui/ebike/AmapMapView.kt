@@ -41,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.MapView
+import com.amap.api.maps.model.AMapGestureListener
 import com.amap.api.maps.model.BitmapDescriptor
 import com.amap.api.maps.model.BitmapDescriptorFactory
 import com.amap.api.maps.model.CameraPosition
@@ -230,20 +231,38 @@ internal fun AmapMapView(
             runCatching { aMap.uiSettings.setLogoBottomMargin(logoBottomMarginPx) }
         }
     }
-    val touchTracker = remember {
-        MapTouchTracker(ViewConfiguration.get(context).scaledTouchSlop.toFloat()) {
-            // 用户接管地图：先停掉程序性相机动画，别让缓动继续和手指抢（与 osmdroid 版同口径）
+    /**
+     * 用户接管地图（单指拖动）：先停掉程序性相机动画，别让缓动继续和手指抢，再让 ViewModel
+     * 退出自动跟随（与 osmdroid 版同口径）。触摸回调与手势回调两条路都通到这里，重复调用无害。
+     *
+     * 顺手清掉 [CameraSuppressor] 的静默区（2026-11-19）：程序性移动会开 1.2 秒时间窗，
+     * 用户在这段时间里拖动并松手，收尾的 `onCameraChangeFinish` 会被吃掉——拖完不重查。
+     */
+    val onUserTakeOver: () -> Unit = remember {
+        {
             interrupted.set(true)
             aMap.stopAnimation()
+            suppressor.clear()
             panCallback()
         }
+    }
+    val touchTracker = remember {
+        MapTouchTracker(ViewConfiguration.get(context).scaledTouchSlop.toFloat(), onUserTakeOver)
     }
     // 最近一次触摸的屏幕坐标。高德的 `OnMarkerClickListener` 只给 Marker、不给手指位置，
     // 而「P 被点中时该不该转给它旁边的聚合圈」必须按**真实手指位置**判（2026-11-18）：
     // 拿 P 自己的坐标当手指位置会偏出半个图标，把旁边的数字也一起算进去。
     val lastTouch = remember { FloatArray(2) }
-    DisposableEffect(mapView) {
-        mapView.setOnTouchListener { _, event ->
+    // **手势必须挂在 SDK 的触摸回调上，别用 `mapView.setOnTouchListener`**（2026-11-19 修
+    // 「走两步镜头就被拽回去」）：高德 `MapView` 是 FrameLayout，图面是它构造函数里 `addView`
+    // 进来的子 View（`MapFragmentDelegateImp.onCreateView` 的返回值）。拖动事件先被子 View
+    // 消费，而 `ViewGroup` 只有在没有子 View 接手时才走自己的 `onTouchEvent`——父级的
+    // OnTouchListener **一次都收不到**。于是 `MapTouchTracker` 从不触发、`onUserPan` 从不回调，
+    // 跟随一直开着，人每走 8 米（`FOLLOW_RECENTER_METERS`）镜头就平移一次，拖图也甩不掉。
+    // 同一份坐标还喂着「P 被点中时按真实手指位置重算命中」（见 [AmapLayers.clickTargetAt]），
+    // 那条也一起失效过（`lastTouch` 恒为 0,0）。
+    DisposableEffect(aMap) {
+        aMap.setOnMapTouchListener { event ->
             touchTracker.onTouch(event)
             if (event.actionMasked == MotionEvent.ACTION_DOWN ||
                 event.actionMasked == MotionEvent.ACTION_UP
@@ -251,9 +270,26 @@ internal fun AmapMapView(
                 lastTouch[0] = event.x
                 lastTouch[1] = event.y
             }
-            false
         }
-        onDispose { mapView.setOnTouchListener(null) }
+        // 第二路信号，**不是冗余**：SDK 转发触摸事件时先 `removeMessages(14)` 再投递最新一条
+        // （`AMapDelegateImp.onTouchEvent`），手势里的 `ACTION_DOWN` / `ACTION_MOVE` 会被后到的
+        // 事件挤掉，`MapTouchTracker` 那种"从 DOWN 攒 slop"的判据就可能整段手势都判不出来。
+        // `onScroll` 由 SDK 的手势引擎在**真的把地图拖动**之后回调，与触摸流的疏密无关。
+        aMap.setAMapGestureListener(object : AMapGestureListener {
+            override fun onScroll(dx: Float, dy: Float) = onUserTakeOver()
+
+            override fun onDoubleTap(x: Float, y: Float) = Unit
+            override fun onSingleTap(x: Float, y: Float) = Unit
+            override fun onFling(dx: Float, dy: Float) = Unit
+            override fun onLongPress(x: Float, y: Float) = Unit
+            override fun onDown(x: Float, y: Float) = Unit
+            override fun onUp(x: Float, y: Float) = Unit
+            override fun onMapStable() = Unit
+        })
+        onDispose {
+            aMap.setOnMapTouchListener(null)
+            aMap.setAMapGestureListener(null)
+        }
     }
     val layers = remember(aMap, bitmaps, density) { AmapLayers(aMap, bitmaps, density) }
     // 相机停稳后重算 P 图标的避让（见 AmapLayers.refreshSpotBadges）
@@ -603,8 +639,14 @@ private const val CAMERA_ANIM_ZOOM_MS = 400L
 /** 只平移的相机动画时长（毫秒）：osmdroid 的 `animationSpeedDefault`，照抄。 */
 private const val CAMERA_ANIM_PAN_MS = 1_000L
 
-/** 等底图首帧的上限：超过就认定 key / 服务不可用，整层回退栅格。 */
-private const val SDK_LOAD_TIMEOUT_MS = 10_000L
+/**
+ * 等底图首帧的上限：超过就认定 key / 服务不可用，整层回退栅格。
+ *
+ * 2026-11-19 从 10 秒收到 **5 秒**（用户口径：key 失效时盯着绿色占位太久）：`initialize`
+ * 对失效 key 仍返回 true，唯一可靠信号就是 `onMapLoaded` 一直不来，等下去只是白等。
+ * 代价是网络极慢时可能误降级（本次会话用栅格），下次冷启动会重新试官方 SDK。
+ */
+private const val SDK_LOAD_TIMEOUT_MS = 5_000L
 
 private const val MOVE_QUIET_MS = 1_200L
 private const val RESTORE_QUIET_MS = 300L

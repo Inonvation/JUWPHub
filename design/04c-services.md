@@ -109,7 +109,11 @@
   （2026-11-19 修订）：离开上一次查询中心 ≥ `BikeNearby.FOLLOW_REQUERY_METERS`（300 米，
   纯函数 `followQueryDue` 有单测）就重查一次，查询在飞时不叠加；近处走动仍只挪镜头
   （程序性移动被 `CameraSuppressor` 吃掉），红线是「不轮询第三方接口」，不是「跟随期间绝不查」。
-  骑行结束那一下另有 `refreshNearUser` 补一次对齐（见 §3.9）。权限缺失等硬失败发一条 Failed 即结束，
+  骑行结束那一下另有 `refreshNearUser` 补一次对齐（见 §3.9）。权限缺失发一条 Failed 即结束
+  （权限是调用方的事）；**定位服务关着 / 没有可用 provider 不再结束这条流**，原地等它恢复
+  （2026-11-19：Activity 只走 ON_PAUSE 时流不会重启，静默结束就是整页停摆）。`shouldMoveDot`
+  之外还有 `DotGate` 的逃生口（连续两条粗读数一致 + 30 秒没采纳过读数，2026-11-19），
+  否则 GPS 一断蓝点会永久冻住。
   失败提示归一次性定位管。
 - **`LocationListener` 的四个方法都要写全**（含 API 29 起废弃的 `onStatusChanged`）：
   它们在 API 30 的 `android.jar` 里才是 default 方法，编译期少写也能过，

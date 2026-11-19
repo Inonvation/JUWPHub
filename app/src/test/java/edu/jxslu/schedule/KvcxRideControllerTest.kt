@@ -236,6 +236,8 @@ class KvcxRideControllerTest {
         located: LocateResult = LocateResult.Ok(28.68, 115.85),
         remoteRideReminder: MutableSharedFlow<Int>? = null,
         onOrderCreated: () -> Unit = {},
+        launchHadRide: Boolean = false,
+        onRideActiveChanged: ((Boolean) -> Unit)? = null,
     ): KvcxRideController = KvcxRideController(
         session = session,
         scope = CoroutineScope(Dispatchers.Unconfined),
@@ -246,7 +248,11 @@ class KvcxRideControllerTest {
         remoteRideReminder = remoteRideReminder,
         // 补全重拉的间隔在单测里取 0：Unconfined 下 delay(0) 不挂起，断言不需要等真时间
         unlockSyncIntervalMs = 0L,
+        // 空回包的二次确认同理
+        orderGoneConfirmDelayMs = 0L,
         onOrderCreated = onOrderCreated,
+        launchHadRide = launchHadRide,
+        onRideActiveChanged = onRideActiveChanged,
     )
 
     // ---------- 开锁 ----------
@@ -602,6 +608,42 @@ class KvcxRideControllerTest {
 
         assertEquals(0, effects.orderGoneCalls)
         assertNotNull(kvcx.state.value.ride)
+    }
+
+    @Test
+    fun `临时锁车后刷新回空不算订单结束`() {
+        // 临时锁车只锁车、订单继续计费；动作后那次刷新若撞上服务端落账窗口回了空包，
+        // 一次抖动不能把本机计时 / 自动还车 / 码全收掉（2026-11-19）。
+        val session = FakeSession()
+        val effects = FakeEffects().apply { orderGoneReturns = true }
+        val kvcx = controller(session, effects)
+        kvcx.query(quiet = true)
+
+        // 刷新第一拍空，确认那一拍订单仍在
+        session.queryScript = ArrayDeque(
+            listOf(null, ride(carNum = "100000669", locked = true)),
+        )
+        kvcx.tempLock()
+
+        assertNotNull(kvcx.state.value.ride)
+        assertEquals(0, effects.orderGoneCalls)
+        assertTrue(notices.none { it.first.contains("订单已在别处结束") })
+    }
+
+    @Test
+    fun `连续两次空回包才按还车口径收尾`() {
+        // 确认过两次都查不到，才认定订单真没了——否则「在微信里还了车但计时还挂着」那条修不回来
+        val session = FakeSession()
+        val effects = FakeEffects().apply { orderGoneReturns = true }
+        val kvcx = controller(session, effects)
+        kvcx.query(quiet = true)
+
+        session.queryScript = ArrayDeque(listOf(null, null))
+        kvcx.tempLock()
+
+        assertNull(kvcx.state.value.ride)
+        assertEquals(1, effects.orderGoneCalls)
+        assertTrue(notices.any { it.first.contains("订单已在别处结束") })
     }
 
     @Test
@@ -1612,6 +1654,106 @@ class KvcxRideControllerTest {
         session.coupons = listOf(card())
         assertNotNull(runBlocking { kvcx.rideCardCoupons(1_001_000L) })
         assertEquals(2, session.couponCalls)
+    }
+
+    // ---------- 冷启动位置提示（2026-11-18） ----------
+
+    @Test
+    fun `冷启动位置提示在第一次成功快照后作废`() {
+        // 上一次进程有骑行 → 今日页第一帧把服务卡放在顶部；空回包一到就归位（下方位置）
+        val session = FakeSession().apply { underway = null }
+        val persisted = mutableListOf<Boolean>()
+        val kvcx = controller(
+            session,
+            launchHadRide = true,
+            onRideActiveChanged = { persisted += it },
+        )
+        assertTrue(kvcx.rideHint.value)
+
+        kvcx.query()
+
+        assertFalse(kvcx.rideHint.value)
+        // 首帧的空状态不能落盘（那会抹掉提示），只有拿到成功快照后的「没有骑行」才写
+        assertEquals(listOf(false), persisted)
+    }
+
+    @Test
+    fun `查询失败时保留冷启动位置提示`() {
+        val session = FakeSession()
+        session.queryError = IOException("断网")
+        val persisted = mutableListOf<Boolean>()
+        val kvcx = controller(
+            session,
+            launchHadRide = true,
+            onRideActiveChanged = { persisted += it },
+        )
+
+        kvcx.query()
+
+        assertTrue(kvcx.rideHint.value)
+        assertTrue(persisted.isEmpty())
+    }
+
+    @Test
+    fun `查到在案骑行时位置提示作废且落盘为有骑行`() {
+        val persisted = mutableListOf<Boolean>()
+        val kvcx = controller(
+            FakeSession(),
+            launchHadRide = false,
+            onRideActiveChanged = { persisted += it },
+        )
+
+        kvcx.query()
+
+        assertNotNull(kvcx.state.value.ride)
+        assertFalse(kvcx.rideHint.value)
+        assertEquals(listOf(true), persisted)
+    }
+
+    @Test
+    fun `外部结束清掉落盘的骑行提示`() {
+        val persisted = mutableListOf<Boolean>()
+        val kvcx = controller(FakeSession(), onRideActiveChanged = { persisted += it })
+
+        kvcx.query()
+        assertEquals(listOf(true), persisted)
+
+        kvcx.onRideEndedExternally()
+
+        assertEquals(listOf(true, false), persisted)
+        assertFalse(kvcx.rideHint.value)
+    }
+
+    @Test
+    fun `开锁成功立即落盘为有骑行`() {
+        val persisted = mutableListOf<Boolean>()
+        val kvcx = controller(
+            FakeSession(),
+            launchHadRide = false,
+            onRideActiveChanged = { persisted += it },
+        )
+
+        kvcx.unlock("100000669")
+
+        assertFalse(kvcx.rideHint.value)
+        assertEquals(listOf(true), persisted)
+    }
+
+    @Test
+    fun `退出登录清掉位置提示与落盘`() {
+        val loggedIn = MutableStateFlow(true)
+        val persisted = mutableListOf<Boolean>()
+        val kvcx = controller(
+            FakeSession(loggedIn = loggedIn),
+            launchHadRide = true,
+            onRideActiveChanged = { persisted += it },
+        )
+        assertTrue(kvcx.rideHint.value)
+
+        loggedIn.value = false
+
+        assertFalse(kvcx.rideHint.value)
+        assertEquals(listOf(false), persisted)
     }
 
     private fun card(

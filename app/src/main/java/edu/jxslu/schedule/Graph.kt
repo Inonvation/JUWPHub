@@ -10,6 +10,7 @@ import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
 import edu.jxslu.schedule.data.kqcx.KqxCredentialStore
 import edu.jxslu.schedule.data.kqcx.KqcxBikeClient
 import edu.jxslu.schedule.data.kqcx.KqcxOrderCache
+import edu.jxslu.schedule.data.kqcx.KvcxRideHintStore
 import edu.jxslu.schedule.data.kqcx.ZoneCacheStore
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.GuessTarget
@@ -862,6 +863,9 @@ object Graph {
                 val notices = MutableSharedFlow<KvcxNotice>(extraBufferCapacity = 8)
                 val unlocked = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
                 val remoteReminder = MutableSharedFlow<Int>(extraBufferCapacity = 1)
+                // 冷启动位置提示（2026-11-18）：上一次进程有在案骑行时，今日页服务卡
+                // 从第一帧就留在顶部，不等第一次订单查询回包才归位。
+                val rideHint = KvcxRideHintStore(context.applicationContext)
                 KvcxRideController(
                     session = runCatching { kqcx(context) }.getOrNull(),
                     scope = scope,
@@ -873,6 +877,8 @@ object Graph {
                     remoteRideReminder = remoteReminder,
                     // 「猜你想用」：建单成功记一次真实订单（不是打开骑行页）
                     onOrderCreated = { recordGuessOrder(GuessTarget.KVCX) },
+                    launchHadRide = rideHint.hadRide,
+                    onRideActiveChanged = { active -> rideHint.setHadRide(active) },
                 )
             }.also { kvcxRide = it }
         }

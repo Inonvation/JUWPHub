@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.Gcj02
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collect
@@ -70,6 +71,14 @@ internal object BikeLocator {
     /** 位移门槛交给 [shouldMoveDot] 在内存里滤，平台层不再按距离截流。 */
     private const val STREAM_MIN_DISTANCE_M = 0f
 
+    /**
+     * 定位服务还没开 / 没有可用 provider 时的重看间隔。
+     *
+     * 只在这两种状态下跑（页面可见 + 定位不可用），一旦有 provider 就转成平台回调，
+     * 不再轮询；页面退后台由收集方的生命周期取消掉。
+     */
+    private const val PROVIDER_POLL_MS = 3_000L
+
     /** 精确或粗略任一授权即可（API 31+ 用户可能只给「大致位置」）。 */
     fun hasPermission(context: Context): Boolean =
         isGranted(context, Manifest.permission.ACCESS_FINE_LOCATION) ||
@@ -111,9 +120,13 @@ internal object BikeLocator {
      * 挪镜头、重查车辆接口都不是它的事（镜头会把用户拖好的视野抢回来；接口禁止轮询）。
      *
      * 先发五分钟内的缓存定位（蓝点立刻出现，不等 GPS 慢慢找），再挂网络与 GPS 两条更新，
-     * 经 [shouldMoveDot] 滤掉原地抖动后逐条发 GCJ-02 结果。权限缺失、定位服务关闭这类
-     * 硬失败发一条 [LocateResult.Failed] 后结束：看得见的失败提示是「定位」按钮那条路的
-     * 职责，这条流静默结束即可。取消（页面退后台 / 离开页面）由 `awaitClose` 注销监听。
+     * 经 [DotGate]（[shouldMoveDot] + 粗读数逃生口）滤掉原地抖动后逐条发 GCJ-02 结果。
+     *
+     * **定位服务关着 / 没有可用 provider 时这条流不结束**（2026-11-19 修）：它原来发一条
+     * [LocateResult.Failed] 就 `return@flow`，而页面的收集跑在 `repeatOnLifecycle(STARTED)`
+     * 里——从通知栏把定位打开、Activity 只走 ON_PAUSE 不走 STOP，流不会重启，于是蓝点、
+     * 跟随、「距你」整页停摆，只能退出页面再进。现在原地等它恢复（页面不可见时由
+     * 生命周期的取消收掉）。
      */
     fun updates(context: Context): Flow<LocateResult> = flow {
         if (!hasPermission(context)) {
@@ -127,20 +140,28 @@ internal object BikeLocator {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !manager.isLocationEnabled) {
             emit(LocateResult.Failed("手机定位服务未开启，请打开后重试"))
-            return@flow
+            while (!manager.isLocationEnabled) delay(PROVIDER_POLL_MS)
         }
 
         val cached = freshLastKnown(manager)?.toFix()
-        var shown: LocationFix? = cached
-        cached?.let { fix -> emit(toResult(fix, "session")) }
+        val gate = DotGate()
+        if (cached != null && gate.accept(cached, System.currentTimeMillis())) {
+            emit(toResult(cached, "session"))
+        }
 
-        val providers = enabledProviders(manager)
-        if (providers.isEmpty()) return@flow
+        var providers = enabledProviders(manager)
+        if (providers.isEmpty()) {
+            emit(LocateResult.Failed("正在等待可用的定位来源"))
+            while (true) {
+                delay(PROVIDER_POLL_MS)
+                providers = enabledProviders(manager)
+                if (providers.isNotEmpty()) break
+            }
+        }
         locationUpdates(manager, providers, STREAM_MIN_TIME_MS, STREAM_MIN_DISTANCE_M)
             .collect { location ->
                 val next = location.toFix()
-                if (shouldMoveDot(shown, next)) {
-                    shown = next
+                if (gate.accept(next, System.currentTimeMillis())) {
                     emit(toResult(next, "realtime"))
                 }
             }
@@ -296,4 +317,75 @@ internal fun shouldMoveDot(previous: LocationFix?, next: LocationFix): Boolean {
     if (moved >= DOT_MOVE_MIN_METERS) return true
     return accuracy > 0f && shownAccuracy > 0f &&
         accuracy <= shownAccuracy * DOT_ACCURACY_GAIN_RATIO
+}
+
+/** 两条**连续的**粗读数彼此离这么近，才算「同一片」而不是单条跳点。 */
+private const val DOT_COARSE_CONFIRM_METERS = 80.0
+
+/**
+ * 多久没有任何读数被采纳之后，才允许粗读数接管（见 [DotGate]）。
+ *
+ * 站定时 GPS 每两秒还在刷新基准，这个计时永远到不了门槛；只有「GPS 彻底没了」才会走到。
+ */
+private const val DOT_STALE_ACCEPT_MS = 30_000L
+
+/**
+ * 蓝点的挪点判据 + 一条**逃生口**（2026-11-19 修「进楼后蓝点冻住」）。
+ *
+ * [shouldMoveDot] 的第 1 条是硬规则：明显更粗的读数一律不认，拦的是双源交替里的单条跳点。
+ * 但基准（`shown`）**只在读数被采纳时前进**：人走进楼里、GPS 彻底没有，剩下的只有精度
+ * 60~2000 米的网络点，每条都比 20 米的旧基准粗 2.5 倍以上 → 全部被拒 → 蓝点冻在原地，
+ * 跟随、精度圈、「距你」一起停，直到重新拿到一条 ≤50 米的 GPS 读数（可能要走出这栋楼）。
+ *
+ * 逃生口**两条同时成立**才放行，缺一条都会把「定位乱跳」放回来：
+ * 1. 连续两条粗读数彼此相距 ≤ [DOT_COARSE_CONFIRM_METERS]——单条跳点凑不出这一对；
+ * 2. 已经 [DOT_STALE_ACCEPT_MS] 没有任何读数被采纳——站定时 GPS 还在刷新基准，到不了门槛。
+ */
+internal class DotGate {
+
+    private var shown: LocationFix? = null
+    private var lastAcceptedAt = 0L
+
+    /** 上一条被拒的粗读数（只为凑「连续两条」这一对）。 */
+    private var coarseCandidate: LocationFix? = null
+
+    /** 这个读数要不要真的挪蓝点；true 时内部基准一起前进。 */
+    fun accept(next: LocationFix, nowMillis: Long): Boolean {
+        val previous = shown
+        if (previous == null) {
+            adopt(next, nowMillis)
+            return true
+        }
+        if (shouldMoveDot(previous, next)) {
+            adopt(next, nowMillis)
+            return true
+        }
+        val coarser = next.accuracyMeters > 0f && previous.accuracyMeters > 0f &&
+            next.accuracyMeters > previous.accuracyMeters * DOT_COARSER_RATIO
+        if (!coarser) {
+            coarseCandidate = null
+            return false
+        }
+        val candidate = coarseCandidate
+        coarseCandidate = next
+        if (candidate == null) return false
+        if (BikeNearby.distanceMeters(
+                candidate.lat,
+                candidate.lng,
+                next.lat,
+                next.lng,
+            ) > DOT_COARSE_CONFIRM_METERS
+        ) {
+            return false
+        }
+        if (nowMillis - lastAcceptedAt < DOT_STALE_ACCEPT_MS) return false
+        adopt(next, nowMillis)
+        return true
+    }
+
+    private fun adopt(fix: LocationFix, nowMillis: Long) {
+        shown = fix
+        lastAcceptedAt = nowMillis
+        coarseCandidate = null
+    }
 }

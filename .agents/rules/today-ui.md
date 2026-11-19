@@ -45,7 +45,8 @@
 
 - 位置：**没有在案骑行时在作业卡与收件箱列表之间**；**有在案骑行时提到课程区之前**
   （列表第一项，2026-10-22 用户口径：骑行是最需要一眼看到的状态）。
-  **位置判据 = `kvcxRideActive`**（= 快趣单例 `state.ride != null && loggedIn`，**同步**），
+  **位置判据 = `kvcxRideActive`**（= 快趣单例 `state.ride != null && loggedIn`，**同步**）；
+  冷启动到第一次成功快照之前，再并上落盘的 `kvcxRideHint`（见「切 Tab / 冷启动的首帧」）。
   别用过了能力闸的 `kvcxRideState`：能力闸读的 `ebikeUseMode` 是 DataStore 冷流，新组合
   （切 Tab / 二级页返回）的第一帧恒是默认档（小程序方式 → `inAppRide=false`），第二帧才发真值，
   位置会晚一帧翻真、`animateItem` 把卡片从列表下方滑到顶部（2026-11-12 用户报「切 Tab 时
@@ -170,6 +171,28 @@
   - **趣智用水**：`elapsedMillis / QzxyWatering.EXPIRE_MILLIS`（1 小时记账窗口）；
     转「待核对」后不画。
   - **U净**：`1 - liveRemain / durationSeconds`（与 U净 页英雄卡同口径）；旧快照无时长不画。
+
+### 切 Tab / 冷启动的首帧（2026-11-18）
+
+服务卡的位置与内容都必须在**新组合的第一帧**成立。判据晚一帧，`AnimatedVisibility`
+就会把行收起再展开（160 / 220ms），下面的作业 / 猜你想用 / 收件箱被顶得上下跳——
+用户报的「切 Tab 时提醒卡片重组跳动」。
+
+- **内容闸**：`ebikeUseMode` / `ebikeRideStartAt` **不在页面里订阅 DataStore 冷流**，
+  一律走 `TodayViewModel.ebikeUseMode` / `ebikeRideStartAt`（VM 构造期同步读一次真值，
+  跨 Tab 保留最后值）。账号方式的骑行行由 `kvcxInAppRide` 控：首帧若落回默认档
+  （小程序方式），整卡会先收拢、下一帧再展开。
+- **位置闸**：冷启动的 `state.ride` 要等第一次 query 回包。`KvcxRideController.rideHint`
+  （`KvcxRideHintStore` 落盘，一枚布尔）在拿到第一次成功快照前把条目钉在顶部；成功快照 /
+  开锁 / 还车 / 外部结束 / 退出登录都会让它失效。它**只参与位置**、不参与行内容——提示为真
+  但没有骑行时整条零高度、不可见。
+- **课程卡 / 猜你想用的 `animateItem` 关位移**（`placementSpec = null`，2026-11-18 反转
+  11-12 的课程卡例外）：焦点态会在卡内展开状态行 / 进度条（280ms 高度动画），位移动画会让
+  下面各项逐帧追弹簧、文字叠文字；推荐卡虽然自身高度不变，但它上方的服务卡 / 课程卡在变，
+  同样不能追。加 / 删课与换槽的淡入淡出不受影响；服务卡条目**仍保留**位移
+  （「有订单时提到顶部」是明确需求）。
+- **课程卡行底进度条走 `animateFloatAsState(Motion.page())`**（2026-11-18）：进度每 30 秒
+  tick 才更新，直接换宽度是一格一跳；与进行中服务卡同一口径（低频数值不做 crossfade）。
 
 ## 宿舍报修状态行（2026-10-19；2026-10-21 并入收件箱列表，DESIGN §4.49）
 

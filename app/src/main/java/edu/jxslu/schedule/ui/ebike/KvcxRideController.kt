@@ -94,6 +94,15 @@ internal const val RIDE_CARD_CACHE_TTL_MS = 10 * 60 * 1000L
 internal const val RIDE_CARD_RECHECK_MS = 60_000L
 internal const val RIDE_CARD_WAIT_MS = 2_500L
 
+/**
+ * 空回包确认「订单真的没了」的间隔（见 [KvcxRideController.confirmOrderGone]）。
+ *
+ * 服务端在建单 / 临时锁车的异步落账窗口里会回一份空结果，而那份空结果一旦被当成
+ * 「订单已结束」就是**不可逆**收尾（清计时 / 撤自动还车 / 焚码）。等半秒再问一次，
+ * 足够让落账那条请求走完，也不至于让还车后的收尾明显变慢。
+ */
+internal const val ORDER_GONE_CONFIRM_DELAY_MS = 600L
+
 /** 快趣用车动作（DESIGN §4.32，B/C 档）：同一时刻只允许一个在跑。 */
 enum class KvcxAction {
     /**
@@ -400,6 +409,11 @@ class KvcxRideController internal constructor(
      */
     private val unlockSyncIntervalMs: Long = UNLOCK_SYNC_INTERVAL_MS,
     /**
+     * 「空回包确认订单已没」的等待间隔（见 [confirmOrderGone]）。单测注入 0 让 Unconfined
+     * 同步跑完；生产用 [ORDER_GONE_CONFIRM_DELAY_MS]。
+     */
+    private val orderGoneConfirmDelayMs: Long = ORDER_GONE_CONFIRM_DELAY_MS,
+    /**
      * 建单成功的一次性回调（「猜你想用」订单信号，DESIGN §4.51，2026-11-17）。
      *
      * 为什么放在编排层而不是页面：建单有「确认成功」与「订单已建、开锁未确认」两条路，
@@ -408,10 +422,52 @@ class KvcxRideController internal constructor(
      * 默认空实现：JVM 单测注入假 session 时不碰 Graph。
      */
     private val onOrderCreated: () -> Unit = {},
+    /**
+     * 上一次进程退出时有没有在案骑行（`KvcxRideHintStore.hadRide`，2026-11-18）。
+     * 冷启动第一帧还查不到订单，今日页靠它决定服务卡条目留在顶部还是底部；见 [rideHint]。
+     */
+    private val launchHadRide: Boolean = false,
+    /**
+     * 骑行在案状态变化时写回提示（默认空实现：单测不碰 SharedPreferences）。
+     * **只在拿到确定答案的事件里回调**（成功快照 / 开锁 / 还车 / 外部结束 / 退出登录），
+     * 冷启动首帧的「还没查」不算。
+     */
+    private val onRideActiveChanged: ((Boolean) -> Unit)? = null,
 ) {
 
     private val _state = MutableStateFlow(KvcxRideState())
     val state: StateFlow<KvcxRideState> = _state.asStateFlow()
+
+    private val _rideHint = MutableStateFlow(launchHadRide)
+
+    /**
+     * 服务卡**位置**的冷启动提示（2026-11-18）：上一次进程有在案骑行，且本进程还没拿到过
+     * 成功快照。今日页拿它把服务卡条目从第一帧就放对位置，避免「先排在列表下方、回包一到
+     * 再挪到顶部」的跳动（用户报的「状态卡从底部弹到顶部」）。
+     *
+     * 行内容不读它：卡片本体仍然只认 [state]，提示为真但没有骑行时整条零高度、不可见。
+     * 成功快照 / 开锁 / 还车 / 外部结束 / 退出登录都会把它翻假。
+     */
+    val rideHint: StateFlow<Boolean> = _rideHint.asStateFlow()
+
+    /**
+     * 最近一次落盘的「有无骑行」。初值取冷启动提示：落盘值与其相同就不重复写；
+     * 提示本身失效时（成功快照说没有订单）才会写 false。
+     */
+    @Volatile
+    private var persistedRideActive: Boolean = launchHadRide
+
+    /**
+     * 骑行在案状态变化时写回落盘提示（[onRideActiveChanged]）。
+     *
+     * **只在位置提示有了确定答案时调用**：冷启动首帧的「还没查」不是证据，调用点都是
+     * 成功快照 / 开锁 / 还车 / 外部结束 / 退出登录这些真事件。同值跳写。
+     */
+    private fun persistRidePresence(active: Boolean) {
+        if (persistedRideActive == active) return
+        persistedRideActive = active
+        onRideActiveChanged?.invoke(active)
+    }
 
     /** 提示事件共享流（单例化后各消费方自己收；单测不走这里）。 */
     val notices: SharedFlow<KvcxNotice> get() = rideNotices ?: emptyNotices
@@ -538,6 +594,10 @@ class KvcxRideController internal constructor(
                     cardJob = null
                     cardCoupons = null
                     cardFetchedAt = 0L
+                    // 位置提示属于上一个账号的订单：立刻作废，别让下一轮冷启动
+                    // 拿别人的骑行把服务卡钉在顶部。
+                    _rideHint.value = false
+                    persistRidePresence(false)
                 }
             }
         }
@@ -649,6 +709,9 @@ class KvcxRideController internal constructor(
                 }
                 // 成功触感也立即发：它属于"开锁成功"这一刻，不该被善后拖后
                 unlocked()
+                // 开锁成功 = 确定有骑行：冷启动位置提示与落盘一起更新（不必等下一次查询）
+                _rideHint.value = false
+                persistRidePresence(true)
                 // 「猜你想用」：建单成功 = 一次真实订单（不是打开骑行页；重试不重复）
                 if (!hadRide) onOrderCreated()
                 // 免费计时与开锁**同步**：本机开锁是服务端确认的骑行
@@ -866,6 +929,8 @@ class KvcxRideController internal constructor(
         }
         // 结束订单成功即落结果卡：订单状态已经在本地结束，不再等 queryUnderwayOrder
         // 的“订单消失”回包，也不让扣款轮询占住主动作。
+        _rideHint.value = false
+        persistRidePresence(false)
         _state.update {
             it.copy(
                 ride = null,
@@ -928,6 +993,9 @@ class KvcxRideController internal constructor(
         snapshotSeq++
         readSeq++
         val hadRide = _state.value.ride != null
+        // 外部结束是「有没有骑行」的确定答案：冷启动位置提示同时收掉，落盘也写 false
+        _rideHint.value = false
+        persistRidePresence(false)
         _state.update { it.copy(ride = null, unlockPending = false, lockPending = false) }
         if (hadRide && notice.isNotBlank()) notice(notice, NoticeTone.Success)
     }
@@ -1101,6 +1169,9 @@ class KvcxRideController internal constructor(
      * [KvcxSideEffects.onOrderGoneExternally]）。
      */
     private suspend fun applySnapshot(ride: KqcxAuth.Ride?) {
+        // 成功快照是「有没有骑行」的确定答案：位置提示作废，落盘按这次结果写
+        _rideHint.value = false
+        persistRidePresence(ride != null)
         _state.update { it.withRideSnapshot(ride) }
         if (ride == null && effects.onOrderGoneExternally()) {
             notice("订单已在别处结束，本机计时已收掉", NoticeTone.Info)
@@ -1114,7 +1185,35 @@ class KvcxRideController internal constructor(
         val read = ++readSeq
         runCatching { session.queryUnderway() }.onSuccess { ride ->
             if (seq != snapshotSeq || read != readSeq) return@onSuccess
+            // **空回包先确认一次再收尾**（2026-11-19）：服务端在建单 / 临时锁车的异步落账
+            // 窗口里会回一份空结果，而 `parseUnderway` 把「空对象」「缺 carNum」和 12003
+            // 一律折叠成 null——走下去就是不可逆收尾（清本机计时、撤自动还车、焚码）。
+            // 拿一次抖动当「订单在别处结束了」，用户会被告知结束、订单其实还在计费。
+            // 只在这一条路确认：`unlock` 的补全（[syncAfterUnlock]）本来就把空回包当脏数据。
+            if (ride == null && _state.value.ride != null && !confirmOrderGone(seq, read)) {
+                return@onSuccess
+            }
             applySnapshot(ride)
+        }
+    }
+
+    /**
+     * 「订单真的没了」的第二次确认（见 [refreshInternal]）。
+     *
+     * false 有两种含义，处理一样——**这一拍不落空**：第二份查不动（网络失败 / 会话失效），
+     * 或者这期间用户已经做了别的动作（[seq] / [read] 变了，旧结论作废）。宁可按旧状态多
+     * 显示一会儿，也不做不可逆的收尾。
+     */
+    private suspend fun confirmOrderGone(seq: Long, read: Long): Boolean {
+        val session = session ?: return true
+        delay(orderGoneConfirmDelayMs)
+        if (seq != snapshotSeq || read != readSeq) return false
+        return try {
+            session.queryUnderway() == null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            false
         }
     }
 

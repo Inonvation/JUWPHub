@@ -531,7 +531,9 @@ settle 后结果落盘（`onboarding_sync_outcome_json`），主界面在 `onboa
   自动还车闹钟全都在，用户只能点「结束计时」）。现在所有刷新路径落空都走
   `KvcxRideController.applySnapshot` → `onOrderGoneExternally()`，判据
   `EbikeFreeRide.shouldEndTimerWhenOrderGone`：账号方式 + 计时在案 + 过了 60 秒建单落账宽限
-  （`ORDER_GONE_GRACE_MS`，刚建单那几秒服务端还在落账、空回包是脏的）；**小程序方式不收**
+  （`ORDER_GONE_GRACE_MS`，刚建单那几秒服务端还在落账、空回包是脏的）；**动作后的静默刷新
+  落空要先隔 600ms 再确认一次**（2026-11-19），两次都说查不到才收——一次抖动不该触发不可逆
+  收尾；**小程序方式不收**
   ——那一档查不到订单是常态，计时是本机唯一真相。收尾复用还车那条 `endRideAndBurn()`。
   通知构建与两个 channel 在 `ui/ebike/EbikeFreeRideNotifier.kt`（倒计时 LOW 无震动 / 提醒 HIGH
   **带震动**、category `EVENT`；带震动的提醒 channel 用新 id `_v2`，早期无震动的旧 id 由

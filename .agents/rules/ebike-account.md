@@ -44,6 +44,11 @@
   `queryLockState` / `refreshInternal` / `syncAfterUnlock`），**别再各写
   `_state.update { it.withRideSnapshot(...) }`**；落空时调副作用层
   `onOrderGoneExternally()`，返回 true 才给一句「订单已在别处结束，本机计时已收掉」；
+  **动作后的静默刷新（`refreshInternal`，临时锁车 / 解锁都走它）落空要先确认一次**
+  （2026-11-19）：`confirmOrderGone` 隔 `ORDER_GONE_CONFIRM_DELAY_MS`（600ms）再问一遍，
+  两次都说没有才落空。解析层把「空对象」「缺 `carNum`」和 12003 都折叠成 null，而落账窗口里
+  服务端就是这样回包的——一次抖动就收计时 / 撤自动还车 / 焚码，用户被告知结束、订单还在计费。
+  别把确认加回 `unlock` 那条（`syncAfterUnlock` 本来就把空包当脏数据，加了只是多一次往返）；
   ② 收不收由 `EbikeFreeRide.shouldEndTimerWhenOrderGone` 判（纯函数，`EbikeFreeRideTest` 钉住）：
   **只认账号方式**（小程序方式查不到订单是常态、计时是那一档唯一真相，收了就是误伤）+
   计时在案 + **已过 `ORDER_GONE_GRACE_MS`（60 秒）**——刚建单那几秒服务端还在异步落账，

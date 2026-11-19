@@ -48,9 +48,13 @@ import edu.jxslu.schedule.domain.liveChipText
 import edu.jxslu.schedule.domain.liveClassLine
 import edu.jxslu.schedule.domain.minutesLeft
 import edu.jxslu.schedule.domain.progressPercent
+import edu.jxslu.schedule.ui.ebike.EbikeAutoReturnReminder
 import edu.jxslu.schedule.ui.wenqu.WenquPreregReminder
 import edu.jxslu.schedule.ui.widget.TodayWidgetRefresh
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.concurrent.TimeUnit
@@ -830,6 +834,10 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
  * （放假回家 / 出差）或用户手改系统时间，已排的闹钟就落在错误的墙上时刻，而系统
  * 不会替我们重算。这两条广播只在**时间基准**变了时发，正常一天里一次都不会来。
  * 补排本身是幂等的（全量重算 + `REPLACE`/`KEEP`），重复触发只是白跑一轮。
+ *
+ * 自动还车（2026-11-19 补）：它同样只有精确闹钟 + 一次性 Worker，重启 / 覆盖安装后
+ * 原来没有任何补排入口（全在页面里），骑到一半重启就等于这一轮永不还车。`reconcile`
+ * 要读偏好（suspend），所以走 `goAsync` 给它时间；它内部自己 runCatching，不会抛。
  */
 class ReminderBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -849,6 +857,16 @@ class ReminderBootReceiver : BroadcastReceiver() {
                 // 小组件边界闹钟同一条口径（2026-11-06）：它也是「墙上时刻 → 绝对时刻」，
                 // 时区一变就落在错误的时刻上。无实例时是廉价空跑（内部先查 getGlanceIds）。
                 TodayWidgetRefresh.enqueueRefresh(context)
+                // 自动还车（2026-11-19）：同上，精确闹钟不跨重启 / 安装存活
+                val app = context.applicationContext
+                val pending = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        EbikeAutoReturnReminder.reconcile(app)
+                    } finally {
+                        pending.finish()
+                    }
+                }
             }
         }
     }

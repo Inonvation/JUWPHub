@@ -79,7 +79,6 @@ import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.DormRepairRecord
 import edu.jxslu.schedule.domain.DormRepairRules
-import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.GuessPick
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.QuickScanTarget
@@ -139,6 +138,7 @@ import edu.jxslu.schedule.ui.water.WaterUiState
 import edu.jxslu.schedule.ui.water.WaterViewModel
 import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -232,12 +232,20 @@ fun TodayScreen(
             // 取不到控制器（地图 SDK 初始化失败等）时按「没有骑行」处理，推荐照常工作。
             // 这里不套 remember：默认参数在组合期求值，`remember` 里的 `LocalContext.current`
             // 属于非组合 lambda；Graph 是单例快路径，每次重组取一次的成本可以忽略。
+            // 冷启动的落盘提示也算「有骑行」（`rideHint`，2026-11-18）：否则第一帧会先推一次
+            // 快趣、订单回包到了再换卡，推荐卡在进页后自己跳一次。
             kvcxRideActive = runCatching { Graph.kvcxRide(LocalContext.current) }
                 .getOrNull()
-                ?.state
-                ?.map { it.ride != null }
-                ?.distinctUntilChanged()
+                ?.let { controller ->
+                    combine(
+                        controller.state.map { it.ride != null }.distinctUntilChanged(),
+                        controller.rideHint,
+                    ) { riding, hint -> riding || hint }
+                }
                 ?: flowOf(false),
+            // 快趣使用方式 / 免费计时起点：VM 首帧同步读真值，见 TodayViewModel.ebikeFirstFrame。
+            // 页面不再各自订阅 DataStore 冷流——那正是「切 Tab 时服务卡晚一帧、整列卡片跳一下」的来路。
+            ebikePrefs = Graph.displayPrefs(LocalContext.current),
         ),
     ),
 ) {
@@ -303,11 +311,12 @@ fun TodayScreen(
     // 趣智登录态：卡片与开水面板都要，直接订阅仓库那条流（理由见 QzxyCard 里的注释）
     val qzxyRepo = remember(context) { Graph.qzxy(context) }
     val qzxyLoggedIn by qzxyRepo.loggedIn.collectAsStateWithLifecycle()
-    val ebikePrefs = remember(context) { Graph.displayPrefs(context) }
-    val ebikeRideStartAt by ebikePrefs.ebikeRideStartAt
-        .collectAsStateWithLifecycle(initialValue = 0L)
-    val ebikeFreeReminderEnabled by ebikePrefs.ebikeFreeReminderEnabled
-        .collectAsStateWithLifecycle(initialValue = false)
+    // 免费计时起点 / 快趣使用方式：从 TodayViewModel 的 StateFlow 读（首帧真值 + 跨 Tab 缓存）。
+    // 不再直接订阅 DataStore 冷流：新组合第一帧恒是 0 / 默认档，账号方式的骑行行与
+    // 小程序方式的计时行都会晚一帧出现，下面的卡片被顶得一跳（2026-11-18 用户报
+    // 「切 Tab 时今日页的作业 / 猜你想用 / 收件箱卡片重组跳动」）。
+    val ebikeRideStartAt by viewModel.ebikeRideStartAt.collectAsStateWithLifecycle()
+    val ebikeUseModeRaw by viewModel.ebikeUseMode.collectAsStateWithLifecycle()
     // 宿舍报修进度（DESIGN §4.49）：有在途记录优先，没有则显示 3 天内已完成的。
     // 2026-10-21 起渲染在收件箱卡内的报修状态行（原独立报修卡并入删除）
     val dormRepairSnapshot by remember(context) { Graph.dormRepairStore(context) }
@@ -328,10 +337,13 @@ fun TodayScreen(
     val kvcxLoggedIn by kvcxRide?.loggedIn
         ?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(false) }
-    // 使用方式原始流：能力闸判据（小程序方式不露骑行行、不查询），读真值不读合并流
-    val ebikeUseModeRaw by remember(context) { Graph.displayPrefs(context) }
-        .ebikeUseMode
-        .collectAsStateWithLifecycle(initialValue = EbikeUseMode.Default)
+    // 冷启动位置提示（2026-11-18）：上一次进程有在案骑行时，服务卡条目从第一帧就留在顶部，
+    // 不等第一次订单查询回包才归位（否则会从列表下方弹到顶部）。第一次成功查询落地后自动作废；
+    // 只影响位置，不决定行内容。
+    val kvcxRideHint by kvcxRide?.rideHint
+        ?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(false) }
+    // 使用方式原始值：能力闸判据（小程序方式不露骑行行、不查询），读真值不读合并流
     val kvcxInAppRide = remember(ebikeUseModeRaw) { ebikeUseModeRaw.capabilities().inAppRide }
     // U净 在案订单：落盘快照直接订阅；对表沿用 10s TTL 节流（RESUMED / 下拉时打一拍）
     val ujingRepo = remember(context) { Graph.ujing(context) }
@@ -795,6 +807,10 @@ fun TodayScreen(
                     // （用户报的「切 Tab 时快趣卡从底部跳到顶部」）。
                     // 与 `DoneLingerGate` 同一纪律：位置判据必须同帧成立，见 ActiveServiceCard 的 KDoc。
                     kvcxRideActive = kvcxRideState?.ride != null && kvcxLoggedIn,
+                    // 冷启动位置提示（2026-11-18）：上一次进程有在案骑行、本进程还没拿到成功
+                    // 快照时，服务卡条目从第一帧就留在顶部（行内容仍等回包）。
+                    // 小程序方式没有账号订单可等（也不会发起查询），提示在这里一并忽略。
+                    kvcxRideHint = kvcxRideHint && kvcxInAppRide,
                     // 账号方式的免费窗口起点：快趣行倒计时 / 超时进度条（小程序方式走下面那一行）
                     kvcxFreeStartAt = ebikeRideStartAt.takeIf { kvcxInAppRide },
                     waterSession = qiekjWateringSession,
@@ -1086,6 +1102,12 @@ private fun TodayContent(
      * 位置会晚一帧翻真（`animateItem` 就演成「从底部跳到顶部」）。缺省 false = 留在原位。
      */
     kvcxRideActive: Boolean = false,
+    /**
+     * 冷启动位置提示（2026-11-18）：上一次进程有在案骑行、本进程还没拿到成功快照。
+     * 为真时条目从第一帧就留在顶部（与 [kvcxRideActive] 同一判据族；第一次成功查询
+     * 落地后控制器自动翻假）。只影响位置，不决定行内容。
+     */
+    kvcxRideHint: Boolean = false,
     /** 账号方式的免费窗口起点（`ebikeRideStartAt`）：快趣行倒计时 / 超时进度条用。 */
     kvcxFreeStartAt: Long? = null,
     /**
@@ -1149,7 +1171,7 @@ private fun TodayContent(
             kvcxPinned = false
         }
     }
-    val rideInProgress = kvcxRideActive || kvcxDone || kvcxPinned
+    val rideInProgress = kvcxRideActive || kvcxDone || kvcxPinned || kvcxRideHint
     val activeServicesCard: @Composable (Modifier) -> Unit = { cardModifier ->
         ActiveServiceCard(
             kvcxState = kvcxRideState,
@@ -1215,8 +1237,11 @@ private fun TodayContent(
                         },
                         progress = if (isOngoing) state.ongoingProgress else null,
                         onClick = { onOpenCourse(course) },
-                        // 删除/新增课程时列表项平滑进出场，不再整列硬跳
-                        modifier = Modifier.animateItem(),
+                        // 焦点态会在卡内展开状态行 / 进度条（280ms 高度动画）：位移动画必须关掉，
+                        // 否则下面每张卡每帧都被判成「位置变了」并开始一段弹簧位移（文字叠文字、
+                        // 落定后再滑下来——培养方案 / 学业卡同一根因，见 ui-common.md）。加 / 删课
+                        // 的进出场仍由 animateItem 的淡入淡出交代。
+                        modifier = Modifier.animateItem(placementSpec = null),
                     )
                 }
             } else {
@@ -1251,12 +1276,14 @@ private fun TodayContent(
 
             // 「猜你想用」（DESIGN §3.33/§4.51）：收件箱列表**正上方**。
             // 空档 / 开关关 / 无候选时整个 item 不渲染，不留空隙；跨槽进出场走 animateItem。
+            // 位移动画关掉（2026-11-18）：它上面的服务卡 / 课程卡高度会动画，位移会让推荐卡
+            // 逐帧追弹簧（看起来像卡片自己重组）；进出场淡入淡出保留。
             guessPick?.let { pick ->
                 item(key = "guess") {
                     GuessYouWantCard(
                         pick = pick,
                         onClick = { onOpenGuess(pick) },
-                        modifier = Modifier.animateItem(),
+                        modifier = Modifier.animateItem(placementSpec = null),
                     )
                 }
             }
@@ -1556,6 +1583,14 @@ private fun TodayCourseCard(
 @Composable
 private fun ProgressBar(progress: Float) {
     val primary = MaterialTheme.colorScheme.primary
+    val fraction = progress.coerceIn(0f, 1f)
+    // 进度值每 30 秒 tick 才更新一次：直接换宽度会是一格一跳，走 Motion.page 平滑推进
+    // （与进行中服务卡的进度条同一口径；低频数值不做 crossfade）。
+    val animated by animateFloatAsState(
+        targetValue = fraction,
+        animationSpec = Motion.page(),
+        label = "todayCourseProgress",
+    )
     Box(
         Modifier
             .fillMaxWidth()
@@ -1563,11 +1598,10 @@ private fun ProgressBar(progress: Float) {
             .clip(RoundedCornerShape(2.dp))
             .background(primary.copy(alpha = 0.18f)),
     ) {
-        val fraction = progress.coerceIn(0f, 1f)
-        if (fraction > 0f) {
+        if (animated > 0f) {
             Box(
                 Modifier
-                    .fillMaxWidth(fraction)
+                    .fillMaxWidth(animated)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(2.dp))
                     .background(primary),

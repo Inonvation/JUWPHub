@@ -516,6 +516,35 @@ class BikeNearbyTest {
     }
 
     @Test
+    fun `跟随回中距离按视口缩放`() {
+        // 默认 z17 视野（半对角线约 1 公里）：贴着 60 米上限——旧固定 8 米等于每 6 秒推一次
+        assertEquals(
+            BikeNearby.FOLLOW_RECENTER_MAX_METERS,
+            BikeNearby.followRecenterMeters(1000.0),
+            1e-9,
+        )
+        // 没量到视口（0 / 负数 / NaN）：退回下限 8 米，别把镜头锁死
+        assertEquals(
+            BikeNearby.FOLLOW_RECENTER_MIN_METERS,
+            BikeNearby.followRecenterMeters(0.0),
+            1e-9,
+        )
+        assertEquals(
+            BikeNearby.FOLLOW_RECENTER_MIN_METERS,
+            BikeNearby.followRecenterMeters(Double.NaN),
+            1e-9,
+        )
+        // 放大到只看一条路：跟着缩到下限
+        assertEquals(
+            BikeNearby.FOLLOW_RECENTER_MIN_METERS,
+            BikeNearby.followRecenterMeters(10.0),
+            1e-9,
+        )
+        // 中间档：上限与下限之间按 0.3 比例
+        assertEquals(30.0, BikeNearby.followRecenterMeters(100.0), 1e-9)
+    }
+
+    @Test
     fun `缩到整座校区可见时按轻量范围查`() {
         // 16.5 是"整座校区都看得见"的判定线（2026-11-18 用户要求「整个校区都能被看到时
         // 不再刷新大范围车辆」）：更小只查中心一页

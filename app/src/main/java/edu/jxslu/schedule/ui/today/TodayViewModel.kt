@@ -3,10 +3,12 @@ package edu.jxslu.schedule.ui.today
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.domain.Course
+import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.GuessPick
 import edu.jxslu.schedule.domain.GuessPickStabilizer
 import edu.jxslu.schedule.domain.GuessRules
@@ -23,6 +25,7 @@ import edu.jxslu.schedule.domain.TodayState
 import edu.jxslu.schedule.domain.TodayTip
 import edu.jxslu.schedule.domain.WeatherAdvice
 import edu.jxslu.schedule.domain.buildTodayState
+import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.domain.pendingHomework
 import edu.jxslu.schedule.ui.common.UndoableMessage
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -33,12 +36,14 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -68,9 +73,50 @@ class TodayViewModel(
      * 默认 false：单测与旧构造点不传时行为不变。
      */
     private val kvcxRideActive: Flow<Boolean> = flowOf(false),
+    /**
+     * 快趣显示偏好（使用方式 / 免费计时起点）。今日页的服务卡内容与计时行都靠它分流。
+     * 可空注入：单测与旧构造点不传时按默认档 / 无计时处理，行为与改动前一致。
+     */
+    private val ebikePrefs: DisplayPrefsStore? = null,
 ) : ViewModel() {
 
     private val tick = MutableStateFlow(0L)
+
+    /**
+     * 快趣偏好的**首帧快照**（2026-11-18）。
+     *
+     * 为什么必须同步读一次：`ebikeUseMode` / `ebikeRideStartAt` 是 DataStore 冷流。
+     * 今日页每次新组合（切 Tab / 二级页返回）第一帧都会拿到默认档与 0——使用方式为
+     * 「账号登录」时，服务卡里的骑行行被 `kvcxInAppRide` 挡掉一帧、整卡先收拢再展开；
+     * 小程序方式的免费计时行同样晚一帧出现。两种都会把下面的作业 / 猜你想用 / 收件箱
+     * 卡片顶得一跳（2026-11-18 用户报的「切 Tab 时提醒卡片重组跳动」）。
+     *
+     * VM 跨 Tab 存活，这里只读一次；DataStore 在 MainActivity 的启动快照里已经读热，
+     * 不碰磁盘。取不到时退回默认值（与收集器首帧的旧行为一致，不新增失败面）。
+     */
+    private val ebikeFirstFrame: EbikeFirstFrame = ebikePrefs?.let { prefs ->
+        runBlocking {
+            runCatching {
+                EbikeFirstFrame(
+                    useMode = prefs.ebikeUseMode.first(),
+                    rideStartAt = prefs.ebikeRideStartAt.first(),
+                )
+            }.getOrElse { EbikeFirstFrame() }
+        }
+    } ?: EbikeFirstFrame()
+
+    /** 快趣使用方式（账号 / 小程序）。首帧就是真值，且跨 Tab 保留最后一次的值。 */
+    val ebikeUseMode: StateFlow<EbikeUseMode> = (ebikePrefs?.ebikeUseMode ?: flowOf(EbikeUseMode.Default))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ebikeFirstFrame.useMode)
+
+    /** 免费计时起点（落盘）；0 = 没有计时。首帧就是真值，且跨 Tab 保留最后一次的值。 */
+    val ebikeRideStartAt: StateFlow<Long> = (ebikePrefs?.ebikeRideStartAt ?: flowOf(0L))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ebikeFirstFrame.rideStartAt)
+
+    private data class EbikeFirstFrame(
+        val useMode: EbikeUseMode = EbikeUseMode.Default,
+        val rideStartAt: Long = 0L,
+    )
 
     /**
      * 首帧门闸。
@@ -267,13 +313,18 @@ class TodayViewModel(
      * 3. 其余走 [GuessRules.decide] 的时段表 / 周末先验 / 习惯权重，**每个 30 分钟槽只抽一次**。
      *
      * 上课信号的分钟数每 tick 用实时值覆盖（缓存里存的是抽样时的旧值，不能直接上屏）。
+     *
+     * 「在案骑行」= 控制器的 ride **且**使用方式是账号档：小程序方式查不到账号订单，
+     * 也不发起查询，冷启动的位置提示（`rideHint`）不能把快趣在当前进程里永久排除。
      */
     val guessPick: StateFlow<GuessPick?> = combine(
         uiState,
         repo.guessYouWantEnabled,
         repo.guessUsage,
         tick,
-        kvcxRideActive,
+        combine(kvcxRideActive, ebikeUseMode) { active, mode ->
+            active && mode.capabilities().inAppRide
+        },
     ) { state, enabled, usages, _, riding ->
         if (state.loading || !enabled) {
             guessStabilizer.reset()
@@ -349,6 +400,8 @@ class TodayViewModel(
             private val weatherRepo: WeatherRepository,
         /** 在案骑行：为真时「猜你想用」排除快趣（DESIGN §4.51）。 */
         private val kvcxRideActive: Flow<Boolean> = flowOf(false),
+        /** 快趣使用方式 / 免费计时起点：首帧同步读一次，见 [TodayViewModel.ebikeFirstFrame]。 */
+        private val ebikePrefs: DisplayPrefsStore? = null,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
@@ -357,6 +410,7 @@ class TodayViewModel(
                     homeworkRepo,
                     weatherRepo = weatherRepo,
                     kvcxRideActive = kvcxRideActive,
+                    ebikePrefs = ebikePrefs,
                 ) as T
     }
 }

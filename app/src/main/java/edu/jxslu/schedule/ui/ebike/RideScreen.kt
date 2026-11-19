@@ -34,6 +34,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -195,15 +196,26 @@ fun RideScreen(
      * 按 `amapChoice` 重置——用户在设置里关掉再打开要能重新试一次，提示条也得跟着消失。
      */
     var mapFallback by remember(prefs.amapChoice) { mutableStateOf(false) }
+    /**
+     * 结算卡的 8 秒只数**看得见**的时间（2026-11-19）：切后台 / 熄屏那段不算。
+     *
+     * 旧口径是墙上时钟——刚还完车去看了眼微信，回来卡片已经被收走，金额都没看到。
+     * 做法是把后台时长加回截止时刻（下游的卡片过期判定、倒计时标签、自动收尾全部按这一个
+     * deadline 算，不改它们的口径）；单次最多补 [SETTLE_PAUSE_CREDIT_MAX_MS]，离开太久
+     * 回来就当它已经过期，不会让一张旧结算卡无限期挂在屏幕上。
+     */
+    var settlePausedMs by remember(kvcxState.returnSummaryAt) { mutableStateOf(0L) }
+    var settlePausedAt by remember(kvcxState.returnSummaryAt) { mutableStateOf(0L) }
     // 过期的结算卡不再渲染（离开页面很久再回来不闪一帧）；主动点过上面两个动作则保留
     val summaryExpired = rawSummary != null && kvcxState.returnSummaryAt > 0L &&
-        System.currentTimeMillis() >= kvcxState.returnSummaryAt + SettleAutoContinueMillis
+        System.currentTimeMillis() >=
+        kvcxState.returnSummaryAt + SettleAutoContinueMillis + settlePausedMs
     val summary = rawSummary.takeUnless { !settleAutoCancelled && summaryExpired }
     // 倒计时截止时刻（0 = 不自动收尾）：从控制器里的结果卡出现时刻起算，跨页面重建不重来
     val settleDeadlineAt = if (summary != null && !settleAutoCancelled &&
         kvcxState.returnSummaryAt > 0L
     ) {
-        kvcxState.returnSummaryAt + SettleAutoContinueMillis
+        kvcxState.returnSummaryAt + SettleAutoContinueMillis + settlePausedMs
     } else {
         0L
     }
@@ -232,11 +244,20 @@ fun RideScreen(
     // 结算卡 8 秒自动「继续找车」：倒计时基准在控制器里（`returnSummaryAt`），离开页面再
     // 回来不重新计时；到点走与手动按钮同一条收尾。用户主动点过「重新使用该车 / 去微信结清」
     // 就跳过（`settleAutoCancelled`），把卡片留给正在进行的动作 / 付款。
-    LaunchedEffect(kvcxState.returnSummaryAt, rawSummary != null) {
+    // **只在页面可见时收尾**（2026-11-19）：后台把卡片收掉，用户回来就只剩「结算卡没了、
+    // 金额也没看到」。`settlePausedMs` 进 key：从后台回来时按新的截止时刻重算。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(kvcxState.returnSummaryAt, rawSummary != null, settlePausedMs) {
         val summaryAt = kvcxState.returnSummaryAt
         if (rawSummary == null || summaryAt <= 0L) return@LaunchedEffect
-        val remain = summaryAt + SettleAutoContinueMillis - System.currentTimeMillis()
+        val remain = summaryAt + SettleAutoContinueMillis + settlePausedMs -
+            System.currentTimeMillis()
         if (remain > 0L) delay(remain)
+        if (settleAutoCancelled) return@LaunchedEffect
+        // 到点时若正退在后台（灭屏 / 切走），等回前台再收——后台收卡用户什么都没看到
+        while (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            delay(500)
+        }
         if (settleAutoCancelled) return@LaunchedEffect
         continueFinding()
     }
@@ -622,26 +643,57 @@ fun RideScreen(
         autoUnlockArmed = true
         viewModel.setPendingFocusCar(carNum, autoUnlock = armAutoUnlock)
     }
-    // 骑行状态在别处（微信 / 桌面）变了：回到本页时不能还是旧值；焚码兜底同口径
-    val lifecycleOwner = LocalLifecycleOwner.current
+    // 骑行状态在别处（微信 / 桌面）变了：回到本页时不能还是旧值；焚码兜底同口径。
+    // `lifecycleOwner` 已在上面的结算卡计时处声明（那里要用 `currentStateFlow`）。
+    /**
+     * 定位授权态（下方连续定位流的 key）。
+     *
+     * 声明必须排在那个 ON_RESUME 观察者**之前**：用户从系统设置里补授权限回来时要把这里
+     * 翻成 true（2026-11-19 修「设置里授权后蓝点不出现」），观察者得能读到它。
+     */
+    var locationGranted by remember { mutableStateOf(BikeLocator.hasPermission(context)) }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                ebikeViewModel.burnPending()
-                viewModel.queryRideQuietly()
-                // 小程序方式的远程用车提醒（2026-10-24）：跳微信那一下不打断，标记落盘，
-                // 回 App 在这里消费弹出（读了就清，一次性）。账号方式不走这条（当场已弹），
-                // 标记常态为 false，多查一次无副作用。
-                scope.launch {
-                    val pending = runCatching { cardPrefs.ebikeRemoteRidePending.first() }
-                        .getOrDefault(false)
-                    if (pending) {
-                        runCatching { cardPrefs.setEbikeRemoteRidePending(false) }
-                        remoteNoticeCount = runCatching { cardPrefs.ebikeRemoteRideCount.first() }
-                            .getOrDefault(0)
-                        showRemoteRideNotice = true
+            when (event) {
+                // 结算卡的 8 秒只数看得见的时间：记下离开前台的时刻，回来看这一段有多长
+                Lifecycle.Event.ON_PAUSE -> settlePausedAt = System.currentTimeMillis()
+
+                Lifecycle.Event.ON_RESUME -> {
+                    if (settlePausedAt > 0L) {
+                        val gap = (System.currentTimeMillis() - settlePausedAt).coerceAtLeast(0L)
+                        settlePausedAt = 0L
+                        // 离开太久（> 1 分钟）不补：一张旧结算卡不该无限期挂着
+                        if (gap <= SETTLE_PAUSE_CREDIT_MAX_MS) settlePausedMs += gap
+                    }
+                    ebikeViewModel.burnPending()
+                    viewModel.queryRideQuietly()
+                    // 授权只在两处会变：本页发起的系统权限框（见 locatePermissionLauncher）、
+                    // 用户自己进系统设置改的。后者拿不到任何回调，只能回到前台时重读；
+                    // 不重读的话 `locationGranted` 一直是 false，连续定位流永远不启动。
+                    val granted = BikeLocator.hasPermission(context)
+                    if (granted && !locationGranted) {
+                        locationGranted = true
+                        // 刚授权：顺手取一次定位，把镜头带过去（与点「定位」同一条路，静默）
+                        locate(context, viewModel, scope, silent = true, onIssue = {})
+                    } else if (!granted && locationGranted) {
+                        locationGranted = false
+                    }
+                    // 小程序方式的远程用车提醒（2026-10-24）：跳微信那一下不打断，标记落盘，
+                    // 回 App 在这里消费弹出（读了就清，一次性）。账号方式不走这条（当场已弹），
+                    // 标记常态为 false，多查一次无副作用。
+                    scope.launch {
+                        val pending = runCatching { cardPrefs.ebikeRemoteRidePending.first() }
+                            .getOrDefault(false)
+                        if (pending) {
+                            runCatching { cardPrefs.setEbikeRemoteRidePending(false) }
+                            remoteNoticeCount = runCatching { cardPrefs.ebikeRemoteRideCount.first() }
+                                .getOrDefault(0)
+                            showRemoteRideNotice = true
+                        }
                     }
                 }
+
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -653,7 +705,6 @@ fun RideScreen(
     // 进页定位一次（已授权静默定；没问过且没被拒就申请一次）——与地图页同一套口径。
     // `ebikeLocationAsked` 落 DataStore：系统在用户拒绝两次后静默拒绝，不看这个标记的话
     // 每次进页面都会白申请一次、再弹一句「已拒绝」，那就成了骚扰。
-    var locationGranted by remember { mutableStateOf(BikeLocator.hasPermission(context)) }
     val notifyLocateIssue: suspend (String) -> Unit = { message ->
         val outcome = snackbar.showNotice(
             AppNoticeVisuals(
@@ -702,6 +753,9 @@ fun RideScreen(
                             result.lat,
                             result.lng,
                             result.accuracyMeters,
+                            // 缓存那条开场读数不当镜头锚点：等实时读数做无条件收敛
+                            // （2026-11-19 修「进页视角不在我的位置」）
+                            fromCache = result.source == "session",
                         )
                         // 落盘「上次位置」给下次进页面用（60 秒一次足够，定位本身是 ~2 秒一跳）
                         val now = System.currentTimeMillis()
@@ -841,20 +895,47 @@ fun RideScreen(
             // 把面板夹小（且不会还原）→ 面板顶边先随块升起、再跳回去。
             // 现在预留一个**固定常数**（最高档底部块 + 最小地图可见高度），上限在窗口内恒定，
             // 卡片进出不再动面板；地图侧改整幅平移（见下），面板高度变化也不再 resize 地图。
-            val maxPanelDp = minOf(
-                MAX_PANEL_HEIGHT_DP,
-                maxHeight.value - BOTTOM_RESERVE_DP,
-            ).coerceAtLeast(MIN_PANEL_HEIGHT_DP)
-            LaunchedEffect(maxPanelDp, state.panelHeightDp) {
-                viewModel.clampPanelHeight(MIN_PANEL_HEIGHT_DP, maxPanelDp)
+            // **上限先算、下限再跟它取小**（2026-11-19 修「横屏 / 分屏 / 大字体下底部动作区
+            // 被挤没」）：旧写法是 `.coerceAtLeast(MIN_PANEL_HEIGHT_DP)`，窗口比预留还矮时
+            // 它把上限**抬回** 240dp（横屏 1080×2400 折算只有约 320dp 可用，320−400 < 0），
+            // 于是面板吃 240、底部常驻块只剩几十 dp，主动作按钮与地图浮钮一起被裁掉。
+            // 现在装不下时面板先让路（可以缩到 0），动作区永远优先——那才是用户下一步
+            // 唯一要点的东西。
+            val panelCeil = minOf(MAX_PANEL_HEIGHT_DP, maxHeight.value - BOTTOM_RESERVE_DP)
+                .coerceAtLeast(0f)
+            val panelFloor = minOf(MIN_PANEL_HEIGHT_DP, panelCeil)
+            LaunchedEffect(panelFloor, panelCeil, state.panelHeightDp) {
+                viewModel.clampPanelHeight(panelFloor, panelCeil)
             }
-            val panelHeight = state.panelHeightDp.coerceIn(MIN_PANEL_HEIGHT_DP, maxPanelDp).dp
+            val panelHeight = state.panelHeightDp.coerceIn(panelFloor, panelCeil).dp
+            /**
+             * 面板被压到 0 之后的出口（2026-11-19）。
+             *
+             * 短窗口（横屏 / 分屏 / 大字体）里面板让位给动作区，高度可以是 0——把手也跟着
+             * 消失，用户就再也没有"看列表"的入口了。这里给两态：塌缩时在动作区上方露一行
+             * 「附近 N 辆 · 看列表」，点开把面板顶到整块可用高度、动作区暂时让位，
+             * 底部留一行「收起列表」。窗口恢复正常（面板能回到 240dp 以上）就自动收起，
+             * 不带着一个"展开态"跨过转屏。
+             */
+            var listExpanded by remember { mutableStateOf(false) }
+            val panelCollapsed = panelHeight < 24.dp
+            LaunchedEffect(panelCollapsed) {
+                if (!panelCollapsed) listExpanded = false
+            }
+            val panelTargetHeight = if (listExpanded) {
+                // 展开态 = 面板顶到窗口高减去「收起列表」那一行（44dp）。
+                // 这个值恒 ≥ panelCeil（上限 = 窗口 − 400 < 窗口 − 44），展开只会比原来高。
+                maxHeight - LIST_CLOSE_ROW_DP.dp
+            } else {
+                panelHeight
+            }
     /**
      * 高德版权标识的底边距（px）：地图整体上移了 (面板 + 底部块) / 2，logo 跟着上移同样的量，
      * 再加 6dp 余量就能落在面板上沿之上（见 [AmapMapView.logoBottomMarginPx]）。
+     * 按 [panelTargetHeight] 算：面板展开态是一次真实让位，logo 要跟着面板上沿走。
      */
     val mapLogoBottomMarginPx =
-        (((panelHeight.value + liveBlockDp) / 2f + 6f) * density).toInt()
+        (((panelTargetHeight.value + liveBlockDp) / 2f + 6f) * density).toInt()
 
             // 地图在上、面板与动作区在下。地图视图**尺寸恒定**（= 整个可用区），让位全靠
             // 整幅平移 + 裁切：可见区 = 地图层减去被面板 + 底部块盖住的那段，把地图按这段的
@@ -1031,13 +1112,16 @@ fun RideScreen(
                         refLat = state.userLat ?: BikeNearby.DEFAULT_CENTER_LAT,
                         refLng = state.userLng ?: BikeNearby.DEFAULT_CENTER_LNG,
                         refFromUser = state.distanceFromUser,
-                        panelHeight = panelHeight,
+                        panelHeight = panelTargetHeight,
                         onResize = { dragPx ->
-                            viewModel.resizePanelBy(
-                                deltaDp = -dragPx / density,
-                                minDp = MIN_PANEL_HEIGHT_DP,
-                                maxDp = maxPanelDp,
-                            )
+                            // 展开态是一次临时让位，不接把手拖动（高度由窗口决定）
+                            if (!listExpanded) {
+                                viewModel.resizePanelBy(
+                                    deltaDp = -dragPx / density,
+                                    minDp = panelFloor,
+                                    maxDp = panelCeil,
+                                )
+                            }
                         },
                         onResizeFinished = viewModel::persistPanelHeight,
                         onClusterTap = { key ->
@@ -1090,6 +1174,30 @@ fun RideScreen(
                         },
                     )
 
+                    // 面板塌缩时的出口 + 展开态的收起条（见 panelTargetHeight 那段注释）。
+                    // 两者都只在短窗口出现：正常窗口下面板至少 240dp，列表本来就在。
+                    if (listExpanded) {
+                        TextButton(
+                            onClick = {
+                                haptics.tap()
+                                listExpanded = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("收起列表")
+                        }
+                    } else if (panelCollapsed) {
+                        TextButton(
+                            onClick = {
+                                haptics.tap()
+                                listExpanded = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("附近 ${state.bikeCount} 辆 · 看列表")
+                        }
+                    }
+                    if (!listExpanded) {
                     // 页面底部常驻块：主动作 + 免责那一行。它在面板**之外**——面板定高、
                     // 动作区变高，装在一起就是把按钮挤出去（骑行仪表盘就是装不下的那个）。
                     // 导航栏内边距归这一块吃，面板不再自己垫。
@@ -1189,6 +1297,7 @@ fun RideScreen(
                                 .padding(bottom = 8.dp),
                         )
                     }
+                    } // if (!listExpanded)
                 }
             }
         }
@@ -1571,6 +1680,14 @@ private const val DENIED_HINT = "已拒绝定位权限；可在系统设置里�
  */
 private const val LOCATION_PERSIST_INTERVAL_MS = 60_000L
 
+/**
+ * 结算卡「离开前台」最多补回多少时间（毫秒，2026-11-19）。
+ *
+ * 8 秒停留只数看得见的时间：切后台 / 熄屏那段不该把卡片耗掉。但离开太久回来再弹一张旧
+ * 结算卡也不行（金额早就该看过了），所以单次最多补一分钟——超过就按已过期处理。
+ */
+private const val SETTLE_PAUSE_CREDIT_MAX_MS = 60_000L
+
 private const val RIDE_NEAR_USER_METERS = 100.0
 
 /**
@@ -1604,6 +1721,13 @@ private val CENTER_PIN_DOT = Color(0xFF63D099)
 private const val BOTTOM_RESERVE_DP = 400f
 
 /**
+ * 面板展开态时「收起列表」那一行的高度估算（dp，2026-11-19）：
+ * 只用于把展开后的面板顶到"窗口高 − 这一行"的近似值，估偏几 dp 没有可见后果
+ * （`panelTargetHeight` 已经被 `panelCeil` 兜底，最多比理论值矮一点）。
+ */
+private const val LIST_CLOSE_ROW_DP = 44
+
+/**
  * 在骑这辆车的坐标（GCJ-02）：优先用订单快照里的实时坐标（`queryUnderwayOrder` 拉到的
  * 车辆位置），快照还没补全时退回开锁那一刻附近查询里的同一辆车。
  *
@@ -1626,6 +1750,9 @@ private fun rideBikePosition(ride: KqcxAuth.Ride?, state: BikeMapUiState): Pair<
 /**
  * 取一次定位并把镜头移过去。[silent] = 失败不弹提示（进页自动定位那条路用）。
  * 全程置 `locating`：接口最长等 8 秒，不告诉用户"在做事"的话他只会连点按钮。
+ *
+ * `result.source == "session"` = 拿的是缓存位置：镜头先带过去，但不当成镜头锚点
+ * （见 [BikeMapViewModel.onLocated] 的 [BikeMapViewModel] 侧注释），等实时读数收敛。
  */
 private fun locate(
     context: android.content.Context,
@@ -1644,6 +1771,7 @@ private fun locate(
                         result.lng,
                         result.accuracyMeters,
                         animated = !silent,
+                        fromCache = result.source == "session",
                     )
                 is LocateResult.Failed -> if (!silent) onIssue(result.message)
             }

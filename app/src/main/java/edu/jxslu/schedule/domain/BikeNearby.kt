@@ -189,6 +189,28 @@ object BikeNearby {
      */
     const val FOLLOW_REQUERY_METERS = 300.0
 
+    /**
+     * 跟随镜头**多久回中一次**：蓝点离视口中心超过这个距离才平移镜头（米，2026-11-19）。
+     *
+     * 旧口径是固定 8 米：步行 1.4 m/s 下每 6 秒推一次、每次滑 1 秒，地图一直在追着人跑，
+     * 越走越像"镜头自己动"。现在按视口缩放（与 [sampleRadiusMeters] 同一手法）：
+     * `min(上限, 半对角线 × 比例)`，下限仍是 8 米。z17 默认视野（半对角线约 1 公里）算出来
+     * 贴着 60 米上限——蓝点最多离开中心 60 米（约屏幕高度的五分之一）才滑一次；放大到只看
+     * 一条路时跟着收到 8~20 米，边推边走不会把目标推出画面。
+     *
+     * **下限别抬**：站定时几米的抖动也不该推镜头（`DOT_MOVE_MIN_METERS` 已经在蓝点那一层滤过）。
+     */
+    const val FOLLOW_RECENTER_MIN_METERS = 8.0
+    const val FOLLOW_RECENTER_MAX_METERS = 60.0
+    const val FOLLOW_RECENTER_VIEWPORT_RATIO = 0.3
+
+    /** 跟随镜头的回中距离（米）：视口半对角线 → 距离，见 [FOLLOW_RECENTER_MIN_METERS]。 */
+    fun followRecenterMeters(viewportHalfDiagonalMeters: Double): Double {
+        val scaled = viewportHalfDiagonalMeters * FOLLOW_RECENTER_VIEWPORT_RATIO
+        if (!scaled.isFinite() || scaled <= 0.0) return FOLLOW_RECENTER_MIN_METERS
+        return scaled.coerceIn(FOLLOW_RECENTER_MIN_METERS, FOLLOW_RECENTER_MAX_METERS)
+    }
+
     /** 电量低于这个百分比就把数字标成警告色（纯展示阈值，与运营方的 lowBattery 无关）。 */
     const val LOW_BATTERY_HINT_PERCENT = 30.0
 

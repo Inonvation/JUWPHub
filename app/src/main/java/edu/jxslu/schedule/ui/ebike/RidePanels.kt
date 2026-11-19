@@ -83,10 +83,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.BikeCluster
 import edu.jxslu.schedule.domain.BikeNearby
+import edu.jxslu.schedule.domain.EbikeAutoReturn
 import edu.jxslu.schedule.domain.EbikeCapabilities
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeQr
@@ -111,6 +114,10 @@ import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BellRing
 import me.rerere.hugeicons.stroke.Cancel01
@@ -2807,6 +2814,9 @@ private fun RideCountdown(
     }
     val remaining = EbikeFreeRide.remainingSeconds(startAt, now)
     val progress = EbikeFreeRide.progressFraction(startAt, now)
+    // 开了「自动还车」就把触发时刻写在倒计时下面（2026-11-19）：用户开了这个开关，
+    // 界面上却一句提示都没有，到点系统替他点了还车时会很意外（尤其账单上跟着一条结算）。
+    val autoReturnHint = rememberAutoReturnHint(startAt, wechatMode = showEstimateNote)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
@@ -2828,6 +2838,13 @@ private fun RideCountdown(
             modifier = Modifier.fillMaxWidth(),
             trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
         )
+        autoReturnHint?.let { line ->
+            Text(
+                text = line,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
         if (showEstimateNote) {
             Text(
                 text = "倒计时为预估，实际以微信小程序显示为准",
@@ -2844,8 +2861,36 @@ private fun RideCountdown(
 }
 
 /**
- * 地图右上角的圆形浮层按钮（定位 / 回到校区）。
+ * 「14:27 自动还车（提前 30 秒）」这一行（2026-11-19）。
  *
+ * 只在**账号方式 + 开关开着 + 计时在案**时给：小程序方式没有本机订单，「自动还车」这一档
+ * 本来就不存在（`caps.wechatScan` 即小程序方式，见 [RideCountdown] 的 `showEstimateNote`）。
+ * 触发时刻与调度层同源（[EbikeAutoReturn.triggerAtMillis]），别在 UI 里另算一份。
+ * 开关 / 提前量读一次即可：这一行按计时起点定住，不需要每秒刷新，也不参与走秒。
+ */
+@Composable
+private fun rememberAutoReturnHint(startAt: Long, wechatMode: Boolean): String? {
+    if (wechatMode || startAt <= 0L) return null
+    val context = LocalContext.current
+    val prefs = remember { Graph.displayPrefs(context) }
+    val clock = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    val hint by produceState(initialValue = null as String?, key1 = startAt) {
+        val enabled = runCatching { prefs.ebikeAutoReturnEnabled.first() }.getOrDefault(false)
+        if (!enabled) {
+            value = null
+            return@produceState
+        }
+        val lead = runCatching { prefs.ebikeAutoReturnLeadSeconds.first() }
+            .getOrDefault(EbikeAutoReturn.DEFAULT_LEAD_SECONDS)
+        val triggerAt = EbikeAutoReturn.triggerAtMillis(startAt, lead)
+        val at = Instant.ofEpochMilli(triggerAt).atZone(ZoneId.systemDefault()).format(clock)
+        value = "$at 自动还车（提前 $lead 秒）"
+    }
+    return hint
+}
+
+/**
+ * 地图右上角的圆形浮层按钮（定位 / 回到校区）。
  * [busy] 时把图标换成进度指示并停止响应点击：定位最长 8 秒，没有这个状态用户看不出来
  * 点没点上，只会接着点。
  *

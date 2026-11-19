@@ -56,6 +56,16 @@
     车辆卡 / 骑行卡进出而变 → 上限跟着变 → `clampPanelHeight` 把面板夹小且**不还原** →
     面板顶边先随块升起再跳回去。**别把块实测高度加回上限**。`BOTTOM_RESERVE_DP` 的取值
     口径（最高档底部块 + 最小地图可见高度）写在 `RideScreen` 那段注释里；改它要重新量。
+    **下限必须跟上限取小，不能反过来**（2026-11-19 修用户报的「横屏下按钮点不到」）：
+    旧写法先把上限 `coerceAtLeast(MIN_PANEL_HEIGHT_DP)` 再夹，窗口比预留还矮时（横屏
+    1080×2400 折算约 320dp 可用，320−400 < 0）上限被**抬回** 240 → 面板吃掉大半屏、
+    底部常驻块只剩几十 dp，主动作按钮与地图浮钮一起被裁。现在 `panelCeil` 先夹到 ≥0、
+    `panelFloor = min(MIN, panelCeil)`：装不下时面板先让路（可缩到 0），动作区永远优先。
+    **塌缩要有出口**（2026-11-19）：面板 < 24dp 视为塌缩，动作区上方露一行
+    「附近 N 辆 · 看列表」，点开面板顶到「窗口 − 44dp」、动作区暂时让位、底部给「收起列表」；
+    窗口恢复正常（面板 ≥ 240dp）自动收起展开态。地图平移量与 logo 边距按
+    `panelTargetHeight` 算（展开态是一次真实让位），**别退回只用 `panelHeight`**——
+    那会让展开态的地图留出一段没人占的空档。
     导航栏内边距归常驻块吃，面板自己不再垫（旧版两处都垫）。
   - 三态由数据推导（`phase`），不另存可变状态：`Settled`（有还车结果）→ `Riding`
     （有订单或在案计时）→ `Finding`。「选中某辆车」「选中某停车点」**不在三态里**，
@@ -177,6 +187,9 @@
     到点自动走与手动「继续找车」同一条收尾（清 `returnSummary` + 刷新列表）。计时基准
     `KvcxRideState.returnSummaryAt` 在控制器里，**别放页面**：离开骑行页再回来不能重新计时，
     过了 8 秒进页也不该再渲染结算卡（`RideScreen` 的 `summaryExpired` 直接按 Finding 起步）。
+    **这 8 秒只数看得见的时间**（2026-11-19）：切后台 / 熄屏那段由 `settlePausedMs` 补回截止
+    时刻（单次上限 `SETTLE_PAUSE_CREDIT_MAX_MS` 1 分钟，离开太久就当过期），到点时若正退在
+    后台还要等回前台才收——旧口径按墙上时间，用户看一眼微信回来卡片已经没了，金额都没看到。
     用户主动点「重新使用该车 / 去微信结清」后 `settleAutoCancelled` 取消自动收尾（失败要
     保留卡片原地重试、付款路径不能抽卡）。今日页完成行优先读实时 `returnSummary`，
     实时值被这里清掉后回退 `lastKvcxSummary`，副行不会突然变成「订单已结束」。
@@ -356,10 +369,29 @@
   加载一次头行别闪。
   **写动作开始先取消地图查询**（`BikeMapViewModel.cancelQueriesForRideAction`）：开锁 / 锁车 /
   还车共用连接池，高峰期不要让还在飞的附近车辆/图层请求排在写请求前面。
-  蓝点实时更新 + 镜头跟随（2026-09-26 / **2026-10-19 加跟随** / **2026-11-19 数据跟上**）：页面可见期间（`repeatOnLifecycle(STARTED)`）
+  **取消 ≠ 查过了**（2026-11-19）：`cancelQueriesForRideAction` 掐掉在飞的查询后要同时把
+  `lastAttempt*` 清空（闸门退回"没查过"）并置 `queryCancelledByAction`，动作结束（busy 非空
+  → 空）时 `resumeQueryAfterAction` 补查一次。旧版只清 `loading`，闸门记着"这一片查过"——
+  拖到新片区再开锁，屏幕上是上一片的车、30 米内微调全被吞；首查被取消时列表永远停在
+  「正在查附近的车」。
+  **用户接管地图要清静默区**（2026-11-19）：`CameraSuppressor.clear()` 在两条路径的
+  `onPan` 回调里调——程序性移动开的 1.2 秒时间窗会把用户拖动的收尾回调一起吃掉，拖完不重查。
+  蓝点实时更新 + 镜头跟随（2026-09-26 / **2026-10-19 加跟随** / **2026-11-19 数据跟上 + 回中按视口算**）：页面可见期间（`repeatOnLifecycle(STARTED)`）
   挂 `BikeLocator.updates` 连续定位流，走 `onUserLocationChanged`——挪蓝点与「距你」距离；
-  **跟随态（`BikeMapUiState.followUser`）下位移 ≥ `FOLLOW_RECENTER_METERS`（8 米）就把镜头
-  平移过去**（`pushCamera(animated = true)`）。**换了片区域要重查**（2026-11-19 用户报
+  **跟随态下蓝点离视口中心超过 `BikeNearby.followRecenterMeters(视口半对角线)` 才把镜头
+  平移过去**（`pushCamera(animated = true)`）：`min(60 米上限, 半对角线 × 0.3)`、下限 8 米。
+  **2026-11-19 由固定 8 米改成按视口算**（用户口径：步行时每 6 秒一次缓动、地图一直在追）：
+  z17 默认视野算出来贴着 60 米——镜头运动少了七成，动的那一次有明确理由；放大到只看一条路
+  时跟着收到 8~20 米。**下限别抬**（8 米是站定抖动的安全线），**上限别放回 100+**（蓝点离
+  中心太远，用户以为地图没跟着）。
+  **缓存定位不算镜头锚点**（2026-11-19 修用户报「进页视角不在我的位置」）：进页那条一次性
+  定位与连续定位流的开场读数都可能来自**缓存**（`source="session"`，五分钟内的上次定位），
+  缓存点与实时读数能差三四十米——若拿缓存点当 `followCameraLat/Lng` 记账，回中阈值就把实时
+  读数压在阈值内，镜头永远不再向蓝点收敛，蓝点带着精度圈停在偏离中心的位置（真机复现：
+  冷启动后蓝点恒在中心针下方约 30 米）。口径：缓存读数只挪蓝点、镜头先落到缓存点
+  （比停在旧视野强）；`followCameraLat/Lng` 保持 null，**第一条实时读数无条件收敛一次**，
+  之后才进入「阈值内不动」的口径。`onLocated` / `onUserLocationChanged` 的 `fromCache`
+  参数与 `LocateResult.source == "session"` 一一对应，别按坐标自己猜。**换了片区域要重查**（2026-11-19 用户报
   「骑车从一个地方到较远的另一个地方，镜头跟过去了，新位置的窗口却没有停车点和车」）：
   `followCameraIfMoved` 里判 `BikeNearby.followQueryDue`——离开**上一次查询中心** ≥
   `FOLLOW_REQUERY_METERS`（300 米，`domain/BikeNearby` 有单测）时把 `pendingLat/Lng` 换成新
@@ -392,6 +424,18 @@
   请求节奏 2 秒一次，别改回 0（费电不讨好）。**「明显更粗不认」是 2026-10-13 修「定位乱跳」加的**
   （`DOT_COARSER_RATIO` 2.5）：网络点在楼群里能偏出几十上百米、位移远超 4 米，只靠位移闸门拦不住，
   蓝点会在准的 GPS 点与粗的网络点之间来回跳；两者都粗（只有网络可用）时这条不触发，照常跟随。
+  **「更粗不认」有逃生口 `DotGate`**（2026-11-19 修「进楼后蓝点冻住」）：基准只在读数**被采纳**
+  时前进，而人走进楼里、GPS 彻底没有之后，剩下的每条网络点都比旧基准粗 2.5 倍以上 → 全被拒
+  → 蓝点永远停在进楼那一刻，跟随 / 精度圈 /「距你」一起停，直到重新拿到 ≤50 米的 GPS 读数。
+  逃生口两条同时成立才放行：**连续两条粗读数彼此 ≤80 米 + 已经 30 秒没有任何读数被采纳**。
+  缺第一条会把单条跳点放回来，缺第二条会让站定的人被网络点拽走（站定时 GPS 还在刷新基准，
+  计时到不了门槛）。别把它简化成"超时就认"。
+  **定位流不会因为定位服务关着就结束**（2026-11-19）：`BikeLocator.updates` 原来遇到
+  「服务未开 / 没有 provider」发一条失败就 `return@flow`，而收集方跑在
+  `repeatOnLifecycle(STARTED)` 里——从通知栏打开定位、Activity 只走 ON_PAUSE，流不会重启，
+  整页停摆。现在原地轮询等它恢复（页面不可见时由生命周期取消）。**权限**是另一回事：
+  系统设置里补授权限拿不到任何回调，只能靠页面 `ON_RESUME` 重读 `hasPermission` 并翻
+  `locationGranted`（那个 state 同时是连续定位流的 key）——别删重读，否则授权后必须退页重进。
   **`onUserLocationChanged` 里不许再调 `rebuildClusters()`**（2026-10-13 删）：簇的距离用查询落地
   时定下的参照点（`anchorLat ?: fetchedLat`），与蓝点实时位置无关——重算结果逐字段相同，纯浪费
   （还在主线程、走动时每 2 秒一次）。停车点距离读的是 `state.userLat`，不经过簇，照常跟着蓝点走。
@@ -475,8 +519,10 @@
 - **主路径 = 高德官方 3D SDK**（`com.amap.api:3dmap`，`AmapMapView`）。矢量底图，校名与
   楼栋名都是新的，任意缩放清晰。设置弹层「地图」区的开关**默认开**（`amapChoice = agreed`）。
 - **回退路径 = osmdroid + 高德栅格**（`OsmMapView`，`AmapRoadHD9` / style=9 / 相机 20）。
-  回退判据只有一条：**10 秒内没等到 `onMapLoaded`**（`MapsInitializer.initialize` 返回
-  void，key 校验在服务端异步做，问不出来）。回退是进程内的，下次冷启动重试；地图角上
+  回退判据只有一条：**5 秒内没等到 `onMapLoaded`**（`MapsInitializer.initialize` 返回
+  void，key 校验在服务端异步做，问不出来；2026-11-19 由 10 秒收到 5 秒——用户口径：
+  key 失效时盯着绿色占位太久；代价是网络极慢时可能误降级，下次冷启动会重新试官方 SDK）。
+  回退是进程内的，下次冷启动重试；地图角上
   显示「高德地图不可用，已用基础底图」。设置里把开关关掉再打开 = 手动重试。
 - **标记是位图**：高德走 OpenGL，没有自定义 Canvas overlay 的口子，聚合圈 / 车标 / 蓝点 /
   高亮 chip / P 全在 `AmapMarkerBitmaps` 里离屏渲染，尺寸口径与 `BikeMarkerOverlay` 逐项
@@ -521,6 +567,18 @@
   轮询准，所以高德路径不用 `SettleWatcher`；程序性移动仍由 `CameraSuppressor` 吃掉，
   `aim` 存的就是 GCJ-02（两条路径同基准，没有显示基准转换了）。单指拖动仍自己看 touch
   （`MapTouchTracker`）用来退出自动跟随。
+- **高德的手势必须挂 `aMap.setOnMapTouchListener` / `setAMapGestureListener`，别挂
+  `mapView.setOnTouchListener`**（2026-11-19 修用户报「走两步镜头就被拽回当前位置、拖图也
+  甩不掉」）：高德 `MapView` 是 FrameLayout，图面是它构造函数里 `addView` 进来的子 View，
+  拖动事件先被子 View 消费，父级的 `OnTouchListener` **一次都收不到**（`ViewGroup` 只在没有
+  子 View 接手时才走自己的 `onTouchEvent`）。后果是 `MapTouchTracker` 从不触发 →
+  `onUserPan` 从不回调 → 跟随一直开着，人每走 `FOLLOW_RECENTER_METERS`（8 米）镜头就平移一次；
+  同一份坐标还喂着「P 被点中时按真实手指位置重算命中」，那条也一起失效（`lastTouch` 恒为 0,0）。
+  另注意 SDK 转发触摸时先 `removeMessages(14)` 再投递最新一条（`AMapDelegateImp.onTouchEvent`），
+  `ACTION_DOWN` / `MOVE` 会被后到的事件挤掉，所以还要一路 `AMapGestureListener.onScroll`
+  （SDK 的手势引擎真的把地图拖动了才回调，纯 MotionEvent 路径，程序性相机动画不会触发），
+  两条都通到 `onUserTakeOver`。**捏合缩放可能也走 `onScroll`**：那一下同样算"用户自己在看图"，
+  退出跟随是对的，别为此再加指针数判据。
 - **拖动帧率**（2026-11-18 用户报「高德下拖地图还是卡卡的」）：矢量底图每帧要重算几何 +
   排文字，比栅格贵是固有的，只能把每帧的量压下去。已做的五处，动到任一处先读对应注释：
   1. `AmapMaps.prepare` 关地形 / 等高线（进程级，必须早于 `initialize`）；
@@ -793,6 +851,10 @@
   **触发点 = 开锁 + 15 分钟 − 提前量**（`EbikeAutoReturn.triggerAtMillis`），提前量
   10~60 秒、步长 5、默认 30——**不许卡在 15 分钟那一刻或之后**：晚于免费时段的还车会
   开始计费（用户 2026-10-10 明确）。提前量下限 10 秒就是这条口径的代码保证，别再放宽。
+  **骑行页倒计时块下有一行触发时刻提示**（2026-11-19）：「HH:mm 自动还车（提前 N 秒）」，
+  `rememberAutoReturnHint` 只在账号方式 + 开关开 + 计时在案时给，小程序方式没有这一档
+  （`caps.wechatScan` 即小程序）。触发时刻与调度层同源（`triggerAtMillis`），**别在 UI 里
+  另算一份**；开了开关却在界面上只字不提，到点系统替他还车时用户会很意外。
 - **重试 = 上一次失败后 3 秒内**（`EbikeAutoReturn.RETRY_INTERVAL_MS`），次数 1~3、
   默认 2（`totalAttempts` = 重试次数 + 1）。**每次尝试结果都发通知**（用户口径）：
   成功一条；失败写清原因原文 + 第 i/N 次 + 是否还会重试。调度费（`dispatchMoneyCents`）
@@ -812,10 +874,13 @@
   （网络 + 3 秒重试超出 `goAsync` 的时限），**也别改由前台服务的协程 delay 负责**
   （灭屏 CPU 挂起，和免费提醒同一条理由）。Worker 类名别改（WorkManager 按类名恢复任务）。
 - **同一轮只跑一次**：`EbikeAutoReturn.doneKey(startAt)` 落 `ebike_auto_return_done_key`——
-  成功、重试用尽、不该重试的失败都落键；换车（新起点）自然换键。进页 / 账号页 / 开锁
-  各调一次 `EbikeAutoReturnReminder.reconcile` 兜底（闹钟被 ROM 丢掉时补跑）。
-  `reconcile(catchUp = false)`（设置变更）**不追补**触发点已过的这一轮——刚打开开关
-  不该让 App 立刻还车；已排着的闹钟也不撤，到点按最新设置复核。
+  成功、重试用尽、不该重试的失败都落键；换车（新起点）自然换键。补排入口四处，缺一处就是
+  一条静默失效路径：进页 / 账号页 / 开锁各一次 `reconcile`（闹钟被 ROM 丢掉时补跑）
+  ＋ **冷启动一次**（`JuwApplication` 启动协程，2026-11-19 补）＋ **重启 / 覆盖安装广播一次**
+  （`ReminderBootReceiver`，与其它提醒同一处；`reconcile` 是 suspend，所以那一条走 `goAsync`）。
+  以前只有页面那三处——骑到一半重启手机、或进程被回收后不再打开骑行页，这一轮再也不会还车，
+  用户只会在账单上看到超时费。`reconcile(catchUp = false)`（设置变更）**不追补**触发点已过的
+  这一轮——刚打开开关不该让 App 立刻还车；已排着的闹钟也不撤，到点按最新设置复核。
   `run` 的早退（开关关 / 非账号方式 / 没到点 / 过了迟到窗口 / 已执行过）**都不落键**：
   那是"这次不该跑"，不是"这轮跑完了"。
 - **订单结束后要通知活着的页面**（2026-10-19）：Worker 拿不到页面的 `KvcxRideController`，

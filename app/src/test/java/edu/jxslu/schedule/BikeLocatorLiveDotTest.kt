@@ -1,5 +1,6 @@
 package edu.jxslu.schedule
 
+import edu.jxslu.schedule.ui.ebike.DotGate
 import edu.jxslu.schedule.ui.ebike.LocationFix
 import edu.jxslu.schedule.ui.ebike.shouldMoveDot
 import org.junit.Assert.assertFalse
@@ -90,5 +91,64 @@ class BikeLocatorLiveDotTest {
         val previous = fix(28.0000, 112.0000, accuracy = 120f)
         val next = fix(28.0002, 112.0000, accuracy = 120f)
         assertTrue(shouldMoveDot(previous, next))
+    }
+
+    // ---------- DotGate：粗读数的逃生口 ----------
+
+    /**
+     * 进楼后 GPS 彻底没了、只剩网络点：单条粗读数仍然不认（双源交替的老口径不能退），
+     * 但**连续两条彼此靠得住 + 已经 30 秒没采纳过读数**时放行，蓝点不再永久冻住。
+     */
+    @Test
+    fun coarseEscapeNeedsPairAndStaleWindow() {
+        val gate = DotGate()
+        val t0 = 1_000_000L
+        assertTrue("第一条读数直接画", gate.accept(fix(28.0, 112.0, accuracy = 20f), t0))
+
+        // 4 秒后第一条粗读数：凑不成对，不认
+        assertFalse(gate.accept(fix(28.0010, 112.0, accuracy = 200f), t0 + 4_000))
+        // 6 秒后第二条粗读数（与上一条相距约 11 米）：凑成对了，但还没过 30 秒窗口，不认
+        assertFalse(gate.accept(fix(28.0011, 112.0, accuracy = 200f), t0 + 6_000))
+        // 40 秒后又来一条（与上一条仍同一片）：两条一致 + 超过窗口 → 采纳（人确实挪了）
+        assertTrue(gate.accept(fix(28.0012, 112.0, accuracy = 200f), t0 + 40_000))
+    }
+
+    /** 站定不动、GPS 一直在刷新基准：计时永远到不了窗口，粗读数不许把点拽走。 */
+    @Test
+    fun stationaryKeepsBaselineFresh() {
+        val gate = DotGate()
+        var t = 1_000_000L
+        var lat = 28.0
+        assertTrue(gate.accept(fix(lat, 112.0, accuracy = 10f), t))
+        repeat(6) {
+            t += 10_000
+            // 夹在中间的粗网络点：比 10 米的基准粗 15 倍，且间距不到 30 秒窗口
+            assertFalse(gate.accept(fix(lat, 112.0, accuracy = 150f), t - 1_000))
+            // 走 5 米的正常 GPS 读数：照位移口径采纳，基准一直是新的
+            lat += 0.000045
+            assertTrue(gate.accept(fix(lat, 112.0, accuracy = 10f), t))
+        }
+    }
+
+    /** 两条粗读数彼此差出一百多米（两次网络定位各跳各的）：不当成「同一片」，不认。 */
+    @Test
+    fun coarsePairMustAgree() {
+        val gate = DotGate()
+        val t0 = 1_000_000L
+        assertTrue(gate.accept(fix(28.0, 112.0, accuracy = 20f), t0))
+        assertFalse(gate.accept(fix(28.0050, 112.0, accuracy = 300f), t0 + 40_000))
+        // 相隔约 110 米：与前一条凑不成对
+        assertFalse(gate.accept(fix(28.0060, 112.0, accuracy = 300f), t0 + 42_000))
+    }
+
+    /** 被拒的读数不挪基准（这是逃生口的前提，也是老 bug 的成因，单独钉一条）。 */
+    @Test
+    fun rejectedFixDoesNotMoveBaseline() {
+        val gate = DotGate()
+        val t0 = 1_000_000L
+        assertTrue(gate.accept(fix(28.0, 112.0, accuracy = 20f), t0))
+        assertFalse(gate.accept(fix(28.01, 112.0, accuracy = 500f), t0 + 40_000))
+        // 基准还是那个 20 米的点：一条偏出 1 公里、精度 30 米的 GPS 读数照位移口径跟随
+        assertTrue(gate.accept(fix(28.0100, 112.0, accuracy = 30f), t0 + 60_000))
     }
 }

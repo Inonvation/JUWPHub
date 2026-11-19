@@ -313,7 +313,12 @@ internal fun OsmMapView(
     val touchTracker = remember {
         TouchTracker(
             touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat(),
-            onPan = { panCallback() },
+            onPan = {
+                // 用户接管：静默区立刻作废，否则这次拖动的收尾回调会被程序性移动开的
+                // 时间窗吃掉，拖完不重查（见 CameraSuppressor.clear）
+                suppressor.clear()
+                panCallback()
+            },
         )
     }
     val settleScope = rememberCoroutineScope()
@@ -562,6 +567,18 @@ internal class CameraSuppressor {
         }
         release()
         return false
+    }
+
+    /**
+     * 用户接管地图：静默区立刻作废（2026-11-19）。
+     *
+     * 程序性移动（跟随 / 定位 / 回到校区）都会开一个 [quietFor] 时间窗，用户在这 1.2 秒里
+     * 拖动并松手时，收尾的 `onCameraChangeFinish` 会被时间窗吃掉——不重查、也不算用户
+     * 意图，屏幕上留着上一片的车。用户动手就是最高优先级：清掉窗口与瞄准点。
+     */
+    fun clear() {
+        quietUntil = 0L
+        release()
     }
 
     private companion object {

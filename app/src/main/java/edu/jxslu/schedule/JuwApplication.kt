@@ -12,6 +12,7 @@ import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.domain.UpdateCheck
 import edu.jxslu.schedule.ui.ai.clearAiImageCache
 import edu.jxslu.schedule.ui.common.clearAttachmentImageCache
+import edu.jxslu.schedule.ui.ebike.EbikeAutoReturnReminder
 import edu.jxslu.schedule.ui.ebike.EbikeFreeRideReminder
 import edu.jxslu.schedule.ui.me.hub.UpdateAvailableBus
 import edu.jxslu.schedule.ui.reminder.BalanceAlertReminder
@@ -91,6 +92,11 @@ class JuwApplication : Application() {
             // （只在计时期间存在，平时零唤醒）；老版本排下的周期任务也会在这一步被撤掉。
             // 无进行中计时 / 开关关时 check 是空跑，很廉价。
             EbikeFreeRideReminder.check(this@JuwApplication)
+            // 自动还车（DESIGN §3.9，2026-11-19 补）：精确闹钟不跨重启 / 覆盖安装存活，
+            // 而它原来的补排入口全在页面里（进骑行页 / 账号页 / 开锁后）——骑到一半重启
+            // 手机、或 App 被系统回收后不再打开骑行页，这一轮就再也不会还车，用户只会在
+            // 账单上看到超时费。幂等（`doneKey` 去重 + 到点才补跑），无计时时是撤闹钟的空跑。
+            EbikeAutoReturnReminder.reconcile(this@JuwApplication)
             // 首版（2026-09-22）通知 channel 的清理：新 channel 用别的 id，
             // 老 channel 一旦建出来就常驻系统，代码不再用它也不会自己消失
             EbikeFreeRideReminder.deleteLegacyChannel(this@JuwApplication)
