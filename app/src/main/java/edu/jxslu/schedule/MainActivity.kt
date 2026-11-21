@@ -1388,6 +1388,9 @@ internal fun JuwApp(
                 onOpenWaterSheet = { showWaterSheet = true },
                 onOpenQzxy = { openFromDrawer(SubpageScreen.QZXY, null) },
                 onOpenQzxySheet = { showQzxySheet = true },
+                // 一卡通账号（2026-11-21）：「江水生活」首行，进校园卡设置页（DESIGN §3.10）。
+                // 与充值宿主里的 onOpenCampusSettings 同一落点，那条是「去开启凭证」的场景出口。
+                onOpenCampusAccount = { openFromDrawer(SubpageScreen.CAMPUS_CARD_SETTINGS, null) },
                 waterBalance = waterBalanceText,
                 qzxyBalance = qzxyBalanceText,
                 wenquHours = wenquHoursText,
@@ -1398,7 +1401,6 @@ internal fun JuwApp(
                 onOpenNotes = { openFromDrawer(SubpageScreen.NOTES, null) },
                 onOpenHomework = { openFromDrawer(SubpageScreen.HOMEWORK, null) },
                 onOpenToolbox = { openFromDrawer(SubpageScreen.TOOLBOX, null) },
-                onOpenWeather = { openFromDrawer(SubpageScreen.WEATHER, null) },
                 onOpenStatement = { openFromDrawer(SubpageScreen.CAMPUS_STATEMENT, null) },
                 onOpenPowerBill = { openFromDrawer(SubpageScreen.POWER_BILL, null) },
                 onOpenCampusRecharge = {

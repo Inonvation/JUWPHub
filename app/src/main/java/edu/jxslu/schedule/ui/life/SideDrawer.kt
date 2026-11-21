@@ -101,10 +101,10 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Bolt
 import me.rerere.hugeicons.stroke.Book01
 import me.rerere.hugeicons.stroke.ChevronRight
+import me.rerere.hugeicons.stroke.CreditCard
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.QrCodeScan
 import me.rerere.hugeicons.stroke.Settings01
-import me.rerere.hugeicons.stroke.Sun01
 import me.rerere.hugeicons.stroke.Task01
 import me.rerere.hugeicons.stroke.Toolbox
 import me.rerere.hugeicons.stroke.Wallet01
@@ -182,9 +182,10 @@ data class ServiceActiveFlags(
  *   头像 + 姓名 + 班级整块可点，进学籍信息页（2026-10-21，入口从教务 Tab 挪来）；
  * - 校园卡与电费都是可点的余额行，详情弹层里放账单与充值；右侧一枚充值入口开选择弹层；
  *   电子账户与寝室电费并排一行（2026-10-21），省纵向空间；
- * - 生活（取快递 / 百宝箱 / 天气）· 江水生活（快趣 / 胖乖 / 趣智 / U净 / 问渠）
- *   · 学习（笔记 / 作业）三段，2026-10-21 起取消「工具」段：百宝箱与天气并入生活，
- *   五张服务卡单列品牌段；
+ * - 生活（取快递 / 百宝箱）· 江水生活（快趣 / 胖乖 / 趣智 / U净 / 问渠）
+ *   · 学习（笔记 / 作业）三段，2026-10-21 起取消「工具」段：百宝箱并入生活，
+ *   五张服务卡单列品牌段；天气行 2026-11-21 删除，天气页只从今日页顶栏那行进
+ *   （§3.29），侧栏不再重复挂入口；
  *   收件箱不进侧栏（2026-10-21 收口：唯一展示入口在今日页收件箱卡）；
  * - 底部左设置、右付款码，`navigationBarsPadding` 让开手势条，不再贴屏幕底。
  */
@@ -206,6 +207,8 @@ fun SideDrawerContent(
     /** 趣智校园：整行进二级页；右侧余额点开的是入口弹窗（余额 / 设备 / 用水状态 / 结算）。 */
     onOpenQzxy: () -> Unit,
     onOpenQzxySheet: () -> Unit,
+    /** 一卡通账号：进校园卡设置页（学号 + 查询密码、余额 / 电费提醒，DESIGN §3.10）。 */
+    onOpenCampusAccount: () -> Unit,
     /** 胖乖小票余额文案（null = 不显示）。 */
     waterBalance: String?,
     /** 趣智余额文案（null = 不显示）。 */
@@ -224,7 +227,6 @@ fun SideDrawerContent(
     onOpenNotes: () -> Unit,
     onOpenHomework: () -> Unit,
     onOpenToolbox: () -> Unit,
-    onOpenWeather: () -> Unit,
     onOpenStatement: () -> Unit,
     onOpenPowerBill: () -> Unit,
     onOpenCampusRecharge: () -> Unit,
@@ -433,6 +435,7 @@ fun SideDrawerContent(
                 )
                 // 2026-10-21 用户口径：百宝箱 / 天气从「工具」并入「生活」；
                 // 快趣 / 胖乖 / 趣智 / U净 / 问渠五张服务卡单列「江水生活」。
+                // 天气行 2026-11-21 删除：天气页只从今日页顶栏天气句进，侧栏不重复挂入口。
                 DrawerSection("生活") {
                     DrawerRow(
                         label = "取快递",
@@ -442,9 +445,16 @@ fun SideDrawerContent(
                     if (toolboxEnabled) {
                         DrawerRow("百宝箱", HugeIcons.Toolbox, onClick = onOpenToolbox)
                     }
-                    DrawerRow("天气", HugeIcons.Sun01, onClick = onOpenWeather)
                 }
                 DrawerSection("江水生活") {
+                    // 一卡通账号（2026-11-21 用户口径）：「江水生活」首行、快趣卡片之上。
+                    // 图标用线性信用卡、不用水宝宝位图——品牌位图留给五张服务卡，
+                    // 账号行与「账号与登录」页的「一卡通 · 电费」共用同一颗。
+                    DrawerRow(
+                        label = "一卡通账号",
+                        icon = HugeIcons.CreditCard,
+                        onClick = onOpenCampusAccount,
+                    )
                     // 快趣/胖乖/趣智/U净/问渠五行走**官方品牌图标**（2026-10-21 用户口径）：
                     // 位图自带彩色底，视觉体量比线性图标大，槽位取 24dp（线性 22dp）保持行内平衡
                     DrawerRow(
