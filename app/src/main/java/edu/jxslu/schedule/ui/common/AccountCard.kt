@@ -1,9 +1,16 @@
 package edu.jxslu.schedule.ui.common
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,24 +34,24 @@ import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 
 /**
- * 账户卡（DESIGN §3.3）：姓名 + 学号（可遮罩）+ 副行 + 一行登录状态。
+ * 账户卡（DESIGN §3.3）：姓名 + 学号（可遮罩）+ 副行 + 状态。
  *
- * **两处共用**：教务账户页（`JwAccountScreen`）与一卡通设置页（`CampusCardSettingsScreen`）。
- * 原先各画一套（一处用 `AppCard`、一处自己拼 `SettingsCard`），同样一句「我是谁」
- * 在两个页面长得不一样。
- *
- * 状态文案由调用方给——两处语义本就不同（教务会说「会话过期时自动重新登录」，
- * 一卡通每次都用保存的凭证重登、没有这回事），这里只按 [statusState] 取颜色。
+ * 两处共用：教务账户页（`JwAccountScreen`）与一卡通设置页（`CampusCardSettingsScreen`）。
+ * 状态有两种画法，调用方二选一：整句 [statusText]（分割线下一行），或右上角胶囊 [badgeText]。
+ * 文案与颜色都按 [statusState] 走，两个页面的「我是谁」不再各画一套。
  */
 @Composable
 fun AccountCard(
     username: String,
     name: String,
-    statusText: String,
+    /** 状态句；给了 [badgeText] 就不画这一行。 */
+    statusText: String?,
     statusState: LoginState,
     modifier: Modifier = Modifier,
     /** 副行（班级等）。空则不占位。 */
     subtitle: String = "",
+    /** 右上角状态胶囊（2026-11-21）：给了就不画分割线与 [statusText]。 */
+    badgeText: String? = null,
 ) {
     var revealed by rememberSaveable { mutableStateOf(false) }
     val masked = AccountMask.maskStudentId(username).orEmpty()
@@ -89,6 +96,10 @@ fun AccountCard(
                 }
             }
             // 没有学号时不显示眼睛：遮罩一个空串没有意义
+            if (badgeText != null) {
+                Spacer(Modifier.width(8.dp))
+                StatusPill(text = badgeText, state = statusState)
+            }
             if (username.isNotBlank()) {
                 IconButton(onClick = { revealed = !revealed }) {
                     Icon(
@@ -99,15 +110,33 @@ fun AccountCard(
                 }
             }
         }
-        HorizontalDivider(
-            modifier = Modifier.padding(vertical = 10.dp),
-            color = MaterialTheme.colorScheme.outlineVariant,
-        )
-        Text(
-            text = statusText,
-            style = MaterialTheme.typography.bodySmall,
-            color = statusState.tint(),
-        )
+        if (statusText != null) {
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 10.dp),
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.bodySmall,
+                color = statusState.tint(),
+            )
+        }
+    }
+}
+
+/** 右上角状态胶囊：色随登录态，与卡片下方状态句同一份口径。 */
+@Composable
+private fun StatusPill(text: String, state: LoginState) {
+    val tint = state.tint()
+    Row(
+        modifier = Modifier
+            .background(tint.copy(alpha = 0.12f), RoundedCornerShape(percent = 50))
+            .padding(horizontal = 9.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(6.dp).background(tint, CircleShape))
+        Spacer(Modifier.width(5.dp))
+        Text(text, style = MaterialTheme.typography.labelSmall, color = tint, maxLines = 1)
     }
 }
 

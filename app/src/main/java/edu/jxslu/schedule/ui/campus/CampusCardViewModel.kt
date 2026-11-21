@@ -71,7 +71,7 @@ class CampusCardViewModel(
     val hasSavedAccount: Boolean get() = credentialStore.read() != null
 
     /**
-     * 已保存的学号（明文回填到「校园卡账号」输入框，2026-09-24 用户拍板）。
+     * 已保存的学号（明文回填到「账号与凭证」的学号输入框，2026-09-24 用户拍板）。
      * 普通 getter：只在进页时被读一次（UI 用 `remember` 承接），不做 State 免得每次重组都读加密存储。
      */
     val savedUsername: String? get() = credentialStore.read()?.username
