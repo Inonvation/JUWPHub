@@ -99,6 +99,7 @@ import edu.jxslu.schedule.ui.common.rememberQuickScan
 import edu.jxslu.schedule.ui.campus.CampusPayResultDialogHost
 import edu.jxslu.schedule.ui.jw.JwHubScreen
 import edu.jxslu.schedule.ui.jwvw.JwImportMode
+import edu.jxslu.schedule.ui.jwvw.SCHEDULE_IMPORT_CAVEAT
 import edu.jxslu.schedule.ui.me.hub.UpdateAvailableDialogHost
 import edu.jxslu.schedule.ui.reminder.DormRepairReminder
 import kotlinx.coroutines.runBlocking
@@ -920,6 +921,17 @@ private fun OnboardingSyncResultDialog(
                     onView = { onOpenSubpage(SubpageScreen.SCHOLAR) },
                 )
                 Spacer(Modifier.height(4.dp))
+                // 课表那行报的是「已归档 N 个学期课表」，只说明这次解析写进了库：调课 / 停课
+                // 这类导入之后才由教务录入的变动抓不到，用户要拿它去教室。说明与结果同屏出现
+                // （2026-11-21 用户口径），文案与导入气泡共用一份（[SCHEDULE_IMPORT_CAVEAT]）。
+                if (outcome.scheduleTried) {
+                    Text(
+                        text = "$SCHEDULE_IMPORT_CAVEAT。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
                 Text(
                     "完成于 " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
                         .format(java.util.Date(outcome.finishedAt)) +

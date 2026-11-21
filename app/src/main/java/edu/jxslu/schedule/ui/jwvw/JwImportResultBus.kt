@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.jwvw
 
 import android.os.SystemClock
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +30,13 @@ data class JwImportOutcome(
     val text: String,
     val publishedAtMs: Long,
     val tone: NoticeTone = NoticeTone.Success,
+    /**
+     * 这条气泡该挂多久。默认 `Short`（4 秒）够读一句结论；课表导入成功那条带了口径说明
+     * （[SCHEDULE_IMPORT_CAVEAT]）明显更长，由调用点传 `Long`（10 秒）。
+     * 别把默认值改成长——队列是串行的（[OutcomeQueue] 等 `showNotice` 返回才换下一条），
+     * 每条都占十秒会把「教材未同步」拖到用户离开这一页之后。
+     */
+    val duration: SnackbarDuration = SnackbarDuration.Short,
 ) {
     /** 是否还在新鲜期内（[FRESH_WINDOW_MS]）。 */
     fun isFresh(nowMs: Long = SystemClock.elapsedRealtime()): Boolean =
@@ -55,9 +63,18 @@ object JwImportResultBus {
      * 发一条消息。**前一条还没消费时排队**（见 [OutcomeQueue]），不再把它顶掉——
      * 「导入完成」与「教材未同步」是同一次导入的两条结果，两条都该看得到（2026-10-06）。
      */
-    fun publish(text: String, tone: NoticeTone = NoticeTone.Success) = synchronized(lock) {
+    fun publish(
+        text: String,
+        tone: NoticeTone = NoticeTone.Success,
+        duration: SnackbarDuration = SnackbarDuration.Short,
+    ) = synchronized(lock) {
         _outcome.value = queue.push(
-            JwImportOutcome(text = text, publishedAtMs = SystemClock.elapsedRealtime(), tone = tone),
+            JwImportOutcome(
+                text = text,
+                publishedAtMs = SystemClock.elapsedRealtime(),
+                tone = tone,
+                duration = duration,
+            ),
         )
     }
 
@@ -131,7 +148,9 @@ fun JwImportOutcomeEffect(snackbar: SnackbarHostState) {
             JwImportResultBus.consume(pending)
             return@LaunchedEffect
         }
-        snackbar.showNotice(AppNoticeVisuals(pending.text, tone = pending.tone))
+        snackbar.showNotice(
+            AppNoticeVisuals(pending.text, tone = pending.tone, duration = pending.duration),
+        )
         JwImportResultBus.consume(pending)
     }
 }

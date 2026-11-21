@@ -45,6 +45,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -1843,8 +1844,10 @@ fun JwImportScreen(
                     // 终态反馈 = 落回课表页后下方那条气泡（DESIGN §3.3，2026-09-29 用户口径）。
                     // 这里**不弹「导入完成」弹窗**：弹窗在本窗口里，点完就 finish，用户在自己
                     // 那一页看不到；写成气泡后「导没导成、导了几门、导到哪张表」在落点上直接可见。
+                    // 时长给 Long：文案尾部带了口径说明（[SCHEDULE_IMPORT_CAVEAT]），四秒读不完。
                     JwImportResultBus.publish(
                         scheduleOutcomeText(count = imported, merge = merge, timetableName = targetName),
+                        duration = SnackbarDuration.Long,
                     )
                     // 教材顺带抓（DESIGN §4.31）：挂进程级作用域，不随本页面销毁中断。
                     // 抓取本身仍然「失败不挡导入」，但**不再无声**（2026-10-06）：失败时补一条
@@ -2107,15 +2110,20 @@ private data class TermSwitchFailure(
  *
  * 一句话说清三件事：导了几门、覆盖还是合并、导到哪张表。[timetableName] 读不到时省掉那一截
  * （旧数据或课表刚被删）。
+ *
+ * 尾部固定跟 [SCHEDULE_IMPORT_CAVEAT]（2026-11-21 用户口径）：「导入成功」只说明这次解析写进了库，
+ * 调课 / 停课这类导入之后才由教务录入的变动抓不到，用户要拿它去教室，所以这条说明与成功结果
+ * 同屏出现、不能省。文案变长后调用点把气泡时长换成 `SnackbarDuration.Long`，否则四秒读不完。
  */
-private fun scheduleOutcomeText(count: Int, merge: Boolean, timetableName: String): String {
+internal fun scheduleOutcomeText(count: Int, merge: Boolean, timetableName: String): String {
     val target = timetableName.takeIf { it.isNotBlank() }?.let { "到「$it」" }.orEmpty()
-    return if (merge) {
+    val head = if (merge) {
         "已合并导入 $count 门新课$target（重复课程已跳过）"
     } else {
         // 覆盖写的是全部条数，说成「新课」会让人以为只是追加
         "已覆盖写入 $count 条课次$target，原有课程已清空"
     }
+    return "$head。$SCHEDULE_IMPORT_CAVEAT"
 }
 
 /**

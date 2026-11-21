@@ -45,6 +45,12 @@
   只在 current 被消费后才换值，所以同一时刻只有一个 `showNotice` 在飞，「导入完成」与
   「教材未同步」两条都会轮到，不会被 `showNotice` 的「新的顶掉旧的」吃掉（2026-10-08 核对）。
 - 新鲜期常数在 `JwImportOutcome.FRESH_WINDOW_MS`，边界由 `JwImportResultBusTest` 钉住。
+- **成功气泡尾部固定跟口径说明**（2026-11-21 用户口径）：`scheduleOutcomeText` 在「导了几门 /
+  覆盖还是合并 / 导到哪张表」之后拼 `SCHEDULE_IMPORT_CAVEAT`（`ui/jwvw/ScheduleImportNote.kt`：
+  脚本自动识别、调课等变动可能遗漏、以教务课表为准）。同一句还用在首启「同步完成」弹窗与
+  课表管理页的归档结果——**三处共用一份常量，别各写一句**；改文案同时看 `ScheduleOutcomeTextTest`。
+  这条气泡因此把时长升到 `SnackbarDuration.Long`（`JwImportOutcome.duration`，其余仍 Short：
+  队列串行，每条都占十秒会把「教材未同步」拖到用户离开之后）。
 
 ## 确认弹窗支持切换学期（2026-09-28）
 

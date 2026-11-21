@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,6 +63,7 @@ import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.jwvw.SCHEDULE_IMPORT_CAVEAT
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -192,7 +194,8 @@ class TimetableViewModel(
             message.value = when (result) {
                 is ScheduleTermImport.Result.Archived -> when {
                     result.createdTerms.isNotEmpty() ->
-                        "已导入 ${result.createdTerms.size} 个学期课表（共 ${result.courseCount} 门）"
+                        "已导入 ${result.createdTerms.size} 个学期课表（共 ${result.courseCount} 门）。" +
+                            SCHEDULE_IMPORT_CAVEAT
                     result.failed.isNotEmpty() -> "没有导入成功：${result.failed.first().second}"
                     else -> "没有需要补的学期，课表已是最新"
                 }
@@ -239,7 +242,9 @@ fun TimetableManageScreen(
 
     LaunchedEffect(state.message) {
         state.message?.let {
-            snackbar.showNotice(it)
+            // 归档结果带口径说明（[SCHEDULE_IMPORT_CAVEAT]），四秒读不完；本页消息是顶替式的，
+            // 拉长不会拖慢下一条。其余短消息也一并走 Long，不值得为时长再分一档状态。
+            snackbar.showNotice(it, duration = SnackbarDuration.Long)
             viewModel.consumeMessage()
         }
     }
