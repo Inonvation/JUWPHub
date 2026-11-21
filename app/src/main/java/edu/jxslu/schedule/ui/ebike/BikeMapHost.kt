@@ -52,7 +52,12 @@ internal fun BikeMapHost(
     showCampusFence: Boolean = true,
     colors: BikeMarkerColors,
     camera: CameraRequest?,
-    onCenterSettled: (Double, Double, Double, Double) -> Unit,
+    onCenterSettled: (Double, Double, Double) -> Unit,
+    /**
+     * 视口半对角线（米）的测量值：底图就绪时一次、之后每次相机停稳一次。
+     * 与「停手」无关（程序性移动的停稳回调会被静默区吃掉），见 `BikeMapViewModel.onViewportMeasured`。
+     */
+    onViewportMeasured: (Double) -> Unit = {},
     zones: KvcxZones,
     onClusterTap: (String) -> Unit,
     onRideTap: () -> Unit,
@@ -107,6 +112,7 @@ internal fun BikeMapHost(
             colors = colors,
             camera = camera,
             onCenterSettled = onCenterSettled,
+            onViewportMeasured = onViewportMeasured,
             zones = zones,
             onClusterTap = onClusterTap,
             onRideTap = onRideTap,
@@ -142,6 +148,7 @@ internal fun BikeMapHost(
             colors = colors,
             camera = camera,
             onCenterSettled = onCenterSettled,
+            onViewportMeasured = onViewportMeasured,
             zones = zones,
             onClusterTap = onClusterTap,
             onRideTap = onRideTap,

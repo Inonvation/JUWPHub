@@ -2,7 +2,9 @@ package edu.jxslu.schedule
 
 import edu.jxslu.schedule.ui.ebike.DotGate
 import edu.jxslu.schedule.ui.ebike.LocationFix
+import edu.jxslu.schedule.ui.ebike.LocateResult
 import edu.jxslu.schedule.ui.ebike.shouldMoveDot
+import edu.jxslu.schedule.ui.ebike.shouldRecenterFromCache
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -150,5 +152,90 @@ class BikeLocatorLiveDotTest {
         assertFalse(gate.accept(fix(28.01, 112.0, accuracy = 500f), t0 + 40_000))
         // 基准还是那个 20 米的点：一条偏出 1 公里、精度 30 米的 GPS 读数照位移口径跟随
         assertTrue(gate.accept(fix(28.0100, 112.0, accuracy = 30f), t0 + 60_000))
+    }
+
+    // ---------- 缓存落地之后的镜头收敛（进页 / 点「定位」的两段用法，2026-11-21） ----------
+
+    /**
+     * 进页时缓存点还在上次那片（差出约 1 公里）、实时读数只有网络点：必须收敛，
+     * 否则镜头冻在缓存位置（用户报的那条）。粗读数的精度 100 米远小于差距，够判。
+     */
+    @Test
+    fun cacheFarBehindIsCorrectedByCoarseFix() {
+        assertTrue(
+            shouldRecenterFromCache(
+                cacheLat = 28.0000,
+                cacheLng = 112.0000,
+                liveLat = 28.0100,
+                liveLng = 112.0000,
+                liveAccuracyMeters = 100f,
+            ),
+        )
+    }
+
+    /** 站定不动：网络点比缓存点偏 20 米、自己声明精度 60 米——差得还没它自己的误差大，不挪。 */
+    @Test
+    fun coarseFixWithinOwnAccuracyHeld() {
+        assertFalse(
+            shouldRecenterFromCache(
+                cacheLat = 28.0000,
+                cacheLng = 112.0000,
+                liveLat = 28.00018,
+                liveLng = 112.0000,
+                liveAccuracyMeters = 60f,
+            ),
+        )
+    }
+
+    /** 精度比下限还好的时长（人真走了 50 米）：照位移口径收敛。 */
+    @Test
+    fun fineFixAfterShortWalkConverges() {
+        assertTrue(
+            shouldRecenterFromCache(
+                cacheLat = 28.0000,
+                cacheLng = 112.0000,
+                liveLat = 28.00045,
+                liveLng = 112.0000,
+                liveAccuracyMeters = 8f,
+            ),
+        )
+    }
+
+    /** 实时读数没给精度（0）时退到位移下限：几米的差不动，几十米才动。 */
+    @Test
+    fun unknownLiveAccuracyFallsBackToFloor() {
+        assertFalse(
+            shouldRecenterFromCache(28.0000, 112.0, 28.0001, 112.0, liveAccuracyMeters = 0f),
+        )
+        assertTrue(
+            shouldRecenterFromCache(28.0000, 112.0, 28.0004, 112.0, liveAccuracyMeters = 0f),
+        )
+    }
+
+    /** 粗读数偏出 200 米、精度 300 米：仍在自己声明的误差内，不当成"人挪了"。 */
+    @Test
+    fun veryCoarseFixHeldWithinItsCircle() {
+        assertFalse(
+            shouldRecenterFromCache(
+                cacheLat = 28.0000,
+                cacheLng = 112.0000,
+                liveLat = 28.0018,
+                liveLng = 112.0000,
+                liveAccuracyMeters = 300f,
+            ),
+        )
+    }
+
+    // ---------- 定位失败分档（进页那条自动定位只对可改的两档说话，2026-11-21） ----------
+
+    /** 只有「没权限」「定位总开关关着」两档值得给用户一个「去设置」，其余只能等信号。 */
+    @Test
+    fun onlyFixableFailuresAreActionable() {
+        assertTrue(LocateResult.Failed("x", LocateResult.Issue.Permission).actionable)
+        assertTrue(LocateResult.Failed("x", LocateResult.Issue.ServiceOff).actionable)
+        assertFalse(LocateResult.Failed("x", LocateResult.Issue.NoFix).actionable)
+        assertFalse(LocateResult.Failed("x", LocateResult.Issue.Unsupported).actionable)
+        // 不传分档时按「等不到读数」处理：进页不打扰
+        assertFalse(LocateResult.Failed("x").actionable)
     }
 }

@@ -264,18 +264,21 @@ internal fun OsmMapView(
     colors: BikeMarkerColors,
     camera: CameraRequest?,
     /**
-     * 地图**停手**后回调一次（中心 + 缩放 + 视口半对角线米数）：用户拖完/滑停才通知，
+     * 地图**停手**后回调一次（中心 + 缩放）：用户拖完/滑停才通知，
      * 滑行途中一次都不发。
      *
      * 判据在 [SettleWatcher]（手指松开 + 地图中心连续 120ms 没动；**不是**事件间隔，也不是
      * `scroller.isFinished`——那两条都真机否掉过，理由写在那个类的注释里），不在调用方：
      * View 层才知道地图是不是还在滑。程序性移动（定位 / 回到校区 / 点分组联动）的事件被
      * [CameraSuppressor] 吃掉，走不到这里，那些路径各自安排查询。
-     *
-     * 视口半对角线（米）用于按视口缩放采样半径（`BikeNearby.sampleRadiusMeters`）：
-     * 放大到只看一条路时不必再查视界之外的几百米。拿不到包围盒时回 0，调用方按上限算。
      */
-    onCenterSettled: (Double, Double, Double, Double) -> Unit,
+    onCenterSettled: (Double, Double, Double) -> Unit,
+    /**
+     * 视口半对角线（米）：布局完成时一次、之后每次滚动 / 缩放事件一次（**先于静默区判断**）。
+     * 用于按视口缩放采样半径（`BikeNearby.sampleRadiusMeters`）与跟随的回中距离
+     * （`BikeNearby.followRecenterMeters`）。拿不到包围盒时回 0，调用方忽略。
+     */
+    onViewportMeasured: (Double) -> Unit = {},
     zones: KvcxZones,
     onClusterTap: (String) -> Unit,
     onRideTap: () -> Unit,
@@ -299,6 +302,7 @@ internal fun OsmMapView(
     val userHeading by userHeadingFlow.collectAsStateWithLifecycle()
     // 回调每次重组刷新：地图监听器只建一次，闭包捕获旧 lambda 会读到过期状态
     val settleCallback by rememberUpdatedState(onCenterSettled)
+    val viewportCallback by rememberUpdatedState(onViewportMeasured)
     val tapCallback by rememberUpdatedState(onClusterTap)
     val bikeTapCallback by rememberUpdatedState(onBikeTap)
     val rideTapCallback by rememberUpdatedState(onRideTap)
@@ -360,33 +364,29 @@ internal fun OsmMapView(
                 object : MapListener {
                     override fun onScroll(event: ScrollEvent?): Boolean {
                         val center = mapCenter ?: return false
+                        // 视口尺寸先回报（2026-11-21）：几何量，与"这次回调吃不吃"无关。
+                        // 拖动不改变视口，值也基本不变，贵不了一分——省得再判断一次
+                        val halfDiagonal = viewportHalfDiagonalMeters(this@apply)
+                        viewportCallback(halfDiagonal)
                         if (suppressor.shouldSwallow(center.latitude, center.longitude)) {
                             return false
                         }
                         // 每次事件只喂给停手判定；查询由它确认"真的停了"之后再发
                         settleWatcher.onEvent(this@apply) { lat, lng, zoom ->
-                            settleCallback(
-                                lat,
-                                lng,
-                                zoom,
-                                viewportHalfDiagonalMeters(this@apply),
-                            )
+                            settleCallback(lat, lng, zoom)
                         }
                         return false
                     }
 
                     override fun onZoom(event: ZoomEvent?): Boolean {
                         val center = mapCenter ?: return false
+                        val halfDiagonal = viewportHalfDiagonalMeters(this@apply)
+                        viewportCallback(halfDiagonal)
                         if (suppressor.shouldSwallow(center.latitude, center.longitude)) {
                             return false
                         }
                         settleWatcher.onEvent(this@apply) { lat, lng, zoom ->
-                            settleCallback(
-                                lat,
-                                lng,
-                                zoom,
-                                viewportHalfDiagonalMeters(this@apply),
-                            )
+                            settleCallback(lat, lng, zoom)
                         }
                         return false
                     }
@@ -481,6 +481,13 @@ internal fun OsmMapView(
             mapView.onPause()
             mapView.onDetach()
         }
+    }
+
+    // 布局完成就回报一次视口（2026-11-21）：用户如果不拖地图，滚动 / 缩放事件一次都不会来，
+    // 视口就永远量不到（跟随阈值退到 8 米下限、采样环按上限算）。包围盒未就绪时回 0，调用方忽略。
+    LaunchedEffect(mapSize) {
+        if (mapSize.width == 0 || mapSize.height == 0) return@LaunchedEffect
+        viewportCallback(viewportHalfDiagonalMeters(mapView))
     }
 
     LaunchedEffect(camera?.nonce, mapSize) {

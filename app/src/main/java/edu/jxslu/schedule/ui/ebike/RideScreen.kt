@@ -705,15 +705,25 @@ fun RideScreen(
     // 进页定位一次（已授权静默定；没问过且没被拒就申请一次）——与地图页同一套口径。
     // `ebikeLocationAsked` 落 DataStore：系统在用户拒绝两次后静默拒绝，不看这个标记的话
     // 每次进页面都会白申请一次、再弹一句「已拒绝」，那就成了骚扰。
-    val notifyLocateIssue: suspend (String) -> Unit = { message ->
+    /**
+     * 定位失败的提示。两档「用户自己能改」的失败（权限 / 系统定位总开关）给「去设置」，
+     * 按档跳到对应的系统页——**定位总开关不在应用详情页里**（2026-11-21）；其余只报原因。
+     */
+    val notifyLocateIssue: suspend (LocateResult.Failed) -> Unit = { issue ->
         val outcome = snackbar.showNotice(
             AppNoticeVisuals(
-                message = message,
-                actionLabel = "去设置",
+                message = issue.message,
+                actionLabel = if (issue.actionable) "去设置" else null,
                 tone = NoticeTone.Warning,
             ),
         )
-        if (outcome == SnackbarResult.ActionPerformed) AppPermissions.jumpAppDetails(context)
+        if (outcome == SnackbarResult.ActionPerformed) {
+            if (issue.issue == LocateResult.Issue.ServiceOff) {
+                AppPermissions.jumpLocationSettings(context)
+            } else {
+                AppPermissions.jumpAppDetails(context)
+            }
+        }
     }
     val locatePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -732,7 +742,7 @@ fun RideScreen(
     LaunchedEffect(Unit) {
         when {
             BikeLocator.hasPermission(context) ->
-                locate(context, viewModel, scope, silent = true, onIssue = {})
+                locate(context, viewModel, scope, silent = true, onIssue = notifyLocateIssue)
             !prefsStore.ebikeLocationAsked.first() -> {
                 prefsStore.setEbikeLocationAsked(true)
                 locatePermissionLauncher.launch(AppPermissions.location.toTypedArray())
@@ -989,6 +999,9 @@ fun RideScreen(
                         colors = markerColors,
                         camera = state.camera,
                         onCenterSettled = viewModel::onMapSettled,
+                        // 视口尺寸与「停手」分开回报（2026-11-21）：它是几何量，程序性移动的
+                        // 停手回调被静默区吃掉，靠那条路会在用户拖图之前一直是 0
+                        onViewportMeasured = viewModel::onViewportMeasured,
                         // 点地图上的数字 = 展开列表里对应的那张停车点卡，并把列表滚过去。
                         // **不再弹第二份卡片**——同一批车只在一处出现（2026-09-30 用户口径）
                         onClusterTap = { key ->
@@ -1752,32 +1765,64 @@ private fun rideBikePosition(ride: KqcxAuth.Ride?, state: BikeMapUiState): Pair<
  * 全程置 `locating`：接口最长等 8 秒，不告诉用户"在做事"的话他只会连点按钮。
  *
  * `result.source == "session"` = 拿的是缓存位置：镜头先带过去，但不当成镜头锚点
- * （见 [BikeMapViewModel.onLocated] 的 [BikeMapViewModel] 侧注释），等实时读数收敛。
+ * （见 [BikeMapViewModel.onLocated] 的 [BikeMapViewModel] 侧注释）。
+ *
+ * **缓存读数之后还要再取一条实时读数**（2026-11-21 修用户报「进页卡在上一次的定位缓存
+ * 位置，手动点定位才过来」）：旧版把这口气全交给连续定位流，而流里的同一条实时读数要过
+ * [DotGate]——缓存点是准的 GPS 点、楼里只剩网络点时精度差十倍以上，被判成「明显更粗」
+ * 整段拒掉，等逃生口要 30 秒且要有两条连续粗读数。手动点「定位」能立刻好，正是因为它走
+ * 这条一次性定位（不过 [DotGate]）。所以一次性定位自己收敛：先把缓存点落位，
+ * 再等一条实时读数把镜头（和蓝点）带过去——**只在这条读数与缓存点差得超过它自己的精度时**
+ * 才动（[shouldRecenterFromCache]），否则站定的人会被一个粗网络点拽走。
+ * 缓存点只在这几秒里当占位。
+ *
+ * 失败时：[silent] 那条（进页自动定位）只说一句**用户自己能改**的（定位没权限 / 总开关
+ * 关着）——那种状态下地图会停在"上次的位置"，界面上一点说明都没有，用户会以为已经定位过；
+ * 等不到读数（室内 / 信号差）不提，用户点「定位」时自然会看到原因。
  */
 private fun locate(
     context: android.content.Context,
     viewModel: BikeMapViewModel,
     scope: kotlinx.coroutines.CoroutineScope,
     silent: Boolean,
-    onIssue: suspend (String) -> Unit,
+    onIssue: suspend (LocateResult.Failed) -> Unit,
 ) {
     viewModel.setLocating(true)
     scope.launch {
-        try {
-            when (val result = BikeLocator.currentLocation(context)) {
-                is LocateResult.Ok ->
-                    viewModel.onLocated(
-                        result.lat,
-                        result.lng,
-                        result.accuracyMeters,
-                        animated = !silent,
-                        fromCache = result.source == "session",
-                    )
-                is LocateResult.Failed -> if (!silent) onIssue(result.message)
-            }
+        val first = try {
+            BikeLocator.currentLocation(context)
         } finally {
             viewModel.setLocating(false)
         }
+        when (first) {
+            is LocateResult.Ok ->
+                viewModel.onLocated(
+                    first.lat,
+                    first.lng,
+                    first.accuracyMeters,
+                    animated = !silent,
+                    fromCache = first.source == "session",
+                )
+            is LocateResult.Failed -> {
+                if (!silent || first.actionable) onIssue(first)
+                return@launch
+            }
+        }
+        val cached = first as? LocateResult.Ok
+        if (cached == null || cached.source != "session") return@launch
+        // 转圈已经在第一段收掉了：收敛这一段最多等 8 秒，静默进行，别让按钮一直转
+        val live = BikeLocator.currentLocation(context, acceptCached = false)
+        if (live !is LocateResult.Ok) return@launch
+        if (!shouldRecenterFromCache(cached.lat, cached.lng, live.lat, live.lng, live.accuracyMeters)) {
+            return@launch
+        }
+        viewModel.onLocated(
+            live.lat,
+            live.lng,
+            live.accuracyMeters,
+            animated = !silent,
+            fromCache = false,
+        )
     }
 }
 

@@ -129,6 +129,23 @@ object AppPermissions {
     }
 
     /**
+     * 跳系统「位置信息」页：**系统定位总开关关着时，应用详情页里没有这个开关**，
+     * 只有这一页能把它打开（2026-11-21，骑行页进页定位失败的提示用）。
+     *
+     * ROM 不认这个 action 时兜底到应用详情页——宁可多一步，也别点下去没反应。
+     */
+    fun jumpLocationSettings(context: Context) {
+        val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+        val started = runCatching {
+            if (intent.resolveActivity(context.packageManager) == null) return@runCatching false
+            context.startActivityOutsideApp(intent)
+            true
+        }.getOrDefault(false)
+        if (started) return
+        jumpAppDetails(context)
+    }
+
+    /**
      * 跳系统「应用通知设置」页——通知渠道细分的入口（横幅 / 悬浮、震动、声音都在那里）。
      *
      * 免费时长提醒弹不出来时，这是用户唯一能改的地方（见 `EbikeFreeRideNotifier` 的 KDoc），

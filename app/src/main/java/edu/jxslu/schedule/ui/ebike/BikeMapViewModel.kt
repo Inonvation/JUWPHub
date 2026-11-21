@@ -503,9 +503,12 @@ class BikeMapViewModel(
 
     /**
      * 最近一次量到的视口半对角线（米；0 = 还没量到）。采样环半径按它缩放
-     * （[BikeNearby.sampleRadiusMeters]）：放大到只看一条路时不再查视界之外的车。
-     * View 层在「停手」时用可见包围盒现算并带过来（[onMapSettled]）；其它查询路径
-     * （定位 / 回到校区 / 刷新）沿用最近一次的值。
+     * （[BikeNearby.sampleRadiusMeters]），跟随的回中距离也按它算
+     * （[BikeNearby.followRecenterMeters]）。
+     *
+     * **只有一个写入点** [onViewportMeasured]（View 层回报，与"停手"无关，2026-11-21）。
+     * 旧版在 [onMapSettled] 里顺带学，而进页那次定位是程序性移动、停手回调被静默区吞掉
+     * ——用户没亲手拖过地图之前它一直是 0，跟随阈值退到 8 米下限。
      */
     private var viewportHalfDiagonalMeters = 0.0
 
@@ -609,21 +612,36 @@ class BikeMapViewModel(
      *
      * 程序性移动（定位、回到校区、点分组联动）的事件被镜头静默区吃掉，走不到这里，
      * 那些路径各自安排查询（[onLocated] / [onResetToCampus] / [onClusterTap]）。
+     *
+     * 视口尺寸**不从这里带**（2026-11-21 改）：它只在"没被静默区吞掉"的停手时才会到这里，
+     * 而进页那次定位正好是程序性移动——见 [onViewportMeasured]。
      */
     fun onMapSettled(
         lat: Double,
         lng: Double,
         zoom: Double,
-        viewportHalfDiagonalMeters: Double = 0.0,
     ) {
         if (!lat.isFinite() || !lng.isFinite()) return
         if (zoom.isFinite() && zoom > 0) pendingZoom = zoom
-        if (viewportHalfDiagonalMeters.isFinite() && viewportHalfDiagonalMeters > 0.0) {
-            this.viewportHalfDiagonalMeters = viewportHalfDiagonalMeters
-        }
         pendingLat = lat
         pendingLng = lng
         scheduleQuery()
+    }
+
+    /**
+     * 视口半对角线的最新测量值（米；View 层在底图就绪与每次相机停稳时回报，2026-11-21）。
+     *
+     * 为什么单独一条：它是个**几何量**，与"这次停手是不是用户动作"无关。旧版只在
+     * [onMapSettled] 里学到，而进页那次定位是程序性移动、回调被 `CameraSuppressor` 吃掉
+     * ——于是用户没亲手拖过地图之前它一直是 0：跟随阈值退到
+     * [BikeNearby.FOLLOW_RECENTER_MIN_METERS]（8 米）下限，镜头每走 8 米就滑一次
+     * （正是 2026-11-19 修掉的"地图一直在追"）；采样环退到半径上限，放大到一条路也不收窄。
+     *
+     * **只记数，不安排查询**：换个视口尺寸不是用户"要看这一片"的意思表达。
+     */
+    fun onViewportMeasured(meters: Double) {
+        if (!meters.isFinite() || meters <= 0.0) return
+        viewportHalfDiagonalMeters = meters
     }
 
     /**
@@ -1172,6 +1190,11 @@ class BikeMapViewModel(
      *   读数，不加这道闸会反复取消上一笔，页面一直转圈、一次都落不了地；
      * - 还没查过（`lastAttempt*` 为空）也不在这里补：首屏查询与 [onLocated] 各自会发，
      *   跟随时补一条只会在进页那一刻多打一轮。
+     *
+     * **[pendingLat/Lng] 跟着镜头走，与"要不要发查询"分开**（2026-11-21）：「下一次查询的
+     * 中心」是"镜头现在看着哪"，而 300 米那道闸门只决定"这一片的数据要不要现在换"。旧版
+     * 只在闸门放行时才写它，于是跟随骑出两百米后点「刷新」/ 开锁后的补查，查的还是上一片的
+     * 中心——列表与地图差出一段，正是"镜头与数据不同源"那一族。
      */
     private fun followCameraIfMoved(lat: Double, lng: Double) {
         val lastLat = followCameraLat
@@ -1184,6 +1207,8 @@ class BikeMapViewModel(
         }
         followCameraLat = lat
         followCameraLng = lng
+        pendingLat = lat
+        pendingLng = lng
         pushCamera(lat, lng, zoom = null, animated = true)
 
         val queryLat = lastAttemptLat
@@ -1191,8 +1216,6 @@ class BikeMapViewModel(
         if (queryLat == null || queryLng == null) return
         if (_uiState.value.loading) return
         if (!BikeNearby.followQueryDue(queryLat, queryLng, lat, lng)) return
-        pendingLat = lat
-        pendingLng = lng
         scheduleQuery(immediate = true, useCache = false)
     }
 

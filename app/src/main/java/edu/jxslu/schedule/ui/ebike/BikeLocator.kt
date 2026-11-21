@@ -36,7 +36,33 @@ internal sealed interface LocateResult {
     ) : LocateResult
 
     /** 失败，[message] 直接给 Snackbar 用。 */
-    data class Failed(val message: String) : LocateResult
+    data class Failed(
+        val message: String,
+        /**
+         * 失败分档（2026-11-21）：页面据此决定提示里的「去设置」跳到哪一页，
+         * 以及**进页那条自动定位失败要不要说一句**（只有 [actionable] 的两档值得打扰）。
+         */
+        val issue: Issue = Issue.NoFix,
+    ) : LocateResult {
+
+        /** 用户自己能改的两档：放开定位权限 / 打开系统定位总开关。其余只能等信号或换地方。 */
+        val actionable: Boolean get() = issue == Issue.Permission || issue == Issue.ServiceOff
+    }
+
+    /** 定位失败的成因（见 [Failed.issue]）。 */
+    enum class Issue {
+        /** 没给定位权限。 */
+        Permission,
+
+        /** 有权，但系统「位置信息」总开关关着 / 没有可用 provider。 */
+        ServiceOff,
+
+        /** 这台设备没有定位服务。 */
+        Unsupported,
+
+        /** 权限与服务都正常，只是等不到一条有效读数（室内 / 信号差）。 */
+        NoFix,
+    }
 }
 
 /** 一次定位的原始读数（WGS84），只留挪蓝点要看的字段，纯数据可单测。 */
@@ -92,25 +118,31 @@ internal object BikeLocator {
      *
      * 顺序：先看五分钟内的缓存定位（瞬时返回），没有再同时挂网络与 GPS 两条更新，
      * 谁先给结果用谁。网络定位先到也无所谓——把地图中心落到用户那一片，粗略坐标就够。
+     *
+     * [acceptCached] = false 时**跳过缓存**，只等一条实时读数。页面在缓存读数落地之后
+     * 再取一次用（见 `RideScreen.locate`）：连续定位流里的同一批实时读数要过 [DotGate]，
+     * 精度从 GPS 掉到网络点（楼里只有网络定位）时会被判成「明显更粗」拒掉，等它的
+     * 逃生口要 30 秒——那段时间镜头就停在缓存点上。
      */
     suspend fun currentLocation(
         context: Context,
         timeoutMs: Long = FIX_TIMEOUT_MS,
+        acceptCached: Boolean = true,
     ): LocateResult {
         if (!hasPermission(context)) {
-            return LocateResult.Failed("没有定位权限，请在系统设置里允许后再试")
+            return LocateResult.Failed("没有定位权限，请在系统设置里允许后再试", LocateResult.Issue.Permission)
         }
         val manager = context.getSystemService(LocationManager::class.java)
-            ?: return LocateResult.Failed("这台设备没有定位服务")
+            ?: return LocateResult.Failed("这台设备没有定位服务", LocateResult.Issue.Unsupported)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !manager.isLocationEnabled) {
-            return LocateResult.Failed("手机定位服务未开启，请打开后重试")
+            return LocateResult.Failed("手机定位服务未开启，请打开后重试", LocateResult.Issue.ServiceOff)
         }
 
-        freshLastKnown(manager)?.let { return toResult(it.toFix(), "session") }
+        if (acceptCached) freshLastKnown(manager)?.let { return toResult(it.toFix(), "session") }
 
         val providers = enabledProviders(manager)
         val fix = awaitFix(manager, providers, timeoutMs)
-            ?: return LocateResult.Failed("暂时取不到位置，可手动拖动地图找车")
+            ?: return LocateResult.Failed("暂时取不到位置，可手动拖动地图找车", LocateResult.Issue.NoFix)
         return toResult(fix.toFix(), "realtime")
     }
 
@@ -130,16 +162,16 @@ internal object BikeLocator {
      */
     fun updates(context: Context): Flow<LocateResult> = flow {
         if (!hasPermission(context)) {
-            emit(LocateResult.Failed("没有定位权限，请在系统设置里允许后再试"))
+            emit(LocateResult.Failed("没有定位权限，请在系统设置里允许后再试", LocateResult.Issue.Permission))
             return@flow
         }
         val manager = context.getSystemService(LocationManager::class.java)
         if (manager == null) {
-            emit(LocateResult.Failed("这台设备没有定位服务"))
+            emit(LocateResult.Failed("这台设备没有定位服务", LocateResult.Issue.Unsupported))
             return@flow
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !manager.isLocationEnabled) {
-            emit(LocateResult.Failed("手机定位服务未开启，请打开后重试"))
+            emit(LocateResult.Failed("手机定位服务未开启，请打开后重试", LocateResult.Issue.ServiceOff))
             while (!manager.isLocationEnabled) delay(PROVIDER_POLL_MS)
         }
 
@@ -151,7 +183,7 @@ internal object BikeLocator {
 
         var providers = enabledProviders(manager)
         if (providers.isEmpty()) {
-            emit(LocateResult.Failed("正在等待可用的定位来源"))
+            emit(LocateResult.Failed("正在等待可用的定位来源", LocateResult.Issue.ServiceOff))
             while (true) {
                 delay(PROVIDER_POLL_MS)
                 providers = enabledProviders(manager)
@@ -276,6 +308,39 @@ internal object BikeLocator {
         LocationManager.NETWORK_PROVIDER,
         LocationManager.PASSIVE_PROVIDER,
     )
+}
+
+/**
+ * 缓存读数之后再拿一条实时读数时，两者至少差这么多米才值得为它挪镜头
+ * （实时读数自己没给精度时也用它当门槛，口径见 [shouldRecenterFromCache]）。
+ */
+private const val RECENTER_FROM_CACHE_MIN_METERS = 30.0
+
+/**
+ * 缓存定位落地之后，要不要用这条实时读数再收敛一次镜头与蓝点
+ * （`RideScreen.locate` 的两段用法，2026-11-21）。
+ *
+ * 为什么不能无条件收敛：一次性定位的第一段吃的是系统缓存（准确说是一个 GPS 点），第二段
+ * 等到的第一条实时读数常常是**网络点**（先回），精度 30~2000 米、位置能偏出几十米。无条件
+ * 把镜头挪过去，站定不动的人会看到地图/蓝点被拽走——正是 `shouldMoveDot` 那条「更粗不认」
+ * 要防的事。所以门槛取**这条读数自己的精度**（下限 [RECENTER_FROM_CACHE_MIN_METERS]）：
+ * 差得还没它自己承认的误差大，说明缓存点与它并不矛盾，镜头本来就够准，不动；
+ * 差得超出噪声（人确实挪了、或缓存点是上次别处的），才值得收敛。
+ */
+internal fun shouldRecenterFromCache(
+    cacheLat: Double,
+    cacheLng: Double,
+    liveLat: Double,
+    liveLng: Double,
+    liveAccuracyMeters: Float,
+): Boolean {
+    val moved = BikeNearby.distanceMeters(cacheLat, cacheLng, liveLat, liveLng)
+    val threshold = if (liveAccuracyMeters > 0f) {
+        liveAccuracyMeters.toDouble().coerceAtLeast(RECENTER_FROM_CACHE_MIN_METERS)
+    } else {
+        RECENTER_FROM_CACHE_MIN_METERS
+    }
+    return moved >= threshold
 }
 
 /** 蓝点至少挪了这么多米才真的动。 */

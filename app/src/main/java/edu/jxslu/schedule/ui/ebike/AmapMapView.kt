@@ -98,7 +98,13 @@ internal fun AmapMapView(
     showCampusFence: Boolean = true,
     colors: BikeMarkerColors,
     camera: CameraRequest?,
-    onCenterSettled: (Double, Double, Double, Double) -> Unit,
+    onCenterSettled: (Double, Double, Double) -> Unit,
+    /**
+     * 视口半对角线（米）：底图就绪时一次、之后每次相机停稳一次（**先于静默区判断**）。
+     * 它是几何量，与"这次停手是不是用户动作"无关——进页那次定位是程序性移动，回调必被
+     * [CameraSuppressor] 吃掉，不先回报的话整段会话都按 0 算（见 `BikeMapViewModel.onViewportMeasured`）。
+     */
+    onViewportMeasured: (Double) -> Unit = {},
     zones: KvcxZones,
     onClusterTap: (String) -> Unit,
     onRideTap: () -> Unit,
@@ -140,6 +146,7 @@ internal fun AmapMapView(
     val userHeading by userHeadingFlow.collectAsStateWithLifecycle()
 
     val settleCallback by rememberUpdatedState(onCenterSettled)
+    val viewportCallback by rememberUpdatedState(onViewportMeasured)
     val clusterTapCallback by rememberUpdatedState(onClusterTap)
     val bikeTapCallback by rememberUpdatedState(onBikeTap)
     val rideTapCallback by rememberUpdatedState(onRideTap)
@@ -182,6 +189,9 @@ internal fun AmapMapView(
                 runCatching { map.showBuildings(true) }
                     .onFailure { Log.w(TAG_MAP, "开启 3D 楼块失败", it) }
                 mapLoaded = true
+                // 首帧就回报一次视口：用户如果一直不拖地图，就再没有别的时机量它
+                // （进页那次定位的停稳回调会被静默区吃掉，见 onCameraChangeFinish）
+                viewportCallback(viewportHalfDiagonalMeters(map))
             }
             map.uiSettings.apply {
                 isZoomControlsEnabled = false
@@ -212,13 +222,11 @@ internal fun AmapMapView(
                     // 放在吞掉回调的判断**之前**：程序性移动同样会让缩放变化。
                     settleTick += 1
                     val target = position?.target ?: return
+                    // 视口尺寸同理先回报（2026-11-21）：几何量，与"这次回调吃不吃"无关
+                    val halfDiagonal = viewportHalfDiagonalMeters(this@apply.map)
+                    viewportCallback(halfDiagonal)
                     if (suppressor.shouldSwallow(target.latitude, target.longitude)) return
-                    settleCallback(
-                        target.latitude,
-                        target.longitude,
-                        position.zoom.toDouble(),
-                        viewportHalfDiagonalMeters(this@apply.map),
-                    )
+                    settleCallback(target.latitude, target.longitude, position.zoom.toDouble())
                 }
             })
             // 只读不拦：返回 false，地图自己的手势照常处理（监听器在下面挂）
