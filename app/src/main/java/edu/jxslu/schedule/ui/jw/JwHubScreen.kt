@@ -43,6 +43,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.domain.CourseKind
+import edu.jxslu.schedule.domain.ExamMapper.ExamEntry
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.ScoreCalculator
 import edu.jxslu.schedule.ui.common.AppCard
@@ -465,22 +466,7 @@ private fun rememberJwHubStats(): JwHubStats {
             ?.let { "${it.courseCount} 门" }
             ?: "暂无"
 
-        val exams = examSnapshot?.exams.orEmpty().filter { it.date.isNotBlank() }
-        val upcoming = exams.filter { it.date >= today.toString() }
-        val examText = when {
-            // 快照还没读回来：给占位符，不下「没有考试」的结论（见 examSnapshot 注释）
-            !examSnapshotLoaded -> "…"
-            exams.isEmpty() -> "暂无考试"
-            upcoming.isNotEmpty() ->
-                "${upcoming.size} 场 · 最近 ${upcoming.minOf { it.date }.substring(5)}"
-            else -> "${exams.size} 场 · 均已结束"
-        }
-        val examsShort = when {
-            !examSnapshotLoaded -> "…"
-            upcoming.isNotEmpty() -> "${upcoming.size} 场"
-            exams.isNotEmpty() -> "${exams.size} 场"
-            else -> "暂无"
-        }
+        val examStat = examStatText(examSnapshot?.exams.orEmpty(), today, examSnapshotLoaded)
 
         val bookCount = textbookTitles.values.sumOf { it.size }
         val textbooks = if (bookCount == 0) "暂无教材" else "$bookCount 本"
@@ -509,8 +495,8 @@ private fun rememberJwHubStats(): JwHubStats {
             scoreTerm = latestScoreTerm ?: "最近学期",
             scores = scores,
             scoresShort = scoresShort,
-            exams = examText,
-            examsShort = examsShort,
+            exams = examStat.summary,
+            examsShort = examStat.short,
             textbooks = textbooks,
             schedule = schedule,
             // 快捷格副标题：理论 / 实验各自的课次数（不是「门」，一门课可能分多块）
@@ -521,4 +507,34 @@ private fun rememberJwHubStats(): JwHubStats {
             examLoaded = examSnapshotLoaded,
         )
     }
+}
+
+/** 教务页「考试」两处文案：概览卡的「考试」指标 + 快捷格副标题。 */
+internal data class ExamStatText(val summary: String, val short: String)
+
+/**
+ * 考试场次口径（2026-11-19）：**本学期总场次**，与考试页表头「共 N 场」同一份数
+ * （[ExamSnapshotStore] 那份快照，两边同源）。
+ *
+ * 旧实现数的是「还没考的场次」：11-17 那场考完之后 9 场变 8 场，用户报成
+ * 「教务已经 9 场，卡片还是 8 场，重启也没用」——数据其实是新的，口径在掉数。
+ * 「最近」只取待考里最早的一场（含当天）；全都考完时保留总场次并标「均已结束」。
+ */
+internal fun examStatText(
+    exams: List<ExamEntry>,
+    today: LocalDate,
+    loaded: Boolean,
+): ExamStatText {
+    // 快照是磁盘文件、异步读：读到之前不下「没有考试」的结论（届时会闪一下）
+    if (!loaded) return ExamStatText("…", "…")
+    val dated = exams.filter { it.date.isNotBlank() }
+    if (dated.isEmpty()) return ExamStatText("暂无考试", "暂无")
+    val todayText = today.toString()
+    val next = dated.filter { it.date >= todayText }.minByOrNull { it.date }
+    val summary = if (next != null) {
+        "共 ${dated.size} 场 · 最近 ${next.date.drop(5)}"
+    } else {
+        "共 ${dated.size} 场 · 均已结束"
+    }
+    return ExamStatText(summary, "${dated.size} 场")
 }
