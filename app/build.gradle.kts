@@ -31,8 +31,8 @@ android {
         applicationId = "edu.jxslu.schedule"
         minSdk = 26
         targetSdk = 36
-        versionCode = 34
-        versionName = "3.4.0"
+        versionCode = 35
+        versionName = "3.5.0"
 
         // 只发 64 位（2026-11-18）：高德 3dmap 带 arm64 19.1MB + v7a 12.8MB 两个 .so，
         // 两个都留 release 是 22.5MB，砍掉 v7a 回到 ~15MB（§5 的体积目标）。
