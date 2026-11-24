@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.wenqu
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.data.wenqu.WenquActivity
 import edu.jxslu.schedule.data.wenqu.WenquRepository
@@ -182,12 +181,6 @@ class WenquRecordsViewModel(private val repo: WenquRepository) : ViewModel() {
 
     fun consumeMessage() {
         _state.update { it.copy(message = null) }
-    }
-
-    class Factory(private val repo: WenquRepository) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            WenquRecordsViewModel(repo) as T
     }
 }
 

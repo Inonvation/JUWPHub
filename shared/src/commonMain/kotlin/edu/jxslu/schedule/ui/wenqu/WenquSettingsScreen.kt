@@ -1,7 +1,5 @@
 package edu.jxslu.schedule.ui.wenqu
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,12 +26,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.repo.WenquCertStore
+import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.domain.WenquRules
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
@@ -46,10 +43,6 @@ import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.reminder.WenquActivityAlertReminder
-import edu.jxslu.schedule.ui.reminder.WenquWeeklyAlertReminder
-import edu.jxslu.schedule.ui.score.maybeRequestNotifPermission
-import edu.jxslu.schedule.ui.score.openPdf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import edu.jxslu.schedule.data.prefs.setWenquActivityAlertEnabled
@@ -77,12 +70,36 @@ import edu.jxslu.schedule.data.prefs.wenquWeeklyAlertOffsetMinutes
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
-    val context = LocalContext.current
-    val prefs = remember { Graph.displayPrefs(context) }
+fun WenquSettingsScreen(
+    onBack: () -> Unit,
+    onOpenRecords: () -> Unit,
+    /**
+     * 问渠仓库（会话 / 工时 / 退出登录 / 星级证书）。**由宿主传进来**（Android =
+     * `Graph.wenqu(this)`）：它需要一个 `WenquSessionStore`（Android 是
+     * EncryptedSharedPreferences），共享层拿不到那条凭证链，所以不做成 `Services` 成员。
+     */
+    repository: WenquRepository,
+    /**
+     * 「新增志愿活动提醒」开关变了之后的重排（Android = `WenquActivityAlertReminder
+     * .onSettingsChanged`）。`suspend`：它要读到刚落盘的开关值，不能与写盘并发。
+     * `null` = 本平台没有后台提醒链 → 那一整段「提醒」不渲染。
+     */
+    onAlertSettingsChanged: (suspend () -> Unit)? = null,
+    /** 「每周日 12:00 抢活动提醒」开关 / 提前量变了之后的重排（Android = `WenquWeeklyAlertReminder`）。 */
+    onWeeklyAlertSettingsChanged: (suspend () -> Unit)? = null,
+    /** 请求通知权限（Android 13+ 运行时权限；iOS 是系统授权弹窗）。`null` = 本平台没有。 */
+    onRequestNotifPermission: (() -> Unit)? = null,
+    /**
+     * **下载星级证书**：取 PDF → 落盘 → 打开（Android 走 `WenquCertStore` + 系统 PDF 查看器）。
+     * 失败时抛异常，页面把 `message` 当提示发出去；[onNotice] 收打开环节的回执。
+     * `null` = 本平台没有这条链 → 那一行不渲染。
+     */
+    onDownloadCert: (suspend (onNotice: (String) -> Unit) -> Unit)? = null,
+) {
+    val prefs = remember { Services.current.displayPrefs() }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    val session by remember { Graph.wenqu(context).session }.collectAsStateWithLifecycle()
+    val session by remember { repository.session }.collectAsStateWithLifecycle()
 
     val alertEnabled by prefs.wenquActivityAlertEnabled.collectAsState(initial = false)
     val intervalHours by prefs.wenquActivityIntervalHours
@@ -100,15 +117,11 @@ fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
     var confirmingLogout by remember { mutableStateOf(false) }
     /** 星级证书下载中（防连点；动作只读，但仍别并发打）。 */
     var downloadingCert by remember { mutableStateOf(false) }
-    val certStore = remember { WenquCertStore(context) }
     /** 记录条数：进页读一次仓库缓存（冷缓存时它自己会抓一次），失败就不显示数字。 */
     var recordsCount by remember { mutableStateOf<Int?>(null) }
-    val notifPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { }
 
     LaunchedEffect(Unit) {
-        recordsCount = runCatching { Graph.wenqu(context).volunteer().list.size }.getOrNull()
+        recordsCount = runCatching { repository.volunteer().list.size }.getOrNull()
     }
 
     Scaffold(
@@ -148,92 +161,104 @@ fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
                     value = recordsCount?.let { "共 $it 条" },
                     onClick = onOpenRecords,
                 )
-                SettingItem(
-                    title = "下载星级证书",
-                    subtitle = "导出志愿星级证书 PDF（随时可重下）",
-                    icon = AppIcons.Certificate01,
-                    value = if (downloadingCert) "下载中…" else null,
-                    enabled = !downloadingCert,
-                    onClick = {
-                        downloadingCert = true
-                        scope.launch {
-                            try {
-                                val cert = Graph.wenqu(context).downloadCert()
-                                val file = certStore.save(cert.bytes, cert.fileName)
-                                openPdf(context, certStore.uriOf(file)) { msg, tone ->
-                                    scope.launch {
-                                        snackbar.showNotice(AppNoticeVisuals(message = msg, tone = tone))
+                // 证书下载是「取 PDF → 落盘 → 交给系统打开」，三步都在平台侧；
+                // 本平台没有这条链时整行不渲染（`design/ios-port.md` §11.2 ④）。
+                onDownloadCert?.let { download ->
+                    SettingItem(
+                        title = "下载星级证书",
+                        subtitle = "导出志愿星级证书 PDF（随时可重下）",
+                        icon = AppIcons.Certificate01,
+                        value = if (downloadingCert) "下载中…" else null,
+                        enabled = !downloadingCert,
+                        onClick = {
+                            downloadingCert = true
+                            scope.launch {
+                                try {
+                                    download { msg ->
+                                        scope.launch {
+                                            snackbar.showNotice(AppNoticeVisuals(message = msg))
+                                        }
                                     }
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    snackbar.showNotice(
+                                        AppNoticeVisuals(
+                                            message = e.message ?: "下载失败",
+                                            tone = NoticeTone.Error,
+                                        ),
+                                    )
+                                } finally {
+                                    downloadingCert = false
                                 }
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                snackbar.showNotice(
-                                    AppNoticeVisuals(
-                                        message = e.message ?: "下载失败",
-                                        tone = NoticeTone.Error,
-                                    ),
-                                )
-                            } finally {
-                                downloadingCert = false
                             }
-                        }
-                    },
-                )
+                        },
+                    )
+                }
             }
 
-            SettingsSection(
-                title = "提醒",
-                subtitle = "问渠平台上出现新的可报名志愿活动时通知",
-            ) {
-                SettingSwitchRow(
-                    title = "新增志愿活动提醒",
-                    subtitle = "检测到新的「招募中」活动就发一条通知",
-                    icon = AppIcons.Notification03,
-                    checked = alertEnabled,
-                    onCheckedChange = { want ->
-                        // 开关变了要重排周期任务（这一路可能是五条链里最勤的那条）+ 立刻评估一次
-                        scope.launch {
-                            prefs.setWenquActivityAlertEnabled(want)
-                            WenquActivityAlertReminder.onSettingsChanged(context)
-                        }
-                        if (want) maybeRequestNotifPermission(context, notifPermissionLauncher)
-                    },
-                )
-                SettingItem(
-                    title = "检测间隔",
-                    subtitle = "多久在后台扫一次新活动（与其它提醒共用周期任务）",
-                    value = WenquRules.activityIntervalLabel(intervalHours),
-                    enabled = alertEnabled,
-                    onClick = { intervalPickerOpen = true },
-                )
-                SettingsNote("首次开启只记基线、不立刻通知；间隔别调太短")
+            // 「提醒」整段都是平台能力（周期任务 / 精确闹钟 / 通知权限）。两端都没有那条链时
+            // 整段不渲染，而不是留几个拨了没反应的开关。
+            if (onAlertSettingsChanged != null || onWeeklyAlertSettingsChanged != null) {
+                SettingsSection(
+                    title = "提醒",
+                    subtitle = "问渠平台上出现新的可报名志愿活动时通知",
+                ) {
+                    onAlertSettingsChanged?.let { onChanged ->
+                        SettingSwitchRow(
+                            title = "新增志愿活动提醒",
+                            subtitle = "检测到新的「招募中」活动就发一条通知",
+                            icon = AppIcons.Notification03,
+                            checked = alertEnabled,
+                            onCheckedChange = { want ->
+                                // 开关变了要重排周期任务（这一路可能是五条链里最勤的那条）+ 立刻评估一次
+                                scope.launch {
+                                    prefs.setWenquActivityAlertEnabled(want)
+                                    onChanged()
+                                }
+                                if (want) onRequestNotifPermission?.invoke()
+                            },
+                        )
+                        SettingItem(
+                            title = "检测间隔",
+                            subtitle = "多久在后台扫一次新活动（与其它提醒共用周期任务）",
+                            value = WenquRules.activityIntervalLabel(intervalHours),
+                            enabled = alertEnabled,
+                            onClick = { intervalPickerOpen = true },
+                        )
+                        SettingsNote("首次开启只记基线、不立刻通知；间隔别调太短")
+                    }
 
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    if (onAlertSettingsChanged != null && onWeeklyAlertSettingsChanged != null) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
 
-                // 每周日 12:00「抢活动」（2026-10-11，用户口径）：与上面那条是两件事——
-                // 那条是事后发现（周期扫列表），这条是事前蹲点（固定时刻，不扫接口）。
-                SettingSwitchRow(
-                    title = "每周日 12:00 抢活动提醒",
-                    subtitle = "学校常在这时发布新志愿活动，到点前提醒你去蹲",
-                    icon = AppIcons.AlarmClock,
-                    checked = weeklyEnabled,
-                    onCheckedChange = { want ->
-                        scope.launch {
-                            prefs.setWenquWeeklyAlertEnabled(want)
-                            WenquWeeklyAlertReminder.onSettingsChanged(context)
-                        }
-                        if (want) maybeRequestNotifPermission(context, notifPermissionLauncher)
-                    },
-                )
-                SettingItem(
-                    title = "提前提醒",
-                    subtitle = "到点前多久响一声",
-                    value = WenquRules.weeklyOffsetLabel(weeklyOffsetMinutes),
-                    enabled = weeklyEnabled,
-                    onClick = { weeklyOffsetPickerOpen = true },
-                )
-                SettingsNote("到点前提醒一次，抢活动要自己去问渠")
+                    // 每周日 12:00「抢活动」（2026-10-11，用户口径）：与上面那条是两件事——
+                    // 那条是事后发现（周期扫列表），这条是事前蹲点（固定时刻，不扫接口）。
+                    onWeeklyAlertSettingsChanged?.let { onChanged ->
+                        SettingSwitchRow(
+                            title = "每周日 12:00 抢活动提醒",
+                            subtitle = "学校常在这时发布新志愿活动，到点前提醒你去蹲",
+                            icon = AppIcons.AlarmClock,
+                            checked = weeklyEnabled,
+                            onCheckedChange = { want ->
+                                scope.launch {
+                                    prefs.setWenquWeeklyAlertEnabled(want)
+                                    onChanged()
+                                }
+                                if (want) onRequestNotifPermission?.invoke()
+                            },
+                        )
+                        SettingItem(
+                            title = "提前提醒",
+                            subtitle = "到点前多久响一声",
+                            value = WenquRules.weeklyOffsetLabel(weeklyOffsetMinutes),
+                            enabled = weeklyEnabled,
+                            onClick = { weeklyOffsetPickerOpen = true },
+                        )
+                        SettingsNote("到点前提醒一次，抢活动要自己去问渠")
+                    }
+                }
             }
 
             SettingsSection(
@@ -280,7 +305,7 @@ fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
                 val value = WenquRules.ACTIVITY_ALERT_INTERVAL_CHOICES[index]
                 scope.launch {
                     prefs.setWenquActivityIntervalHours(value)
-                    WenquActivityAlertReminder.onSettingsChanged(context)
+                    onAlertSettingsChanged?.invoke()
                     snackbar.showNotice("检测间隔已设为${WenquRules.activityIntervalLabel(value)}")
                 }
             },
@@ -299,7 +324,7 @@ fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
                 scope.launch {
                     prefs.setWenquWeeklyAlertOffsetMinutes(value)
                     // 改提前量要重排闹钟（提醒时刻变了），但**不动已发键**——同一周不会重复报
-                    WenquWeeklyAlertReminder.onSettingsChanged(context)
+                    onWeeklyAlertSettingsChanged?.invoke()
                     snackbar.showNotice("已设为${WenquRules.weeklyOffsetLabel(value)}")
                 }
             },
@@ -332,7 +357,7 @@ fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
             danger = true,
             onConfirm = {
                 confirmingLogout = false
-                Graph.wenqu(context).logout()
+                repository.logout()
                 // 退完直接回问渠页——那一页订阅着登录态，此刻已经是登录表单了；
                 // 留在设置页只会看到一张空的「已登录手机号」
                 onBack()

@@ -31,7 +31,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -39,35 +38,28 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.wenqu.WenquActivity
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.domain.WenquRules
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
+import edu.jxslu.schedule.ui.common.KeepScreenOnEffect
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.reminder.ReminderChime
-import edu.jxslu.schedule.ui.reminder.ReminderVibration
-import edu.jxslu.schedule.ui.reminder.WenquActivityAlertReminder
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * 蹲点抢活动页（DESIGN §3.28 / §4.45，2026-10-11；用户口径）。
@@ -88,11 +80,28 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WenquGrabScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val vm: WenquGrabViewModel = viewModel(
-        factory = WenquGrabViewModel.Factory(Graph.wenqu(context), Graph.displayPrefs(context)),
-    )
+fun WenquGrabScreen(
+    onBack: () -> Unit,
+    /**
+     * 本页状态机，**由宿主创建**（Android `viewModel {}`、iOS `remember {}`），
+     * 见 `design/ios-port.md` §11.1 / §11.2 ①。
+     */
+    viewModel: WenquGrabViewModel,
+    /**
+     * 命中那一刻的提醒（Android = 震动 + 提示音）：用户可能没盯着屏幕。
+     * `null` = 本平台没有那条提醒链 → 命中只弹确认框。
+     */
+    onHitAlert: (() -> Unit)? = null,
+    /** 盯 / 取消盯之后的重排动作（Android = `WenquActivityAlertReminder.onPinChanged`）。 */
+    onPinChanged: (suspend () -> Unit)? = null,
+    /** **预报名**：`(活动, 报名开始时刻)` → 排闹钟 + 前台服务；`null` = 本平台没有那条链。 */
+    onRequestPrereg: (suspend (WenquActivity, Long) -> Unit)? = null,
+    /** 取消预报名。`null` 的语义同 [onRequestPrereg]。 */
+    onCancelPrereg: (suspend () -> Unit)? = null,
+    /** **去微信报名**：活动名已复制好，这里只递手；参数是回执口。`null` → 只剩「复制活动名」。 */
+    onOpenWechat: ((onNotice: (String) -> Unit) -> Unit)? = null,
+) {
+    val vm = viewModel
     val state by vm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -106,23 +115,17 @@ fun WenquGrabScreen(onBack: () -> Unit) {
         vm.consumeMessage()
     }
 
-    // 命中那一刻震一下 + 响一声：用户可能没盯着屏幕（同提醒的直接震动口径）
+    // 命中那一刻震一下 + 响一声：用户可能没盯着屏幕（同提醒的直接震动口径）。
+    // 震动与提示音是平台能力，收成回调；null = 本平台没有，静默。
     LaunchedEffect(state.hit?.id) {
-        if (state.hit != null) {
-            ReminderVibration.vibrate(context)
-            ReminderChime.play(context)
-        }
+        if (state.hit != null) onHitAlert?.invoke()
     }
 
     // 蹲点期间保持屏幕常亮（用户口径）：息屏后系统可能把进程冻住，探测就断了。
     // 命中弹窗开着时也常亮，别让用户回来时屏幕已经黑了。
     val keepScreenOn = state.phase == WenquGrabViewModel.Phase.Checking ||
         state.hit != null
-    val view = LocalView.current
-    DisposableEffect(keepScreenOn) {
-        view.keepScreenOn = keepScreenOn
-        onDispose { view.keepScreenOn = false }
-    }
+    KeepScreenOnEffect(keepScreenOn)
 
     // 填了 / 改了活动名，匹配项会整批置前：把列表拉回顶部，别把用户丢在
     // 「另一份结果」的中间（同主页换检索词就回顶的口径）
@@ -192,12 +195,14 @@ fun WenquGrabScreen(onBack: () -> Unit) {
                         onStop = vm::stop,
                         onUnpin = {
                             vm.unpin()
-                            scope.launch { WenquActivityAlertReminder.onPinChanged(context) }
+                            scope.launch { onPinChanged?.invoke() }
                         },
-                        onCancelPrereg = {
-                            scope.launch {
-                                WenquPreregReminder.cancel(context)
-                                snackbar.showNotice("已取消预报名")
+                        onCancelPrereg = onCancelPrereg?.let { cancel ->
+                            {
+                                scope.launch {
+                                    cancel()
+                                    snackbar.showNotice("已取消预报名")
+                                }
                             }
                         },
                     )
@@ -310,7 +315,7 @@ fun WenquGrabScreen(onBack: () -> Unit) {
                 applyStartTime = activity.applyStartTime,
                 applyEndTime = activity.applyEndTime,
                 blacklisted = state.blacklisted,
-                now = System.currentTimeMillis(),
+                now = AppClock.nowMillis(),
             ),
             canCancel = WenquRules.canCancelFromActivity(activity.status, activity.applied),
             busy = state.applying,
@@ -318,30 +323,35 @@ fun WenquGrabScreen(onBack: () -> Unit) {
             onApply = { vm.applyActivity(activity.id) },
             onCancel = { vm.cancelApply(activity.id, activity.applyId) },
             preregOpensAt = if (state.preregId == activity.id) state.preregOpensAt else 0L,
-            onRequestPrereg = {
-                scope.launch {
-                    val opensAt = WenquRules.stampMillis(activity.applyStartTime)
-                    if (opensAt == null) {
-                        snackbar.showNotice("这条活动的报名时间读不出来，暂不能预报名")
-                    } else {
-                        WenquPreregReminder.arm(context, activity, opensAt)
-                        snackbar.showNotice(
-                            "已预报名：到点自动抢《${activity.title.ifBlank { "这条活动" }}》",
-                        )
+            onRequestPrereg = onRequestPrereg?.let { request ->
+                {
+                    scope.launch {
+                        val opensAt = WenquRules.stampMillis(activity.applyStartTime)
+                        if (opensAt == null) {
+                            snackbar.showNotice("这条活动的报名时间读不出来，暂不能预报名")
+                        } else {
+                            request(activity, opensAt)
+                            snackbar.showNotice(
+                                "已预报名：到点自动抢《${activity.title.ifBlank { "这条活动" }}》",
+                            )
+                        }
                     }
                 }
             },
-            onCancelPrereg = {
-                scope.launch {
-                    WenquPreregReminder.cancel(context)
-                    snackbar.showNotice("已取消预报名")
+            onCancelPrereg = onCancelPrereg?.let { cancel ->
+                {
+                    scope.launch {
+                        cancel()
+                        snackbar.showNotice("已取消预报名")
+                    }
                 }
             },
+            onOpenWechat = onOpenWechat,
             onPin = {
                 vm.pin(activity)
                 vm.closeDetail()
                 scope.launch {
-                    WenquActivityAlertReminder.onPinChanged(context)
+                    onPinChanged?.invoke()
                     snackbar.showNotice("已盯上「${activity.title.ifBlank { "这条活动" }}」，可以报名时会提醒")
                 }
             },
@@ -361,7 +371,8 @@ private fun GrabControlCard(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onUnpin: () -> Unit,
-    onCancelPrereg: () -> Unit,
+    /** `null` = 本平台没有预报名链 → 那一行整行不渲染（别留一个点了没反应的 ✕）。 */
+    onCancelPrereg: (() -> Unit)?,
 ) {
     val phase = state.phase
     val armed = phase == WenquGrabViewModel.Phase.Checking
@@ -429,7 +440,7 @@ private fun GrabControlCard(
             }
         }
         // 「预报名」（2026-10-16）：详情里开的到点自动抢，这里只展示状态 + 取消入口。
-        if (state.preregId > 0L) {
+        if (state.preregId > 0L && onCancelPrereg != null) {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -438,7 +449,7 @@ private fun GrabControlCard(
                         append(
                             WenquRules.preregOpenLabel(
                                 state.preregOpensAt,
-                                System.currentTimeMillis(),
+                                AppClock.nowMillis(),
                             ),
                         )
                         append(" 自动抢")
@@ -495,7 +506,9 @@ private fun statusText(state: WenquGrabViewModel.UiState): String =
             append(state.keyword.trim().ifBlank { "盯着的活动" })
             append("』· 已检查 ${state.checks} 次")
             if (state.lastRoundMs > 0L) {
-                append(" · 上轮 ${"%.1f".format(state.lastRoundMs / 1000.0)}s")
+                // 一位小数：`TextFmt.decimals` 是共享层的定点格式化（`String.format` 在
+                // commonMain 取不到），口径与原来的 "%.1f" 一致。
+                append(" · 上轮 ${TextFmt.decimals(state.lastRoundMs / 1000.0, 1)}s")
                 if (state.failures > 0) append("（连败 ${state.failures}）")
             }
             if (state.lastCheckAt > 0L) append(" · 最近 ${clockText(state.lastCheckAt)}")
@@ -505,9 +518,11 @@ private fun statusText(state: WenquGrabViewModel.UiState): String =
             if (state.stopReason.isNotBlank()) "已停止 · ${state.stopReason}" else "已停止"
     }
 
-/** 时刻（HH:mm:ss，本地时区）。 */
-private fun clockText(millis: Long): String =
-    SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date(millis))
+/** 时刻（HH:mm:ss，本地时区）。`SimpleDateFormat` 是 JVM 专有，改走 `AppClock` + `TextFmt.pad`。 */
+private fun clockText(millis: Long): String {
+    val at = AppClock.dateTimeOf(millis)
+    return "${TextFmt.pad(at.hour)}:${TextFmt.pad(at.minute)}:${TextFmt.pad(at.second)}"
+}
 
 /**
  * 命中弹窗：**直接弹「确认报名」**（用户口径），但不自动提交，提交由这一次点击触发。

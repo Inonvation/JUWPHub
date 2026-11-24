@@ -95,9 +95,13 @@ import edu.jxslu.schedule.ui.toolbox.ToolboxScreen
 import edu.jxslu.schedule.ui.toolbox.WatermarkScreen
 import edu.jxslu.schedule.ui.week.ScheduleShareScreen
 import edu.jxslu.schedule.ui.wenqu.WenquGrabScreen
+import edu.jxslu.schedule.ui.wenqu.WenquGrabViewModel
 import edu.jxslu.schedule.ui.wenqu.WenquRecordsScreen
+import edu.jxslu.schedule.ui.wenqu.WenquRecordsViewModel
 import edu.jxslu.schedule.ui.wenqu.WenquScreen
 import edu.jxslu.schedule.ui.wenqu.WenquSettingsScreen
+import edu.jxslu.schedule.ui.wenqu.WenquViewModel
+import edu.jxslu.schedule.ui.wenqu.rememberWenquScreenActions
 import kotlinx.coroutines.launch
 
 
@@ -226,20 +230,66 @@ class SubpageActivity : ComponentActivity() {
             )
             SubpageScreen.UJING_ORDER -> UjingOrderScreen(onBack = onBack)
             SubpageScreen.UJING_HISTORY -> UjingHistoryScreen(onBack = onBack)
-            SubpageScreen.WENQU -> WenquScreen(
+            // 问渠四页已搬进 shared/commonMain（iOS 移植 S16）：ViewModel 由宿主建（`viewModel {}`
+            // 保留配置变更），平台动作用 `rememberWenquScreenActions` 补齐；回调里 null 的语义是
+            // 「本平台没这项能力」，入口整块不渲染（`design/ios-port.md` §11.2）。
+            SubpageScreen.WENQU -> {
+                val actions = rememberWenquScreenActions()
+                WenquScreen(
+                    onBack = onBack,
+                    viewModel = viewModel {
+                        // `viewModel {}` 的 receiver 是 CreationExtras，Context 要显式指名宿主
+                        WenquViewModel(
+                            Graph.wenqu(this@SubpageActivity),
+                            Graph.displayPrefs(this@SubpageActivity),
+                        )
+                    },
+                    onOpenSettings = { SubpageActivity.start(this, SubpageScreen.WENQU_SETTINGS) },
+                    // 工时行右侧「记录 ›」（2026-10-11）：与设置页那个入口同一去处
+                    onOpenRecords = { SubpageActivity.start(this, SubpageScreen.WENQU_RECORDS) },
+                    // 顶栏「蹲点」图标（2026-10-11）：到点自动检测、命中弹确认框
+                    onOpenGrab = { SubpageActivity.start(this, SubpageScreen.WENQU_GRAB) },
+                    onRequestPrereg = actions.requestPrereg,
+                    onCancelPrereg = actions.cancelPrereg,
+                    onPinChanged = actions.pinChanged,
+                    onOpenWechat = actions.openWechat,
+                    onSessionExpired = actions.sessionExpired,
+                )
+            }
+            SubpageScreen.WENQU_RECORDS -> WenquRecordsScreen(
                 onBack = onBack,
-                onOpenSettings = { SubpageActivity.start(this, SubpageScreen.WENQU_SETTINGS) },
-                // 工时行右侧「记录 ›」（2026-10-11）：与设置页那个入口同一去处
-                onOpenRecords = { SubpageActivity.start(this, SubpageScreen.WENQU_RECORDS) },
-                // 顶栏「蹲点」图标（2026-10-11）：到点自动检测、命中弹确认框
-                onOpenGrab = { SubpageActivity.start(this, SubpageScreen.WENQU_GRAB) },
+                viewModel = viewModel { WenquRecordsViewModel(Graph.wenqu(this@SubpageActivity)) },
             )
-            SubpageScreen.WENQU_RECORDS -> WenquRecordsScreen(onBack = onBack)
-            SubpageScreen.WENQU_SETTINGS -> WenquSettingsScreen(
-                onBack = onBack,
-                onOpenRecords = { SubpageActivity.start(this, SubpageScreen.WENQU_RECORDS) },
-            )
-            SubpageScreen.WENQU_GRAB -> WenquGrabScreen(onBack = onBack)
+            SubpageScreen.WENQU_SETTINGS -> {
+                val actions = rememberWenquScreenActions()
+                WenquSettingsScreen(
+                    onBack = onBack,
+                    onOpenRecords = { SubpageActivity.start(this, SubpageScreen.WENQU_RECORDS) },
+                    // 仓库带 EncryptedSharedPreferences 凭证链，由宿主给（共享层拿不到）
+                    repository = Graph.wenqu(this),
+                    onAlertSettingsChanged = actions.alertSettingsChanged,
+                    onWeeklyAlertSettingsChanged = actions.weeklyAlertSettingsChanged,
+                    onRequestNotifPermission = actions.requestNotifPermission,
+                    onDownloadCert = actions.downloadCert,
+                )
+            }
+            SubpageScreen.WENQU_GRAB -> {
+                val actions = rememberWenquScreenActions()
+                WenquGrabScreen(
+                    onBack = onBack,
+                    viewModel = viewModel {
+                        WenquGrabViewModel(
+                            Graph.wenqu(this@SubpageActivity),
+                            Graph.displayPrefs(this@SubpageActivity),
+                        )
+                    },
+                    onHitAlert = actions.hitAlert,
+                    onPinChanged = actions.pinChanged,
+                    onRequestPrereg = actions.requestPrereg,
+                    onCancelPrereg = actions.cancelPrereg,
+                    onOpenWechat = actions.openWechat,
+                )
+            }
             SubpageScreen.QZXY -> QzxyScreen(
                 onBack = onBack,
                 onOpenDiagnostics = { address ->

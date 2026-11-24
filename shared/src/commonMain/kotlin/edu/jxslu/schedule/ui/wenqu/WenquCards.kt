@@ -24,6 +24,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.wenqu.WenquActivity
 import edu.jxslu.schedule.data.wenqu.WenquVolunteerRecord
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.WenquRules
 import edu.jxslu.schedule.ui.common.AppCard
 
@@ -207,7 +208,7 @@ internal fun ActivityCard(
         trailing = WenquRules.cardTimeLabel(
             start = activity.startTime,
             end = activity.endTime,
-            now = System.currentTimeMillis(),
+            now = AppClock.nowMillis(),
         ).takeIf { it.isNotBlank() },
         keyword = keyword,
         // 已结束 / 已取消压暗；招募中与进行中保持原样（「还能报名的」一眼分辨）

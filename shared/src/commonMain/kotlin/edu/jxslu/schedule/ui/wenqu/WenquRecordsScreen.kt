@@ -24,14 +24,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.wenqu.WenquVolunteerRecord
 import edu.jxslu.schedule.domain.WenquRules
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
@@ -56,10 +53,15 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WenquRecordsScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val vm: WenquRecordsViewModel =
-        viewModel(factory = WenquRecordsViewModel.Factory(Graph.wenqu(context)))
+fun WenquRecordsScreen(
+    onBack: () -> Unit,
+    /**
+     * 记录页状态机，**由宿主创建**（Android `viewModel {}`、iOS `remember {}`），
+     * 见 `design/ios-port.md` §11.1。
+     */
+    viewModel: WenquRecordsViewModel,
+) {
+    val vm = viewModel
     val state by vm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
