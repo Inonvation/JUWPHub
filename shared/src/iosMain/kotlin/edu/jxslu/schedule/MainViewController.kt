@@ -1,25 +1,25 @@
 package edu.jxslu.schedule
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -39,30 +39,15 @@ import edu.jxslu.schedule.data.local.DB_VERSION
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.local.juwDatabasePath
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
-import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.DataSelfTestResult
 import edu.jxslu.schedule.ui.DataSelfTestStrip
-import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
-import edu.jxslu.schedule.ui.campus.StatementScreen
-import edu.jxslu.schedule.ui.campus.StatementViewModel
-import edu.jxslu.schedule.ui.inbox.InboxScreen
+import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.jw.JwHubScreen
-import edu.jxslu.schedule.ui.jw.JwScheduleListScreen
-import edu.jxslu.schedule.ui.jw.TeachingCalendarScreen
-import edu.jxslu.schedule.ui.jw.TextbookScreen
-import edu.jxslu.schedule.ui.life.PowerBillScreen
-import edu.jxslu.schedule.ui.life.PowerBillViewModel
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.SettingsScreen
-import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
-import edu.jxslu.schedule.ui.selection.SelectionScreen
-import edu.jxslu.schedule.ui.exam.ExamScreen
-import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.theme.JuwTheme
-import edu.jxslu.schedule.ui.weather.WeatherScreen
-import edu.jxslu.schedule.ui.weather.WeatherViewModel
 import edu.jxslu.schedule.ui.web.WebContentView
 import edu.jxslu.schedule.ui.web.WebViewController
 import edu.jxslu.schedule.ui.week.WeekScreen
@@ -70,52 +55,22 @@ import edu.jxslu.schedule.ui.week.WeekViewModel
 import kotlinx.coroutines.launch
 import platform.UIKit.UIViewController
 
-/**
- * iOS 侧入口（P3，2026-11-24；M1 起是产品页面）。
- *
- * Swift 侧通过 `MainViewControllerKt.MainViewController()` 拿到这个 UIViewController，
- * 再用 `UIViewControllerRepresentable` 塞进 SwiftUI。这是 Compose Multiplatform 在 iOS 上的
- * 标准接法：Compose 负责画，Swift 只负责窗口与生命周期。
- *
- * ## 现在的页面结构
- *
- * | 区域 | 内容 | 说明 |
- * |---|---|---|
- * | 主体 | [WeekScreen]（共享层同一个页面） | 真实 Room 数据；空库时显示「去导入课表」 |
- * | 底部 | [DbSelfTestStrip] 一行 | 读写探针，**保留是因为它是「数据链路通了」的唯一屏上证据** |
- * | 覆盖层 | [JwLoginScreen] | 点「去导入」进来的教务登录 WebView（WKWebView） |
- *
- * 搬掉的两个旧面板：`WeekGridPreview`（样例网格）与 `LinkValidationScreen`（定点小数对照）。
- * 它们的验收目的都已达成——真网格取代样例网格，小数口径由 2418 条 JVM 单测继续钉住。
- *
- * ## 装配
- *
- * [IosServices] 必须在**任何**共享 ViewModel 构造之前安装，所以放在
- * `ComposeUIViewController` 之前——那是 Swift 调用进来的第一行。
- * 与 Android 侧 `JuwApplication.onCreate` 里的 `Services.install(GraphServices(this))` 对称。
- */
-fun MainViewController(): UIViewController {
-    val services = IosServices()
-    Services.install(services)
-    // 首启把作息表与默认学期写进库（Android 在 JuwApplication.ensureDefaults 里做同一件事）
-    services.warmUp()
-    return ComposeUIViewController { IosRoot(services) }
-}
-
 @Composable
 private fun IosRoot(services: IosServices) {
     JuwTheme {
         var jwOpen by remember { mutableStateOf(false) }
-        var page by remember { mutableStateOf(IosPage.Week) }
-        // 教务 Tab 的一层子页（S18）：理论 / 实验课表、教材、教学日历都已经在共享层，
-        // iOS 侧没有 `SubpageActivity` 那套栈，这一版只要一层——非 null = 正在看那一页，
-        // 返回键清回 null。
-        var jwSub by remember { mutableStateOf<IosJwSubPage?>(null) }
-        // 详情页（笔记 / 作业）还在 :app，iOS 点条目时给一句确定的话，不留「点了没反应」
-        var hint by remember { mutableStateOf<String?>(null) }
-        // 「我的」与课表显示设置共用同一个 VM 实例（Android 侧是 Activity 作用域，两边等价）。
+        var tab by remember { mutableStateOf(IosTab.Week) }
+        // 二级页栈：Android 是 SubpageActivity 的任务栈，iOS 用一份列表顶上（见 IosNavigation.kt）
+        val stack = remember { mutableStateListOf<IosRoute>() }
+        var drawerOpen by remember { mutableStateOf(false) }
+        // 「我的」与课表显示设置共用同一个 VM（Android 侧是 Activity 作用域，两边等价）。
         // iOS 没有配置变更重建，`remember` 的生命周期就是这一屏；见 design/ios-port.md §11.2 ①。
         val meViewModel = remember { MeViewModel(services.scheduleRepository()) }
+        val top = stack.lastOrNull()
+
+        // iOS 没有系统返回手势：二级页栈非空时把「返回」接到这个缝上（Android 是实体返回键）
+        AppBackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
+
         if (jwOpen) {
             JwLoginScreen(services = services, onClose = { jwOpen = false })
         } else {
@@ -129,181 +84,158 @@ private fun IosRoot(services: IosServices) {
                         .weight(1f)
                         .fillMaxWidth(),
                 ) {
-                    when (page) {
-                        // ViewModel 挂在组合上即可：iOS 侧没有 Android 的配置变更重建，
-                        // `remember` 的生命周期就等于这一屏的生命周期。
-                        IosPage.Week -> {
-                            val viewModel = remember { WeekViewModel(services.scheduleRepository()) }
-                            WeekScreen(
-                                viewModel = viewModel,
-                                // 空态的「去导入课表」→ 教务登录页（M2 第一步：先把登录页跑起来）
-                                onOpenJwImport = { jwOpen = true },
-                                // 显示设置面板（S17 搬进共享层）：顶栏那只眼睛从此在 iOS 上也有入口。
-                                // 面板里的「背景」整组不出现——iOS 还没有 UIImage 解码实现，
-                                // 装配根的 scheduleBackgroundFiles() 返回 null。
-                                displaySettings = { headerMinDp, dismiss ->
-                                    IosDisplaySettingsOverlay(
-                                        viewModel = meViewModel,
-                                        headerMinDp = headerMinDp,
-                                        onDismiss = dismiss,
-                                    )
-                                },
-                                // 其余平台动作在 iOS 侧都还没有实现，留空即可——
-                                // 传 null / 空 lambda 的入口本来就不渲染（见 WeekScreen 头部参数表）。
-                            )
-                        }
-                        // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
-                        //
-                        // 十四个二级页回调里接了七个，落点都是**真页面**：
-                        // - 成绩 / 考试 / 选课：`IosPage` 里本来就有；
-                        // - 理论 / 实验课表、教材、教学日历：本次一起搬进共享层，
-                        //   落到本 Tab 的一层子页（[jwSub]）里，返回键回汇总页。
-                        // 其余七个（学业、培养方案、实习基地、评教、请假、报修、校历）的页面
-                        // 还在 `:app`，传 null = 整行不渲染（`design/ios-port.md` §11.2 ④：
-                        // 给空 lambda 留死入口比没有更糟）。顶栏「校园门户」同理：iOS 还没有
-                        // 通用浏览窗口，传 null 后图标不出现。
-                        IosPage.Jw -> {
-                            val sub = jwSub
-                            if (sub != null) {
-                                when (sub) {
-                                    IosJwSubPage.TheorySchedule -> JwScheduleListScreen(
-                                        kind = CourseKind.Theory,
-                                        onBack = { jwSub = null },
-                                    )
-                                    IosJwSubPage.LabSchedule -> JwScheduleListScreen(
-                                        kind = CourseKind.Lab,
-                                        onBack = { jwSub = null },
-                                    )
-                                    IosJwSubPage.Textbooks -> TextbookScreen(
-                                        onBack = { jwSub = null },
-                                    )
-                                    IosJwSubPage.TeachingCalendar -> TeachingCalendarScreen(
-                                        onBack = { jwSub = null },
-                                    )
-                                }
-                            } else {
-                                JwHubScreen(
-                                    onOpenTheorySchedule = { jwSub = IosJwSubPage.TheorySchedule },
-                                    onOpenLabSchedule = { jwSub = IosJwSubPage.LabSchedule },
-                                    onOpenTextbooks = { jwSub = IosJwSubPage.Textbooks },
-                                    onOpenTeachingCalendar = {
-                                        jwSub = IosJwSubPage.TeachingCalendar
+                    if (top != null) {
+                        IosRouteContent(
+                            route = top,
+                            services = services,
+                            meViewModel = meViewModel,
+                            push = { stack.add(it) },
+                            pop = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) },
+                        )
+                    } else {
+                        when (tab) {
+                            IosTab.Week -> {
+                                val viewModel = remember { WeekViewModel(services.scheduleRepository()) }
+                                WeekScreen(
+                                    viewModel = viewModel,
+                                    // 空态的「去导入课表」→ 教务登录页（WKWebView 登录后自动抓取落库）
+                                    onOpenJwImport = { jwOpen = true },
+                                    // 课程长按菜单里的「笔记 / 作业」→ 对应课程的分组页
+                                    onOpenCourseNotes = { course ->
+                                        stack.add(IosRoute(SubpageScreen.NOTES_COURSE, course.name))
                                     },
-                                    onOpenScores = { page = IosPage.Score },
-                                    onOpenExams = { page = IosPage.Exam },
-                                    onOpenSelection = { page = IosPage.Selection },
+                                    onOpenCourseHomework = { course ->
+                                        stack.add(IosRoute(SubpageScreen.HOMEWORK_COURSE, course.name))
+                                    },
+                                    // 显示设置面板（S17 搬进共享层）：顶栏那只眼睛从此在 iOS 上也有入口。
+                                    // 面板里的「背景」整组不出现——iOS 还没有 UIImage 解码实现，
+                                    // 装配根的 scheduleBackgroundFiles() 返回 null。
+                                    displaySettings = { headerMinDp, dismiss ->
+                                        IosDisplaySettingsOverlay(
+                                            viewModel = meViewModel,
+                                            headerMinDp = headerMinDp,
+                                            onDismiss = dismiss,
+                                        )
+                                    },
+                                    // 其余平台动作（时间表管理 / 调课 / 分享 / 日历同步 / 文件选择）
+                                    // 在 iOS 侧还没有实现，留默认值——对应入口本来就不渲染。
                                 )
                             }
-                        }
-                        // 「我的」：设置首页（S17 搬进共享层）。二级页栈是 Android 的
-                        // `SubpageActivity`，iOS 侧还没有，所以每个入口先给一句确定的话。
-                        IosPage.Me -> SettingsScreen(
-                            onOpen = { screen ->
-                                hint = "「${screen.name}」还在 Android 侧，下一批搬过来"
-                            },
-                            viewModel = meViewModel,
-                        )
-                        // 笔记库（S13 搬进共享层）：仓库是本地 Room 表，iOS 直接可读。
-                        // `images` 传 null = 本平台还没有附件图解码，缩略图整行不出现；
-                        // 详情页仍在 :app，条目点开先给提示（见 [hint]）。
-                        IosPage.Notes -> NoteLibraryScreen(
-                            onBack = { page = IosPage.Week },
-                            onOpenNote = { _, _, _ ->
-                                hint = "笔记详情页还在 Android 侧，下一批搬过来"
-                            },
-                        )
-                        // 作业库（S13）：同上。`markdown` 传 null 时正文退化成纯文本，
-                        // 不会因为「还没有渲染器」就把作业内容藏掉。
-                        IosPage.Homework -> HomeworkLibraryScreen(
-                            onBack = { page = IosPage.Week },
-                            onOpenHomework = { _, _, _ ->
-                                hint = "作业详情页还在 Android 侧，下一批搬过来"
-                            },
-                        )
-                        // 选课（S13）：iOS 没有教务直取链（`IosServices.selectionSync()` 返回 null），
-                        // 轮次卡会说「本平台还没有教务直取能力」；已同步过的记录仍可读。
-                        // 二级页（选课中心 / 预选清单 / 已选课程）在 iOS 侧还没有路由，全部传 null，
-                        // 对应入口整行不渲染。
-                        IosPage.Selection -> SelectionScreen(onBack = { page = IosPage.Week })
-                        // 成绩（S10 搬进共享层）：读的是本地 Room 表，iOS 直接可用。
-                        // 四个平台动作全传 null——「从教务导入」「成绩设置」「盖章成绩单」
-                        // 三个入口在 iOS 侧还没有对应实现，对应行整行不渲染。
-                        IosPage.Score -> ScoreScreen(onBack = { page = IosPage.Week })
-                        // 考试（S10）：同上。考试数据来自教务同步，iOS 已有 IosJwReadSession，
-                        // 顶栏的「刷新」走 ExamSync，导入页登录后即可拉到。
-                        IosPage.Exam -> ExamScreen(onBack = { page = IosPage.Week })
-                        // 收件箱（S19 搬进共享层）：单表 Room，iOS 直接可读。
-                        // `onOpenSubpage` 传 null = iOS 还没有二级页栈：点行**仍会标已读**，
-                        // 只是不跳页（见 InboxScreen 头部参数表）。传个空 lambda 会变成
-                        // 「点了没反应」，比没有更糟。
-                        IosPage.Inbox -> InboxScreen(onBack = { page = IosPage.Week })
-                        // 天气（S19）：仓库是纯 Ktor + 进程内缓存，iOS 与 Android 同一份实现。
-                        // ViewModel 挂在组合上——iOS 没有配置变更重建，`remember` 就等于这一屏。
-                        IosPage.Weather -> {
-                            val viewModel = remember {
-                                WeatherViewModel(services.weatherRepository())
-                            }
-                            WeatherScreen(viewModel = viewModel, onBack = { page = IosPage.Week })
-                        }
-                        // 电费账单（S20 搬进共享层）：iOS 没有加密凭证存储
-                        // （`IosServices.yktCredentialStore()` 返回 null），所以进页落在
-                        // 「凭证未配置」态——「用电统计」分页照样画本机攒下的读数，充值账单为空。
-                        // 「去设置」「在缴费平台打开」两个入口传 null，整行不渲染（§11.2 ④）。
-                        IosPage.PowerBill -> {
-                            val vm = remember {
-                                PowerBillViewModel(
-                                    repo = services.powerRepository(),
-                                    credentialStore = services.yktCredentialStore(),
-                                    readingStore = services.powerReadingStore(),
-                                )
-                            }
-                            PowerBillScreen(viewModel = vm, onBack = { page = IosPage.Week })
-                        }
-                        // 消费流水（S20）：同上。凭证为 null 时只显示本地 `ykt_turnovers` 表，
-                        // 空库就是空态；`postInbox` 不传 = iOS 没有收件箱落点，同步照跑但不留痕。
-                        IosPage.Statement -> {
-                            val vm = remember {
-                                StatementViewModel(
-                                    repo = services.yktRepository(),
-                                    credentialStore = services.yktCredentialStore(),
-                                    db = services.database(),
-                                )
-                            }
-                            StatementScreen(viewModel = vm, onBack = { page = IosPage.Week })
+
+                            // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
+                            // 七个入口接真页面；学业 / 培养方案 / 实习基地 / 评教 / 请假 / 报修 /
+                            // 校历的页面还在 `:app`，传 null = 整行不渲染（§11.2 ④）。
+                            IosTab.Jw -> JwHubScreen(
+                                onOpenTheorySchedule = {
+                                    stack.add(IosRoute(SubpageScreen.THEORY_SCHEDULE))
+                                },
+                                onOpenLabSchedule = {
+                                    stack.add(IosRoute(SubpageScreen.LAB_SCHEDULE))
+                                },
+                                onOpenScores = { stack.add(IosRoute(SubpageScreen.SCORES)) },
+                                onOpenExams = { stack.add(IosRoute(SubpageScreen.EXAMS)) },
+                                onOpenTextbooks = { stack.add(IosRoute(SubpageScreen.TEXTBOOKS)) },
+                                onOpenSelection = { stack.add(IosRoute(SubpageScreen.SELECTIONS)) },
+                                onOpenTeachingCalendar = {
+                                    stack.add(IosRoute(SubpageScreen.TEACHING_CALENDAR))
+                                },
+                            )
+
+                            // 「我的」= 设置首页（S17 搬进共享层）。每个入口都 push 一个路由，
+                            // 没搬的页面落在 IosNotPortedScreen（一句确定的话，不是点了没反应）。
+                            IosTab.Me -> SettingsScreen(
+                                onOpen = { screen -> stack.add(IosRoute(screen)) },
+                                viewModel = meViewModel,
+                            )
                         }
                     }
                 }
-                hint?.let { text ->
-                    Text(
-                        text = text,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                    )
-                }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    IosPage.entries.forEach { entry ->
-                        TextButton(
-                            onClick = {
-                                hint = null
-                                // 点底栏 = 回到该 Tab 的根页（教务 Tab 正在看子页时退回汇总页）
-                                jwSub = null
-                                page = entry
-                            },
-                        ) { Text(entry.label) }
+                // 底栏只在根层出现：二级页有自己的返回键，再压一条底栏会把返回路径搞混
+                if (top == null) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        IosTab.entries.forEach { entry ->
+                            TextButton(onClick = { tab = entry }) { Text(entry.label) }
+                        }
+                        // Android 的入口在左侧抽屉里；iOS 这一版把抽屉收到「更多」按钮后面
+                        TextButton(onClick = { drawerOpen = true }) { Text("更多") }
                     }
                 }
                 DbSelfTestStrip()
             }
         }
+
+        if (drawerOpen) {
+            IosDrawer(
+                onPick = { route ->
+                    drawerOpen = false
+                    stack.add(route)
+                },
+                onDismiss = { drawerOpen = false },
+            )
+        }
     }
+}
+
+/**
+ * iOS 底栏的三个 Tab。
+ *
+ * Android 的底栏是「今日 / 课表 / 教务」，iOS 这一版没有今日页——`TodayScreen` 依赖
+ * water / ujing / qzxy / ebike / homework / inbox / jwvw / reminder 八个包，全都在 `:app`。
+ * 所以第三格换成「我的」，它是真页面（`SettingsScreen`）。
+ *
+ * 今日页搬完之后这里改回 Android 的原序，并把「我的」移到抽屉里（Android 就是从抽屉进的）。
+ */
+private enum class IosTab(val label: String) {
+    Week("课表"),
+    Jw("教务"),
+    Me("我的"),
+}
+
+/**
+ * iOS 侧入口（P3，2026-11-24；M1 起是产品页面）。
+ *
+ * Swift 侧通过 `MainViewControllerKt.MainViewController()` 拿到这个 UIViewController，
+ * 再用 `UIViewControllerRepresentable` 塞进 SwiftUI。这是 Compose Multiplatform 在 iOS 上的
+ * 标准接法：Compose 负责画，Swift 只负责窗口与生命周期。
+ *
+ * ## 现在的页面结构（2026-11-25 起是真正的导航栈）
+ *
+ * | 区域 | 内容 | 说明 |
+ * |---|---|---|
+ * | 主体 | 二级页栈顶（[IosRouteContent]）或三个 Tab 之一 | 栈空时显示 Tab，栈非空时显示栈顶 |
+ * | 底栏 | 课表 / 教务 / 我的 + 「更多」 | 只在栈空时出现；「更多」打开左侧抽屉 |
+ * | 抽屉 | [IosDrawer] | 分组列出**已经搬过来**的二级页（白名单在 `IosNavigation.kt`） |
+ * | 覆盖层 | [JwLoginScreen] | 点「去导入」进来的教务登录 WebView（WKWebView） |
+ * | 底部 | [DbSelfTestStrip] 一行 | 读写探针，**保留是因为它是「数据链路通了」的唯一屏上证据** |
+ *
+ * 路由键用的是共享层的 [SubpageScreen]（Android 的 `SubpageActivity` 消费同一份），
+ * 所以两端不会出现「一边有入口、一边没有」。还没搬的页面落在 `IosNotPortedScreen`，
+ * 看到的是确定的一句话而不是点了没反应；完整清单见 `design/ios-port.md` §12。
+ *
+ * 与 Android 的**已知差异**：底栏第三格是「我的」而不是「今日」——`TodayScreen` 依赖
+ * water / ujing / qzxy / ebike / homework / inbox / jwvw / reminder 八个包，全在 `:app`。
+ * 今日页搬完后改回 Android 的原序。
+ *
+ * 搬掉的两个旧面板：`WeekGridPreview`（样例网格）与 `LinkValidationScreen`（定点小数对照）。
+ * 它们的验收目的都已达成——真网格取代样例网格，小数口径由 2419 条 JVM 单测继续钉住。
+ *
+ * ## 装配
+ *
+ * [IosServices] 必须在**任何**共享 ViewModel 构造之前安装，所以放在
+ * `ComposeUIViewController` 之前——那是 Swift 调用进来的第一行。
+ * 与 Android 侧 `JuwApplication.onCreate` 里的 `Services.install(GraphServices(this))` 对称。
+ */
+fun MainViewController(): UIViewController {
+    val services = IosServices()
+    Services.install(services)
+    // 首启把作息表与默认学期写进库（Android 在 JuwApplication.ensureDefaults 里做同一件事）
+    services.warmUp()
+    return ComposeUIViewController { IosRoot(services) }
 }
 
 /**
@@ -371,41 +303,6 @@ private fun IosDisplaySettingsOverlay(
             }
         }
     }
-}
-
-/**
- * iOS 侧目前能进的一级页面（S13 起有笔记 / 作业 / 选课；S18 起有教务；
- * S19 起有收件箱与天气；S20 起有电费与流水；S17 起有「我的」）。
- *
- * 为什么用枚举而不是导航库：iOS 侧还没有二级页栈（`SubpageActivity` 那一套是 Android 的），
- * 这一版只要能切页就够验证「共享页面在 iOS 上真的画得出来」。等详情页搬完再换真正的路由。
- */
-private enum class IosPage(val label: String) {
-    Week("课表"),
-    // 教务 Tab 的入口汇总页；与 Android 底栏同序（课表之后就是教务）。
-    Jw("教务"),
-    /** 「我的」= 设置首页（S17 起在共享层）。 */
-    Me("我的"),
-    Notes("笔记"),
-    Homework("作业"),
-    Selection("选课"),
-    Score("成绩"),
-    Exam("考试"),
-    Inbox("收件箱"),
-    Weather("天气"),
-    PowerBill("电费"),
-    Statement("流水"),
-}
-
-/**
- * 教务 Tab 下的一层子页（S18）。这些页面都已搬进 `shared/commonMain`，iOS 直接画得出来；
- * 它们的平台动作（浏览窗口 / 导入窗口）iOS 侧还没有，传 null 后对应入口不渲染。
- */
-private enum class IosJwSubPage {
-    TheorySchedule,
-    LabSchedule,
-    Textbooks,
-    TeachingCalendar,
 }
 
 /**
