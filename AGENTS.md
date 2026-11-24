@@ -284,7 +284,7 @@ MainActivity
    PowerBankPay / Onboarding / SubpageActivity（二级页，路由枚举见 SubpageScreen）
 
 shared/       KMP 共享逻辑（iOS 移植 P0/P2 起）：commonMain 已装 **domain 层全部** + qzxy/wenqu/qiekj
-              的 wire model + `ui/theme` 的四个纯 Compose 文件（140 个文件；包名保留原样，
+              的 wire model + **`ui/theme` 整包**（142 个文件；包名保留原样，
               所以 `data.qzxy.*` 也会出现在这里，是有意的）。已接 Compose Multiplatform 1.7.3。
               androidMain / iosMain 只放 expect/actual 的平台实现（条码、定点小数）。
               **commonMain 必须零 JVM 专有 API**，判据是 `:shared:metadataCommonMainClasses`。

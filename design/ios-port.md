@@ -449,12 +449,19 @@ KSP 按 target 加：`kspAndroid` / `kspIosArm64` / `kspIosSimulatorArm64`；sch
    就看不见了。P0 搬 domain 时踩过同样的坑（`KvcxZones.capped`、`ScheduleExporter.teacherDescription`）。
    **批量搬 UI 之前先 grep `^\s*internal `**，一次列清楚比逐个撞编译错误快得多。
 
-**下一批要做的两处缝**（`Theme.kt` / `Motion.kt` 还留在 `:app`，就是卡在这）：
+**下一批要做的两处缝：已完成**（`ui/theme` 整包平移，`:app` 侧目录已删）：
 
-| Android 依赖 | 位置 | 缝的形状 |
+| Android 依赖 | 原位置 | 缝的形状 |
 |---|---|---|
-| `android.os.Build.VERSION.SDK_INT >= 31` + `dynamicLightColorScheme(LocalContext.current)` | `Theme.kt` | `expect @Composable fun dynamicSchemeOrNull(dark: Boolean): ColorScheme?`，Android 返回动态取色、iOS 恒返回 null（回落用户选的 palette） |
-| `Settings.Global.ANIMATOR_DURATION_SCALE` | `Motion.kt` | `expect fun systemAnimationsEnabled(): Boolean`，iOS 读 `UIAccessibilityIsReduceMotionEnabled` |
+| `android.os.Build.VERSION.SDK_INT >= 31` + `dynamicLightColorScheme(LocalContext.current)` | `Theme.kt` | `expect @Composable fun platformDynamicColorScheme(dark: Boolean): ColorScheme?` —— Android 低于 31 返回 null、否则读壁纸主色；iOS 恒返回 null，落回用户选的 palette |
+| `Settings.Global.ANIMATOR_DURATION_SCALE` | `Motion.kt` | `expect @Composable fun rememberPlatformAnimationsEnabled(): Boolean` —— Android 读该设置；iOS 读 `UIAccessibilityIsReduceMotionEnabled()`（语义对应，不是数值对应） |
+
+两条缝的共同口径，批量搬 UI 时反复用得上：
+
+- **把「平台支不支持」写进返回值**，而不是让公共代码问系统版本。`ColorScheme?` 返回 null
+  就表示不支持，`JuwTheme` 不用知道 `SDK_INT`。
+- **expect 要做成 `@Composable` 才能保留 `remember` 语义**。`Motion` 原本是
+  `remember(context) { 读设置 }`——换成普通函数就退化成每帧读系统属性。
 
 ### P3 iOS 壳与系统扩展（3–5 周）
 
