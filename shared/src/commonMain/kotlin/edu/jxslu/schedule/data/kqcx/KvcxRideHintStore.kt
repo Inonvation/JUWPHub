@@ -1,7 +1,5 @@
 package edu.jxslu.schedule.data.kqcx
 
-import android.content.Context
-
 /**
  * 「上一次进程退出时还有在案骑行」的落盘提示（2026-11-18）。
  *
@@ -14,25 +12,19 @@ import android.content.Context
  * 提示为真时服务卡条目从第一帧就留在顶部（行内容仍然等回包；没骑行时整条零高度、
  * 不可见）。第一次成功查询落地后提示即作废（`KvcxRideController.rideHint`）。
  *
- * 存普通 SharedPreferences 不上加密：只是一枚布尔，不含车号 / 订单号；凭证仍在
- * `secure_kqcx` 里。与 [edu.jxslu.schedule.data.qzxy.QzxyWateringStore] /
- * [edu.jxslu.schedule.data.ujing.UjingOrderStore] 同口径。
+ * 只存一枚布尔，不含车号 / 订单号；凭证仍在 `secure_kqcx` 里。
+ *
+ * iOS 移植 S12（2026-11-24）：**收成接口**。实现是 `:app` 的
+ * `KvcxRideHintPrefsStore`（普通 SharedPreferences，与 `QzxyWateringStore` /
+ * `UjingOrderStore` 同口径）；iOS 将来用 NSUserDefaults 写一份，共享层不关心。
+ * 没有把整类搬过来，是因为它唯一的消费方 `KvcxRideController` 还在 `:app` 的
+ * `ui/ebike`，搬过去也只是一层转调。
  */
-internal class KvcxRideHintStore(context: Context) {
-
-    private val prefs = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
+interface KvcxRideHintStore {
 
     /** 上一次进程退出时是否还有在案骑行。 */
-    val hadRide: Boolean get() = prefs.getBoolean(KEY_HAD_RIDE, false)
+    val hadRide: Boolean
 
-    /** 有骑行 → true、无骑行 → false。同值跳写（每次查询都会走到这里）。 */
-    fun setHadRide(active: Boolean) {
-        if (hadRide == active) return
-        prefs.edit().putBoolean(KEY_HAD_RIDE, active).apply()
-    }
-
-    private companion object {
-        const val FILE_NAME = "kvcx_ride_hint"
-        const val KEY_HAD_RIDE = "had_ride"
-    }
+    /** 有骑行 → true、无骑行 → false。同值跳写由实现方负责（每次查询都会走到这里）。 */
+    fun setHadRide(active: Boolean)
 }

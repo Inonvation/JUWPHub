@@ -11,7 +11,7 @@ import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
 import edu.jxslu.schedule.data.kqcx.KqxCredentialStore
 import edu.jxslu.schedule.data.kqcx.KqcxBikeClient
 import edu.jxslu.schedule.data.kqcx.KqcxOrderCache
-import edu.jxslu.schedule.data.kqcx.KvcxRideHintStore
+import edu.jxslu.schedule.data.kqcx.KvcxRideHintPrefsStore
 import edu.jxslu.schedule.data.kqcx.ZoneCacheStore
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.GuessTarget
@@ -896,7 +896,7 @@ object Graph {
                 val remoteReminder = MutableSharedFlow<Int>(extraBufferCapacity = 1)
                 // 冷启动位置提示（2026-11-18）：上一次进程有在案骑行时，今日页服务卡
                 // 从第一帧就留在顶部，不等第一次订单查询回包才归位。
-                val rideHint = KvcxRideHintStore(context.applicationContext)
+                val rideHint = KvcxRideHintPrefsStore(context.applicationContext)
                 KvcxRideController(
                     session = runCatching { kqcx(context) }.getOrNull(),
                     scope = scope,
