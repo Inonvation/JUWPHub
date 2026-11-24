@@ -124,7 +124,7 @@ object CainiaoQuery {
             ) {
                 sb.append(ch)
             } else {
-                for (b in ch.toString().toByteArray(Charsets.UTF_8)) {
+                for (b in ch.toString().encodeToByteArray()) {
                     sb.append('%').append(HEX[(b.toInt() shr 4) and 0xF]).append(HEX[b.toInt() and 0xF])
                 }
             }

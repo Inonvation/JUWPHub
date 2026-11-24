@@ -701,7 +701,9 @@ object BikeNearby {
         if (extra.isEmpty()) return primary
         val merged = LinkedHashMap<String, NearbyBike>(primary.size + extra.size)
         primary.forEach { merged[it.carNum] = it }
-        extra.forEach { merged.putIfAbsent(it.carNum, it) }
+        // 不能用 `putIfAbsent`（java.util.Map 的默认方法，commonMain 里没有）：
+        // 语义是「primary 已有的不被 extra 覆盖」，所以只在缺键时写入。
+        extra.forEach { if (!merged.containsKey(it.carNum)) merged[it.carNum] = it }
         return merged.values.toList()
     }
 

@@ -267,23 +267,23 @@ object PowerUsage {
             val slices = splitByDay(segment.startMs, segment.endMs, zone)
             for ((dayKey, overlapMs) in slices) {
                 val weight = overlapMs.toDouble() / span.toDouble()
-                kwh.merge(dayKey, segment.usedKwh * weight, Double::plus)
+                // 用「读-加-写」代替 `Map.merge`（java.util.Map 的默认方法，commonMain 里没有）
+                kwh[dayKey] = (kwh[dayKey] ?: 0.0) + segment.usedKwh * weight
                 val yuanPart = segment.usedYuan
                 if (yuanPart == null) yuanUnknown += dayKey
-                else yuan.merge(dayKey, yuanPart * weight, Double::plus)
+                else yuan[dayKey] = (yuan[dayKey] ?: 0.0) + yuanPart * weight
             }
         }
 
         val rechargeFen = HashMap<String, Long>()
         for (point in recharges) {
-            rechargeFen.merge(dayKeyOf(point.epochMs, zone), point.amountFen, Long::plus)
+            val dayKey = dayKeyOf(point.epochMs, zone)
+            rechargeFen[dayKey] = (rechargeFen[dayKey] ?: 0L) + point.amountFen
         }
 
-        val keys = sortedSetOf<String>().apply {
-            addAll(kwh.keys)
-            addAll(yuanUnknown)
-            addAll(rechargeFen.keys)
-        }
+        // `sortedSetOf` 建的是 TreeSet（JVM 专有），commonMain 里用有序 List 代替：
+        // 下面的 `map` 依赖升序，顺序口径不变。
+        val keys = (kwh.keys + yuanUnknown + rechargeFen.keys).sorted()
         return keys.map { key ->
             PowerUsageDay(
                 key = key,

@@ -281,8 +281,10 @@ object ScheduleCalculator {
             .filterValues { it > 1 }.keys
         if (contestedColors.isEmpty()) return emptyMap()
 
-        // 每个撞色组里保留课名排序最前的那个，其余进入替换名单
-        val needOverride = sortedSetOf<String>()
+        // 每个撞色组里保留课名排序最前的那个，其余进入替换名单。
+        // 用 mutableSetOf + 取用时 sorted()：`sortedSetOf` 是 TreeSet（JVM 专有），
+        // 而这里的顺序会影响配色分配结果，所以迭代前必须显式排序。
+        val needOverride = mutableSetOf<String>()
         for (color in contestedColors.sorted()) {
             stored.filterValues { it == color }.keys
                 .sorted()
@@ -291,7 +293,7 @@ object ScheduleCalculator {
         }
         val used = stored.values.toMutableSet()
         val result = mutableMapOf<String, Int>()
-        for (name in needOverride) {
+        for (name in needOverride.sorted()) {
             val pick = nextColorIndex(used)
             if (pick != stored[name]) result[name] = pick
             used += pick

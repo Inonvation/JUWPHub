@@ -37,7 +37,8 @@ object QzxySign {
      * @param key 第一次 `&key=` 后挂的值，官方放的是 loginCode
      */
     fun sign(fields: Map<String, String>, key: String): String {
-        val plain = fields.toSortedMap().entries.joinToString("") { it.key + it.value }
+        // `toSortedMap` 建的是 TreeMap（JVM 专有）；commonMain 里用按 key 排序后的 entries
+        val plain = fields.entries.sortedBy { it.key }.joinToString("") { it.key + it.value }
         return md5(md5(plain + "&key=" + key) + SIGN_SUFFIX)
     }
 
@@ -58,7 +59,7 @@ object QzxySign {
      * 不创建订单，所以试是安全的。
      */
     fun candidates(fields: Map<String, String>, key: String): List<Candidate> {
-        val sorted = fields.toSortedMap().entries.toList()
+        val sorted = fields.entries.sortedBy { it.key }
         val plain = sorted.joinToString("") { it.key + it.value }
         val paired = sorted.joinToString("&") { "${it.key}=${it.value}" }
         val salt = SIGN_SUFFIX.removePrefix("&key=")

@@ -46,11 +46,13 @@ object QzxyClData {
     fun decrypt(encoded: String?): ByteArray? {
         val text = encoded?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         val cipherText = decodeCipherText(text) ?: return null
-        val key = KEY.toByteArray(Charsets.US_ASCII)
+        // `Charsets` 是 JVM 专有的（kotlin.text.Charsets），commonMain 里用 encodeToByteArray() /
+        // decodeToString()。这里的密钥、IV 与「可打印文本」判定本来就是 ASCII，UTF-8 逐字节等价。
+        val key = KEY.encodeToByteArray()
         val ecb = runCatching { stripPadding(AesBlock.decryptEcb(key, cipherText)) }.getOrNull()
         if (ecb != null && isPrintable(ecb)) return ecb
         val cbc = runCatching {
-            stripPadding(AesBlock.decryptCbc(key, IV.toByteArray(Charsets.US_ASCII), cipherText))
+            stripPadding(AesBlock.decryptCbc(key, IV.encodeToByteArray(), cipherText))
         }.getOrNull()
         if (cbc != null && isPrintable(cbc)) return cbc
         return ecb
@@ -86,7 +88,7 @@ object QzxyClData {
         if (plain.isEmpty()) return "（空）"
         val printable = plain.all { (it.toInt() and 0xFF) in 0x20..0x7E }
         return if (printable) {
-            "${plain.toString(Charsets.US_ASCII)}（${plain.size} 字节）"
+            "${plain.decodeToString()}（${plain.size} 字节）"
         } else {
             "${QzxyFrame.bytesToHex(plain)}（${plain.size} 字节）"
         }

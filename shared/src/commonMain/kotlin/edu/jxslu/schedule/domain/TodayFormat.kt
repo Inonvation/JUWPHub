@@ -195,8 +195,10 @@ fun remarkPreview(remark: String): String? {
     var cut = cleaned.take(REMARK_PREVIEW_LIMIT)
     // 截断点落在代理对中间（备注含 emoji 等增补平面字符）时少取一位，
     // 不产出孤立半对——渲染层会把它画成替换符
-    if (Character.isHighSurrogate(cut.last()) &&
-        cleaned.getOrNull(REMARK_PREVIEW_LIMIT)?.let { Character.isLowSurrogate(it) } == true
+    // `Char.isHighSurrogate()` / `isLowSurrogate()` 是 Kotlin 标准库的扩展（common 可用）；
+    // 不要写成 `Character.xxx`——那是 java.lang.Character，commonMain 里不存在。
+    if (cut.last().isHighSurrogate() &&
+        cleaned.getOrNull(REMARK_PREVIEW_LIMIT)?.let { it.isLowSurrogate() } == true
     ) {
         cut = cut.dropLast(1)
     }

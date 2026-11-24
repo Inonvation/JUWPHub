@@ -127,13 +127,14 @@ object ScheduleOverrides {
      */
     fun weeksOf(overrides: List<ScheduleOverride>, semester: SemesterConfig?): List<Int> {
         if (semester == null) return emptyList()
-        val weeks = sortedSetOf<Int>()
+        // `sortedSetOf` 是 TreeSet（JVM 专有）；commonMain 里收完再排序，升序口径不变
+        val weeks = mutableSetOf<Int>()
         overrides.forEach { override ->
             eachDate(override.fromDate, override.toDate) { date ->
                 slotOf(semester, date)?.let { weeks += it.week }
             }
         }
-        return weeks.toList()
+        return weeks.sorted()
     }
 
     /** 点课表里「放假 / 补课」标记时弹出的详情（DESIGN §3.25 / §4.40）。 */

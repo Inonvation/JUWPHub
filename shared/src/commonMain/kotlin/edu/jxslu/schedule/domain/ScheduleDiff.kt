@@ -97,7 +97,7 @@ object ScheduleDiff {
 
         val changes = mutableListOf<Change>()
         val consumedAdded = mutableSetOf<Course>()
-        removed.groupBy(::identity).forEach { _, group ->
+        removed.groupBy(::identity).forEach { (_, group) ->
             // 组内恰好一删一增：整块时间挪动（周次 / 地点 / 教师都可能变），保持原口径
             val free = added.filter { identity(it) == identity(group.first()) && it !in consumedAdded }
             group.forEach { old ->

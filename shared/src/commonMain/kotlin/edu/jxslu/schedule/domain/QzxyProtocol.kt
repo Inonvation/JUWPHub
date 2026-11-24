@@ -407,7 +407,7 @@ object QzxyProtocol {
 
         // 服务端凭据：内容与记录摘要一致，但它是服务端签发的，格式变了它能兜住
         if (clDataPlain != null && clDataPlain.isNotEmpty()) {
-            val text = clDataPlain.toString(Charsets.US_ASCII)
+            val text = clDataPlain.decodeToString()
             out += ClearCandidate(ClearKey.CL_DATA_RAW, "服务端凭据原文", CLEAR_CONSUME, clDataPlain)
             hexOrNull(text)?.let {
                 out += ClearCandidate(ClearKey.CL_DATA_HEX, "服务端凭据按十六进制解", CLEAR_CONSUME, it)

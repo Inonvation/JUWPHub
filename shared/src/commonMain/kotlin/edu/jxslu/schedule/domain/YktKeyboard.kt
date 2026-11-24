@@ -1,5 +1,9 @@
 package edu.jxslu.schedule.domain
 
+// commonMain 不默认导入 `kotlin.jvm.*`（JVM 模块才会），所以 `@JvmName` 必须显式 import。
+// 它标在两个 `buildMapping` 重载之一上：两者擦除后 JVM 签名相同，不区分就编不过。
+// 别把这一行当多余 import 删掉。
+import kotlin.jvm.JvmName
 import okio.ByteString.Companion.toByteString
 
 /**

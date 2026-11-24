@@ -2,7 +2,6 @@ package edu.jxslu.schedule.domain
 
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
-import kotlinx.datetime.toKotlinLocalDateTime
 
 /**
  * 天气提示行里的「课表句」（DESIGN §3.29，2026-10-12；2026-10-20 收口成「一条只讲一件事」）。

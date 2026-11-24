@@ -109,13 +109,13 @@ object QzxyFrame {
             sb.append(HEX[v ushr 4]).append(HEX[v and 0x0F])
         }
         sb.append(WRAP_SUFFIX)
-        return sb.toString().toByteArray(Charsets.US_ASCII)
+        return sb.toString().encodeToByteArray()
     }
 
     /** [wrap] 的逆操作：从设备回包里还原帧字节。格式不符返回 null。 */
     fun unwrap(raw: ByteArray): ByteArray? {
         if (raw.size < 3) return null
-        val text = raw.toString(Charsets.US_ASCII)
+        val text = raw.decodeToString()
         val start = text.indexOf(WRAP_PREFIX)
         if (start < 0) return null
         val end = text.indexOf(WRAP_SUFFIX, start + 1).let { if (it < 0) text.length else it }
@@ -128,9 +128,10 @@ object QzxyFrame {
         if (trimmed.isEmpty() || trimmed.length % 2 != 0) return null
         val out = ByteArray(trimmed.length / 2)
         for (i in out.indices) {
-            val hi = Character.digit(trimmed[i * 2], 16)
-            val lo = Character.digit(trimmed[i * 2 + 1], 16)
-            if (hi < 0 || lo < 0) return null
+            // `Character.digit(c, 16)` 是 java.lang.Character；commonMain 里用 Kotlin 的
+            // `digitToIntOrNull(16)`（只认 0-9a-fA-F，与设备侧发来的 ASCII 十六进制一致）
+            val hi = trimmed[i * 2].digitToIntOrNull(16) ?: return null
+            val lo = trimmed[i * 2 + 1].digitToIntOrNull(16) ?: return null
             out[i] = ((hi shl 4) or lo).toByte()
         }
         return out

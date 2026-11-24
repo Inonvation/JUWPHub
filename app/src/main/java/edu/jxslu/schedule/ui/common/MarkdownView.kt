@@ -252,7 +252,9 @@ private fun ListItemRow(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 )
             } else {
-                TaskCheckbox(checked = item.task)
+                // 这里的 item.task 非空，但它是 `:shared` 里的公开属性，跨模块不能智能转换，
+                // 所以写成 `== true`（等价，且不用 `!!`）。
+                TaskCheckbox(checked = item.task == true)
                 Spacer(Modifier.width(8.dp))
             }
             InlineText(
