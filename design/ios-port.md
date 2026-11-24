@@ -292,8 +292,36 @@ iosApp/            薄壳：Xcode 工程、SwiftUI 入口、WidgetKit 扩展、I
 > `String.format` 已在第 3 批清零；`domain/` 里剩下的 `.format(…)` 全是日期格式化，随 `java.time` 一起处理。
 
 **P0 已完成的部分（2026-11-24）**：`shared/` 模块已建（`androidTarget` + `iosX64`/`iosArm64`/
-`iosSimulatorArm64`，后者在 Windows 上被 KGP 自动禁用、只留声明），`TextFmt` 与 `Money` 已搬进
-`shared/src/commonMain`，`:app` 用 `implementation(project(":shared"))` 依赖它。
+`iosSimulatorArm64`，后者在 Windows 上被 KGP 自动禁用、只留声明），`:app` 用
+`implementation(project(":shared"))` 依赖它。
+
+**domain 层主体已搬完**：`commonMain` 里现有 128 个文件（121 个原 `app/.../domain` 的域层文件 +
+`TextFmt` / `Money` / `PlatformFormat` / `EbikeQr` / `YktPayCode` / `BarcodeMatrix` / `Barcode`）。
+
+搬的过程中**编译器**（不是正则）抓出 12 类 commonMain 看不见的 JVM 专有 API，全是 JVM 模块默认
+导入、平时写得很自然的那种——这条清单值得单独留着，P2 搬 UI 时还会再撞一遍：
+
+| 原写法 | 为什么 JVM 可以 | commonMain 怎么写 |
+|---|---|---|
+| `Charsets.US_ASCII` / `Charsets.UTF_8` | `kotlin.text.Charsets` 是 JVM 侧 actual | `str.encodeToByteArray()` / `bytes.decodeToString()`（ASCII 数据逐字节等价） |
+| `Map.merge(k, v, f)` / `putIfAbsent` | `java.util.Map` 的默认方法 | 读-加-写 `m[k] = (m[k] ?: 0) + v` / `if (!m.containsKey(k)) m[k] = v` |
+| `sortedSetOf<T>()`（= `TreeSet`） | JVM 集合 | `mutableSetOf` 收完再 `sorted()`；**注意原代码若依赖 TreeSet 的有序迭代，排序必须补在迭代前**，否则配色分配之类的顺序会变 |
+| `map.toSortedMap()` | `TreeMap` | `entries.sortedBy { it.key }` |
+| `Character.digit(c, 16)` | `java.lang.Character` | `c.digitToIntOrNull(16) ?: return null` |
+| `Character.isHighSurrogate(c)` | 同上 | `c.isHighSurrogate()`（Kotlin 标准库扩展，common 有） |
+| `java.lang.Math.*` | 默认导入 | `kotlin.math`；`Math.round` → `roundToLong`（`round` 是 `rint`，0.5 取偶，别搞反），`Math.floorMod` → `Int.mod` |
+| `@JvmInline` / `@JvmName` | `kotlin.jvm.*` 默认导入 | 显式 `import kotlin.jvm.JvmInline` / `JvmName`。**去掉注解不行**：`@JvmInline` 少了 JVM 侧报 `Value classes without '@JvmInline'`，`@JvmName` 少了两个擦除后同签名的重载冲突 |
+| `java.util.Locale` / `String.format` | JVM | `internal expect fun formatFixed(...)`（见 [PlatformFormat]） |
+| `javax.crypto`（AES） | JVM | 纯 Kotlin 实现（`domain/AesBlock.kt`），用 FIPS-197 向量钉住 |
+| `okhttp3.HttpUrl.resolve` | JVM 库 | 手写 RFC 3986 §5.2（`domain/UrlRef.kt`） |
+| `com.google.zxing.*` | JVM 库 | 中性 `BarcodeMatrix` + `expect/actual`（Android 用 zxing，iOS 用 CoreImage） |
+| 跨模块读公开属性后智能转换 | 同模块才行 | `item.task == true` 这类显式比较（P2 搬 UI 时会大量出现） |
+
+**还剩 3 个文件留在 `app/.../domain`**：`QzxyBillStats` / `QzxySessionLink` / `WenquRules`。
+它们各自 import 了 `data.qzxy.QzxyBill`、`data.qzxy.QzxySession`、`data.wenqu.WenquActivity`，
+属**分层倒置**（域层反过来依赖 data 层的 wire model）。要先把那几个 model 与 `data/qiekj` 的
+`LenientString*` 序列化器纯数据化才能搬，列为 P1。`AutoSyncRules` 属于同一类问题，
+2026-11-24 已经先行归位到 `domain/`。
 
 **这道门禁是可以本地验证的**（这是 P0 最关键的一条工程事实）：`.\gradlew
 :shared:metadataCommonMainClasses` 用 Kotlin **公共**标准库编译 `commonMain`，看不见 JDK——
@@ -306,6 +334,11 @@ iosApp/            薄壳：Xcode 工程、SwiftUI 入口、WidgetKit 扩展、I
   而只删注解又会在 Android 编译报 `Value classes without '@JvmInline'`——两头都要对。
 - 加 `org.jetbrains.kotlin.multiplatform` 插件后，第一次 `--offline` 构建会失败
   （plugin marker 没进离线缓存），联网解析一次即可，之后恢复 `--offline`。
+
+**构建时的一类环境坑**：`:shared:bundleLibCompileToJarDebug` 会报 `classes.jar` 被另一进程占用。
+原因是上一轮 Gradle / Kotlin 守护进程还攥着这个 jar。处理办法是 `gradlew --stop` +
+杀掉 `kotlin-compiler-embeddable` 的 java 进程，再删掉
+`shared/build/intermediates/compile_library_classes_jar/` 让 Gradle 重建。别当代码问题查。
 
 **下一步的前提：已解除**（第 6 批）。`org.jetbrains.kotlinx:kotlinx-datetime:0.8.0` 已加进
 `app/build.gradle.kts`，一次联网构建把依赖拉进了本地缓存，之后照旧 `--offline` 构建。
