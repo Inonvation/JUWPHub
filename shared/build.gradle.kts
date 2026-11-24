@@ -2,6 +2,9 @@ plugins {
     id("org.jetbrains.kotlin.multiplatform")
     id("com.android.library")
     id("org.jetbrains.kotlin.plugin.serialization")
+    // iOS 移植 P2：`ui/theme` 这批纯 Compose 文件要搬进来，`@Composable` 必须有编译器插件。
+    // 版本与根 build.gradle.kts 一致，别单独升。
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 /**
@@ -52,6 +55,14 @@ kotlin {
             // 版本锁 3.6.0 是 okhttp 4.12.0 自己带的那一版：`domain/` 搬进来以后这是**直接**依赖，
             // 必须显式声明（原先只是 okhttp 的传递依赖，`:shared` 拿不到）。
             api("com.squareup.okio:okio:3.6.0")
+            // Compose Multiplatform（iOS 移植 P2）：`ui/theme` 的纯 Compose 文件搬进来要用。
+            // 版本选 1.7.3 而不是 1.8.x，是为了把 Android 侧的 androidx.compose 留在 1.7 线上——
+            // `:app` 用的是 compose-bom 2024.10.00（1.7.x），Glance 1.2.0 又要求 runtime ≥ 1.7.8；
+            // 上 1.8 会把整条 compose 抬一个大版本，Glance 与既有 UI 都得重新验。
+            // 这三个是 public API 级依赖（Composable 签名里就有 Color / ColorScheme），所以用 api。
+            api("org.jetbrains.compose.ui:ui:1.7.3")
+            api("org.jetbrains.compose.material3:material3:1.7.3")
+            api("org.jetbrains.compose.foundation:foundation:1.7.3")
         }
 
         androidMain.dependencies {

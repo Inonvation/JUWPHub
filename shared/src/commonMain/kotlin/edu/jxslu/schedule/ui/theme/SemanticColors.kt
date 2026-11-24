@@ -37,9 +37,16 @@ private val DarkSemantic = SemanticColors(
 internal val LocalSemanticColors: ProvidableCompositionLocal<SemanticColors> =
     staticCompositionLocalOf { LightSemantic }
 
-/** 供 [JuwTheme] 在解析出深浅色后统一提供。 */
+/**
+ * 供 [JuwTheme] 在解析出深浅色后统一提供。
+ *
+ * 2026-11-24（iOS 移植 P2）：本文件搬进 `:shared` 后从 `internal` 放开成 public——
+ * 唯一调用方 `Theme.kt` 留在 `:app`，跨模块看不见 `internal`。
+ * 配套的 [LocalSemanticColors] 仍保持 `internal`：它只被本模块的 [ProvideSemanticColors] 与
+ * `MaterialTheme.semanticColors` 用到，页面一律走后者。
+ */
 @Composable
-internal fun ProvideSemanticColors(darkTheme: Boolean, content: @Composable () -> Unit) {
+fun ProvideSemanticColors(darkTheme: Boolean, content: @Composable () -> Unit) {
     CompositionLocalProvider(
         LocalSemanticColors provides if (darkTheme) DarkSemantic else LightSemantic,
         content = content,

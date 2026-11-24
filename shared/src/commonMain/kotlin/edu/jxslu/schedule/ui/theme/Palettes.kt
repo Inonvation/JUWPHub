@@ -30,9 +30,12 @@ import edu.jxslu.schedule.domain.ThemePalette
  *
  * 红线：容器层级（Lowest < Low < 默认 < High < Highest）与关键前景/背景对比度由
  * `PaletteContractTest` 钉住——单测红着别合入。
+ *
+ * 2026-11-24（iOS 移植 P2）：本文件搬进 `:shared` 后，下面两个函数从 `internal` 放开成 public。
+ * 调用方（`Theme.kt`、`AppearanceSettingsScreen`、`LifeWidgetUi`）留在 `:app`，跨模块看不见 `internal`。
  */
 
-internal fun paletteScheme(palette: ThemePalette, dark: Boolean): ColorScheme = when (palette) {
+fun paletteScheme(palette: ThemePalette, dark: Boolean): ColorScheme = when (palette) {
     ThemePalette.Brand -> if (dark) BrandDark else BrandLight
     ThemePalette.SkyBlue -> if (dark) SkyBlueDark else SkyBlueLight
     ThemePalette.DuskPurple -> if (dark) DuskPurpleDark else DuskPurpleLight
@@ -42,7 +45,7 @@ internal fun paletteScheme(palette: ThemePalette, dark: Boolean): ColorScheme = 
 }
 
 /** 色卡弹层的预览色点：主色 / 容器 / 次要 / 底色（浅色系，色相一目了然）。 */
-internal fun paletteSwatch(palette: ThemePalette): List<Color> {
+fun paletteSwatch(palette: ThemePalette): List<Color> {
     val light = paletteScheme(palette, dark = false)
     return listOf(light.primary, light.primaryContainer, light.secondary, light.background)
 }
