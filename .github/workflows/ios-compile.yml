@@ -1,0 +1,68 @@
+# iOS 编译闸门（2026-11-24，iOS 移植 P0 之后）
+#
+# 为什么单独开一个 workflow：Android CI 跑在 ubuntu-latest 上，而 Kotlin/Native 的 Apple
+# target **只能在 macOS 上编**（Windows 上 KGP 会直接把 iosArm64 / iosSimulatorArm64
+# 禁掉，任务被跳过、构建「成功」但什么都没编）。所以 iOS 侧到底能不能编，只有 macOS runner
+# 能回答。仓库是 public，macOS runner 免费。
+#
+# 它验的是 `:shared` —— 也就是 `:app` 之外那 157 个文件（domain 全量 + wire model +
+# ui/theme + ui/icon + 6 个已迁移的网络客户端）在 Kotlin/Native 上真的编得过。
+#
+# 与本地 `:shared:metadataCommonMainClasses` 的区别（两个都要跑，别互相替代）：
+# - 元数据编译只证明「commonMain 里没有 JVM 专有 API」；
+# - 这里证明「用到的 API 在 Native 侧真的存在、签名也对」，以及 `androidMain` / `iosMain`
+#   里那些**从未编译过**的 actual 实现（`PlatformFormat` / `Barcode` / `Logger` /
+#   `PlatformDynamicColorScheme` / 动画缩放）到底通不通。
+# 预计首次会红：iosMain 的 5 个 actual 是照着文档推的，没有一行经过编译器。
+
+name: iOS Compile
+
+on:
+  push:
+    branches: [main, feat/ios-port]
+  pull_request:
+  # 手工触发：想单独验 iOS 时不用推提交
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compile-shared-ios:
+    # 只在 macOS 上能编 Apple target；macos-15 自带 Xcode 16 + Kotlin/Native 需要的工具链
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Gradle 配置阶段会连带配置 `:app`（AGP 要 compileSdk 36 的平台），
+      # 所以 macOS 上也得把 Android SDK 装齐，否则会在配置期就失败，
+      # 报「Failed to find target with hash string 'android-36'」而不是我们想看的那类错。
+      - uses: android-actions/setup-android@v3
+      - name: 装 Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 打印工具链版本（失败时定位用）
+        run: |
+          xcodebuild -version
+          java -version
+
+      # 只编 klib，不链接 framework：现在还没有 `iosApp` 工程，链接没有落点。
+      # 设备（arm64）与模拟器（simulatorArm64）两个都编——两者的可用 API 面不完全一样。
+      - name: 编译 :shared 的 iOS klib
+        run: |
+          ./gradlew \
+            :shared:compileKotlinIosArm64 \
+            :shared:compileKotlinIosSimulatorArm64 \
+            --stacktrace
