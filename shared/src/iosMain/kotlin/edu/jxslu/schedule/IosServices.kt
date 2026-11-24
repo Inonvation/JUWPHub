@@ -41,9 +41,14 @@ class IosServices : AppServices {
     private val prefs: DisplayPrefsStore by lazy { DisplayPrefsStore() }
 
     private val repository: ScheduleRepository by lazy {
-        // 第四个参数是调课检测用的基线快照；那份存储走文件 IO（`:app` 的
-        // `ScheduleBaselineStore`），iOS 侧还没搬，先给 null = 不参与基线比对。
-        ScheduleRepository(juwDatabase(), prefs, scope, baselineStore = null)
+        // 调课检测基线（DESIGN §4.17）：S7 把 `ScheduleBaselineStore` 也搬进共享层了，
+        // 落盘走 `appDataDir()`，iOS 侧直接可用——不再像 M1 草案那样传 null。
+        ScheduleRepository(
+            juwDatabase(),
+            prefs,
+            scope,
+            baselineStore = ScheduleBaselineStore(),
+        )
     }
 
     override fun displayPrefs(): DisplayPrefsStore = prefs
