@@ -8,6 +8,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,17 +35,26 @@ import edu.jxslu.schedule.platform.UjingPay
 import edu.jxslu.schedule.platform.UjingPayOutcome
 import edu.jxslu.schedule.platform.UjingPayResult
 import edu.jxslu.schedule.ui.me.CalendarSettingsScreen
+import edu.jxslu.schedule.ui.me.CalendarSettingsViewModel
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
 import edu.jxslu.schedule.ui.me.JwAccountScreen
+import edu.jxslu.schedule.ui.me.rememberCalendarSyncActions
+import edu.jxslu.schedule.ui.me.rememberReminderScreenActions
+import edu.jxslu.schedule.ui.me.rememberShortcutScreenActions
 import edu.jxslu.schedule.ui.me.ReminderSettingsScreen
+import edu.jxslu.schedule.ui.me.ReminderSettingsViewModel
 import edu.jxslu.schedule.ui.me.ShortcutSettingsScreen
+import edu.jxslu.schedule.ui.me.ShortcutSettingsViewModel
 import edu.jxslu.schedule.ui.me.WidgetSettingsScreen
 import edu.jxslu.schedule.ui.me.hub.AboutUpdateScreen
 import edu.jxslu.schedule.ui.me.hub.AccountsHubScreen
 import edu.jxslu.schedule.ui.me.hub.AppearanceSettingsScreen
+import edu.jxslu.schedule.ui.me.hub.openUrl
 import edu.jxslu.schedule.ui.me.hub.PermissionsStorageScreen
 import edu.jxslu.schedule.ui.me.hub.QuietHoursScreen
+import edu.jxslu.schedule.ui.me.hub.REWARD_QR_RES
+import edu.jxslu.schedule.ui.me.hub.saveRewardQrToGallery
 import edu.jxslu.schedule.ui.me.hub.SupportDevScreen
 import edu.jxslu.schedule.ui.me.hub.TermsDeclarationsScreen
 import edu.jxslu.schedule.ui.me.hub.TimetableHubScreen
@@ -60,6 +72,9 @@ import edu.jxslu.schedule.ui.common.rememberMarkdownEditorUi
 import edu.jxslu.schedule.ui.common.rememberMarkdownImageUi
 import edu.jxslu.schedule.ui.common.rememberMarkdownUi
 import edu.jxslu.schedule.ui.common.AppPermissions
+import edu.jxslu.schedule.ui.common.LicensesDialog
+import edu.jxslu.schedule.ui.common.NoticeDialog
+import edu.jxslu.schedule.ui.common.presetShortcutPainter
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
 import edu.jxslu.schedule.ui.common.ShortcutLauncher
 import edu.jxslu.schedule.ui.common.washerScanIntent
@@ -69,6 +84,7 @@ import edu.jxslu.schedule.ui.ebike.KvcxScreen
 import edu.jxslu.schedule.ui.ebike.RideScreen
 import edu.jxslu.schedule.ui.ebike.BikeLocator
 import edu.jxslu.schedule.ui.ebike.LocateResult
+import edu.jxslu.schedule.ui.ebike.openWechatScan
 import edu.jxslu.schedule.ui.exam.ExamScreen
 import edu.jxslu.schedule.ui.exam.rememberExamScreenActions
 import edu.jxslu.schedule.ui.exam.ExamSettingsScreen
@@ -86,6 +102,7 @@ import edu.jxslu.schedule.ui.jw.StudentInfoScreen
 import edu.jxslu.schedule.ui.jw.JwScheduleListScreen
 import edu.jxslu.schedule.ui.jw.TeachingCalendarScreen
 import edu.jxslu.schedule.ui.jw.TextbookScreen
+import edu.jxslu.schedule.ui.jwvw.JwImportMode
 import edu.jxslu.schedule.ui.jw.rememberJwScreenPlatformActions
 import edu.jxslu.schedule.ui.notes.NoteCourseScreen
 import edu.jxslu.schedule.ui.notes.NoteDetailScreen
@@ -450,10 +467,44 @@ class SubpageActivity : ComponentActivity() {
                 onBack = onBack,
             )
             SubpageScreen.WIDGET_SETTINGS -> WidgetSettingsScreen(onBack = onBack)
-            SubpageScreen.CALENDAR_SETTINGS -> CalendarSettingsScreen(onBack = onBack)
-            SubpageScreen.REMINDER_SETTINGS -> ReminderSettingsScreen(onBack = onBack)
-            SubpageScreen.SHORTCUTS ->
-                ShortcutSettingsScreen(onBack = onBack, focusItemId = focusItemId)
+            // 日历 / 提醒 / 快捷方式三页已在 shared/commonMain（iOS 移植 W1）：
+            // VM 由宿主建（design/ios-port.md §11.2 ①），平台动作（系统日历 / 闹钟 / 拉起外部应用）
+            // 由本侧注入，null 的语义是「本平台没这项能力」，入口整行不渲染。
+            SubpageScreen.CALENDAR_SETTINGS -> {
+                val calendarActions = rememberCalendarSyncActions()
+                CalendarSettingsScreen(
+                    onBack = onBack,
+                    viewModel = viewModel {
+                        CalendarSettingsViewModel(Services.current.scheduleRepository(), calendarActions)
+                    },
+                )
+            }
+            SubpageScreen.REMINDER_SETTINGS -> {
+                val actions = rememberReminderScreenActions()
+                ReminderSettingsScreen(
+                    onBack = onBack,
+                    viewModel = viewModel {
+                        ReminderSettingsViewModel(Services.current.scheduleRepository())
+                    },
+                    onReschedule = actions.reschedule,
+                    onRecheckHomework = actions.recheckHomework,
+                    onRequestNotifPermission = actions.requestNotifPermission,
+                )
+            }
+            SubpageScreen.SHORTCUTS -> {
+                val actions = rememberShortcutScreenActions()
+                ShortcutSettingsScreen(
+                    onBack = onBack,
+                    focusItemId = focusItemId,
+                    viewModel = viewModel {
+                        ShortcutSettingsViewModel(Services.current.scheduleRepository())
+                    },
+                    // 预设品牌图是 `res/drawable/ic_preset_*.webp`，共享层拿不到（S23 口径）
+                    brandIcon = { presetShortcutPainter(it) },
+                    onTest = actions.onTest,
+                    onQueryInstalledApps = actions.onQueryInstalledApps,
+                )
+            }
             // 成绩与考试四页已在 shared/commonMain（iOS 移植 S10），平台动作用
             // `rememberScoreScreenActions` / `rememberExamScreenActions` 补齐；
             // 回调里 null 的语义是「本平台没这项能力」，入口整行不渲染。
@@ -583,7 +634,16 @@ class SubpageActivity : ComponentActivity() {
                 onBack = onBack,
                 onOpenStatement = { SubpageActivity.start(this, SubpageScreen.CAMPUS_STATEMENT) },
             )
-            SubpageScreen.JW_ACCOUNT -> JwAccountScreen(onBack = onBack)
+            // 教务账户页已在 shared/commonMain（iOS 移植 W1）：VM 由宿主建，
+            // 四个平台窗口（引导页 / 两个导入窗口 / 成绩单窗口）由本侧注入。
+            SubpageScreen.JW_ACCOUNT -> JwAccountScreen(
+                onBack = onBack,
+                viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
+                onUpdatePassword = { OnboardingActivity.start(this, startAtJw = true) },
+                onImportTimetable = { JwImportActivity.start(this) },
+                onImportScores = { JwImportActivity.start(this, JwImportMode.Scores) },
+                onExportTranscript = { TranscriptActivity.start(this) },
+            )
             SubpageScreen.TIMETABLE_HUB -> TimetableHubScreen(
                 onBack = onBack,
                 // ViewModel 由宿主创建（design/ios-port.md §11.2 ①）
@@ -714,9 +774,37 @@ class SubpageActivity : ComponentActivity() {
                 onOpenAiSettings = { SubpageActivity.start(this, SubpageScreen.AI_SETTINGS) },
             )
             SubpageScreen.PERMISSIONS_STORAGE -> PermissionsStorageScreen(onBack = onBack)
-            SubpageScreen.ABOUT_UPDATE -> AboutUpdateScreen(onBack = onBack)
-            SubpageScreen.TERMS_DECLARATIONS -> TermsDeclarationsScreen(onBack = onBack)
-            SubpageScreen.SUPPORT_DEV -> SupportDevScreen(onBack = onBack)
+            // 「关于」三页已在 shared/commonMain（iOS 移植 W1）：链接跳转 / 许可弹窗 / 条款弹窗
+            // 仍是 `:app` 的件，按槽位注入（`ui/me/hub/AboutPlatform.kt` 是 Android 侧那一份）。
+            SubpageScreen.ABOUT_UPDATE -> AboutUpdateScreen(
+                onBack = onBack,
+                onOpenUrl = { url -> openUrl(this, url) },
+                licensesDialog = { onDismiss -> LicensesDialog(onDismiss = onDismiss) },
+            )
+            SubpageScreen.TERMS_DECLARATIONS -> TermsDeclarationsScreen(
+                onBack = onBack,
+                noticeDialog = { title, intro, items, onDismiss ->
+                    NoticeDialog(
+                        title = title,
+                        intro = intro,
+                        items = items,
+                        onDismiss = onDismiss,
+                    )
+                },
+            )
+            SubpageScreen.SUPPORT_DEV -> SupportDevScreen(
+                onBack = onBack,
+                rewardQr = { modifier ->
+                    Image(
+                        painter = painterResource(REWARD_QR_RES),
+                        contentDescription = "赞赏码",
+                        contentScale = ContentScale.FillWidth,
+                        modifier = modifier,
+                    )
+                },
+                onSaveToGallery = { saveRewardQrToGallery(this) },
+                onOpenWechatScan = { onError -> openWechatScan(this, onError) },
+            )
             SubpageScreen.PAY_CODE -> PayCodeScreen(
                 onBack = onBack,
                 onOpenStatement = { SubpageActivity.start(this, SubpageScreen.CAMPUS_STATEMENT) },

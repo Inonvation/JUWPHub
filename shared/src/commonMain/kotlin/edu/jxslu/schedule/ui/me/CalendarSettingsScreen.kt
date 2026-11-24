@@ -1,8 +1,5 @@
 package edu.jxslu.schedule.ui.me
 
-import android.content.Context
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -23,37 +20,32 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.calendar.CalendarSyncer
+import androidx.lifecycle.viewmodel.CreationExtras
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.domain.CalendarSyncDefaults
 import edu.jxslu.schedule.domain.ScheduleExporter
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
+import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
+import edu.jxslu.schedule.ui.platform.CalendarSyncOutcome
 import kotlinx.coroutines.Dispatchers
+import kotlin.reflect.KClass
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -83,17 +75,22 @@ sealed interface SyncReadiness {
  * （[ScheduleRepository.expandedCalendarEvents]），权限也由本页运行时申请。
  * 页面进阶反馈：进页即展示就绪状态（学期/课程/事件数）；同步与删除期间整页忙碌
  * （进度条 + 动作禁用），防止重复触发——写整学期事件在低端机上要好几秒。
+ *
+ * ## iOS 移植 W1（2026-11-25）搬进 `commonMain`
+ *
+ * 系统日历写入与运行时权限都不在共享层，收成 [CalendarSyncActions] 槽位交给宿主；
+ * **null = 本平台没有系统日历**（iOS），此时同步 / 删除 / 权限三行整行不渲染。
+ * 该槽位挂在 [CalendarSettingsViewModel.actions] 上而不是再当参数传一遍：
+ * 宿主建 VM 时已经把它给了 VM（忙碌标志由它的回调复位），两处各拿一份容易给成两个实例。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarSettingsScreen(
     onBack: () -> Unit,
-    viewModel: CalendarSettingsViewModel = viewModel(
-        factory = CalendarSettingsViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
+    /** 由宿主创建（Android `viewModel {}`、iOS `remember {}`），见 `design/ios-port.md` §11.1。 */
+    viewModel: CalendarSettingsViewModel,
 ) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val actions = viewModel.actions
     val reminder by viewModel.reminderMinutes.collectAsStateWithLifecycle()
     val readiness by viewModel.readiness.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
@@ -106,18 +103,12 @@ fun CalendarSettingsScreen(
     var syncAfterGrant by remember { mutableStateOf(false) }
     var pendingSync by remember { mutableStateOf(false) }
 
-    // 日历权限状态：进页与从系统设置返回（ON_RESUME）时各读一次
-    var calendarGranted by remember {
-        mutableStateOf(hasCalendarPermission(context))
-    }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                calendarGranted = hasCalendarPermission(context)
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    // 日历权限状态：进页与从系统设置返回（回到前台）时各读一次。
+    // `rememberResumeTick` 是 `LocalLifecycleOwner` + `LifecycleEventObserver` 的共享层替代
+    //（`design/ios-port.md` §11.2 ⑥ 的替换表）。
+    val resumeTick = rememberResumeTick()
+    var calendarGranted by remember(resumeTick) {
+        mutableStateOf(actions?.isGranted() == true)
     }
 
     LaunchedEffect(message) {
@@ -127,44 +118,42 @@ fun CalendarSettingsScreen(
         }
     }
 
-    val calendarPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { grants ->
-        calendarGranted = grants.values.all { it }
-        // syncAfterGrant 是一次性意图：无论授予与否都消费掉，
-        // 避免「点同步→拒绝→事后从权限行授权」被误判为要续跑同步
-        val continueSync = syncAfterGrant
-        syncAfterGrant = false
-        if (grants.values.all { it }) {
-            pendingSync = continueSync
-        } else {
-            viewModel.onPermissionDenied()
-        }
-    }
-
     // 权限授予后的续跑放 LaunchedEffect，避免在 launcher 回调里直接调 VM 引发重组竞态
     //（与 WeekScreen 分享弹层的同步入口同一模式）
     LaunchedEffect(pendingSync) {
         if (pendingSync) {
             pendingSync = false
-            viewModel.sync(context)
+            viewModel.sync()
         }
     }
 
     fun startSync() {
+        val a = actions ?: return
         syncAfterGrant = true
-        val needed = AppPermissions.missing(context, AppPermissions.calendar)
-        if (needed.isEmpty()) {
-            viewModel.sync(context)
+        if (a.isGranted()) {
+            viewModel.sync()
         } else {
-            calendarPermissionLauncher.launch(needed.toTypedArray())
+            a.request { granted ->
+                calendarGranted = granted
+                // syncAfterGrant 是一次性意图：无论授予与否都消费掉，
+                // 避免「点同步→拒绝→事后从权限行授权」被误判为要续跑同步
+                val continueSync = syncAfterGrant
+                syncAfterGrant = false
+                if (granted) {
+                    pendingSync = continueSync
+                } else {
+                    viewModel.onPermissionDenied()
+                }
+            }
         }
     }
 
     fun requestCalendarPermission() {
+        val a = actions ?: return
         syncAfterGrant = false
-        val needed = AppPermissions.missing(context, AppPermissions.calendar)
-        if (needed.isNotEmpty()) calendarPermissionLauncher.launch(needed.toTypedArray())
+        if (!a.isGranted()) {
+            a.request { granted -> calendarGranted = granted }
+        }
     }
 
     // 未授权不禁用同步行：点「同步」本身就是授权入口（运行时申请后续跑）
@@ -203,27 +192,31 @@ fun CalendarSettingsScreen(
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                     Spacer(Modifier.height(6.dp))
                 }
-                SettingItem(
-                    title = "同步课表到日历",
-                    subtitle = when {
-                        busy -> "正在写入日历…"
-                        readiness is SyncReadiness.Ready ->
-                            "将写入 ${(readiness as SyncReadiness.Ready).eventCount} 条日程 · 以 App 课表为准"
-                        readiness is SyncReadiness.NoSemester -> "先到「我的 → 课表设置」配置学期"
-                        readiness == null -> "正在统计…"
-                        else -> "当前课表还没有课程"
-                    },
-                    onClick = { startSync() },
-                    enabled = syncEnabled,
-                    icon = AppIcons.CalendarAdd01,
-                )
-                SettingItem(
-                    title = "一键删除已同步课程",
-                    subtitle = if (busy) "请等当前动作完成" else "只删除本应用写入的日历事件",
-                    onClick = { showDeleteConfirm = true },
-                    enabled = !busy,
-                    icon = AppIcons.Delete02,
-                )
+                // 三行同步动作只在有系统日历时才渲染：null = 本平台做不到（iOS），
+                // 给个点了没反应的入口比没有更糟（`design/ios-port.md` §11.2 ④）
+                if (actions != null) {
+                    SettingItem(
+                        title = "同步课表到日历",
+                        subtitle = when {
+                            busy -> "正在写入日历…"
+                            readiness is SyncReadiness.Ready ->
+                                "将写入 ${(readiness as SyncReadiness.Ready).eventCount} 条日程 · 以 App 课表为准"
+                            readiness is SyncReadiness.NoSemester -> "先到「我的 → 课表设置」配置学期"
+                            readiness == null -> "正在统计…"
+                            else -> "当前课表还没有课程"
+                        },
+                        onClick = { startSync() },
+                        enabled = syncEnabled,
+                        icon = AppIcons.CalendarAdd01,
+                    )
+                    SettingItem(
+                        title = "一键删除已同步课程",
+                        subtitle = if (busy) "请等当前动作完成" else "只删除本应用写入的日历事件",
+                        onClick = { showDeleteConfirm = true },
+                        enabled = !busy,
+                        icon = AppIcons.Delete02,
+                    )
+                }
                 SettingItem(
                     title = "提醒时长",
                     subtitle = "修改后重新同步即可更新已写入的提醒",
@@ -232,17 +225,19 @@ fun CalendarSettingsScreen(
                     enabled = !busy,
                     icon = AppIcons.CalendarClock,
                 )
-                SettingItem(
-                    title = "日历读写权限",
-                    subtitle = if (calendarGranted) "已授予" else "未授予 · 点此授权",
-                    onClick = if (calendarGranted) {
-                        null
-                    } else {
-                        { requestCalendarPermission() }
-                    },
-                    icon = AppIcons.CalendarSetting01,
-                    showArrow = !calendarGranted,
-                )
+                if (actions != null) {
+                    SettingItem(
+                        title = "日历读写权限",
+                        subtitle = if (calendarGranted) "已授予" else "未授予 · 点此授权",
+                        onClick = if (calendarGranted) {
+                            null
+                        } else {
+                            { requestCalendarPermission() }
+                        },
+                        icon = AppIcons.CalendarSetting01,
+                        showArrow = !calendarGranted,
+                    )
+                }
             }
         }
     }
@@ -257,7 +252,7 @@ fun CalendarSettingsScreen(
             confirmEnabled = !busy,
             onConfirm = {
                 showDeleteConfirm = false
-                viewModel.deleteSynced(context)
+                viewModel.deleteSynced()
             },
             onDismiss = { showDeleteConfirm = false },
         )
@@ -277,11 +272,16 @@ fun CalendarSettingsScreen(
     }
 }
 
-private fun hasCalendarPermission(context: Context): Boolean =
-    AppPermissions.calendarGranted(context)
-
+/**
+ * 日历同步页的状态机。
+ *
+ * 构造只吃共享层类型（`design/ios-port.md` §11.2 ③）：仓库来自 `Services.current.scheduleRepository()`，
+ * 系统日历能力由宿主在构造时把 [CalendarSyncActions] 传进来（可为 null）。
+ */
 class CalendarSettingsViewModel(
     private val repo: ScheduleRepository,
+    /** 系统日历能力；null = 本平台没有（iOS），同步与删除入口据此不渲染。 */
+    val actions: CalendarSyncActions?,
 ) : ViewModel() {
 
     /** 提前提醒分钟数（全局）。初值阻塞读真值，改过的用户进页不会先显示默认再跳。 */
@@ -292,7 +292,7 @@ class CalendarSettingsViewModel(
             runBlocking { repo.calendarReminderMinutes.first() },
         )
 
-    /** 就绪状态随学期/课表数据自动刷新；null = 还在算。展开是纯 JVM 计算，放 Default 池。 */
+    /** 就绪状态随学期/课表数据自动刷新；null = 还在算。展开是纯计算，放 Default 池。 */
     val readiness: StateFlow<SyncReadiness?> = combine(
         repo.semester,
         repo.courses,
@@ -330,7 +330,8 @@ class CalendarSettingsViewModel(
         }
     }
 
-    fun sync(context: Context) {
+    fun sync() {
+        val a = actions ?: return
         // 忙碌标志在进入协程前同步置位：viewModelScope 的调度有延迟，
         // 放协程体内会让同帧内的第二次点击也通过防线
         if (_busy.value) return
@@ -342,45 +343,25 @@ class CalendarSettingsViewModel(
                     _message.value = "请先在「我的 → 课表设置」配置学期，并确认课表不为空"
                     return@launch
                 }
-                _message.value = when (val r = CalendarSyncer.sync(context, events, reminderMinutes.value)) {
-                    is CalendarSyncer.CalendarSyncResult.Success ->
-                        CalendarSyncDefaults.syncSuccessMessage(
-                            r.count,
-                            reminderMinutes.value,
-                            r.reminderMissing,
-                        )
-                    is CalendarSyncer.CalendarSyncResult.Deleted ->
-                        "已删除 ${r.count} 条课程日历"
-                    is CalendarSyncer.CalendarSyncResult.NoCalendarAccount ->
-                        "手机上没有可用日历账户，请先在系统日历中登录或添加账户"
-                    is CalendarSyncer.CalendarSyncResult.NoPermission ->
-                        "日历权限未授予，无法同步"
-                    is CalendarSyncer.CalendarSyncResult.Error ->
-                        "同步失败：${r.message}"
-                }
+                _message.value = a.sync(events, reminderMinutes.value)
+                    .describeSync(reminderMinutes.value)
+            } catch (e: Exception) {
+                _message.value = "同步失败：${e.message}"
             } finally {
                 _busy.value = false
             }
         }
     }
 
-    fun deleteSynced(context: Context) {
+    fun deleteSynced() {
+        val a = actions ?: return
         if (_busy.value) return
         _busy.value = true
         viewModelScope.launch {
             try {
-                _message.value = when (val r = CalendarSyncer.deleteSynced(context)) {
-                    is CalendarSyncer.CalendarSyncResult.Deleted ->
-                        if (r.count == 0) "日历中没有本应用同步的课程" else "已从日历删除 ${r.count} 条课程"
-                    is CalendarSyncer.CalendarSyncResult.NoPermission ->
-                        "日历权限未授予，无法删除"
-                    is CalendarSyncer.CalendarSyncResult.Error ->
-                        "删除失败：${r.message}"
-                    is CalendarSyncer.CalendarSyncResult.Success ->
-                        "已从日历删除课程"
-                    is CalendarSyncer.CalendarSyncResult.NoCalendarAccount ->
-                        "手机上没有可用日历账户"
-                }
+                _message.value = a.deleteSynced().describeDelete()
+            } catch (e: Exception) {
+                _message.value = "删除失败：${e.message}"
             } finally {
                 _busy.value = false
             }
@@ -391,9 +372,34 @@ class CalendarSettingsViewModel(
         _message.value = "未授予日历权限，无法同步"
     }
 
-    class Factory(private val repo: ScheduleRepository) : ViewModelProvider.Factory {
+    class Factory(
+        private val repo: ScheduleRepository,
+        private val actions: CalendarSyncActions?,
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            CalendarSettingsViewModel(repo) as T
+        override fun <T : ViewModel> create(modelClass: KClass<T>, extras: CreationExtras): T =
+            CalendarSettingsViewModel(repo, actions) as T
     }
+}
+
+/** 同步结果 → 提示文案（口径与课表页分享弹层共用 [CalendarSyncDefaults.syncSuccessMessage]）。 */
+private fun CalendarSyncOutcome.describeSync(reminderMinutes: Int): String = when (this) {
+    is CalendarSyncOutcome.Synced ->
+        CalendarSyncDefaults.syncSuccessMessage(count, reminderMinutes, reminderMissing)
+    is CalendarSyncOutcome.Deleted -> "已删除 $count 条课程日历"
+    CalendarSyncOutcome.NoCalendarAccount -> "手机上没有可用日历账户，请先在系统日历中登录或添加账户"
+    CalendarSyncOutcome.NoPermission -> "日历权限未授予，无法同步"
+    CalendarSyncOutcome.Unsupported -> "本平台不支持写入系统日历"
+    is CalendarSyncOutcome.Error -> "同步失败：$message"
+}
+
+/** 删除结果 → 提示文案。删除是同步的一个分支，文案却不能说「已同步」，所以单列一份。 */
+private fun CalendarSyncOutcome.describeDelete(): String = when (this) {
+    is CalendarSyncOutcome.Deleted ->
+        if (count == 0) "日历中没有本应用同步的课程" else "已从日历删除 $count 条课程"
+    CalendarSyncOutcome.NoPermission -> "日历权限未授予，无法删除"
+    CalendarSyncOutcome.NoCalendarAccount -> "手机上没有可用日历账户"
+    CalendarSyncOutcome.Unsupported -> "本平台不支持写入系统日历"
+    is CalendarSyncOutcome.Synced -> "已从日历删除课程"
+    is CalendarSyncOutcome.Error -> "删除失败：$message"
 }
