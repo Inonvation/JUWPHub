@@ -16,10 +16,19 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $mainDir = Join-Path $root 'app\src\main\java'
 $testDir = Join-Path $root 'app\src\test\java'
+# 2026-11-24（iOS 移植 P0）：domain 层已整体搬进 :shared，扫描范围必须跟上，
+# 否则 136 个共享文件逃过重复检查——那正是最容易「又抄一份」的地方。
+$sharedDir = Join-Path $root 'shared\src'
 
 if (-not (Test-Path $mainDir)) { Write-Host "找不到 $mainDir"; exit 2 }
 
 $files = Get-ChildItem $mainDir -Recurse -Filter *.kt
+if (Test-Path $sharedDir) {
+    $files = $files + (Get-ChildItem $sharedDir -Recurse -Filter *.kt)
+} else {
+    # shared 缺失说明 P0 被回退了，别静默少扫一半
+    Write-Host "警告：找不到 $sharedDir，重复检查只覆盖 :app" -ForegroundColor Yellow
+}
 $testFiles = if (Test-Path $testDir) { Get-ChildItem $testDir -Recurse -Filter *.kt } else { @() }
 $allText = (($files + $testFiles) | ForEach-Object { [System.IO.File]::ReadAllText($_.FullName) }) -join "`n"
 $refCount = @{}
