@@ -196,8 +196,12 @@ dependencies {
     // 小组件兜底刷新：WorkManager 15 分钟周期任务（进程被杀后仍能刷）
     implementation("androidx.work:work-runtime-ktx:2.7.1")
 
-    // 非传递：只用它的图标 AAR，不借它的依赖把 compose/core 的版本边界搅进来
-    implementation("com.github.rikkahub:hugeicons-compose:1.4") {
+    // HugeIcons 只在**构建期**用：图标数据已导出成 `:shared` 里的 `ui/icon/AppIcons.kt`
+    // （纯 CMP `ImageVector`，iOS 可用），运行时不再需要这个 Android-only AAR。
+    // 留着它是给 `app/src/test/.../tools/IconExportTool.kt` 重新生成图标用的——
+    // 新增图标时先写调用点，再跑那条命令重导。
+    // 仍然 `isTransitive = false`：只用它的图标 AAR，不借它的依赖把 compose/core 版本边界搅乱。
+    testImplementation("com.github.rikkahub:hugeicons-compose:1.4") {
         isTransitive = false
     }
 
@@ -229,4 +233,15 @@ dependencies {
     implementation("com.amap.api:3dmap:10.0.600")
 
     testImplementation("junit:junit:4.13.2")
+}
+
+/**
+ * 图标导出开关透传（见 IconExportTool）：`-D` 交给的是 Gradle 自己的 JVM，
+ * 单测跑在 fork 出来的 JVM 里默认看不到它，所以把 `exportIcons` 显式传下去。
+ * 命令行没传这项就不设，日常单测的行为完全不变。
+ *
+ * 用法：`.\gradlew.bat :app:testDebugUnitTest --tests "*IconExportTool*" -DexportIcons=true`
+ */
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    System.getProperty("exportIcons")?.let { systemProperty("exportIcons", it) }
 }
