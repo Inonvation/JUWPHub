@@ -603,6 +603,50 @@ agent 同时改（每个 agent 只改自己那几个文件、不跑 Gradle），
 - **expect 要做成 `@Composable` 才能保留 `remember` 语义**。`Motion` 原本是
   `remember(context) { 读设置 }`——换成普通函数就退化成每帧读系统属性。
 
+**第二批已落地（2026-11-24）：课表网格一族 + 两条新缝**
+
+搬进 `commonMain` 的 6 个文件（包名不变，`:app` 调用点零改动）：`ui/week/WeekGrid.kt`(548)、
+`ui/week/WeekGridLayout.kt`(200)、`ui/week/GridTypeSpec.kt`(82)、`ui/common/CourseUi.kt`(619)、
+`ui/common/WheelPicker.kt`(269)、`data/DefaultData.kt`(49)；另新建 `ui/week/WeekGridPreview.kt`。
+预览屏是纯 `@Composable` + 常量数据（不接 ViewModel / Room / DataStore），iOS 根视图改成
+`WeekGridPreview` : `LinkValidationScreen` = 3:2，网格渲染与定点小数校验同屏可验。
+
+| 新缝 | Android | iOS |
+|---|---|---|
+| `expect @Composable rememberAppHaptics(): AppHaptics` | `HapticFeedbackConstants`（CONTEXT_CLICK / CLOCK_TICK / API30+ CONFIRM） | `UIImpactFeedbackGenerator` 一族，四档压三档 |
+| `expect @Composable DialogWindowFadeEffect()` | 挂 `windowAnimations`；样式与两个 `@anim` 搬到 `shared/src/androidMain/res/` | 空实现（iOS 没有弹窗 window 这个概念） |
+
+**第四条通用口径**（前三条见上）：**开关类全局状态的注入点用可变 lambda，不用 CompositionLocal**。
+`HapticsSettings.isEnabled` 由 `JuwApplication` 把 DataStore 的 `hapticsEnabled` 收集进来——开关只在
+手指按下那一刻读一次，不需要触发重组。这条让 `commonMain` 不必认识 `Graph` / `Context`。
+
+**三条踩出来的硬规律**：
+
+1. **同包引用是 import 扫描的盲区**。`CourseUi.kt` 的 import 全是 Compose 与 domain，看着完全可搬，
+   实际引用了同包的 `WheelValueDialog`（在 `WheelPicker.kt`）与 `rememberAppHaptics`（在 `Haptics.kt`）。
+   判据只能是「搬过去 + 跑 `:shared:metadataCommonMainClasses`」；grep 结论只能用来排顺序，不能下结论。
+2. **搬之前先 grep `^\s*internal ` 一次列全**。这批提了 15 个（`weekDate` / `dayLabels` / `TimeRail` /
+   `WeekPage` / `EmptyScheduleHint` / `GridLayout` / `buildGridLayout` / `nowMarker` / `MinRowHeight` /
+   `GridEndGap` / `shareBoardGridHeightDp` / `NowMarker` / `minHeaderHeightForDateFont` / `GridTypeSpec` /
+   `rememberGridTypeSpec`），全部补了「为什么公开」的 KDoc。
+3. **Android 资源要跟着代码走**。样式一旦被 `commonMain` 调用，资源就得搬进
+   `shared/src/androidMain/res/`（库自己那套 R 是 `edu.jxslu.schedule.shared.R`），留在 `:app` 里
+   共享层根本拿不到。**别用「删掉调用」绕过去**——第一版就是那么干的，Android 侧三个滚轮弹窗
+   白丢淡入淡出，这一版补回来了。
+
+**下一批（顺序按「搬完必编译」排，别再按包名猜耦合）**：
+
+| 批 | 内容 | 文件 / 行 | 需先立的缝 | 风险 |
+|---|---|---|---|---|
+| 1 | `ui/common` 中枢：`AppCard` `SettingsUi` `AppNotice` `SheetDismissIme` `Skeleton` `LoadingHint` `Charts` `CourseDetailSheet` … | 27 / 3,663 | 无（Haptics 已就绪）；4 处 `System.currentTimeMillis()` → `Clock.System`，2 处 internal→public | 低 |
+| 2 | 跨包叶子：`ai/AiProposalCard`(955) `ai/SchedulePreviewGrid` `wenqu/WenquCards` `widget/WaterWidgetModels` … | 14 / 2,277 | 无 | 低–中 |
+| 3 | 弹窗族：`LegalDialogs` `ConfirmDialog` `LaunchGate` `RechargeDisclaimerDialog` … | 6 / 766 | `SystemClock.elapsedRealtime()` → `TimeSource.Monotonic` | 中 |
+| 4 | 页面骨架 + 58 个 `material.icons` 使用者 | 2 + 56 | `:shared` 加 CMP material-icons 坐标（是坐标问题，不是缝） | 中 |
+| 5 | 位图 / 附件簇：`AttachmentImage` `MarkdownView` `BitmapSave` `QuickScan` … | 10 / 1,625 | 中性 Bitmap 类型 + 相册 + 文件选择 + 去 Context | 高 |
+
+**别先做**：`material.icons`（58 文件，换坐标会动版本线）与位图簇（一次四缝同时上）。
+上面「`common` 应该最后动」的判断已被这批修正：**无平台依赖的那一半必须最先动**，它解锁 100+ 个引用方。
+
 ### P3 iOS 壳与系统扩展（3–5 周）
 
 SwiftUI 容器 + `ComposeUIViewController`；WidgetKit 读 App Group 数据；通知授权引导；Live Activity；扫码。
@@ -699,6 +743,20 @@ KMP framework 由 Xcode 的 Build Phase 调 `./gradlew :shared:embedAndSignApple
 
 版本号单一来源：`gradle.properties` 的 `versionName` / `versionCode`，iOS 由
 `scripts/ios-gen-version.sh` 写成 `iosApp/Config/Version.xcconfig`；同一 tag 双产物。
+
+**2026-11-24 实测补充**（真实 workflow 与上面这段草稿不同，以 `.github/workflows/` 下两份文件为准）：
+
+- push 只由 `ios-ipa.yml` 接管（Android SDK + link arm64 + xcodegen + xcodebuild + 打包），
+  `ios-compile.yml` 只留 PR 与手工触发——两个 macOS workflow 同时排队会抢不到 runner
+  （实测报 `The job was not acquired by Runner of type hosted`）。
+- **`Info.plist` 必须有 `CADisableMinimumFrameDurationOnPhone = true`**。CMP 1.7 起这是硬性运行时
+  校验，缺了或为 false 时 iPhone 上启动即被 `PlistSanityCheck` 抛异常终止
+  （[CMP 1.7.0 breaking changes](https://github.com/JetBrains/compose-multiplatform/releases/tag/v1.7.0)）。
+  2026-11-24 第一版 IPA 就漏了这一项，侧载后点开直接闪退。
+- 必须 `-configuration Release` + `ENABLE_DEBUG_DYLIB=NO`：Debug 会把代码塞进
+  `JUWPHub.debug.dylib`（实测 59 MB），主二进制只剩壳，侧载后容易起不来。workflow 里有断言。
+- Kotlin 侧仍链 **debug** framework（`linkDebugFrameworkIosArm64`）：它与 Xcode 的优化级别无关，
+  功能等价且 CI 快。出正式分发包时再换成 `linkReleaseFrameworkIosArm64`。
 
 **不做**：不上架 App Store（抓第三方数据、非官方身份，审核过不了）；不用企业签/超级签分发（违规，
 随时集体吊销）；不把证书进 CI secrets（免费证书 7 天失效，签出来对任何设备都无效）。

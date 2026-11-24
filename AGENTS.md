@@ -284,9 +284,14 @@ MainActivity
    PowerBankPay / Onboarding / SubpageActivity（二级页，路由枚举见 SubpageScreen）
 
 shared/       KMP 共享逻辑（iOS 移植 P0/P2 起）：commonMain 已装 **domain 层全部** + qzxy/wenqu/qiekj
-              的 wire model + **`ui/theme` 整包** + **`ui/icon/AppIcons.kt`**（143 个文件；包名保留原样，
-              所以 `data.qzxy.*` 也会出现在这里，是有意的）。已接 Compose Multiplatform 1.7.3。
-              androidMain / iosMain 只放 expect/actual 的平台实现（条码、定点小数）。
+              的 wire model + **`ui/theme` 整包** + **`ui/icon/AppIcons.kt`** + **课表网格一族**
+              （`ui/week/WeekGrid` `WeekGridLayout` `GridTypeSpec` `WeekGridPreview`、
+              `ui/common/CourseUi` `WheelPicker` `Haptics` `DialogWindowFade`）+ `data/DefaultData`
+              （11 小节作息与默认学期的唯一来源；包名保留原样，所以 `data.qzxy.*` 也会出现在这里，是有意的）。
+              已接 Compose Multiplatform 1.7.3。
+              androidMain / iosMain 只放 expect/actual 的平台实现（条码、定点小数、触感、
+              弹窗窗口动画），另有 `shared/src/androidMain/res/`（弹窗动画样式与两个 `@anim`，
+              R 在 `edu.jxslu.schedule.shared.R`）。
               **commonMain 必须零 JVM 专有 API**，判据是 `:shared:metadataCommonMainClasses`。
               新写 commonMain 代码前先看 `design/ios-port.md` 的「JVM 默认导入陷阱」表。
               `app/.../domain` 目录已删除——**新域层代码写进 `shared/src/commonMain/kotlin/
@@ -294,7 +299,8 @@ shared/       KMP 共享逻辑（iOS 移植 P0/P2 起）：commonMain 已装 **d
 data/         Android 平台实现（Room / Retrofit / DataStore / 通知 / 蓝牙 …）；wire model 已部分上移
 platform/     **平台能力缝**（在 `:shared` 里，`edu.jxslu.schedule.platform`）：目前有 `Logger`
               （expect/actual，Android 落 `android.util.Log`、iOS 落 `NSLog`）。新增平台能力
-              （剪贴板/分享/相册/权限）都往这里放，别塞进 `domain/`
+              （剪贴板/分享/相册/权限）都往这里放，别塞进 `domain/`。UI 侧的缝放在用到它的包内
+              （如 `ui/common/Haptics`），口径见 `design/ios-port.md` P2 的四条
 net/          `:shared` 的 `data/net/SharedHttp`（Ktor client，两端共用）+ `:app` 的 `data/net/AppHttp`
               （OkHttp 专用，正在被 Ktor 逐个模块替换，全部迁完后删除）
 data/local    Room v21（表清单见「工程实况」；迁移只加不删，实体索引必须与迁移对齐）
