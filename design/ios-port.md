@@ -867,3 +867,46 @@ KMP framework 由 Xcode 的 Build Phase 调 `./gradlew :shared:embedAndSignApple
 2. **P-1 第二批**：网络收口 + 会话纯函数化（3、4）——这一步决定后续会不会翻车。
 3. **并行**：申请 iOS 高德 key（绑 `edu.jxslu.schedule`），不占工时。
 4. 之后按 §4 的 P0 起骨架。
+
+## 10. M1 / M2 现状（2026-11-25）
+
+本节记录「数据层搬完之后」这一批做了什么、还差什么。前面的 §4/§5 是规划，这一节是实况。
+
+### 10.1 已立的平台缝
+
+| 缝 | 位置 | Android | iOS |
+|---|---|---|---|
+| 服务装配 `AppServices` / `Services` | `platform/AppServices.kt` | `GraphServices`（转接 `Graph`，`Graph` 本体未改） | `IosServices` |
+| `collectAsStateWithLifecycle` | `platform/LifecycleState.kt` | 转调官方实现（行为一字不改） | 退化到 `collectAsState` |
+| `locked` | `platform/Lock.kt` | `synchronized` | 直接跑（不加锁） |
+| `ResumedTickerEffect` / `rememberResumedNow` | `ui/common/ResumedTicker.kt` | `repeatOnLifecycle(RESUMED)` | 无暂停条件 |
+| `platformFileSystem()` | `platform/FileSystem.kt` | `FileSystem.SYSTEM` | `FileSystem.SYSTEM`（okio Posix） |
+| WebView | `ui/web/WebViewController.kt` | `AndroidView` + `WebView` | `UIKitView` + `WKWebView` |
+
+**`lifecycle-runtime-compose` 不能进 `commonMain`**：它的 KMP 变体要 Compose 1.9，本仓锁 CMP 1.7.3。
+所以只加在 `androidMain`，给 `LifecycleState.android.kt` 转调用；`commonMain` 里那份是 expect。
+
+### 10.2 已搬进 commonMain 的页面
+
+- `ui/week/WeekViewModel.kt`：只吃 `ScheduleRepository` + `kotlinx.datetime`；导出改为只产出文本
+  （`csvExport()` / `jsonExport()` 返回「文本 + 成功文案」），落盘归调起方；`canQuickCheck`
+  表达「本平台有没有教务直取链」。
+- `ui/week/WeekScreen.kt` + `WeekSheets.kt` + `QuickCheckText.kt`：平台动作收成四个可空回调
+  （`onPickJsonFile` / `onSaveTextFile` / `onSyncCalendar` / `backgroundExists`）与一个
+  `displaySettings` 槽。**null = 本平台没有这项能力，入口整行不渲染**，不是临时缺省。
+- `ui/common/ConfirmDialog.kt` / `ImportConfirmDialog.kt` / `BackupImportText.kt`、
+  `ui/jwvw/JwImportResultBus.kt`。
+
+跨模块 `internal` 会失效：`TopBarHeight`、`GridTypography`、`quickCheckFeedback`、`OutcomeQueue`
+因此放开成 `public`，KDoc 里各自写了原因。
+
+### 10.3 还差的（按优先级）
+
+1. **iOS 教务会话**：`JwReadSession` 目前只有 OkHttp 实现（`:app` 的 `CasSession`）。要 Ktor 版
+   才能让 iOS 抓课表。WebView 已经能登录并读到 Cookie（`WebViewController.getCookieHeader`），
+   缺的是「Cookie → Ktor 会话 → 解析 → 落库」这条链的最后一节。
+2. **iOS 文件选择 / 另存**：`onPickJsonFile` / `onSaveTextFile` 在 iOS 侧没有实现，
+   JSON 导入导出因此不出现。要 `UIDocumentPickerViewController`。
+3. **iOS 系统日历写入**：`onSyncCalendar` 没有实现，分享弹层里那一行不出现。
+4. 今日页：`TodayScreen` 1493 行，挂着 `ActiveServiceCard`（1175 行，依赖尚未移植的单车 /
+   趣智 / U净 / 一卡通服务），要等那些服务搬完再动。

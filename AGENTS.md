@@ -288,12 +288,16 @@ shared/       KMP 共享逻辑（iOS 移植 P0/P2 起）：commonMain 已装 **d
               （`ui/week/WeekGrid` `WeekGridLayout` `GridTypeSpec` `WeekGridPreview`、
               `ui/common/CourseUi` `WheelPicker` `Haptics` `DialogWindowFade`）+ `data/DefaultData`
               （11 小节作息与默认学期的唯一来源；包名保留原样，所以 `data.qzxy.*` 也会出现在这里，是有意的）。
-              已接 Compose Multiplatform 1.7.3。
+              M1（2026-11-25）起再加：**`data/prefs`**（DataStore KMP）、**`data/repo`**（仓库与同步编排）、
+              **`data/local`**（`JuwDatabase` + `JsonFileStore` 一族）、`platform/`（六条缝，见
+              `design/ios-port.md` §10.1）、**`ui/week` 整包**（课表页与 `WeekViewModel` 已完整共享）。
+              页面靠 `platform/AppServices` + `Services` 取依赖，**不要**再往共享层引入 `Context`。
               androidMain / iosMain 只放 expect/actual 的平台实现（条码、触感、
-              弹窗窗口动画），另有 `shared/src/androidMain/res/`（弹窗动画样式与两个 `@anim`，
-              R 在 `edu.jxslu.schedule.shared.R`）。
+              弹窗窗口动画、服务装配 `GraphServices` / `IosServices`），另有 `shared/src/androidMain/res/`
+              （弹窗动画样式与两个 `@anim`，R 在 `edu.jxslu.schedule.shared.R`）。
               **commonMain 必须零 JVM 专有 API**，判据是 `:shared:metadataCommonMainClasses`。
               新写 commonMain 代码前先看 `design/ios-port.md` 的「JVM 默认导入陷阱」表。
+              跨模块 `internal` 不可见：被 `:app` 的测试或页面用到的符号得放开成 `public`（已有 5 例）。
               `app/.../domain` 目录已删除——**新域层代码写进 `shared/src/commonMain/kotlin/
               edu/jxslu/schedule/domain/`**
 data/         Android 平台实现（Room / Retrofit / DataStore / 通知 / 蓝牙 …）；wire model 已部分上移

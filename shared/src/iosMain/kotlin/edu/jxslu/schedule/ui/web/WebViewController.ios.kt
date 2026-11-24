@@ -191,7 +191,9 @@ private class IosWebHost {
     private fun readCookieHeader(url: String, onResult: (String?) -> Unit) {
         val host: String? = NSURL.URLWithString(url)?.host
         WKWebsiteDataStore.defaultDataStore().httpCookieStore.getAllCookies { cookies ->
-            val header = cookies
+            // `getAllCookies` 的入参在 Kotlin/Native 里是**可空**的 `List<*>?`（ObjC 的
+            // `NSArray` 没做非空标注），直接 `cookies.filter` 编不过，先 orEmpty。
+            val header = cookies.orEmpty()
                 .filterIsInstance<NSHTTPCookie>()
                 .filter { cookie -> host == null || domainMatches(host, cookie.domain) }
                 .mapNotNull { cookie -> cookie.value?.let { value -> "${cookie.name}=$value" } }
@@ -217,6 +219,14 @@ private class NavigationDelegate(
         controller.onPageFinished?.invoke(webView.URL?.absoluteString.orEmpty())
     }
 
+    /**
+     * 加载失败（已开始接收内容之后）。
+     *
+     * 与下面的 provisional 版**在 Kotlin 里是同一个签名**（`WKWebView, WKNavigation?, NSError`），
+     * 所以两个 override 都必须标 `@ObjCSignatureOverride`——只标一个仍报 Conflicting overloads
+     * （2026-11-25 CI 实测）。
+     */
+    @ObjCSignatureOverride
     override fun webView(webView: WKWebView, didFailNavigation: WKNavigation?, withError: NSError) {
         controller.onError?.invoke(withError.localizedDescription)
     }
