@@ -85,8 +85,10 @@ import edu.jxslu.schedule.data.repo.TextbookSync
 import edu.jxslu.schedule.data.jw.TranscriptClient
 import edu.jxslu.schedule.data.jw.JwVpnDetector
 import edu.jxslu.schedule.data.repo.TranscriptStore
+import edu.jxslu.schedule.data.AndroidSessionExpirySink
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.data.session.CredentialVault
+import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.data.session.SessionExpiryStore
 import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
@@ -139,6 +141,9 @@ object Graph {
 
     @Volatile
     private var sessionExpiryStore: SessionExpiryStore? = null
+
+    /** [sessionExpirySink] 的单例（同一份 [sessionExpiryStore] 的共享层视图）。 */
+    private var sessionExpirySink: SessionExpirySink? = null
 
     @Volatile
     private var qzxyRepository: QzxyRepository? = null
@@ -652,6 +657,18 @@ object Graph {
                 .also { sessionExpiryStore = it }
         }
 
+    /**
+     * 上面那条留痕的**共享层视图**（iOS 移植 S15，2026-11-24）：问渠 / U净 的仓库已搬进
+     * `:shared`，它们只认 `SessionExpirySink`（见其 KDoc），这里给同一条标记套一层适配器。
+     * 仍与 [sessionExpiry] 共用同一个 [SessionExpiryStore] 实例——页面侧的 `consume` 与
+     * 仓库侧的 `mark` 必须是同一份标记，否则「已过期」提示永远不会出现。
+     */
+    fun sessionExpirySink(context: Context): SessionExpirySink =
+        sessionExpirySink ?: synchronized(this) {
+            sessionExpirySink ?: AndroidSessionExpirySink(sessionExpiry(context.applicationContext))
+                .also { sessionExpirySink = it }
+        }
+
     /** 胖乖仓库单例（DESIGN §4.10）：Retrofit client 只建一次，token 存加密 prefs。 */
     fun qiekj(context: Context): QiekjRepository =
         qiekjRepository ?: synchronized(this) {
@@ -756,7 +773,7 @@ object Graph {
         wenquRepository ?: synchronized(this) {
             wenquRepository ?: WenquRepository(
                 WenquCredentialStore(context.applicationContext),
-                expiry = sessionExpiry(context.applicationContext),
+                expiry = sessionExpirySink(context.applicationContext),
                 // 「猜你想用」：报名成功记一次真实订单（含预报名自动提交成功）
                 onApplied = { recordGuessOrder(GuessTarget.WENQU) },
             ).also { wenquRepository = it }

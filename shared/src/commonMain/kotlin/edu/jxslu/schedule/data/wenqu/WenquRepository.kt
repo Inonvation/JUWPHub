@@ -1,7 +1,8 @@
 package edu.jxslu.schedule.data.wenqu
 
-import edu.jxslu.schedule.data.session.SessionExpiryStore
-import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.data.session.SessionExpirySink
+import edu.jxslu.schedule.data.session.SessionServiceIds
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.WenquRules
 import kotlinx.coroutines.CancellationException
@@ -17,8 +18,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
-import java.io.IOException
-import java.util.Base64
+import okio.ByteString.Companion.decodeBase64
 
 /**
  * `volunteer/v2` 的**一页响应**（仓库层模型）。
@@ -136,7 +136,7 @@ data class WenquActivityIndex(
  *
  * 纯函数，JVM 可测。
  */
-internal fun mergeNewest(
+fun mergeNewest(
     old: List<WenquActivity>,
     fresh: List<WenquActivity>,
     cap: Int,
@@ -155,7 +155,7 @@ internal fun mergeNewest(
  *
  * `id ≤ 0` 的条目（平台没给 id）不去重——它们没有身份，硬按 0 合并会把好几条挤成一条。
  */
-internal fun mergeActivities(
+fun mergeActivities(
     primary: List<WenquActivity>,
     secondary: List<WenquActivity>,
 ): List<WenquActivity> {
@@ -185,14 +185,27 @@ internal fun mergeActivities(
  * - **唯一例外是预报名**（2026-10-16 用户拍板）：只对用户点名的单条活动、
  *   在有限窗口与次数内自动试发（[preregApplyOnce]），见 `WenquPreregRunner`；
  * - 取数失败**不落任何影子**（宁旧勿空：账号卡那一行保留上次工时）。
+ *
+ * ## iOS 移植 S15（2026-11-24）：整类搬进 `:shared`
+ *
+ * 三处跟着换，都是「JVM 专有 API → 共享层等价物」，口径不变：
+ * - `withContext(Dispatchers.Default)` → [Dispatchers.Default]：Ktor 的请求本身是挂起的、不占线程，
+ *   `Dispatchers.IO` 在 commonMain 里取不到（Kotlin/Native 没有 IO 调度器）。
+ *   代价是 CPU 池跑网络等待，但本类一次最多并发两个请求（预报名启动校对），不影响体验；
+ * - `java.util.Base64`（MIME 解码器）→ okio 的 base64 解码（先剥空白，等价于 MIME 的容错）；
+ * - `java.io.IOException` 不再可见：写请求「结果不明」的判据改成「**不是**业务拒绝，
+ *   或业务异常自带 cause」（见 [isAmbiguousWriteFailure]），与迁移前逐条等价。
+ *
+ * 凭证落盘与「已过期」留痕都改成接口：[WenquSessionStore] / [SessionExpirySink]——
+ * 两者的介质（EncryptedSharedPreferences、SharedPreferences）都是 Android 专有，留在 `:app`。
  */
 class WenquRepository(
-    private val store: WenquCredentialStore,
-    /** 「登录状态已过期」留痕（见 [SessionExpiryStore]）：失效当场写、进页消费。 */
-    private val expiry: SessionExpiryStore? = null,
+    private val store: WenquSessionStore,
+    /** 「登录状态已过期」留痕（见 [SessionExpirySink]）：失效当场写、进页消费。 */
+    private val expiry: SessionExpirySink? = null,
     private val api: WenquApi = WenquApi.create(),
-    /** 可注入的时钟（测试用假时钟，生产走系统钟）。 */
-    private val now: () -> Long = System::currentTimeMillis,
+    /** 可注入的时钟（测试用假时钟，生产走 [AppClock]）。 */
+    private val now: () -> Long = { AppClock.nowMillis() },
     /**
      * 报名成功的一次性回调（「猜你想用」订单信号，DESIGN §4.51，2026-11-17）。
      *
@@ -319,7 +332,7 @@ class WenquRepository(
 
     fun logout() {
         store.clear()
-        expiry?.clear(SessionService.Wenqu)
+        expiry?.clear(SessionServiceIds.WENQU)
         clearCaches()
         _loggedIn.value = false
         _session.value = null
@@ -342,7 +355,7 @@ class WenquRepository(
      * 发「重置密码」验证码。返回 true = 短信已发出。
      * 失败抛 [WenquApiException]，文案已把平台的 `暂无使用次数` 翻成人话。
      */
-    suspend fun sendResetCode(phone: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun sendResetCode(phone: String): Boolean = withContext(Dispatchers.Default) {
         val envelope = api.sendResetCode(phone)
         if (envelope.sendResult()) return@withContext true
         throw WenquApiException(friendlySendError(envelope.msg))
@@ -356,7 +369,7 @@ class WenquRepository(
         rememberPassword: Boolean = true,
     ): WenquSession =
         loginMutex.withLock {
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.Default) {
                 api.resetPassword(phone, captcha, password).requireSuccess()
                 persistLogin(phone, password, rememberPassword)
             }
@@ -373,7 +386,7 @@ class WenquRepository(
         password: String,
         rememberPassword: Boolean = true,
     ): WenquSession = loginMutex.withLock {
-        withContext(Dispatchers.IO) { persistLogin(phone, password, rememberPassword) }
+        withContext(Dispatchers.Default) { persistLogin(phone, password, rememberPassword) }
     }
 
     private suspend fun persistLogin(
@@ -397,7 +410,7 @@ class WenquRepository(
             expiresAt = WenquRules.jwtExpiryMillis(data.token),
         )
         persist(session)
-        expiry?.clear(SessionService.Wenqu)
+        expiry?.clear(SessionServiceIds.WENQU)
         _loggedIn.value = true
         return session
     }
@@ -406,7 +419,7 @@ class WenquRepository(
      * 我的志愿 / 劳动教育：总工时 + 记录。成功才把工时影子写回凭证
      * （失败保留上次的值，账号卡那一行不会突然空掉）。
      */
-    suspend fun volunteer(force: Boolean = false): WenquVolunteerData = withContext(Dispatchers.IO) {
+    suspend fun volunteer(force: Boolean = false): WenquVolunteerData = withContext(Dispatchers.Default) {
         if (!force) volunteerCache.get(SINGLE_KEY, now())?.let { return@withContext it }
         val payload = authed { token -> api.volunteerMine(token) }
         val parsed = payload.decodeData<WenquVolunteerData>() ?: WenquVolunteerData()
@@ -423,7 +436,7 @@ class WenquRepository(
     }
 
     /** 星级证书（总工时 + 星级）。 */
-    suspend fun starCert(force: Boolean = false): WenquStarCertData = withContext(Dispatchers.IO) {
+    suspend fun starCert(force: Boolean = false): WenquStarCertData = withContext(Dispatchers.Default) {
         if (!force) certCache.get(SINGLE_KEY, now())?.let { return@withContext it }
         val payload = authed { token -> api.starCert(token) }
         val parsed = payload.decodeData<WenquStarCertData>() ?: WenquStarCertData()
@@ -443,17 +456,18 @@ class WenquRepository(
      * **下载星级证书 PDF**（2026-10-15）：`GET volunteer/star_cert/download` → base64 解码。
      *
      * 只读、只发一次（同其余取数路径）。仓库层**不碰文件系统**：字节与平台给的文件名
-     * 交给调用方，落盘由 [edu.jxslu.schedule.data.repo.WenquCertStore] 负责。
+     * 交给调用方，落盘由 `WenquCertStore` 负责。
+     *
+     * base64 解码从 `java.util.Base64.getMimeDecoder()` 换成 okio（iOS 移植 S15）：
+     * 平台回的是**折过行**的 MIME base64，okio 的解码器不容忍换行，所以先剥掉全部空白；
+     * 其余容错口径一致（非法字符 → 解码返回 null → 同样归成「证书数据损坏」）。
      */
-    suspend fun downloadCert(): WenquCertFile = withContext(Dispatchers.IO) {
+    suspend fun downloadCert(): WenquCertFile = withContext(Dispatchers.Default) {
         val payload = authed { token -> api.starCertDownload(token) }
         val data = payload.decodeData<WenquCertData>()
             ?: throw WenquApiException("证书数据为空")
-        val bytes = try {
-            Base64.getMimeDecoder().decode(data.pdfBase64)
-        } catch (e: IllegalArgumentException) {
-            throw WenquApiException("证书数据损坏", cause = e)
-        }
+        val bytes = data.pdfBase64.filterNot { it.isWhitespace() }.decodeBase64()?.toByteArray()
+            ?: throw WenquApiException("证书数据损坏")
         WenquCertFile(bytes = bytes, fileName = data.filename)
     }
 
@@ -464,7 +478,7 @@ class WenquRepository(
      * 页面本身不用它——列表与搜索的数据源都是 [activityIndex]（2026-10-11 起）。
      */
     suspend fun activities(keyword: String, force: Boolean = false): WenquActivityPage =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.Default) {
             val key = keyword.trim()
             if (!force) activityCache.get(key, now())?.let { return@withContext it }
             val page = fetchPage(key, page = 1)
@@ -489,7 +503,7 @@ class WenquRepository(
      * 并发的两次调用由 [indexMutex] 串行化——第二个等第一个的结果，不会各抓一份。
      */
     suspend fun activityIndex(force: Boolean = false): WenquActivityIndex? =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.Default) {
             val cached = indexCache.get(INDEX_KEY, now())
             when (
                 WenquRules.indexLoadPlan(
@@ -638,7 +652,7 @@ class WenquRepository(
      * 没有 `force`：详情只在用户点开某条时取，点一次算一次，不需要「强制绕过缓存」的入口。
      */
     suspend fun activityDetail(id: Long): WenquActivity? =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.Default) {
             detailCache.get(id, now())?.let { return@withContext it }
             val parsed = fetchDetailUncached(id) ?: return@withContext null
             detailCache.put(id, parsed, now())
@@ -679,7 +693,7 @@ class WenquRepository(
      * null = 共享的 30 秒客户端（后台「名额空出提醒」那条路照旧）。
      */
     suspend fun refreshIndexItem(id: Long, speed: WenquGrabSpeed? = null): WenquActivity? =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.Default) {
             if (id <= 0L) return@withContext null
             val client = when (speed) {
                 null -> api
@@ -716,7 +730,7 @@ class WenquRepository(
      * 成功后做**本地乐观更新**（索引里那条置「已报名」、名额 -1）并作废「我的记录」缓存；
      * 权威值等下一次同步（30 分钟闸门 / 下拉刷新 / 重进页）回来对齐。
      */
-    suspend fun applyActivity(activityId: Long) = withContext(Dispatchers.IO) {
+    suspend fun applyActivity(activityId: Long) = withContext(Dispatchers.Default) {
         val envelope = try {
             writeOnce { token -> api.volunteerApply(token, activityId) }
         } catch (e: CancellationException) {
@@ -771,12 +785,21 @@ class WenquRepository(
     }
 
     /**
-     * 写请求失败是否「结果不明」：网络层异常（[IOException] 家族，含超时）与响应解析失败
+     * 写请求失败是否「结果不明」：网络层异常（连不上 / 超时 / 读流中断）与响应解析失败
      * （[WenquApiException] 里带 cause 的那种）都可能对应「服务端其实已经处理了」。
      * 平台业务话术的拒绝（`requireSuccess` 抛的，无 cause）与会话失效都确定没生效，不算。
+     *
+     * 判据写法的来历（iOS 移植 S15）：原先直接判 `e is IOException`——那是 JVM 专有类型，
+     * commonMain 里看不见。改成**按排除法**：确定没生效的只有两类
+     * （[WenquSessionExpiredException]、无 cause 的 [WenquApiException]），其余一律按
+     * 「结果不明」处理，逐条等价于原来的「IOException 家族 + 带 cause 的解析失败」。
+     * 保守方向没变：多算一次只读核对，不会把「其实报上了」报成失败。
      */
-    private fun isAmbiguousWriteFailure(e: Exception): Boolean =
-        e is IOException || (e is WenquApiException && e.cause != null)
+    private fun isAmbiguousWriteFailure(e: Exception): Boolean = when {
+        e is WenquSessionExpiredException -> false
+        e is WenquApiException -> e.cause != null
+        else -> true
+    }
 
     /**
      * **取消报名**（DESIGN §4.45）。
@@ -789,7 +812,7 @@ class WenquRepository(
      * 这**不是「失败重试」**：取消对未报名的活动是幂等拒绝，两种 id 都改不了任何数据，
      * 所以换 id 重发不会造成重复副作用（网络 / 会话失效**不**换 id 重发，直接报错）。
      */
-    suspend fun cancelApply(activityId: Long, applyId: Long = 0L) = withContext(Dispatchers.IO) {
+    suspend fun cancelApply(activityId: Long, applyId: Long = 0L) = withContext(Dispatchers.Default) {
         var envelope = writeOnce { token -> api.volunteerCancel(token, activityId) }
         if (envelope.status != WenquEnvelope.STATUS_OK &&
             applyId > 0L && applyId != activityId &&
@@ -859,7 +882,7 @@ class WenquRepository(
     suspend fun preregSnapshot(
         id: Long,
         speed: WenquGrabSpeed = WenquGrabSpeed.Fast,
-    ): WenquPreregSnapshot = withContext(Dispatchers.IO) {
+    ): WenquPreregSnapshot = withContext(Dispatchers.Default) {
         coroutineScope {
             val listJob = async {
                 try {
@@ -904,7 +927,7 @@ class WenquRepository(
      * 网络异常（超时 / 断网 / 响应残缺）原样抛出，由执行器按「结果不明」处理
      * （先只读核对，见 [WenquPreregCheck]）。
      */
-    suspend fun preregApplyOnce(id: Long): WenquPreregAttempt = withContext(Dispatchers.IO) {
+    suspend fun preregApplyOnce(id: Long): WenquPreregAttempt = withContext(Dispatchers.Default) {
         val session = ensureToken()
         val envelope = preregApi.volunteerApply(session.token, id)
         when {
@@ -929,7 +952,7 @@ class WenquRepository(
      * 预报名**只读核对**：这条活动此刻在平台上的 `apply` 段存在吗。
      * 详情取不到（已下架 / 网络失败）回 [WenquPreregCheck.Unknown]——核对不了，继续试。
      */
-    suspend fun preregAppliedNow(id: Long): WenquPreregCheck = withContext(Dispatchers.IO) {
+    suspend fun preregAppliedNow(id: Long): WenquPreregCheck = withContext(Dispatchers.Default) {
         try {
             val detail = fetchDetailUncached(id, preregCheckApi)
             when {
@@ -954,7 +977,7 @@ class WenquRepository(
      * 「赶下一发」的时序压力，多熬几秒把高峰期的慢响应等回来，
      * 别让「某发超时但其实已落库」被误报成没抢到（2026-10-19 用户实测）。
      */
-    suspend fun preregAppliedNowSlow(id: Long): WenquPreregCheck = withContext(Dispatchers.IO) {
+    suspend fun preregAppliedNowSlow(id: Long): WenquPreregCheck = withContext(Dispatchers.Default) {
         try {
             val detail = fetchDetailUncached(id, preregFinalCheckApi)
             when {
@@ -984,7 +1007,7 @@ class WenquRepository(
      * 原先那句「顺手把浏览页缓存刷成刚抓到的前 20 条」已经没有读的人了。
      * 提醒响过之后要拿新数据，走 [invalidateActivities] + 下一次进页重抓快照。
      */
-    suspend fun scanActivities(limit: Int): List<WenquActivity> = withContext(Dispatchers.IO) {
+    suspend fun scanActivities(limit: Int): List<WenquActivity> = withContext(Dispatchers.Default) {
         val payload = authed { token ->
             api.volunteerList(token = token, page = 1, limit = limit, keyword = "")
         }
@@ -1006,7 +1029,7 @@ class WenquRepository(
         limit: Int = WenquRules.GRAB_PAGE_LIMIT,
         speed: WenquGrabSpeed = WenquGrabSpeed.Fast,
     ): WenquGrabProbe =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.Default) {
             val payload = authed { token ->
                 val client = if (speed == WenquGrabSpeed.Burst) burstApi else probeApi
                 client.volunteerList(token = token, page = 1, limit = limit, keyword = "")
@@ -1043,7 +1066,7 @@ class WenquRepository(
      * 失败向上抛，调用方自行决定（探测自己也会再走 [authed] 的续期路径）。
      */
     suspend fun prewarmSession() {
-        withContext(Dispatchers.IO) { ensureToken() }
+        withContext(Dispatchers.Default) { ensureToken() }
     }
 
     private suspend fun fetchPage(
@@ -1122,7 +1145,7 @@ class WenquRepository(
         store.save(current.copy(token = "", expiresAt = 0L))
         // 先写标记再翻登录态：页面侧 LaunchedEffect(loggedIn) 一看到 false 就会消费标记，
         // 反过来写会撞上「状态已翻、标记还没落」的空窗（这一轮提示丢失，要等下次进页）
-        expiry?.mark(SessionService.Wenqu)
+        expiry?.mark(SessionServiceIds.WENQU)
         _session.value = store.read()
         _loggedIn.value = false
     }
