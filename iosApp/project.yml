@@ -60,3 +60,7 @@ targets:
           - UIKit
           - -framework
           - Foundation
+          # `UTTypeJSON` / `UTTypePlainText`（文件选择器允许的类型，iOS 14+）在这个框架里。
+          # 静态 framework 不带 load command，漏了这一行链接时报 Undefined symbols。
+          - -framework
+          - UniformTypeIdentifiers
