@@ -24,7 +24,6 @@ import edu.jxslu.schedule.data.qzxy.QzxyWaterFlow
 import edu.jxslu.schedule.data.qzxy.QzxyWateringRegistry
 import edu.jxslu.schedule.data.qzxy.qzxyDeviceKey
 import edu.jxslu.schedule.data.session.SESSION_EXPIRED_NOTICE
-import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.InboxKeys

@@ -73,7 +73,6 @@ import edu.jxslu.schedule.ui.common.HeroActionButton
 import edu.jxslu.schedule.ui.common.MetricCell
 import edu.jxslu.schedule.ui.common.MetricsRow
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
