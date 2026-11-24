@@ -2,17 +2,16 @@ package edu.jxslu.schedule.platform
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
-import kotlinx.cinterop.COpaquePointerVar
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
-import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.usePinned
+import kotlinx.cinterop.value
 import platform.CoreFoundation.CFDataCreate
-import platform.CoreFoundation.CFDataGetBytePtr
-import platform.CoreFoundation.CFDataGetLength
+import platform.CoreFoundation.CFBridgingRelease
 import platform.CoreFoundation.CFDataRef
+import platform.CoreFoundation.CFTypeRefVar
 import platform.CoreFoundation.CFDictionaryAddValue
 import platform.CoreFoundation.CFDictionaryCreateMutable
 import platform.CoreFoundation.CFRelease
@@ -20,6 +19,9 @@ import platform.CoreFoundation.CFStringCreateWithCString
 import platform.CoreFoundation.CFStringRef
 import platform.CoreFoundation.kCFBooleanTrue
 import platform.CoreFoundation.kCFStringEncodingUTF8
+import platform.Foundation.NSData
+import platform.Foundation.NSString
+import platform.Foundation.NSUTF8StringEncoding
 import platform.Security.SecItemAdd
 import platform.Security.SecItemCopyMatching
 import platform.Security.SecItemDelete
@@ -66,8 +68,14 @@ import platform.Security.kSecValueData
  * ## 未验
  *
  * 本文件在 Windows 上编不了（Kotlin/Native 的 Apple 目标需要 macOS），只能靠 CI 验证。
- * 用到的 API 面刻意压到最小：四个 `SecItem*`、`CFDictionaryCreateMutable` /
- * `CFDictionaryAddValue` / `CFStringCreateWithCString` / `CFDataCreate` 与 `CFRelease`。
+ * 用到的 API 面刻意压到最小：三个 `SecItem*`、`CFDictionaryCreateMutable` /
+ * `CFDictionaryAddValue` / `CFStringCreateWithCString` / `CFDataCreate` / `CFRelease`，
+ * 读取那一侧用 `CFBridgingRelease` + `NSData` 转字符串（比手动 `CFDataGetBytePtr`
+ * 少一层指针运算，也是 Apple 示例的写法）。
+ *
+ * **踩过的坑**：`CFTypeRefVar.value` 是 `kotlinx.cinterop` 的扩展属性，只 import
+ * `alloc` / `ptr` 这类具体符号时它会报 `Unresolved reference 'value'`，必须单独
+ * `import kotlinx.cinterop.value`（2026-11-25 CI 两轮才定位到）。
  */
 @OptIn(ExperimentalForeignApi::class)
 internal object IosKeychain {
@@ -84,21 +92,14 @@ internal object IosKeychain {
             CFDictionaryAddValue(dict, kSecReturnData, kCFBooleanTrue)
             CFDictionaryAddValue(dict, kSecMatchLimit, kSecMatchLimitOne)
 
-            // `SecItemCopyMatching` 的出参在 Kotlin/Native 里声明成 `CFTypeRefVar`，
-            // 但那个类型没有暴露 `.value`；用 `COpaquePointerVar` 接再 reinterpret，
-            // 语义相同（两者都是「一个指针变量的地址」）。
-            val out = alloc<COpaquePointerVar>()
-            if (SecItemCopyMatching(dict, out.ptr.reinterpret()) != errSecSuccess) return null
-            val data: CFDataRef? = out.value?.reinterpret()
-            if (data == null) return null
-            val length = CFDataGetLength(data).toInt()
-            val bytes = CFDataGetBytePtr(data)
-            try {
-                if (bytes == null || length <= 0) return null
-                bytes.readBytes(length).decodeToString()
-            } finally {
-                CFRelease(data)
-            }
+            // 出参用 `CFTypeRefVar`（Apple 官方示例的写法）。注意 `.value` 是
+            // `kotlinx.cinterop` 的**扩展属性**，必须单独 `import kotlinx.cinterop.value`
+            // ——只 import `alloc` 之类的具体符号时它会报「Unresolved reference 'value'」。
+            val result = alloc<CFTypeRefVar>()
+            if (SecItemCopyMatching(dict, result.ptr) != errSecSuccess) return null
+            // CFBridgingRelease 接管 +1 引用并转成 ObjC 对象，所以这里不需要再 CFRelease
+            val data = CFBridgingRelease(result.value) as? NSData ?: return null
+            NSString.create(data = data, encoding = NSUTF8StringEncoding) as String?
         } finally {
             CFRelease(dict)
             CFRelease(svc)
