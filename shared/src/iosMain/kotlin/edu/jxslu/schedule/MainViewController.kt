@@ -271,7 +271,6 @@ private fun IosRoot(services: IosServices) {
                             }
                             StatementScreen(viewModel = vm, onBack = { page = IosPage.Week })
                         }
-                        }
                     }
                 }
                 hint?.let { text ->
