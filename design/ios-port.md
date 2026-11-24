@@ -652,6 +652,8 @@ agent 同时改（每个 agent 只改自己那几个文件、不跑 Gradle），
 | 4 | 页面骨架 + 58 个 `material.icons` 使用者 | 2 + 56 | `:shared` 加 CMP material-icons 坐标（是坐标问题，不是缝） | 中 |
 | 5 | 位图 / 附件簇：`AttachmentImage` `MarkdownView` `BitmapSave` `QuickScan` … | 10 / 1,625 | 中性 Bitmap 类型 + 相册 + 文件选择 + 去 Context | 高 |
 
+**第五个反复出现的坑（已踩两次）**：RegexOption.DOT_MATCHES_ALL 只在 JVM 的 `kotlin.text` 里有，commonMain 一律换成正则内的 [\s\S]。S1 的 `EmphasisText`、S3 的 `CurriculumParser`（5 处）都是元数据门禁当场报出来的。同类还有 `String(CharArray)` → `concatToString()`。搬文件前先 grep 这两个名字，能省一轮。
+
 **别先做**：`material.icons`（58 文件，换坐标会动版本线）与位图簇（一次四缝同时上）。
 上面「`common` 应该最后动」的判断已被这批修正：**无平台依赖的那一半必须最先动**，它解锁 100+ 个引用方。
 
