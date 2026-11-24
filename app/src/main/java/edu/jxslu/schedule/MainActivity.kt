@@ -104,6 +104,7 @@ import edu.jxslu.schedule.ui.jw.JwHubScreen
 import edu.jxslu.schedule.ui.jw.rememberJwScreenPlatformActions
 import edu.jxslu.schedule.ui.jwvw.JwImportMode
 import edu.jxslu.schedule.ui.jwvw.SCHEDULE_IMPORT_CAVEAT
+import edu.jxslu.schedule.ui.me.hub.openUrl
 import edu.jxslu.schedule.ui.me.hub.UpdateAvailableDialogHost
 import edu.jxslu.schedule.ui.reminder.DormRepairReminder
 import kotlinx.coroutines.runBlocking
@@ -1145,7 +1146,12 @@ internal fun JuwApp(
     // **不挂 onboardingSeen 闸**：引导在顶层时本窗口天然被盖住（独立窗口、不透明）；
     // 而老用户设备上没有那个键（2026-09-30 才加、只服务新安装），挂上会让他们的
     // 自动提醒永远不弹。
-    UpdateAvailableDialogHost(enabled = !showSyncOutcome)
+    UpdateAvailableDialogHost(
+        enabled = !showSyncOutcome,
+        // 弹窗本体已在 shared/commonMain（iOS 移植 W1）：打开下载页仍是 Android 的
+        // ACTION_VIEW + 窗口过渡，从这一侧注入
+        onOpenUrl = { url -> openUrl(context, url) },
+    )
 
     // 「我的 → 显示设置」跨 Tab 触发已于 2026-09-20 删除（DESIGN §3.1）：
     // 显示设置唯一入口 = 课表页顶栏眼睛图标，「我的」侧属重复入口，

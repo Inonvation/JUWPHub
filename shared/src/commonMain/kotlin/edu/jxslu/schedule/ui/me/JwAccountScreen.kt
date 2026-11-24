@@ -27,22 +27,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.JwImportActivity
-import edu.jxslu.schedule.OnboardingActivity
-import edu.jxslu.schedule.TranscriptActivity
 import edu.jxslu.schedule.data.session.LoginState
 import edu.jxslu.schedule.data.session.LoginStateRules
 import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionStatus
-import edu.jxslu.schedule.data.session.WebViewCookieBridge
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AccountCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
@@ -50,10 +45,8 @@ import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.jwvw.JwImportMode
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
 
 /**
  * 教务账户页（DESIGN §3.3）。
@@ -64,15 +57,38 @@ import androidx.compose.runtime.rememberCoroutineScope
  *
  * 这里只展示与账号相关的只读信息 + 几个明确动作（更新密码 / 导入 / 退出），
  * 具体取数交给各自的页面。
+ *
+ * ## iOS 移植 W1（2026-11-25）搬进 `commonMain`
+ *
+ * 三件平台物各走各的缝，不再从 `Graph` 直取：
+ *
+ * | 原来 | 现在 |
+ * |---|---|
+ * | `Graph.credentialVault(context).readCas()` | `Services.current.accountCredentials()?.readJwUsername()`（null = 本平台没有加密凭证存储） |
+ * | `Graph.casSession(context).logout()` | `Services.current.jwSessionLogout()`（null = 没有原生教务会话，iOS） |
+ * | `WebViewCookieBridge.hasAnyCookie()` | `Services.current.hasJwWebSession()`（null = 判断不了，按「没有」算） |
+ * | `Graph.dormRepairStore(context).clear()` | `Services.current.dormRepairStore()` |
+ * | `OnboardingActivity` / `JwImportActivity` / `TranscriptActivity` | 可空回调，null = 入口整行不渲染（§11.2 ④） |
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun JwAccountScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
+fun JwAccountScreen(
+    onBack: () -> Unit,
+    /** 「我的」页的共享 ViewModel，**由宿主创建**（`design/ios-port.md` §11.1）。 */
+    viewModel: MeViewModel,
+    /** 打开引导页重填统一认证账号密码；null = 本平台没有那个窗口。 */
+    onUpdatePassword: (() -> Unit)? = null,
+    /** 打开教务课表导入窗口。 */
+    onImportTimetable: (() -> Unit)? = null,
+    /** 打开教务成绩导入窗口。 */
+    onImportScores: (() -> Unit)? = null,
+    /** 打开盖章成绩单出单窗口。 */
+    onExportTranscript: (() -> Unit)? = null,
+) {
     val scope = rememberCoroutineScope()
-    val vault = remember { Graph.credentialVault(context) }
-    val prefs = remember { Graph.displayPrefs(context) }
-    val cas = remember { Graph.casSession(context) }
+    val prefs = remember { Services.current.displayPrefs() }
+    val credentials = remember { Services.current.accountCredentials() }
+    val jwLogout = remember { Services.current.jwSessionLogout() }
     val snackbar = remember { SnackbarHostState() }
 
     // 本页有两个教务导入入口（课表 / 成绩），导入窗口 finish 后落回的就是这一页
@@ -81,22 +97,20 @@ fun JwAccountScreen(onBack: () -> Unit) {
     // 登录态快照只在组合期读一次：从引导页（更新账号密码）回来时组合不重建，
     // 用「回到前台」计数当 key 重读，否则卡片会停在旧状态（2026-09-27）
     val resumeTick = rememberResumeTick()
-    val casCred = remember(resumeTick) { vault.readCas() }
+    val casUsername = remember(resumeTick) { credentials?.readJwUsername() }
     val profileName by prefs.profileName.collectAsStateWithLifecycle(initialValue = "")
     val profileClass by prefs.profileClass.collectAsStateWithLifecycle(initialValue = "")
     val profileStudentId by prefs.profileStudentId.collectAsStateWithLifecycle(initialValue = "")
     val suspendedTargets by SessionStatus.suspended.collectAsStateWithLifecycle()
-    // 升级用户没存凭证、但 WebView 里可能还有会话：只读 CookieManager，不联网
-    val webSession = remember(resumeTick) { WebViewCookieBridge.hasAnyCookie() }
+    // 升级用户没存凭证、但 WebView 里可能还有会话：只读本机 cookie，不联网。
+    // `hasJwWebSession()` 为 null（本平台判断不了，iOS 的 cookie 只能异步读）时按「没有」算。
+    val webSession = remember(resumeTick) { Services.current.hasJwWebSession() ?: false }
     val jwState = LoginStateRules.derive(
-        credentialExists = casCred != null,
+        credentialExists = casUsername != null,
         webSessionExists = webSession,
         suspended = LoginTarget.Jw in suspendedTargets,
     )
 
-    val viewModel: MeViewModel = viewModel(
-        factory = MeViewModel.Factory(Graph.repository(context)),
-    )
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     var confirmLogout by remember { mutableStateOf(false) }
@@ -126,13 +140,13 @@ fun JwAccountScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             AccountCard(
-                username = casCred?.username ?: profileStudentId,
+                username = casUsername ?: profileStudentId,
                 name = profileName,
                 subtitle = profileClass,
                 statusText = when (jwState) {
                     // 没存密码也进了登录态 = 靠 WebView 用出来的网页会话（DESIGN §3.16）。
                     // 这两种「已登录」的后续行为不同，文案要分开，否则用户以为已经能自动续登。
-                    LoginState.LoggedIn -> if (casCred != null) {
+                    LoginState.LoggedIn -> if (casUsername != null) {
                         "已登录 · 会话过期时自动重新登录"
                     } else {
                         "已登录 · 网页会话；填一次账号密码可自动续登"
@@ -150,40 +164,57 @@ fun JwAccountScreen(onBack: () -> Unit) {
                 InfoRow("课表", "${state.timetableName.ifBlank { "—" }} · ${state.courseCount} 门课")
             }
 
-            SettingsSection(title = "账号与数据") {
-                SettingItem(
-                    title = "更新账号密码",
-                    subtitle = "学校改过密码后在这里重填，自动续登立即恢复",
-                    icon = AppIcons.Settings01,
-                    onClick = { OnboardingActivity.start(context, startAtJw = true) },
-                )
-                SettingItem(
-                    title = "导入课表",
-                    subtitle = "打开教务学期课表页并导入",
-                    icon = AppIcons.Book01,
-                    onClick = { JwImportActivity.start(context) },
-                )
-                SettingItem(
-                    title = "导入成绩",
-                    subtitle = "抓全部学期成绩，按学期替换",
-                    icon = AppIcons.GridView,
-                    onClick = { JwImportActivity.start(context, JwImportMode.Scores) },
-                )
-                SettingItem(
-                    title = "导出盖章成绩单",
-                    subtitle = "签章系统出单，含教务处章",
-                    icon = AppIcons.CalendarSetting01,
-                    onClick = { TranscriptActivity.start(context) },
-                )
+            // 四个入口都是平台窗口：本平台没有的那个整行不渲染（§11.2 ④）。
+            // 四个都没有时整节不渲染，免得留一张空卡。
+            val hasAnyAction = onUpdatePassword != null || onImportTimetable != null ||
+                onImportScores != null || onExportTranscript != null
+            if (hasAnyAction) {
+                SettingsSection(title = "账号与数据") {
+                    onUpdatePassword?.let { action ->
+                        SettingItem(
+                            title = "更新账号密码",
+                            subtitle = "学校改过密码后在这里重填，自动续登立即恢复",
+                            icon = AppIcons.Settings01,
+                            onClick = action,
+                        )
+                    }
+                    onImportTimetable?.let { action ->
+                        SettingItem(
+                            title = "导入课表",
+                            subtitle = "打开教务学期课表页并导入",
+                            icon = AppIcons.Book01,
+                            onClick = action,
+                        )
+                    }
+                    onImportScores?.let { action ->
+                        SettingItem(
+                            title = "导入成绩",
+                            subtitle = "抓全部学期成绩，按学期替换",
+                            icon = AppIcons.GridView,
+                            onClick = action,
+                        )
+                    }
+                    onExportTranscript?.let { action ->
+                        SettingItem(
+                            title = "导出盖章成绩单",
+                            subtitle = "签章系统出单，含教务处章",
+                            icon = AppIcons.CalendarSetting01,
+                            onClick = action,
+                        )
+                    }
+                }
             }
 
-            OutlinedButton(
-                onClick = { confirmLogout = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("退出登录并清除密码")
+            // 退出 = 清原生会话；本平台没有原生会话（iOS 登录只在 WKWebView 里）时不给这个入口
+            if (jwLogout != null) {
+                OutlinedButton(
+                    onClick = { confirmLogout = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("退出登录并清除密码")
+                }
             }
-            if (casCred == null) {
+            if (casUsername == null) {
                 Text(
                     "当前没有保存密码：导入课表时需要手动登录，也不会自动续登。",
                     style = MaterialTheme.typography.bodySmall,
@@ -193,7 +224,7 @@ fun JwAccountScreen(onBack: () -> Unit) {
         }
     }
 
-    if (confirmLogout) {
+    if (confirmLogout && jwLogout != null) {
         AppConfirmDialog(
             title = "退出教务登录？",
             message = "将清除本机保存的学号与统一认证密码，自动续登随之失效。" +
@@ -202,12 +233,12 @@ fun JwAccountScreen(onBack: () -> Unit) {
             danger = true,
             onConfirm = {
                 confirmLogout = false
-                // logout 现在挂起：清 WebView cookie 要切主线程（桥内部处理）。
+                // logout 是挂起调用：清 WebView cookie 要切主线程（桥内部处理）。
                 // 清完再返回，状态卡重读时看到的才是真的「未登录」
                 scope.launch {
-                    cas.logout()
+                    jwLogout.logout()
                     // 换账号后不要把上一位用户的报修记录留在今日页（DESIGN §4.49）
-                    Graph.dormRepairStore(context).clear()
+                    Services.current.dormRepairStore().clear()
                     onBack()
                 }
             },

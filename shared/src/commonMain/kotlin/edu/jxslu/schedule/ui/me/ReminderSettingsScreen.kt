@@ -1,10 +1,5 @@
 package edu.jxslu.schedule.ui.me
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -29,26 +24,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
+import androidx.lifecycle.viewmodel.CreationExtras
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.domain.ReminderDefaults
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.SettingItem
-import edu.jxslu.schedule.ui.common.SettingsNote
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
+import edu.jxslu.schedule.ui.common.SettingsNote
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.reminder.ClassReminder
+import kotlin.reflect.KClass
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -64,16 +56,27 @@ import kotlinx.coroutines.runBlocking
  * 拒绝不阻塞开关——功能在系统设置里授权后自动生效。
  * 调度重排放在本页对 (开关, 提前量) 的观察上；课表数据变化与冷启动由
  * JuwApplication 的数据收集器兜住，这里不重复。
+ *
+ * ## iOS 移植 W1（2026-11-25）搬进 `commonMain`
+ *
+ * 三个平台动作收成可空参数（`design/ios-port.md` §11.2 ④）：
+ * [onReschedule] / [onRecheckHomework] 是 `AlarmManager` + 通知渠道（`:app` 的 `ClassReminder`），
+ * [onRequestNotifPermission] 是 Android 运行时权限。null 的语义照 `ScoreSettingsScreen` 的既有口径：
+ * **开关照常落库，只是这一侧不排闹钟、不弹权限框**——等平台实现接上，已保存的开关自动生效。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReminderSettingsScreen(
     onBack: () -> Unit,
-    viewModel: ReminderSettingsViewModel = viewModel(
-        factory = ReminderSettingsViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
+    /** 由宿主创建（Android `viewModel {}`、iOS `remember {}`），见 `design/ios-port.md` §11.1。 */
+    viewModel: ReminderSettingsViewModel,
+    /** 开关 / 提前量变化后重排上课闹钟；null = 本平台没有通知调度。 */
+    onReschedule: (suspend () -> Unit)? = null,
+    /** 作业提醒开关变化后核对一次待提醒作业；null = 同上。 */
+    onRecheckHomework: (suspend () -> Unit)? = null,
+    /** 申请通知权限；拒绝时回调，由本页给一条提示。null = 本平台没有运行时权限模型。 */
+    onRequestNotifPermission: ((onDenied: () -> Unit) -> Unit)? = null,
 ) {
-    val context = LocalContext.current
     val enabled by viewModel.enabled.collectAsStateWithLifecycle()
     val lead by viewModel.leadMinutes.collectAsStateWithLifecycle()
     val homeworkEnabled by viewModel.homeworkEnabled.collectAsStateWithLifecycle()
@@ -91,30 +94,18 @@ fun ReminderSettingsScreen(
 
     // 开关/提前量变化 → 立即重排（scheduleNext 内部已兜错；关闭时撤销已排闹钟）
     LaunchedEffect(enabled, lead) {
-        ClassReminder.scheduleNext(context)
+        onReschedule?.invoke()
     }
 
     // 作业提醒开关变化 → 立即核对一次（enqueueCheck 先补发窗口内的、再重排闹钟；
     // 关到位后作业侧不再排闹钟）。首次进入也会跑一次——与 15 分钟周期核对等价、很廉价。
     LaunchedEffect(homeworkEnabled) {
-        ClassReminder.enqueueCheck(context)
-    }
-
-    val notifPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (!granted) viewModel.onPermissionDenied()
+        onRecheckHomework?.invoke()
     }
 
     // 两个提醒开关共用：开启那一刻请求 POST_NOTIFICATIONS（API 33+），拒绝不阻塞开关本身
     val requestNotifPermission = {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(
-                context, Manifest.permission.POST_NOTIFICATIONS,
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+        onRequestNotifPermission?.invoke { viewModel.onPermissionDenied() }
     }
 
     // 通知权限状态与申请入口在「数据与权限 → 权限与存储」，本页只负责提醒开关本身
@@ -299,7 +290,7 @@ class ReminderSettingsViewModel(
 
     class Factory(private val repo: ScheduleRepository) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+        override fun <T : ViewModel> create(modelClass: KClass<T>, extras: CreationExtras): T =
             ReminderSettingsViewModel(repo) as T
     }
 }

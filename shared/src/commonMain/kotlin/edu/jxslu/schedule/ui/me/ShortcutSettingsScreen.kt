@@ -1,10 +1,5 @@
 package edu.jxslu.schedule.ui.me
 
-import android.content.Context
-import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.drawable.Drawable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -49,25 +45,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.foundation.text.KeyboardOptions
-import edu.jxslu.schedule.Graph
+import androidx.lifecycle.viewmodel.CreationExtras
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.domain.ShortcutItem
 import edu.jxslu.schedule.domain.ShortcutOps
 import edu.jxslu.schedule.domain.ShortcutSettings
 import edu.jxslu.schedule.domain.Shortcuts
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
+import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -76,12 +71,11 @@ import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SettingsDivider
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.ShortcutIcon
-import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
-import edu.jxslu.schedule.ui.common.ShortcutLauncher
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.shortcutIconChoices
 import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
+import kotlin.reflect.KClass
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -124,66 +118,56 @@ private fun ShortcutItem.toDraft(): ShortcutDraft = ShortcutDraft(
     icon = icon,
 )
 
-/** 已安装应用选择器的列表项（DESIGN §3.8）：点一下填好包名，Activity 留给用户按需补。 */
-private data class InstalledApp(
+/**
+ * 已安装应用选择器的列表项（DESIGN §3.8）：点一下填好包名，Activity 留给用户按需补。
+ *
+ * [icon] 是宿主办好解码的位图：`PackageManager` / `Drawable` 都不在共享层，
+ * 由 [ShortcutSettingsScreen.onQueryInstalledApps] 的实现侧转成 `ImageBitmap`。
+ * null = 那一条没取到图标，行内不占位。
+ */
+data class InstalledAppOption(
     val label: String,
     val pkg: String,
-    val icon: Drawable,
+    val icon: ImageBitmap? = null,
 )
-
-/** 有桌面入口的应用；排除自身，按应用名排序。Manifest 的 MAIN/LAUNCHER queries 是可见性前提。 */
-private fun queryInstalledApps(context: Context): List<InstalledApp> {
-    val pm = context.packageManager
-    val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-    return pm.queryIntentActivities(main, 0).asSequence()
-        .mapNotNull { ri ->
-            val pkg = ri.activityInfo?.packageName ?: return@mapNotNull null
-            if (pkg == context.packageName) return@mapNotNull null
-            val label = try {
-                ri.loadLabel(pm)?.toString().orEmpty()
-            } catch (_: Exception) {
-                ""
-            }
-            if (label.isBlank()) return@mapNotNull null
-            InstalledApp(label, pkg, ri.loadIcon(pm))
-        }
-        .distinctBy { it.pkg }
-        .sortedBy { it.label.lowercase() }
-        .toList()
-}
-
-/** 应用图标 Drawable → Bitmap（accompanist 的 DrawablePainter 不在依赖里，不值得为它加）。 */
-private fun drawableToBitmap(drawable: Drawable): Bitmap {
-    if (drawable is android.graphics.drawable.BitmapDrawable && drawable.bitmap != null) {
-        return drawable.bitmap
-    }
-    val width = maxOf(drawable.intrinsicWidth, 1)
-    val height = maxOf(drawable.intrinsicHeight, 1)
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    drawable.setBounds(0, 0, canvas.width, canvas.height)
-    drawable.draw(canvas)
-    return bitmap
-}
 
 /**
  * 快捷方式设置子页（DESIGN §3.8）：开关 + 预设/自定义两组条目 + 编辑弹层。
  *
  * 预设可编辑、可「重置为默认」，不可删除——三条预设是这个功能的底线配置，
  * 删没了用户就得自己重新填 URI。自定义条目可增删，总数上限 [Shortcuts.MAX_COUNT]。
- * 「测试」用当前表单值即时拉起，与今日页共用 [ShortcutLauncher]，错误口径一致。
+ * 「测试」用当前表单值即时拉起，与今日页共用同一执行层，错误口径一致。
+ *
+ * ## iOS 移植 W1（2026-11-25）搬进 `commonMain`
+ *
+ * 两件平台能力收成可空参数（`design/ios-port.md` §11.2 ④）：
+ *
+ * | 参数 | 原来 | null 的后果 |
+ * |---|---|---|
+ * | [onTest] | `ShortcutLauncher.launch(context, item)`（`Intent` 三种拉起） | 编辑弹层里「测试」按钮不渲染 |
+ * | [onQueryInstalledApps] | `PackageManager.queryIntentActivities` + `Drawable → Bitmap` | 包名输入框的「从已安装应用选择」按钮不渲染，手填包名照旧可用 |
+ * | [brandIcon] | 三张预设品牌图（`res/drawable/ic_preset_*.webp`，只有 `R` 认得） | 预设条目退回矢量图标（条目名与目标仍完整可用） |
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShortcutSettingsScreen(
     onBack: () -> Unit,
+    /** 由宿主创建（Android `viewModel {}`、iOS `remember {}`），见 `design/ios-port.md` §11.1。 */
+    viewModel: ShortcutSettingsViewModel,
+    /**
+     * 预设条目的品牌图。**必填、不给默认值**：与 `ui/common/ShortcutUi.kt` 的
+     * `ShortcutIcon(brandIcon=)` 同一考虑——宿主必须明确回答「本平台有没有这套素材」，
+     * 返回 null 是能力声明（没有品牌图 → 退回矢量图标），不是省略。
+     * Android 侧装的是 `presetShortcutPainter`。
+     */
+    brandIcon: @Composable (ShortcutItem) -> Painter?,
     /** Snackbar「去设置」带来的条目 id：落库数据到位后自动展开其编辑弹层（一次性） */
     focusItemId: String? = null,
-    viewModel: ShortcutSettingsViewModel = viewModel(
-        factory = ShortcutSettingsViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
+    /** 测试即拉起验证；返回值作为行内反馈回给弹层。null = 本平台不能拉起外部应用。 */
+    onTest: ((ShortcutItem) -> NoticeFeedback)? = null,
+    /** 读已安装应用（挂起，宿主自己切 IO）；null = 本平台查不到应用列表。 */
+    onQueryInstalledApps: (suspend () -> List<InstalledAppOption>)? = null,
 ) {
-    val context = LocalContext.current
     val state by viewModel.settings.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<ShortcutDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<ShortcutItem?>(null) }
@@ -239,6 +223,7 @@ fun ShortcutSettingsScreen(
                     if (index > 0) SettingsDivider()
                     ShortcutRow(
                         item = item,
+                        brandIcon = brandIcon,
                         canMoveUp = index > 0,
                         canMoveDown = index < presets.lastIndex,
                         onMove = { delta -> viewModel.move(item.id, delta) },
@@ -260,6 +245,7 @@ fun ShortcutSettingsScreen(
                     if (index > 0) SettingsDivider()
                     ShortcutRow(
                         item = item,
+                        brandIcon = brandIcon,
                         canMoveUp = index > 0,
                         canMoveDown = index < customs.lastIndex,
                         onMove = { delta -> viewModel.move(item.id, delta) },
@@ -301,13 +287,8 @@ fun ShortcutSettingsScreen(
                 viewModel.upsert(item)
                 editing = null
             },
-            onTest = { item ->
-                // 测试不落盘：用当前表单值直接拉起，结果与今日页同一执行层。
-                // 结果作为行内反馈回给弹层（弹层不关，续测下一个配置时旧结果被覆盖）
-                ShortcutLauncher.launch(context, item)?.let {
-                    NoticeFeedback(it, NoticeTone.Error)
-                } ?: NoticeFeedback("已启动「${item.name}」", NoticeTone.Success)
-            },
+            onTest = onTest,
+            onQueryInstalledApps = onQueryInstalledApps,
             onResetConfirmed = if (draft.presetIndex >= 0 && draft.id != null) {
                 {
                     viewModel.resetPreset(draft.presetIndex)
@@ -359,6 +340,7 @@ fun ShortcutSettingsScreen(
 @Composable
 private fun ShortcutRow(
     item: ShortcutItem,
+    brandIcon: @Composable (ShortcutItem) -> Painter?,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
     onMove: (Int) -> Unit,
@@ -370,7 +352,7 @@ private fun ShortcutRow(
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ShortcutIcon(item, Modifier.size(26.dp))
+        ShortcutIcon(item, brandIcon(item), Modifier.size(26.dp))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -425,14 +407,15 @@ private fun ShortcutEditSheet(
     draft: ShortcutDraft,
     onDismiss: () -> Unit,
     onSave: (ShortcutItem) -> Unit,
-    /** 测试即拉起验证；返回结果（成功/失败）由弹层**行内**展示，见 [testResult] */
-    onTest: (ShortcutItem) -> NoticeFeedback,
+    /** 测试即拉起验证；返回结果（成功/失败）由弹层**行内**展示，见 [testResult]。null = 不渲染按钮 */
+    onTest: ((ShortcutItem) -> NoticeFeedback)?,
+    /** 读已安装应用；null = 不渲染「从已安装应用选择」按钮 */
+    onQueryInstalledApps: (suspend () -> List<InstalledAppOption>)?,
     /** 非空 = 预设槽位，弹层显示「重置为默认」 */
     onResetConfirmed: (() -> Unit)?,
     /** 非空 = 自定义条目，弹层显示「删除」（点击后由外层确认弹窗兜底） */
     onDelete: (() -> Unit)?,
 ) {
-    val context = LocalContext.current
     var name by remember(draft.id) { mutableStateOf(draft.name) }
     var uri by remember(draft.id) { mutableStateOf(draft.uri) }
     var pkg by remember(draft.id) { mutableStateOf(draft.pkg) }
@@ -446,11 +429,13 @@ private fun ShortcutEditSheet(
 
     // ---- 已安装应用选择器：按需加载一次，存在表单外层状态里避免反复查询 ----
     var showPicker by remember { mutableStateOf(false) }
-    var apps by remember { mutableStateOf<List<InstalledApp>?>(null) }
+    var apps by remember { mutableStateOf<List<InstalledAppOption>?>(null) }
     var appSearch by remember { mutableStateOf("") }
     LaunchedEffect(showPicker) {
-        if (showPicker && apps == null) {
-            apps = withContext(Dispatchers.IO) { queryInstalledApps(context) }
+        val load = onQueryInstalledApps
+        if (showPicker && apps == null && load != null) {
+            // 读应用列表是纯计算/系统查询，共享层只用 Default 池（`Dispatchers.IO` 不在公共标准库）
+            apps = withContext(Dispatchers.Default) { load() }
         }
     }
     if (showPicker) {
@@ -581,13 +566,17 @@ private fun ShortcutEditSheet(
                 placeholder = { Text("如 com.cainiao.wireless") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                 singleLine = true,
-                trailingIcon = {
-                    IconButton(onClick = { showPicker = true }) {
-                        Icon(
-                            AppIcons.AppStore,
-                            contentDescription = "从已安装应用选择",
-                        )
+                trailingIcon = if (onQueryInstalledApps != null) {
+                    {
+                        IconButton(onClick = { showPicker = true }) {
+                            Icon(
+                                AppIcons.AppStore,
+                                contentDescription = "从已安装应用选择",
+                            )
+                        }
                     }
+                } else {
+                    null
                 },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -624,23 +613,25 @@ private fun ShortcutEditSheet(
             }
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    onClick = {
-                        val item = buildItem()
-                        val problem = Shortcuts.validate(item)
-                        if (problem != null) {
-                            error = problem
-                            testResult = null
-                        } else {
-                            // 先清掉上一次的行内错误：测试成功后弹层不关，旧错误挂着误导人
-                            error = null
-                            testResult = onTest(item)
-                        }
-                    },
-                ) {
-                    Icon(AppIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("测试")
+                if (onTest != null) {
+                    TextButton(
+                        onClick = {
+                            val item = buildItem()
+                            val problem = Shortcuts.validate(item)
+                            if (problem != null) {
+                                error = problem
+                                testResult = null
+                            } else {
+                                // 先清掉上一次的行内错误：测试成功后弹层不关，旧错误挂着误导人
+                                error = null
+                                testResult = onTest(item)
+                            }
+                        },
+                    ) {
+                        Icon(AppIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("测试")
+                    }
                 }
                 if (onResetConfirmed != null) {
                     TextButton(onClick = onResetConfirmed) {
@@ -711,10 +702,10 @@ private fun ShortcutEditSheet(
  */
 @Composable
 private fun InstalledAppPicker(
-    apps: List<InstalledApp>?,
+    apps: List<InstalledAppOption>?,
     search: String,
     onSearch: (String) -> Unit,
-    onPick: (InstalledApp) -> Unit,
+    onPick: (InstalledAppOption) -> Unit,
     onDismiss: () -> Unit,
 ) {
     // 内容请求的「带动画关闭」：见上方 KDoc
@@ -771,9 +762,6 @@ private fun InstalledAppPicker(
                     }
                     LazyColumn(modifier = Modifier.heightIn(max = 380.dp)) {
                         items(filtered, key = { it.pkg }) { app ->
-                            val iconBitmap = remember(app.pkg) {
-                                drawableToBitmap(app.icon).asImageBitmap()
-                            }
                             Row(
                                 modifier = Modifier
                                     // 搜索过滤时列表项平滑重排/进出场，不整列硬跳
@@ -783,12 +771,14 @@ private fun InstalledAppPicker(
                                     .padding(vertical = 8.dp, horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Image(
-                                    bitmap = iconBitmap,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(34.dp),
-                                )
-                                Spacer(Modifier.width(10.dp))
+                                app.icon?.let { bitmap ->
+                                    Image(
+                                        bitmap = bitmap,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(34.dp),
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                }
                                 Column(Modifier.weight(1f)) {
                                     Text(
                                         text = app.label,
@@ -876,7 +866,7 @@ class ShortcutSettingsViewModel(private val repo: ScheduleRepository) : ViewMode
 
     class Factory(private val repo: ScheduleRepository) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+        override fun <T : ViewModel> create(modelClass: KClass<T>, extras: CreationExtras): T =
             ShortcutSettingsViewModel(repo) as T
     }
 }
