@@ -1,16 +1,33 @@
 package edu.jxslu.schedule
 
+import android.app.Activity
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.zxing.client.android.Intents
+import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.jw.JwVpnDetector
+import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.data.ujing.UjingAlipay
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.UjingLocateOutcome
+import edu.jxslu.schedule.platform.UjingPay
+import edu.jxslu.schedule.platform.UjingPayOutcome
+import edu.jxslu.schedule.platform.UjingPayResult
 import edu.jxslu.schedule.ui.me.CalendarSettingsScreen
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
@@ -36,10 +53,15 @@ import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.campus.postYktPaymentInbox
 import edu.jxslu.schedule.ui.common.rememberAttachmentImageUi
 import edu.jxslu.schedule.ui.common.rememberMarkdownUi
+import edu.jxslu.schedule.ui.common.AppPermissions
+import edu.jxslu.schedule.ui.common.SessionExpiredNotice
+import edu.jxslu.schedule.ui.common.washerScanIntent
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
 import edu.jxslu.schedule.ui.ebike.RideScreen
+import edu.jxslu.schedule.ui.ebike.BikeLocator
+import edu.jxslu.schedule.ui.ebike.LocateResult
 import edu.jxslu.schedule.ui.exam.ExamScreen
 import edu.jxslu.schedule.ui.exam.rememberExamScreenActions
 import edu.jxslu.schedule.ui.exam.ExamSettingsScreen
@@ -91,6 +113,7 @@ import edu.jxslu.schedule.ui.tweak.CourseTweakScreen
 import edu.jxslu.schedule.ui.ujing.UjingHistoryScreen
 import edu.jxslu.schedule.ui.ujing.UjingOrderScreen
 import edu.jxslu.schedule.ui.ujing.UjingScreen
+import edu.jxslu.schedule.ui.ujing.UjingViewModel
 import edu.jxslu.schedule.ui.water.WaterScreen
 import edu.jxslu.schedule.ui.water.WaterViewModel
 import edu.jxslu.schedule.ui.water.openQiekjRecharge
@@ -110,7 +133,10 @@ import edu.jxslu.schedule.ui.wenqu.WenquScreen
 import edu.jxslu.schedule.ui.wenqu.WenquSettingsScreen
 import edu.jxslu.schedule.ui.wenqu.WenquViewModel
 import edu.jxslu.schedule.ui.wenqu.rememberWenquScreenActions
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 
 /**
@@ -246,15 +272,71 @@ class SubpageActivity : ComponentActivity() {
             // 请假系统（2026-11-08）：三张学工表单的入口页，各自行里直接开 XgFormActivity
             SubpageScreen.LEAVE_HUB -> LeaveHubScreen(onBack = onBack)
             // U净 三页链（DESIGN §3.23）：主页（看板 / 扫码）→ 下单页（档位 / 投放）→ 历史账单。
-            // 下单页与主页间的大对象交接不走 extra，走 Graph 的 UjingDraftStore（进程内草稿）
-            SubpageScreen.UJING -> UjingScreen(
+            // 下单页与主页间的大对象交接不走 extra，走 `UjingDraftStore`（进程内草稿）。
+            // iOS 移植 S21 起三页都在共享层：ViewModel 与平台动作由这里注入（§11.2 ①⑦）。
+            SubpageScreen.UJING -> {
+                val services = Services.current
+                // 这三个在 Android 侧恒非空（`GraphServices` 全部转接 `Graph` 的现有单例）；
+                // 可空是给 iOS 的（那边还没有凭证存储 / `KeyValuePrefs`，返回 null）。
+                val ujingRepo = requireNotNull(services.ujingRepository()) {
+                    "Android 侧 U净 仓库恒非空（GraphServices.ujingRepository）"
+                }
+                val ujingHouses = requireNotNull(services.ujingHouseStore()) {
+                    "Android 侧 U净 收藏仓恒非空（GraphServices.ujingHouseStore）"
+                }
+                val ujingHistory = requireNotNull(services.ujingHistoryStore()) {
+                    "Android 侧 U净 账单仓恒非空（GraphServices.ujingHistoryStore）"
+                }
+                // 支付缝：`PayTask` 只能在 Activity 上拉起，装配根只有 applicationContext，
+                // 所以在组合期造一个（`UjingPay` 的 KDoc 写了为什么不进 AppServices）
+                val ujingPay = remember(this@SubpageActivity) {
+                    ujingAlipayPay(this@SubpageActivity)
+                }
+                // `viewModel {}` 而不是 `remember`：本页跑在独立 Activity 里，旋转时保住 VM
+                val ujingViewModel: UjingViewModel = viewModel {
+                    UjingViewModel(
+                        repo = ujingRepo,
+                        houseStore = ujingHouses,
+                        historyStore = ujingHistory,
+                        draftStore = services.ujingDraftStore(),
+                        prefs = services.displayPrefs(),
+                        pay = ujingPay,
+                        reminder = services.ujingReminder(),
+                    )
+                }
+                // 扫码：复用内置取景窗口的原文模式（相机权限由取景窗口自己处理，与骑行页同一条通道）
+                val scanLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.StartActivityForResult(),
+                ) { result ->
+                    val raw = result.data?.getStringExtra(Intents.Scan.RESULT)
+                    if (result.resultCode == Activity.RESULT_OK && !raw.isNullOrBlank()) {
+                        ujingViewModel.onQrScanned(raw)
+                    }
+                }
+                UjingScreen(
+                    viewModel = ujingViewModel,
+                    onBack = onBack,
+                    onOpenOrder = { SubpageActivity.start(this, SubpageScreen.UJING_ORDER) },
+                    onOpenHistory = { SubpageActivity.start(this, SubpageScreen.UJING_HISTORY) },
+                    scanRaw = ujingScanRaw,
+                    brandIconRes = R.drawable.ic_brand_ujing,
+                    onScan = { scanLauncher.launch(washerScanIntent(this)) },
+                    onLocate = rememberUjingLocator(),
+                    // 登录过期提示还留在 :app（`SessionExpiryStore` 的介质是 SharedPreferences），
+                    // 以槽位注入；页面把自己那份 SnackbarHostState 交出来
+                    sessionExpiredNotice = { snackbar ->
+                        val ujingState by ujingViewModel.uiState.collectAsStateWithLifecycle()
+                        SessionExpiredNotice(SessionService.Ujing, ujingState.loggedIn, snackbar)
+                    },
+                )
+            }
+            SubpageScreen.UJING_ORDER -> UjingOrderScreen(
+                draftStore = Services.current.ujingDraftStore(),
                 onBack = onBack,
-                onOpenOrder = { SubpageActivity.start(this, SubpageScreen.UJING_ORDER) },
-                onOpenHistory = { SubpageActivity.start(this, SubpageScreen.UJING_HISTORY) },
-                scanRaw = ujingScanRaw,
             )
-            SubpageScreen.UJING_ORDER -> UjingOrderScreen(onBack = onBack)
-            SubpageScreen.UJING_HISTORY -> UjingHistoryScreen(onBack = onBack)
+            SubpageScreen.UJING_HISTORY -> Services.current.ujingHistoryStore()?.let { store ->
+                UjingHistoryScreen(store = store, onBack = onBack)
+            }
             // 问渠四页已搬进 shared/commonMain（iOS 移植 S16）：ViewModel 由宿主建（`viewModel {}`
             // 保留配置变更），平台动作用 `rememberWenquScreenActions` 补齐；回调里 null 的语义是
             // 「本平台没这项能力」，入口整块不渲染（`design/ios-port.md` §11.2）。
@@ -754,6 +836,77 @@ class SubpageActivity : ComponentActivity() {
                     startEditing = startEditing,
                 ),
             )
+        }
+    }
+}
+
+// ── U净 的两条 Android 平台缝（iOS 移植 S21；共享层的 `platform/UjingPlatform.kt` 定义了契约） ──
+
+/**
+ * U净 的支付宝支付缝：把服务端签发的 `orderInfo` 交给官方 SDK 并等结果。
+ *
+ * 为什么在宿主里造而不是 `GraphServices`：`PayTask` 只能在 `Activity` 上拉起，而装配根
+ * 只持有 `applicationContext`（见 `GraphServices` 的 KDoc）。本页跑在独立 Activity 里，
+ * 这里现造一个、随窗口销毁，不留长命引用。
+ *
+ * `PayTask.payV2` 是**阻塞调用**（内部建网络连接），所以切到 `Dispatchers.IO`——
+ * 共享层的 `UjingViewModel` 不再自己指定调度器（那边原来写的 `Dispatchers.IO` 是 JVM 专有）。
+ */
+private fun ujingAlipayPay(activity: Activity): UjingPay = object : UjingPay {
+    override suspend fun pay(orderInfo: String): UjingPayResult =
+        withContext(Dispatchers.IO) {
+            val (outcome, memo) = UjingAlipay.pay(activity, orderInfo)
+            UjingPayResult(
+                outcome = when (outcome) {
+                    UjingAlipay.Outcome.Success -> UjingPayOutcome.Success
+                    UjingAlipay.Outcome.Pending -> UjingPayOutcome.Pending
+                    UjingAlipay.Outcome.Canceled -> UjingPayOutcome.Canceled
+                    UjingAlipay.Outcome.Failed -> UjingPayOutcome.Failed
+                },
+                memo = memo,
+            )
+        }
+}
+
+/**
+ * U净「添加洗衣房」的定位缝。
+ *
+ * 权限申请必须走 `ActivityResultLauncher`（只能在组合期注册），所以只能在宿主侧造；
+ * 拿到授权后复用单车地图那条定位链路（`BikeLocator`：`LocationManager` 一次读数、
+ * 8 秒超时、WGS84 → GCJ-02），失败原因原样交给页面显示。
+ *
+ * 权限请求与定位调用之间用 [CompletableDeferred] 搭桥：launcher 的回调不在
+ * 挂起调用里，只能这样把结果交回去。
+ */
+@Composable
+private fun rememberUjingLocator(): suspend () -> UjingLocateOutcome {
+    val context = LocalContext.current
+    // 一次权限请求的等待者；launcher 回调到达时唤醒它
+    var pendingGrant by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        pendingGrant?.complete(result.values.any { it })
+        pendingGrant = null
+    }
+    return remember(context, permissionLauncher) {
+        {
+            val granted = if (BikeLocator.hasPermission(context)) {
+                true
+            } else {
+                val deferred = CompletableDeferred<Boolean>()
+                pendingGrant = deferred
+                permissionLauncher.launch(AppPermissions.location.toTypedArray())
+                deferred.await()
+            }
+            if (!granted) {
+                UjingLocateOutcome.Failed("没有定位权限，无法获取附近洗衣房")
+            } else {
+                when (val fix = BikeLocator.currentLocation(context)) {
+                    is LocateResult.Ok -> UjingLocateOutcome.Ok(fix.lat, fix.lng)
+                    is LocateResult.Failed -> UjingLocateOutcome.Failed(fix.message)
+                }
+            }
         }
     }
 }

@@ -25,15 +25,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.data.ujing.UjingRepository
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
@@ -45,6 +44,13 @@ import edu.jxslu.schedule.ui.theme.Motion
  *
  * 2026-10-19 从生活页随入口一起移到今日页「江水生活」：组件搬进 ui/ujing 包，
  * 「查看洗衣房空闲情况」走 [rememberSheetDismisser] 播完退场再进页。
+ *
+ * iOS 移植 S21（2026-11-25）：搬进 `shared/commonMain`。原来靠 `Graph.ujing(context)`
+ * 现取仓库，现在改成构造参数，默认值走 `Services.current`——两个调用点
+ * （`MainActivity` 侧栏入口、`TodayScreen` 江水生活）都**一行不用改**，
+ * 而拿到的仍是与主页同一个仓库实例（订单状态必须是同一份，否则弹窗显示旧状态）。
+ * iOS 侧仓库为 null（见 `AppServices.ujingRepository` 的 KDoc），那时入口本身就不出现，
+ * 不会走到这个默认值。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,9 +58,11 @@ fun UjingEntrySheet(
     onDismiss: () -> Unit,
     onScan: () -> Unit,
     onOpenPage: () -> Unit,
+    /** U净 仓库（只读 `orderState`）：必须与主页 ViewModel 持有的那份是同一实例。 */
+    repo: UjingRepository = requireNotNull(Services.current.ujingRepository()) {
+        "U净 仓库未装配：本平台没有凭证存储 / KeyValuePrefs（见 AppServices.ujingRepository）"
+    },
 ) {
-    val context = LocalContext.current
-    val repo = remember(context) { Graph.ujing(context) }
     val order by repo.orderState.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState()
     val dismiss = rememberSheetDismisser(sheetState, onDismiss)

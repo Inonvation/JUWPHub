@@ -1,14 +1,9 @@
 package edu.jxslu.schedule.ui.ujing
 
-import android.app.Activity
-import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
-import edu.jxslu.schedule.data.session.SessionExpiryStore
-import edu.jxslu.schedule.data.ujing.UjingAlipay
+import edu.jxslu.schedule.data.prefs.recordGuessOrder
 import edu.jxslu.schedule.data.ujing.UjingApiException
 import edu.jxslu.schedule.data.ujing.UjingDraftStore
 import edu.jxslu.schedule.data.ujing.UjingHistoryStore
@@ -19,13 +14,16 @@ import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.data.ujing.UjingSessionExpiredException
 import edu.jxslu.schedule.data.ujing.UjingStore
 import edu.jxslu.schedule.data.ujing.UjingWashModel
-import edu.jxslu.schedule.domain.UjingState
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.GuessTarget
+import edu.jxslu.schedule.domain.UjingState
+import edu.jxslu.schedule.platform.UjingPay
+import edu.jxslu.schedule.platform.UjingPayOutcome
+import edu.jxslu.schedule.platform.UjingReminder
+import edu.jxslu.schedule.platform.locked
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.ui.reminder.UjingDoneReminder
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -41,7 +39,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 看板一行：[line] 是洗衣机聚合，[dryerLine] 是烘干机聚合（各自为 null = 该店没有这类
@@ -108,23 +105,50 @@ data class UjingUiState(
  * 主页只管：登录、看板、扫码入口（识别成功即开草稿并跳独立下单页）、在案订单卡与
  * 历史账单入口。档位 / 水温 / 投放的选择与确认在 UJING_ORDER 页，选择结果经
  * [UjingDraftStore.submit] 交回这里执行——**写操作仍由主页单点发起**（下单 → 支付宝
- * SDK 拉起 → 支付确认），不因窗口切换换执行者。
+ * 拉起 → 支付确认），不因窗口切换换执行者。
  *
  * 会话过期的统一处理在 [handleFailure]：清 token、让登录态流把 UI 带回登录卡，
  * **不做任何自动重登**。写操作（下单 / 取消 / 启动）零自动重试——失败后先查
  * 在案订单，不盲目重发。
+ *
+ * iOS 移植 S21（2026-11-25）：搬进 `shared/commonMain`。原来构造里的 `appContext` /
+ * `payActivityProvider` / `UjingDoneReminder` / `UjingAlipay` 四处 Android 专有依赖
+ * 换成两条平台缝（[pay] / [reminder]），`Factory` 删掉——共享层没有 `viewModel()`，
+ * 依赖由宿主从 `Services.current` 取好再传进来（`design/ios-port.md` §11.2 ①②③）。
  */
 class UjingViewModel(
     private val repo: UjingRepository,
     private val houseStore: UjingHouseStore,
-    private val historyStore: UjingHistoryStore,
-    private val draftStore: UjingDraftStore,
+    /**
+     * 账单仓：主页记录卡与历史账单页只读它（写入口在 [repo]，本类不碰）。
+     *
+     * 为什么放开成 `val`：记录卡展示「最近三笔」用的是与历史账单页**同一份**实例，
+     * 为这三行再往 [UjingUiState] 抄一份列表等于同一份数据两个来源。
+     */
+    val historyStore: UjingHistoryStore,
+    /**
+     * 扫码草稿仓：主页扫码卡的「上次识别的设备」行只读它，写入口在本类与下单页。
+     * 放开成 `val` 的理由同 [historyStore]。
+     */
+    val draftStore: UjingDraftStore,
     private val prefs: DisplayPrefsStore,
-    /** 应用上下文：排 / 撤洗衣完成提醒的闹钟用（提醒不依赖任何窗口存活）。 */
-    private val appContext: Context,
-    /** 拉起支付宝的活动来源（支付只能在 Activity 上发起）。 */
-    private val payActivityProvider: () -> Activity?,
+    /**
+     * 支付宝支付缝；**null = 本平台没有支付宝 SDK**（iOS 待接）。
+     *
+     * 支付要 `Activity`，所以由宿主在组合期造一个传进来，而不是走 `AppServices`
+     * （见 `UjingPay` 的 KDoc）。null 时下单链在**创建订单之前**就拦住，
+     * 订单卡的「去支付 / 重试支付」也不渲染成可点按钮——机器被锁 2 分钟却没法付最坏。
+     */
+    private val pay: UjingPay? = null,
+    /**
+     * 洗衣完成提醒（闹钟 + 通知）；**null = 本平台没有这项能力**（iOS 待接）。
+     * null 时排 / 撤提醒整体跳过，订单卡与 15 秒轮询照常工作。
+     */
+    private val reminder: UjingReminder? = null,
 ) : ViewModel() {
+
+    /** 本平台能不能拉起支付宝：订单卡据此决定「去支付」是可点按钮还是禁用说明。 */
+    val canPay: Boolean get() = pay != null
 
     private val _uiState = MutableStateFlow(UjingUiState())
     val uiState: StateFlow<UjingUiState> = _uiState.asStateFlow()
@@ -180,12 +204,12 @@ class UjingViewModel(
                     // 扫到机身码时还没登录：登录成功后接着把那次识别跑完，用户不用重扫
                     pendingScan?.let { (raw, at) ->
                         pendingScan = null
-                        if (System.currentTimeMillis() - at <= PENDING_SCAN_TTL_MILLIS) {
+                        if (AppClock.nowMillis() - at <= PENDING_SCAN_TTL_MILLIS) {
                             onQrScanned(raw)
                         }
                     }
                 } else {
-                    UjingDoneReminder.cancel(appContext)
+                    reminder?.cancel()
                 }
             }
         }
@@ -213,7 +237,7 @@ class UjingViewModel(
         // 使用须知：首次（或距上次确认超过一周）进页弹一次
         viewModelScope.launch {
             val seenAt = prefs.ujingNoticeSeenAt.first()
-            val stale = System.currentTimeMillis() - seenAt > NOTICE_RESHOW_INTERVAL_MILLIS
+            val stale = AppClock.nowMillis() - seenAt > NOTICE_RESHOW_INTERVAL_MILLIS
             if (seenAt <= 0L || stale) {
                 _uiState.update { it.copy(noticeVisible = true) }
             }
@@ -238,7 +262,7 @@ class UjingViewModel(
         }
         if (state.codeSending) return
         // 60 秒冷却：UI 按钮已按 codeSentAt 置灰，这里再兜一道边界
-        if (state.codeSentAt > 0 && System.currentTimeMillis() - state.codeSentAt < CODE_COOLDOWN_MILLIS) {
+        if (state.codeSentAt > 0 && AppClock.nowMillis() - state.codeSentAt < CODE_COOLDOWN_MILLIS) {
             return
         }
         _uiState.update { it.copy(codeSending = true) }
@@ -246,7 +270,7 @@ class UjingViewModel(
             runCatching { repo.requestCaptcha(state.mobile) }
                 .onSuccess {
                     _uiState.update {
-                        it.copy(codeSending = false, codeSentAt = System.currentTimeMillis())
+                        it.copy(codeSending = false, codeSentAt = AppClock.nowMillis())
                     }
                     notify("验证码已发送", NoticeTone.Success)
                 }
@@ -285,7 +309,7 @@ class UjingViewModel(
 
     fun logout() {
         repo.logout()
-        UjingDoneReminder.cancel(appContext)
+        reminder?.cancel()
         notify("已退出登录", NoticeTone.Info)
     }
 
@@ -326,7 +350,11 @@ class UjingViewModel(
         _uiState.update { it.copy(boardRefreshing = true) }
         boardJob = viewModelScope.launch {
             try {
-                val expiryNotified = AtomicBoolean(false)
+                // 「同一轮只提示一次会话过期」：并发块里各店各判一次，用一个布尔收口。
+                // 原来这里是 `AtomicBoolean`（JVM 专有）；并发块都收敛在 viewModelScope
+                // 的主线程调度上，换平台同步缝 `locked` 语义等价（iOS 侧不锁，见它的 KDoc）。
+                val expiryGuard = Any()
+                var expiryNotified = false
                 val limiter = Semaphore(BOARD_CONCURRENCY)
                 val rows = coroutineScope {
                     houses.map { house ->
@@ -343,10 +371,16 @@ class UjingViewModel(
                                 throw e
                             } catch (error: Exception) {
                                 // 401 一次就清会话；并发下别让每家店各弹一条「登录已过期」
-                                if (error is UjingSessionExpiredException &&
-                                    expiryNotified.compareAndSet(false, true)
-                                ) {
-                                    handleFailure(error)
+                                if (error is UjingSessionExpiredException) {
+                                    val first = locked(expiryGuard) {
+                                        if (expiryNotified) {
+                                            false
+                                        } else {
+                                            expiryNotified = true
+                                            true
+                                        }
+                                    }
+                                    if (first) handleFailure(error)
                                 }
                                 UjingBoardRow(
                                     house = house,
@@ -416,6 +450,9 @@ class UjingViewModel(
     /**
      * 二维码原文（相机或相册）→ 设备信息 + 套餐。成功即开草稿并请 UI 跳独立下单页
      * （档位 / 水温 / 投放的选择都在那一页，主页不内联展示）。
+     *
+     * 调用方两处：页内扫码（宿主的扫码窗口回灌原文）与今日页侧栏「扫一扫」
+     * （`scanRaw` 令牌），两条都走到这里，不各写一份识别链。
      */
     fun onQrScanned(raw: String) {
         if (raw.isBlank() || _uiState.value.scan is UjingScanState.Parsing) return
@@ -424,7 +461,7 @@ class UjingViewModel(
         // 可能压根没用过 U净，让人回页面上登录才是出路
         if (!repo.loggedIn.value) {
             // 留着原文：登录成功后自动接着识别（见 init 里的 loggedIn 收集器）
-            pendingScan = raw to System.currentTimeMillis()
+            pendingScan = raw to AppClock.nowMillis()
             notify("识别洗衣机需要先登录 U净（手机号 + 短信验证码）", NoticeTone.Warning)
             return
         }
@@ -521,6 +558,12 @@ class UjingViewModel(
         addDisinfectant: Boolean,
     ) {
         val draft = draftStore.draft.value ?: return
+        // 付不了就别建单：`orders/create` 受理即锁机 2 分钟，没支付通道等于把机器占住
+        // 又付不了钱（iOS 侧 pay 为 null）。在创建之前拦住，草稿留着，用户换平台再下。
+        if (pay == null) {
+            notify("当前平台不支持支付宝支付，未创建订单", NoticeTone.Warning)
+            return
+        }
         _uiState.update { it.copy(orderBusy = true) }
         viewModelScope.launch {
             // 下单与取支付参数分两段 try：createOrder 受理成功后订单已建、机器已锁
@@ -543,8 +586,9 @@ class UjingViewModel(
                 notify(error.message ?: "下单失败，请稍后重试", NoticeTone.Error)
                 return@launch
             }
-            // 「猜你想用」：下单受理 = 一次真实订单（支付重试不会再走 createOrder，不会重复）
-            Graph.recordGuessOrder(GuessTarget.UJING)
+            // 「猜你想用」：下单受理 = 一次真实订单（支付重试不会再走 createOrder，不会重复）。
+            // 原来是 `Graph.recordGuessOrder`（:app）；偏好存储已在共享层，直接走它。
+            runCatching { prefs.recordGuessOrder(GuessTarget.UJING) }
             val paid = runCatching {
                 // 下单即拉支付参数（2 分钟独占期宝贵，少一次用户等待）
                 repo.paymentOrderInfo(snapshot.orderId)
@@ -566,26 +610,29 @@ class UjingViewModel(
         }
     }
 
-    /** 支付宝 SDK 拉起（后台线程阻塞等结果），结束后回查支付状态。 */
+    /** 支付宝 SDK 拉起（阻塞等结果），结束后回查支付状态。 */
     private fun launchPay(orderId: String, orderInfo: String) {
-        val activity = payActivityProvider()
-        if (activity == null) {
-            notify("无法拉起支付宝，请在订单卡上重试支付", NoticeTone.Error)
+        val gateway = pay
+        if (gateway == null) {
+            // 走不到（createAndPay / retryPay 都先拦了），留一道防御免得静默卡在 busy
+            notify("当前平台不支持支付宝支付", NoticeTone.Error)
             return
         }
         // paying 态：SDK 阻塞在支付宝界面/收银台的整个窗口里，订单卡动作不该照常可点
         // （此前 busy 在拉起前就复位，支付窗口内「取消/启动」全程可点，点取消会和支付结果赛跑）
         _uiState.update { it.copy(paying = true) }
-        viewModelScope.launch(Dispatchers.IO) {
-            val (outcome, memo) = UjingAlipay.pay(activity, orderInfo)
+        // 切后台线程由缝的实现方负责（Android 是 `PayTask.payV2` 的阻塞调用）——
+        // 原来这里写 `Dispatchers.IO`，那是 JVM 专有，iOS 侧也没有它
+        viewModelScope.launch {
+            val result = gateway.pay(orderInfo)
             _uiState.update { it.copy(paying = false) }
-            when (outcome) {
-                UjingAlipay.Outcome.Success -> {
+            when (result.outcome) {
+                UjingPayOutcome.Success -> {
                     notify("支付成功", NoticeTone.Success)
                     runCatching { repo.confirmPayment(orderId) }
                         .onFailure { handleFailure(it) }
                 }
-                UjingAlipay.Outcome.Pending -> {
+                UjingPayOutcome.Pending -> {
                     // 8000 = 结果确认中：钱可能已扣，按失败报会诱导用户重付造成重复扣款。
                     // 先双查订单状态（confirmPayment = lastPayStatus + detail），以服务端为准。
                     val settled = runCatching { repo.confirmPayment(orderId) }
@@ -603,12 +650,12 @@ class UjingViewModel(
                         },
                     )
                 }
-                UjingAlipay.Outcome.Canceled -> {
+                UjingPayOutcome.Canceled -> {
                     notify("已取消支付，订单保留 2 分钟，可在订单卡重试", NoticeTone.Warning)
                     runCatching { repo.refreshOrder(orderId) }.onFailure { handleFailure(it) }
                 }
-                UjingAlipay.Outcome.Failed -> {
-                    notify("支付失败（$memo），可在订单卡重试", NoticeTone.Error)
+                UjingPayOutcome.Failed -> {
+                    notify("支付失败（${result.memo}），可在订单卡重试", NoticeTone.Error)
                     runCatching { repo.refreshOrder(orderId) }.onFailure { handleFailure(it) }
                 }
             }
@@ -619,6 +666,10 @@ class UjingViewModel(
     fun retryPay() {
         val order = _uiState.value.order ?: return
         if (orderChainBusy) return
+        if (pay == null) {
+            notify("当前平台不支持支付宝支付", NoticeTone.Warning)
+            return
+        }
         _uiState.update { it.copy(orderBusy = true) }
         viewModelScope.launch {
             runCatching { repo.paymentOrderInfo(order.orderId) }
@@ -653,16 +704,14 @@ class UjingViewModel(
                     //   常常早于真实结束，到点 check 会按最新剩余重排，早响比不响好；
                     // - 终结态 → 就地撤销（完成那条由闹钟落点的 check 自己发）。
                     when {
-                        snapshot.isTerminal -> UjingDoneReminder.cancel(appContext)
+                        snapshot.isTerminal -> reminder?.cancel()
                         snapshot.status == "40" && snapshot.remainSeconds > 0 ->
-                            UjingDoneReminder.schedule(
-                                appContext,
+                            reminder?.schedule(
                                 snapshot.orderId,
                                 snapshot.snapshotAt + snapshot.remainSeconds * 1000L,
                             )
                         snapshot.paid && snapshot.durationSeconds > 0 ->
-                            UjingDoneReminder.schedule(
-                                appContext,
+                            reminder?.schedule(
                                 snapshot.orderId,
                                 snapshot.snapshotAt + snapshot.durationSeconds * 1000L,
                             )
@@ -690,7 +739,7 @@ class UjingViewModel(
             runCatching { repo.cancelOrder(order.orderId) }
                 .onSuccess {
                     _uiState.update { it.copy(orderBusy = false) }
-                    UjingDoneReminder.cancel(appContext)
+                    reminder?.cancel()
                     notify("订单已取消，机器已释放", NoticeTone.Success)
                 }
                 .onFailure { error ->
@@ -732,7 +781,7 @@ class UjingViewModel(
     /** 终结态订单卡上的「知道了」：清掉在案快照 + 收摊（撤闹钟 / 撤已发通知 / 撤免扰挂起条）。 */
     fun dismissOrder() {
         repo.dismissOrder()
-        UjingDoneReminder.revoke(appContext)
+        reminder?.revoke()
         _uiState.update { it.copy(order = null) }
     }
 
@@ -740,7 +789,7 @@ class UjingViewModel(
 
     fun onNoticeConfirmed() {
         _uiState.update { it.copy(noticeVisible = false) }
-        viewModelScope.launch { prefs.setUjingNoticeSeenAt(System.currentTimeMillis()) }
+        viewModelScope.launch { prefs.setUjingNoticeSeenAt(AppClock.nowMillis()) }
     }
 
     // ── 内部 ──
@@ -748,7 +797,7 @@ class UjingViewModel(
     private fun handleFailure(error: Throwable) {
         if (error is UjingSessionExpiredException) {
             repo.markExpired()
-            notify(SessionExpiryStore.NOTICE_TEXT, NoticeTone.Warning)
+            notify(SESSION_EXPIRED_NOTICE, NoticeTone.Warning)
         }
     }
 
@@ -758,28 +807,6 @@ class UjingViewModel(
      */
     private fun notify(message: String, tone: NoticeTone) {
         _events.trySend(NoticeFeedback(message, tone))
-    }
-
-    class Factory(
-        private val repo: UjingRepository,
-        private val houseStore: UjingHouseStore,
-        private val historyStore: UjingHistoryStore,
-        private val draftStore: UjingDraftStore,
-        private val prefs: DisplayPrefsStore,
-        private val appContext: Context,
-        private val payActivityProvider: () -> Activity?,
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            UjingViewModel(
-                repo,
-                houseStore,
-                historyStore,
-                draftStore,
-                prefs,
-                appContext,
-                payActivityProvider,
-            ) as T
     }
 
     private companion object {
@@ -802,5 +829,15 @@ class UjingViewModel(
 
         /** 订单进行中且页面可见时的轮询间隔（离开页面即停，无后台轮询）。 */
         const val ORDER_POLL_INTERVAL_MILLIS = 15_000L
+
+        /**
+         * 会话过期的统一文案，**逐字等于** `:app` 的 `SessionExpiryStore.NOTICE_TEXT`。
+         *
+         * 为什么抄一份：那个常量所在的类介质是 `SharedPreferences` + `Context`，留在 `:app`
+         * 搬不动，共享层看不见它。两处必须一字不差——同一条「登录已过期」在别的页面
+         * （胖乖 / 趣智 / 快趣 / 问渠）由 `SessionExpiredNotice` 用那个常量发，这里由
+         * `handleFailure` 发。改文案时两边一起改。
+         */
+        const val SESSION_EXPIRED_NOTICE = "登录状态已过期，请重新登录"
     }
 }

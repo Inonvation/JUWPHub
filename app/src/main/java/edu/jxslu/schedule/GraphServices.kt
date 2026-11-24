@@ -30,6 +30,9 @@ import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.session.WebViewCookieBridge
+import edu.jxslu.schedule.data.ujing.UjingDraftStore
+import edu.jxslu.schedule.data.ujing.UjingHistoryStore
+import edu.jxslu.schedule.data.ujing.UjingHouseStore
 import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.data.wenqu.WenquRepository
@@ -42,6 +45,8 @@ import edu.jxslu.schedule.platform.AppServices
 import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
 import edu.jxslu.schedule.platform.ThirdPartySession
+import edu.jxslu.schedule.platform.UjingReminder
+import edu.jxslu.schedule.ui.reminder.UjingDoneReminder
 import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 import edu.jxslu.schedule.ui.widget.WaterWidgetSync
 import kotlinx.coroutines.CoroutineScope
@@ -296,4 +301,39 @@ class GraphServices(private val context: Context) : AppServices {
      * 必须在有 Looper 的线程调用——页面在组合期读它，正是主线程。
      */
     override fun hasJwWebSession(): Boolean = WebViewCookieBridge.hasAnyCookie()
+    // ---- U净（S21） ----
+    //
+    // 四个仓库 / 存储全部转给 `Graph` 的现有单例：主页的订单卡、下单页的草稿、历史账单页
+    // 读的必须是对方写的同一份（各自 new 一个等于「扫了码、下单页拿到 null」）。
+    // 支付不在这里——`PayTask` 只能在 Activity 上拉起，见 `UjingPay` 的 KDoc。
+
+
+    override fun ujingHouseStore(): UjingHouseStore = Graph.ujingHouses(appContext)
+
+    override fun ujingHistoryStore(): UjingHistoryStore = Graph.ujingHistory(appContext)
+
+    override fun ujingDraftStore(): UjingDraftStore = Graph.ujingDraft(appContext)
+
+    /**
+     * 洗衣完成提醒：转接 `ui/reminder/UjingDoneReminder`（`AlarmManager` + 通知渠道）。
+     *
+     * 那个文件**故意留在 `:app`**：它直调 `AlarmManager` / `NotificationCompat`，
+     * 共享层拿不到；搬过去只会得到一份 expect/actual 的空壳。三个动作与共享层的
+     * [UjingReminder] 逐字对应，语义（精确闹钟 / 兜底闹钟 / 撤已发通知）在那边。
+     */
+    private val ujingReminderSink: UjingReminder = object : UjingReminder {
+        override fun schedule(orderId: String, triggerAtMillis: Long) {
+            UjingDoneReminder.schedule(appContext, orderId, triggerAtMillis)
+        }
+
+        override fun cancel() {
+            UjingDoneReminder.cancel(appContext)
+        }
+
+        override fun revoke() {
+            UjingDoneReminder.revoke(appContext)
+        }
+    }
+
+    override fun ujingReminder(): UjingReminder = ujingReminderSink
 }

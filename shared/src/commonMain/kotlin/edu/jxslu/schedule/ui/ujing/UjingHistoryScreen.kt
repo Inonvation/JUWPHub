@@ -37,20 +37,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.ujing.UjingHistoryEntry
+import edu.jxslu.schedule.data.ujing.UjingHistoryStore
 import edu.jxslu.schedule.domain.UjingState
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * U净 历史账单（DESIGN §3.23 / §4.37，2026-10-02）：本 App 发起的每一笔订单
@@ -59,12 +55,18 @@ import java.util.Locale
  * 拿到样本前不猜端点。
  *
  * 列表项走 `animateItem()`：清空 / 新增时平滑进出场，不再整列硬跳。
+ *
+ * iOS 移植 S21（2026-11-25）：搬进 `shared/commonMain`。本页没有 ViewModel（§11.2 ②），
+ * 唯一的外部依赖是账单仓，改成**必填构造参数**由宿主从 `Services.current` 取好传进来——
+ * 必须是主页记录卡持有的**同一份**实例（各造一个等于「下了一单、账单页看不到」）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UjingHistoryScreen(onBack: () -> Unit = {}) {
-    val context = LocalContext.current
-    val store = remember { Graph.ujingHistory(context) }
+fun UjingHistoryScreen(
+    /** 账单仓：必须与主页 ViewModel 持有的那份是同一实例。 */
+    store: UjingHistoryStore,
+    onBack: () -> Unit = {},
+) {
     val entries by store.state.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
     Scaffold(
@@ -158,9 +160,7 @@ private fun EmptyHistory(modifier: Modifier = Modifier) {
 
 @Composable
 private fun HistoryRow(entry: UjingHistoryEntry, modifier: Modifier = Modifier) {
-    val timeText = remember(entry.displayAt) {
-        SimpleDateFormat("M月d日 HH:mm", Locale.CHINESE).format(Date(entry.displayAt))
-    }
+    val timeText = remember(entry.displayAt) { ujingTimeLabel(entry.displayAt) }
     // 结果分三档上色：洗完了（50）= 成功色，启动失败（52）= 错误色，其余（运行中 / 已取消 / 超时）
     // = 中性。副行前置一枚同色状态点，扫列表时不必逐字读状态。
     val done = entry.paid && entry.status == "50"

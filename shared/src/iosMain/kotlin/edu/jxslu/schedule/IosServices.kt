@@ -34,6 +34,9 @@ import edu.jxslu.schedule.data.session.IosWebCookieSource
 import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.data.session.WebCookies
+import edu.jxslu.schedule.data.ujing.UjingDraftStore
+import edu.jxslu.schedule.data.ujing.UjingHistoryStore
+import edu.jxslu.schedule.data.ujing.UjingHouseStore
 import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.data.wenqu.WenquRepository
@@ -47,6 +50,7 @@ import edu.jxslu.schedule.platform.AppServices
 import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
 import edu.jxslu.schedule.platform.ThirdPartySession
+import edu.jxslu.schedule.platform.UjingReminder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -411,6 +415,36 @@ class IosServices : AppServices {
      * 在那之前账号中心的教务行只按「凭证在不在」判——没凭证就显示未登录。
      */
     override fun hasJwWebSession(): Boolean? = null
+    // ---- U净（S21，2026-11-25） ----
+    //
+    // 页面与 ViewModel 已经搬进共享层，但 iOS 侧还**建不起仓库与两个本地表**：
+    // 它们要「凭证存储 + `KeyValuePrefs` 落点」两样介质，这边都还没有。三处返回 null，
+    // 口径同 [yktCredentialStore]：入口整块不出现，而不是点进去才崩。
+
+    /** U净 收藏洗衣房：**iOS 侧还没有 `KeyValuePrefs` 落点，返回 null**（见 [ujingRepository]）。 */
+    override fun ujingHouseStore(): UjingHouseStore? = null
+
+    /** U净 历史账单：**iOS 侧还没有 `KeyValuePrefs` 落点，返回 null**（见 [ujingRepository]）。 */
+    override fun ujingHistoryStore(): UjingHistoryStore? = null
+
+    /**
+     * U净 扫码草稿：纯内存 `StateFlow`，两端同一份实现——**非空**。
+     *
+     * 惰性单例：主页开的草稿必须与独立下单页读到的是同一个（各造一个等于「扫了码、
+     * 下单页拿到 null」）。进程回收即丢，这是设计（见 `UjingDraftStore` 的 KDoc）。
+     */
+    private val ujingDraft: UjingDraftStore by lazy { UjingDraftStore() }
+
+    override fun ujingDraftStore(): UjingDraftStore = ujingDraft
+
+    /**
+     * 洗衣完成提醒：**iOS 侧还没有实现，返回 null**。
+     *
+     * 升级条件：`UNUserNotificationCenter` 授权 + `UNTimeIntervalNotificationTrigger` 排闹钟，
+     * `removePendingNotificationRequests` / `removeDeliveredNotifications` 对应
+     * Android 的 cancel / revoke 两个动作。在那之前订单卡与 15 秒轮询照常，只是没有「洗好提醒」。
+     */
+    override fun ujingReminder(): UjingReminder? = null
 
     init {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，

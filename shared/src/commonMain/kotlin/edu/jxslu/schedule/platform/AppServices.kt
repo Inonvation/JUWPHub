@@ -24,6 +24,9 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.ujing.UjingDraftStore
+import edu.jxslu.schedule.data.ujing.UjingHistoryStore
+import edu.jxslu.schedule.data.ujing.UjingHouseStore
 import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.data.wenqu.WenquRepository
@@ -383,6 +386,48 @@ interface AppServices {
      * 而这里要在组合期同步给一个布尔。接上之后改成 suspend 或加一层缓存。
      */
     fun hasJwWebSession(): Boolean?
+    // ---- U净（iOS 移植 S21，2026-11-25） ----
+    //
+    // 类型全在 commonMain（S15 搬过），这里只是「谁给同一份实例」。必须是同一个实例：
+    // 主页的订单卡、下单页的草稿、历史账单页读的都是对方写的同一份，
+    // 各造一个等于「扫码开了草稿、下单页拿到 null」。
+    //
+    // 支付与完成提醒按「有没有平台能力」分开：支付要 `Activity`（见 [UjingPay] 的 KDoc），
+    // 所以不进这里、由宿主直接传给 ViewModel；提醒只要 `Context`，装配根给得起。
+
+    /**
+     * U净 收藏的洗衣房（本机偏好）。主页看板与「添加洗衣房」共用。
+     *
+     * **null = 本平台没有 `KeyValuePrefs` 落点**（同 [ujingRepository]）：iOS 侧
+     * 收藏看板整块不渲染，`stores/near` 也就不会被打。
+     */
+    fun ujingHouseStore(): UjingHouseStore?
+
+    /**
+     * U净 历史账单（本机留痕）：主页记录卡与历史账单页共用。
+     *
+     * **null = 本平台没有 `KeyValuePrefs` 落点**（同 [ujingRepository]）：iOS 侧
+     * 记录卡整块不占位（它本来就是「没有记录就不占位」的形状）。
+     */
+    fun ujingHistoryStore(): UjingHistoryStore?
+
+    /**
+     * U净 扫码草稿（进程内一次性交接）：主页与独立下单页共用。
+     *
+     * **非空**：纯内存 `StateFlow`，不落盘（见 `UjingDraftStore` 的 KDoc），两端都建得起来。
+     * 必须同一份实例，否则主页开的草稿下单页读不到。
+     */
+    fun ujingDraftStore(): UjingDraftStore
+
+    /**
+     * 洗衣完成提醒（闹钟 + 系统通知）。
+     *
+     * **null = 本平台没有闹钟与通知渠道**（iOS 待接 `UNUserNotificationCenter` +
+     * `UNTimeIntervalNotificationTrigger`）：排 / 撤提醒整体跳过，订单卡与 15 秒轮询照常工作。
+     * Android 侧转接 `ui/reminder/UjingDoneReminder`（那个文件留在 `:app`，是 `AlarmManager`
+     * 直调，搬不动也不该搬）。
+     */
+    fun ujingReminder(): UjingReminder?
 }
 
 /**

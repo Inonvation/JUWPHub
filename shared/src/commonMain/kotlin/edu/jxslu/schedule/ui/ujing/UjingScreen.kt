@@ -1,8 +1,5 @@
 package edu.jxslu.schedule.ui.ujing
 
-import android.app.Activity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -46,40 +43,32 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.zxing.client.android.Intents
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.R
-import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.ujing.UjingDraftStore
 import edu.jxslu.schedule.data.ujing.UjingHistoryEntry
 import edu.jxslu.schedule.data.ujing.UjingHouse
 import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.QzxyPhoneMask
+import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.domain.UjingState
+import edu.jxslu.schedule.platform.UjingLocateOutcome
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AccountHeroCard
-import edu.jxslu.schedule.ui.common.washerScanIntent
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
-import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.HeroTone
@@ -88,28 +77,23 @@ import edu.jxslu.schedule.ui.common.MetricCell
 import edu.jxslu.schedule.ui.common.MetricsRow
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.PageScaffoldColumn
+import edu.jxslu.schedule.ui.common.ResumedTickerEffect
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
-import edu.jxslu.schedule.ui.common.SessionExpiredNotice
 import edu.jxslu.schedule.ui.common.SkeletonBox
 import edu.jxslu.schedule.ui.common.StaggeredReveal
 import edu.jxslu.schedule.ui.common.StatusHeroCard
 import edu.jxslu.schedule.ui.common.emphasizedText
 import edu.jxslu.schedule.ui.common.heroToneAccent
 import edu.jxslu.schedule.ui.common.lineHeightDp
+import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberCloseLock
-import edu.jxslu.schedule.ui.ebike.BikeLocator
-import edu.jxslu.schedule.ui.ebike.LocateResult
-import edu.jxslu.schedule.ui.ebike.showNotice
+import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlin.math.ceil
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /** 订单进行中且页面可见时的轮询间隔（与 ViewModel 口径一致，只在 UI 侧用）。 */
@@ -153,11 +137,25 @@ private const val FooterDisclaimerText =
  * **业务口径一字未改**：写操作零自动重试、订单 15 秒轮询（离开页面即停）、
  * 完成提醒闹钟、扫码跳独立下单页、会话过期不自动重登——这次只换排版与文案层级。
  *
- * 洗涤中订单由 [edu.jxslu.schedule.ui.reminder.UjingDoneReminder] 在到点时发系统通知
- * （渠道：洗衣完成提醒）。
+ * 洗涤中的订单由平台提醒缝（`AppServices.ujingReminder()`，Android 是
+ * `ui/reminder/UjingDoneReminder`）在到点时发系统通知（渠道：洗衣完成提醒）。
+ *
+ * ## iOS 移植 S21（2026-11-25）：搬进 `shared/commonMain`
+ *
+ * ViewModel 改成必填参数由宿主创建（§11.2 ①），四处 Android 专有动作按 §11.2 ④
+ * 收成可空参数——**null = 本平台确实没有这项能力，对应入口整块不渲染**：
+ *
+ * | 参数 | 原来是什么 | null 时 |
+ * |---|---|---|
+ * | [brandIconRes] | `R.drawable.ic_brand_ujing` | 身份卡不出头像位（`R` 只有 Android 有） |
+ * | [onScan] | `washerScanIntent` + `ActivityResultLauncher` + zxing 回包 | 扫码卡整块不渲染 |
+ * | [onLocate] | `BikeLocator` + 定位权限申请 | 「添加洗衣房」整行不渲染 |
+ * | [sessionExpiredNotice] | `SessionExpiredNotice`（读 `:app` 的 `SessionExpiryStore`） | 不提示 |
  */
 @Composable
 fun UjingScreen(
+    /** 必填，由宿主创建（§11.2 ①：Android 用 `viewModel {}`，iOS 用 `remember {}`）。 */
+    viewModel: UjingViewModel,
     onBack: () -> Unit = {},
     /** 扫码识别成功 → 跳独立下单页（导航由窗口层接，页里只发事件）。 */
     onOpenOrder: () -> Unit = {},
@@ -168,39 +166,47 @@ fun UjingScreen(
      * 进页即按普通扫码处理，识别成功照常跳下单页。普通入口传 null。
      */
     scanRaw: String? = null,
-    // payActivityProvider 的 lambda 会在支付时（非组合上下文）被调，这里在组合期把
-    // Activity 捕获进闭包（LocalContext.current 不能在普通 lambda 里再取）
-    viewModel: UjingViewModel = LocalContext.current.let { entryContext ->
-        viewModel(
-            factory = UjingViewModel.Factory(
-                Graph.ujing(entryContext),
-                Graph.ujingHouses(entryContext),
-                Graph.ujingHistory(entryContext),
-                Graph.ujingDraft(entryContext),
-                Graph.displayPrefs(entryContext),
-                appContext = entryContext.applicationContext,
-                payActivityProvider = { entryContext as? Activity },
-            ),
-        )
-    },
+    /** 身份卡品牌位图（Android 传 `R.drawable.ic_brand_ujing`）；null = 本平台没有这套素材。 */
+    brandIconRes: Int? = null,
+    /**
+     * 拉起本平台的扫码窗口。**null = 本平台没有扫码能力**，扫码卡整块不渲染
+     * （给了按钮却扫不出东西，比没有这个入口更糟）。
+     *
+     * 识别结果由宿主回灌 [UjingViewModel.onQrScanned]——宿主手里有 ViewModel，
+     * 页里再开一条回调通道只会多一层中转。
+     */
+    onScan: (() -> Unit)? = null,
+    /**
+     * 取一次定位（附近洗衣房）。**null = 本平台没有定位能力**，「添加洗衣房」整行不渲染。
+     *
+     * 实现方自己负责权限申请（Android 是 `ActivityResultLauncher` + `BikeLocator`）；
+     * 失败就把原因放进 [UjingLocateOutcome.Failed]，页面直接上屏，不自己编文案。
+     */
+    onLocate: (suspend () -> UjingLocateOutcome)? = null,
+    /**
+     * 登录过期提示槽位：`SessionExpiredNotice` 还在 `:app`（它读的 `SessionExpiryStore`
+     * 介质是 `SharedPreferences` + `Context`）。宿主把 `{ snackbar -> … }` 传进来即可，
+     * 页面把自己那份 [SnackbarHostState] 交出去。null = 本平台没有这条标记。
+     */
+    sessionExpiredNotice: (@Composable (SnackbarHostState) -> Unit)? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptics = rememberAppHaptics()
 
     // 上次在别处判定登录过期：进页说一句为什么退回登录表单（只提示一次）
-    SessionExpiredNotice(SessionService.Ujing, state.loggedIn, snackbar)
+    sessionExpiredNotice?.invoke(snackbar)
     var houseToRemove by remember { mutableStateOf<UjingHouse?>(null) }
     var confirmCancelOrder by remember { mutableStateOf(false) }
-    // 扫码草稿（设备行「上次识别的设备」用）；下单页关掉后仍留着，直到下单受理或重扫覆盖
-    val draftStore = remember { Graph.ujingDraft(context) }
+    // 扫码草稿（设备行「上次识别的设备」用）；下单页关掉后仍留着，直到下单受理或重扫覆盖。
+    // 仓从 ViewModel 取：主页与下单页必须是同一份（各 `remember` 一个等于「扫了码、
+    // 下单页拿到 null」）。原来这里是 `Graph.ujingDraft(context)`。
+    val draftStore = viewModel.draftStore
     val draft by draftStore.draft.collectAsStateWithLifecycle()
-    // 记录卡直接订阅账单仓：与 ViewModel 的 historyCount、历史账单页同一个实例（Graph 单例），
+    // 记录卡直接订阅账单仓：与 ViewModel 的 historyCount、历史账单页同一个实例，
     // 只读、不参与下单链，也就不必为「最近三笔」再往 ViewModel 加状态。
-    val historyStore = remember { Graph.ujingHistory(context) }
-    val history by historyStore.state.collectAsStateWithLifecycle()
+    val history by viewModel.historyStore.state.collectAsStateWithLifecycle()
 
     // 一次性提示（登录 / 下单 / 支付 / 启动 / 取消 / 会话过期）。**语气由 ViewModel 给**
     // （`NoticeFeedback.tone`，口径见 `UjingViewModel.notify`）：成功走勾、失败走叉、
@@ -208,7 +214,9 @@ fun UjingScreen(
     // 警告三角出来，用户读成报错。
     LaunchedEffect(Unit) {
         viewModel.events.collect { notice ->
-            showNotice(scope, snackbar, notice.text, notice.tone)
+            // 事件流里一律 `postNotice`（每条单开协程发），别用挂起的 `showNotice`：
+            // 它要挂到这条收场，收集协程被卡住时「新的顶掉旧的」就轮不到（AppNotice 的口径）
+            scope.postNotice(snackbar, notice.text, notice.tone)
         }
     }
     // 一次性导航：识别成功 → 独立下单页
@@ -224,72 +232,58 @@ fun UjingScreen(
     // 订单进行中且页面可见时的 15 秒轮询（红线 §4.37：**不后台轮询**）。
     // 2026-11-06 修：原来只用 `LaunchedEffect + while` 包，而组合**不随 `onStop` 拆**——
     // 退到后台 / 锁屏 / 进支付宝时循环照跑，后台每 15 秒打一次第三方平台（U净 对高频请求
-    // 会限流数十分钟），正是红线禁止的形状。改 `repeatOnLifecycle(RESUMED)`：灭屏或切后台
-    // 立刻停，回前台立刻续。
+    // 会限流数十分钟），正是红线禁止的形状。改 `ResumedTickerEffect`（两端缝，Android 落
+    // `repeatOnLifecycle(RESUMED)`）：灭屏或切后台立刻停，回前台立刻续。
     // 回前台**补一拍**（首次进入除外）：退后台那段时间可能正好是「洗完 / 启动完成 / 支付到账」
     // 发生的时候，等 15 秒才刷新会让用户先看到旧状态。首次进入不补，是因为
-    // `UjingViewModel` 的 loggedIn 收集器进页已经对过一次表（UjingViewModel.kt:171-172），
-    // 再补就是同一秒两次请求。
+    // `UjingViewModel` 的 loggedIn 收集器进页已经对过一次表，再补就是同一秒两次请求。
     // shortcut: 用「首次 RESUMED 跳过」而不是时间戳判新鲜，因为进页那一刻拿不到
     // 「这次刷新是不是刚发生」；等 ViewModel 提供 lastRefreshedAt 再换（现在不值得加状态）。
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var polledOnce by remember(state.order?.orderId) { mutableStateOf(false) }
-    LaunchedEffect(state.order?.orderId, state.order?.isTerminal) {
-        val order = state.order ?: return@LaunchedEffect
-        if (order.isTerminal) return@LaunchedEffect
-        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            if (polledOnce) viewModel.refreshOrder(silent = true)
-            polledOnce = true
-            while (isActive) {
-                delay(ORDER_POLL_INTERVAL_MILLIS)
-                viewModel.refreshOrder(silent = true)
-            }
+    val polledOrderId = state.order?.orderId
+    val polledOrderTerminal = state.order?.isTerminal == true
+    if (polledOrderId != null && !polledOrderTerminal) {
+        // 「回到前台」计数：注册时那次不算（它就是进页本身），只有真正的回来才 +1
+        val resumeTick = rememberResumeTick()
+        LaunchedEffect(polledOrderId, resumeTick) {
+            if (resumeTick > 0) viewModel.refreshOrder(silent = true)
+        }
+        ResumedTickerEffect(ORDER_POLL_INTERVAL_MILLIS) {
+            viewModel.refreshOrder(silent = true)
         }
     }
 
-    // 附近洗衣房：定位一次 → 拉门店列表（与单车地图同一套定位口径：权限先申请、8 秒超时）
+    // 附近洗衣房：定位一次 → 拉门店列表（权限申请与 8 秒超时都在平台侧，见 [onLocate]）
     val locateAndLoad: () -> Unit = {
-        viewModel.openPicker()
-        scope.launch {
-            when (val result = BikeLocator.currentLocation(context)) {
-                is LocateResult.Ok -> viewModel.loadNearby(result.lat, result.lng)
-                is LocateResult.Failed -> {
-                    viewModel.closePicker()
-                    showNotice(scope, snackbar, result.message, NoticeTone.Warning)
+        val locate = onLocate
+        if (locate != null) {
+            viewModel.openPicker()
+            scope.launch {
+                when (val result = locate()) {
+                    is UjingLocateOutcome.Ok -> viewModel.loadNearby(result.lat, result.lng)
+                    is UjingLocateOutcome.Failed -> {
+                        viewModel.closePicker()
+                        scope.postNotice(snackbar, result.message, NoticeTone.Warning)
+                    }
                 }
             }
         }
     }
-    val locationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { result ->
-        if (result.values.any { it }) {
-            locateAndLoad()
-        } else {
-            showNotice(scope, snackbar, "没有定位权限，无法获取附近洗衣房", NoticeTone.Warning)
-        }
-    }
-    val requestNearby: () -> Unit = {
-        haptics.tap()
-        if (!BikeLocator.hasPermission(context)) {
-            locationPermissionLauncher.launch(AppPermissions.location.toTypedArray())
-        } else {
+    // null = 本平台没有定位能力：「添加洗衣房」整行不渲染（[BoardSection] 的 onAdd 收可空）
+    val requestNearby: (() -> Unit)? = if (onLocate == null) {
+        null
+    } else {
+        {
+            haptics.tap()
             locateAndLoad()
         }
     }
 
-    // 扫码：复用内置取景窗口的原文模式（相机权限由取景窗口自己处理，与骑行页同一条通道）
-    val scanLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        val raw = result.data?.getStringExtra(Intents.Scan.RESULT)
-        if (result.resultCode == Activity.RESULT_OK && !raw.isNullOrBlank()) {
-            viewModel.onQrScanned(raw)
+    // 扫码：宿主的扫码窗口负责取景与相机权限，回包后把原文灌回 ViewModel
+    val startScan: (() -> Unit)? = onScan?.let { launchScanner ->
+        {
+            haptics.tap()
+            launchScanner()
         }
-    }
-    val startScan: () -> Unit = {
-        haptics.tap()
-        scanLauncher.launch(washerScanIntent(context))
     }
 
     // 订单卡退场期间快照可能已被清空（点「知道了」），AnimatedVisibility 在 exit 时
@@ -345,9 +339,9 @@ fun UjingScreen(
                 LoginSection(state = state, viewModel = viewModel)
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // ① 身份卡
+                    // ① 身份卡（品牌图由宿主给：`R` 在 :app，共享层看不见）
                     AccountHeroCard(
-                        brandIcon = R.drawable.ic_brand_ujing,
+                        brandIcon = brandIconRes,
                         title = QzxyPhoneMask.mask(state.mobile),
                         subtitle = "凭证仅存本机 · 不进云备份",
                         pill = "已登录",
@@ -374,6 +368,8 @@ fun UjingScreen(
                                 // 支付 SDK 阻塞期间（paying）同样禁动作：收银台在那边，这里点取消
                                 // 会和支付结果赛跑（busy 只覆盖请求本身，支付窗口是另一段）
                                 busy = state.orderBusy || state.paying,
+                                // 没有支付缝的平台：未支付订单不给「去支付」（点了只会报错）
+                                canPay = viewModel.canPay,
                                 onRefresh = { viewModel.refreshOrder() },
                                 onRetryPay = viewModel::retryPay,
                                 onCancel = { confirmCancelOrder = true },
@@ -390,15 +386,19 @@ fun UjingScreen(
                             viewModel.refreshBoard()
                         },
                     )
-                    // ④ 主操作：扫码（常驻区块错峰落位；订单卡由 AnimatedVisibility 管，别叠加）
-                    StaggeredReveal(index = 0) {
-                        ScanSection(
-                            state = state,
-                            draft = draft,
-                            orderActive = liveOrder != null,
-                            onScan = startScan,
-                            onOpenOrder = onOpenOrder,
-                        )
+                    // ④ 主操作：扫码（常驻区块错峰落位；订单卡由 AnimatedVisibility 管，别叠加）。
+                    //    `startScan` 为 null = 本平台没有扫码窗口：整块不渲染，留一个点了没
+                    //    反应的按钮比没有这个入口更糟（§11.2 ④）
+                    if (startScan != null) {
+                        StaggeredReveal(index = 0) {
+                            ScanSection(
+                                state = state,
+                                draft = draft,
+                                orderActive = liveOrder != null,
+                                onScan = startScan,
+                                onOpenOrder = onOpenOrder,
+                            )
+                        }
                     }
                     // ⑤ 记录：没有记录时整块不占位（2026-11-16；原来常驻一张写着
                     //    「扫码下单后自动记一笔」的空卡），第一笔落库时整块淡入 + 展开
@@ -574,21 +574,16 @@ private fun MetricsSection(state: UjingUiState, onRefresh: () -> Unit) {
 private fun LoginSection(state: UjingUiState, viewModel: UjingViewModel) {
     // 60 秒冷却倒计时：只按发码时刻算，冷却归零（或压根没发过码）就停循环——
     // 不然进页即永久每秒唤醒重组。
-    // 2026-11-06 加 `repeatOnLifecycle`：原来只随组合停，而组合不随 `onStop` 拆，
-    // 发完码立刻切后台的话这 60 秒仍在后台每秒重组（与订单轮询同一个坑）。
-    val owner = LocalLifecycleOwner.current
-    val now by produceState(initialValue = System.currentTimeMillis(), key1 = state.codeSentAt) {
-        val deadline = state.codeSentAt + 60_000L
-        if (state.codeSentAt > 0L && System.currentTimeMillis() < deadline) {
-            owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                while (System.currentTimeMillis() < deadline) {
-                    value = System.currentTimeMillis()
-                    delay(1_000)
-                }
-            }
-        }
-        value = System.currentTimeMillis()
+    // 2026-11-06 加生命周期门（`repeatOnLifecycle(RESUMED)`）：原来只随组合停，而组合
+    // 不随 `onStop` 拆，发完码立刻切后台的话这 60 秒仍在后台每秒重组（与订单轮询同一个坑）。
+    // 这里用共享层的 `ResumedTickerEffect`：只在冷却期内挂（`if` 离开组合即拆掉循环），
+    // 两端语义见 `ui/common/ResumedTicker.kt`。
+    var cooldownNow by remember(state.codeSentAt) { mutableLongStateOf(AppClock.nowMillis()) }
+    val coolingDown = state.codeSentAt > 0L && cooldownNow < state.codeSentAt + 60_000L
+    if (coolingDown) {
+        ResumedTickerEffect(1_000L) { cooldownNow = AppClock.nowMillis() }
     }
+    val now = if (coolingDown) cooldownNow else AppClock.nowMillis()
     val cooldownSeconds = if (state.codeSentAt > 0L) {
         ((state.codeSentAt + 60_000L - now).coerceAtLeast(0L) + 999L) / 1000L
     } else {
@@ -657,7 +652,7 @@ private fun LoginSection(state: UjingUiState, viewModel: UjingViewModel) {
 /**
  * 账单记录（2026-11-05 改版）：最近 [RecentRecordCount] 笔 + 「查看全部」。
  *
- * 数据源与历史账单页同一个仓（[Graph.ujingHistory]，本机留痕、新的在前）；服务端账单
+ * 数据源与历史账单页同一个仓（`UjingViewModel.historyStore`，本机留痕、新的在前）；服务端账单
  * 接口没有协议样本，**别猜端点**（口径见 `.agents/rules/ujing.md`）。
  * 行式平铺 + [AppCardDivider]：卡里不再套卡（ui-common「卡片里放列表用平铺行」）。
  *
@@ -691,9 +686,7 @@ private fun RecordsSection(entries: List<UjingHistoryEntry>, onOpenAll: () -> Un
 /** 一笔账单：设备 · 模式 / 时间 · 状态 / 金额（与历史账单页同一套字段与文案）。 */
 @Composable
 private fun RecordRow(entry: UjingHistoryEntry) {
-    val timeText = remember(entry.displayAt) {
-        SimpleDateFormat("M月d日 HH:mm", Locale.CHINESE).format(Date(entry.displayAt))
-    }
+    val timeText = remember(entry.displayAt) { ujingTimeLabel(entry.displayAt) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -735,16 +728,22 @@ private fun RecordRow(entry: UjingHistoryEntry) {
 @Composable
 private fun BoardSection(
     state: UjingUiState,
-    onAdd: () -> Unit,
+    /** null = 本平台没有定位能力：「添加洗衣房」整行不渲染（§11.2 ④）。 */
+    onAdd: (() -> Unit)?,
     onRemove: (UjingHouse) -> Unit,
 ) {
     SettingsSection(
         title = "收藏洗衣房",
-        subtitle = "行尾可删除，底部可添加",
+        subtitle = if (onAdd != null) "行尾可删除，底部可添加" else "行尾可删除",
     ) {
         if (state.houses.isEmpty()) {
             Text(
-                "还没有收藏洗衣房，点下面「添加洗衣房」。",
+                if (onAdd != null) {
+                    "还没有收藏洗衣房，点下面「添加洗衣房」。"
+                } else {
+                    // 没有定位就加不了店：说清为什么，别留一句「点下面」却点不到
+                    "还没有收藏洗衣房。本平台暂不支持定位，无法添加。"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 modifier = Modifier.padding(vertical = 4.dp),
@@ -762,15 +761,17 @@ private fun BoardSection(
                 }
             }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onAdd) {
-                Icon(AppIcons.Plus, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(if (state.houses.isEmpty()) "添加洗衣房" else "添加")
+        if (onAdd != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onAdd) {
+                    Icon(AppIcons.Plus, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (state.houses.isEmpty()) "添加洗衣房" else "添加")
+                }
             }
         }
     }
@@ -1065,6 +1066,8 @@ private enum class ScanPhase { Idle, Parsing, Failed }
 private fun OrderHero(
     order: UjingOrderSnapshot,
     busy: Boolean,
+    /** 本平台能不能拉起支付宝（`UjingViewModel.canPay`）；false = 未支付时不摆「去支付」。 */
+    canPay: Boolean,
     onRefresh: () -> Unit,
     onRetryPay: () -> Unit,
     onCancel: () -> Unit,
@@ -1073,23 +1076,15 @@ private fun OrderHero(
 ) {
     // 本地每秒 tick：剩余 = 快照 remainSeconds −（现在 − 快照时刻），只对运行中订单有意义；
     // 终态订单倒计时没有意义，不再每秒唤醒（刷新必写新 snapshotAt，状态翻转时本 tick 会重启）。
-    // 2026-11-06 加 `repeatOnLifecycle`：洗涤中订单最长 40 分钟，原来退后台 / 锁屏后仍在
-    // 每秒重组（组合不随 `onStop` 拆）——与「不后台轮询」同一口径，只在前台走秒。
+    // 2026-11-06 加生命周期门：洗涤中订单最长 40 分钟，原来退后台 / 锁屏后仍在每秒重组
+    // （组合不随 `onStop` 拆）——与「不后台轮询」同一口径，只在前台走秒。
+    // 这里用共享层的 `ResumedTickerEffect`：终态时 `if` 不成立，循环根本不存在。
     val terminal = order.isTerminal
-    val owner = LocalLifecycleOwner.current
-    val now by produceState(
-        initialValue = System.currentTimeMillis(),
-        key1 = order.snapshotAt,
-        key2 = terminal,
-    ) {
-        if (terminal) return@produceState
-        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                value = System.currentTimeMillis()
-                delay(1_000)
-            }
-        }
+    var tickNow by remember(order.snapshotAt) { mutableLongStateOf(AppClock.nowMillis()) }
+    if (!terminal) {
+        ResumedTickerEffect(1_000L) { tickNow = AppClock.nowMillis() }
     }
+    val now = tickNow
     val running = order.status == "40" && !terminal
     val remainSeconds = if (running) {
         order.remainSeconds - ((now - order.snapshotAt) / 1000).toInt()
@@ -1218,6 +1213,16 @@ private fun OrderHero(
         when {
             terminal -> Button(onClick = onDismiss, modifier = primaryModifier) { Text("知道了") }
 
+            // 本平台没有支付通道：槽位照占，但按钮禁用 + 说明为什么——
+            // 摆一枚可点的「去支付」点下去只会报错（§11.2 ④）
+            !order.paid && !canPay -> Button(
+                onClick = {},
+                enabled = false,
+                modifier = primaryModifier,
+            ) {
+                Text("当前平台不支持支付")
+            }
+
             !order.paid -> Button(
                 onClick = onRetryPay,
                 enabled = !busy,
@@ -1300,20 +1305,12 @@ internal fun UjingOrderStatusLine(order: UjingOrderSnapshot, modifier: Modifier 
     val running = order.status == "40"
     // 与订单卡同一口径（2026-11-06）：只在前台走秒。这一份还被今日页 U净 弹窗复用，
     // 而今日页的组合是常驻的——不挂生命周期就会在后台每秒重组整个弹窗子树。
-    val owner = LocalLifecycleOwner.current
-    val now by produceState(
-        initialValue = System.currentTimeMillis(),
-        key1 = order.snapshotAt,
-        key2 = running,
-    ) {
-        if (!running) return@produceState
-        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                value = System.currentTimeMillis()
-                delay(1_000)
-            }
-        }
+    // 用共享层的 `ResumedTickerEffect`（`if` 不成立时循环根本不存在）。
+    var tickNow by remember(order.snapshotAt) { mutableLongStateOf(AppClock.nowMillis()) }
+    if (running) {
+        ResumedTickerEffect(1_000L) { tickNow = AppClock.nowMillis() }
     }
+    val now = tickNow
     val remain = UjingState.liveRemainSeconds(order.status, order.remainSeconds, order.snapshotAt, now)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
