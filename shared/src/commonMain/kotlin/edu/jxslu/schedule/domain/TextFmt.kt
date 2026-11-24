@@ -8,9 +8,10 @@ import kotlin.math.abs
  * `String.format` 是 JVM 专有 API，Kotlin/Native 上没有对应物；这类调用原先散在十来个文件里。
  * 纯整数的三种（补零、`HH:mm`、两位十六进制）在这里改成纯 Kotlin 实现，跨平台无差异。
  *
- * [decimals] 走 [formatFixed]（`expect/actual`）：**不要**在这里手写浮点舍入——
- * `%.1f` / `%.2f` 的边界值（`1.045` 这种）手写实现会和原显示差一分钱，
- * 详见 [PlatformFormat] 与 [MoneyFormat.yuanText] 的说明。
+ * [decimals] 走 [formatFixed]：**不要**在这里另写浮点舍入，也不要把 [formatFixed] 改回
+ * `expect/actual`。按平台各调各的 printf 试过了，iOS 的 `NSString(format:)` 是十进制 HALF_EVEN，
+ * 与 Java 的 `%f`（最短表示 HALF_UP）在「末位恰为 5」时分叉，装真机就露。现在是一份纯 Kotlin
+ * 实现 + 对着 `String.format` 的全量单测，详见 [formatFixed] 的 KDoc。
  */
 object TextFmt {
 

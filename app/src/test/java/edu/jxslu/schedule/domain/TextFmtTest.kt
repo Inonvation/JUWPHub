@@ -35,13 +35,37 @@ class TextFmtTest {
         }
     }
 
+    /**
+     * 定点小数：对着 `String.format` 全量比对。
+     *
+     * 这条测试是 iOS 侧舍入行为的**唯一证据**（`:shared` 的 commonMain 在 Kotlin/Native 上
+     * 无法在 Windows 编译，更跑不了）。2026-11-24 就是因为缺它，装了真机才发现 iOS 走的是
+     * 十进制 HALF_EVEN、Android 走的是最短表示 HALF_UP 的差异（见 [formatFixed] 的 KDoc）。
+     * 现在实现只有一份，本地跑通即等于两端一致。
+     */
     @Test
-    fun `定点小数与 printf 一致`() {
-        val samples = listOf(0.0, 0.5, 1.0, 12.34, 12.345, 1.005, 999.999, 1.5, 1023.0 / 1024)
+    fun `定点小数与 printf 全量一致`() {
+        val samples = buildList {
+            addAll(
+                listOf(
+                    0.0, -0.0, 0.5, -0.5, 1.0, -1.0, 12.34, 12.345, 1.045, 2.675, 0.05, 8.835,
+                    1.005, 999.999, 1.5, 1023.0 / 1024, 0.1, 100.0, 123456.789,
+                    1e7, 1.0e-5, 1.0 / 3.0, 2.0 / 3.0, 1e-7,
+                ),
+            )
+            // 伪随机（固定种子，可复现）：覆盖 [0,1) 与 [0,1e6) 两档，模拟金额 / 距离 / 体积
+            var seed = 20261124L
+            repeat(400) {
+                seed = seed * 6364136223846793005L + 1442695040888963407L
+                val unit = (seed ushr 11).toDouble() / (1L shl 53).toDouble()
+                add(unit * 1_000_000.0)
+                add(unit * 10.0)
+            }
+        }
         for (v in samples) {
-            assertEquals("%.2f".format(Locale.ROOT, v), TextFmt.decimals(v, 2))
-            assertEquals("%.1f".format(Locale.ROOT, v), TextFmt.decimals(v, 1))
-            assertEquals("%.3f".format(Locale.ROOT, v), TextFmt.decimals(v, 3))
+            for (p in 0..4) {
+                assertEquals("%.${p}f".format(Locale.ROOT, v), TextFmt.decimals(v, p))
+            }
         }
     }
 

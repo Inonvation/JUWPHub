@@ -89,18 +89,20 @@ fun LinkValidationScreen(modifier: Modifier = Modifier) {
                     Icon(AppIcons.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 }
 
-                SectionTitle("3. 定点小数（唯一的已知运行期风险）")
+                SectionTitle("3. 定点小数（与 JDK 的 %.Nf 逐位一致）")
                 Text(
-                    "左：Android 的期望值（本文件里写死）。右：iOS 实际算出来的。" +
-                        "两列必须完全一致。",
+                    "左：JDK 17 的 String.format 真值（用真实 JDK 跑出来写死在这里）。" +
+                        "右：本机算出来的。两列必须完全一致。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // 这几个值挑得有针对性：12.345 与 1.045 是「乘 100 再 round 会差一分」的经典反例，
-                // 0.05 / 2.675 是 double 二进制表示的边界。全都来自 TextFmtTest 的既有用例。
-                DecimalRow(12.345, 2, "12.34")
-                DecimalRow(1.045, 2, "1.04")
-                DecimalRow(2.675, 2, "2.67")
+                // 这五个值都是「末位恰为 5」的边界，也是 2026-11-24 装真机时两端分叉的那五个：
+                // 当时 Android 走最短表示 HALF_UP、iOS 走十进制 HALF_EVEN，12.345/1.045/0.05 三行不一致。
+                // 现在实现只有一份（见 domain/PlatformFormat.kt），五行必须全绿；
+                // 真机上任何一行变红，说明有人又把浮点舍入按平台拆开了。
+                DecimalRow(12.345, 2, "12.35")
+                DecimalRow(1.045, 2, "1.05")
+                DecimalRow(2.675, 2, "2.68")
                 DecimalRow(0.05, 1, "0.1")
                 DecimalRow(8.835, 2, "8.84")
 
