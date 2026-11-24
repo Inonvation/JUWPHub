@@ -747,8 +747,8 @@ private fun AuthorizationOverlay(
 
     if (showCasLoginDialog) {
         CasLoginDialog(
-            cas = Graph.casSession(context),
-            vault = Graph.credentialVault(context),
+            onVerify = { u, p -> Graph.casSession(context).tryLogin(u, p) },
+            onSave = { u, p -> Graph.credentialVault(context).saveCas(u, p) },
             title = "登录学校统一认证",
             description = "导出盖章成绩单需要统一认证账号。保存后 App 会自动登录，" +
                 "不再需要每次输入。密码加密存本机，可随时在「我的 → 学校统一认证」退出并清除。",
