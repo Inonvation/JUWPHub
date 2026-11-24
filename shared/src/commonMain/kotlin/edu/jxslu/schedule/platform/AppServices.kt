@@ -10,9 +10,13 @@ import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
-import edu.jxslu.schedule.data.repo.DormRepairStore
+import edu.jxslu.schedule.data.repo.CurriculumRepository
+import edu.jxslu.schedule.data.repo.CurriculumSync
+import edu.jxslu.schedule.data.repo.ScholarProgressRepository
+import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.domain.GuessTarget
+import edu.jxslu.schedule.data.repo.DormRepairStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
@@ -430,6 +434,28 @@ interface AppServices {
      */
     fun ujingReminder(): UjingReminder?
 
+    // ---- 学业完成情况 / 培养方案（iOS 移植 V4，2026-11-25） ----
+    //
+    // 两页搬进共享层带出来的四个成员。**全部非空**：两个仓库只认 `JuwDatabase`（本地表），
+    // 两个同步只认 `JwReadSession`——那条缝两端都建得起来（Android `CasSession`，
+    // iOS `IosJwReadSession` 读 `WKWebView` 的 Cookie），与 [profileSync] 同一档。
+    // 所以这里不给 `?`：给 null 会让页面的「重新导入」整行消失，而它确实能用。
+
+    /** 学业完成情况仓库（DESIGN §4.29）：`scholar_groups` / `scholar_courses` 两张本地表。 */
+    fun scholarProgressRepository(): ScholarProgressRepository
+
+    /**
+     * 学业完成情况抓取（四个维度串行 + 7 天闸门）；**必须与引导页 / 冷启动用的是同一份**，
+     * 否则那道 Mutex 形同虚设，两个触发点会同时各抓一轮。
+     */
+    fun scholarProgressSync(): ScholarProgressSync
+
+    /** 培养方案仓库（DESIGN §4.41）：`curriculum_courses` 本地表，整体替换。 */
+    fun curriculumRepository(): CurriculumRepository
+
+    /** 培养方案抓取；同一份实例的理由同 [scholarProgressSync]。 */
+    fun curriculumSync(): CurriculumSync
+
     // ---- 校园卡（付款码 / 流水 / 消费结果，iOS 移植 V2，2026-11-25） ----
     //
     // `ui/campus` 里能搬的那一半带出来的两件**副作用**。两者都不是「一个服务」，
@@ -459,11 +485,11 @@ interface AppServices {
      */
     suspend fun evaluateYktBalance(cardFen: Long) {}
 
-    // ---- 宿舍报修（DESIGN §4.49，iOS 移植 V2，2026-11-25） ----
+    // ---- 宿舍报修（DESIGN §4.49，iOS 移植 V1/V2，2026-11-25） ----
     //
-    // 报修详情页搬进共享层带出来的。**只给本机快照存储**：真正去学工拉数据的那条链
-    // （`DormRepairSync`）还在 `:app` 的 `data/repo`，类型也还不在共享层，所以它由宿主
-    // 直接作为页面参数注入（`DormRepairScreen(onRefresh = …)`），不在这里占位。
+    // 今日页的报修状态行与报修详情页都要它。**只给本机快照存储**：真正去学工拉数据的
+    // 那条链（`DormRepairSync`）还在 `:app` 的 `data/repo`，类型也还不在共享层，
+    // 所以它由宿主直接作为页面参数注入（`DormRepairScreen(onRefresh = …)`），不在这里占位。
 
     /**
      * 宿舍报修本机快照（解析结果 + 最近 20 条记录，JSON 落盘）。
@@ -473,6 +499,7 @@ interface AppServices {
      * 各建一个等于「同步写进 A、详情页看 B」。
      */
     fun dormRepairStore(): DormRepairStore
+
 }
 
 /**

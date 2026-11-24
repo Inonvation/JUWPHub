@@ -1,8 +1,5 @@
 package edu.jxslu.schedule.ui.notes
 
-import android.content.Intent
-import android.net.Uri
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,32 +33,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.startActivityOutsideApp
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Note
 import edu.jxslu.schedule.domain.imageRefs
 import edu.jxslu.schedule.domain.removeImageRef
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.AttachmentImageUi
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.EmptyHint
-import edu.jxslu.schedule.ui.common.epochMonthDay
-import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.LoadingHint
-import edu.jxslu.schedule.ui.common.MarkdownEditorBottomBar
+import edu.jxslu.schedule.ui.common.MarkdownContent
 import edu.jxslu.schedule.ui.common.MarkdownEditorField
-import edu.jxslu.schedule.ui.common.MarkdownView
+import edu.jxslu.schedule.ui.common.MarkdownEditorUi
+import edu.jxslu.schedule.ui.common.MarkdownImageUi
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.ui.common.rememberAppHaptics
-import edu.jxslu.schedule.ui.common.rememberImageInserter
-import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.common.TitleTextField
+import edu.jxslu.schedule.ui.common.epochMonthDay
+import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.launch
 
@@ -69,9 +66,26 @@ import kotlinx.coroutines.launch
  * 笔记详情/编辑（DESIGN §3.11）：**单页双态**，2026-10-21 重排。
  *
  * 编辑态 = 标题固定 + 正文输入框占满剩余高度（内部滚动），附件条与工具条放
- * `Scaffold.bottomBar` 并 `imePadding()`；预览态 = 标题 + 创建/更新时间 + MarkdownView。
+ * `Scaffold.bottomBar` 并 `imePadding()`；预览态 = 标题 + 创建/更新时间 + Markdown 正文。
  * 保存语义与作业一致：保存 = 落库 + 切回预览 + 「已保存」+ 留在本页。
  * 删除收进溢出菜单（列表不放开删除入口，防误触）。
+ *
+ * ## 平台能力全在参数里（iOS 移植 V4，2026-11-25）
+ *
+ * 原来这个文件里有四段纯 Android 的东西：`Graph.attachmentStore` 的删文件、系统 Photo Picker
+ * （`rememberImageInserter`）、附件条底栏（`MarkdownEditorBottomBar`，要 `BitmapFactory` 画缩略图）、
+ * 以及 `MarkdownView` 的满宽图解码与 `Intent` 打开外链。它们按
+ * `design/ios-port.md` §11.2 ④ 收成可空参数：
+ *
+ * | 参数 | null 的含义 |
+ * |---|---|
+ * | [markdownImages] | 本平台画不出附件图 → 图片位置给一行说明，正文照常渲染 |
+ * | [images] | 本平台没有全屏查看器 → 点图不响应 |
+ * | [editor] | 本平台没有附件图落盘 → 编辑态不渲染底栏，插图入口不出现 |
+ * | [onOpenLink] | 本平台打不开外链 → 链接不可点 |
+ *
+ * 正文渲染走共享层的 [MarkdownContent]：解析、排版、点击命中都在 commonMain，只有位图绘制
+ * 交给 [markdownImages]。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,12 +94,18 @@ fun NoteDetailScreen(
     noteId: Long,
     startEditing: Boolean = false,
     onBack: () -> Unit,
+    /** 正文附件图的绘制槽；null = 本平台画不出附件图。 */
+    markdownImages: MarkdownImageUi? = null,
+    /** 附件图能力（缩略图 + 全屏查看器）；null = 本平台没有。 */
+    images: AttachmentImageUi? = null,
+    /** 编辑态底栏与附件文件删除；null = 本平台没有附件图落盘。 */
+    editor: MarkdownEditorUi? = null,
+    /** 打开正文链接，返回是否成功；null = 链接不可点。 */
+    onOpenLink: ((url: String) -> Boolean)? = null,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val noteRepo = remember { Graph.noteRepository(context) }
-    val homeworkRepo = remember { Graph.homeworkRepository(context) }
-    val store = remember { Graph.attachmentStore(context) }
+    val noteRepo = remember { Services.current.noteRepository() }
+    val homeworkRepo = remember { Services.current.homeworkRepository() }
     val snackbar = remember { SnackbarHostState() }
     val haptics = rememberAppHaptics()
     val showNotice: (String, NoticeTone) -> Unit = { message, tone ->
@@ -107,7 +127,6 @@ fun NoteDetailScreen(
     var editing by rememberSaveable { mutableStateOf(noteId == 0L || startEditing) }
     var loadedFromDb by rememberSaveable { mutableStateOf(false) }
     var loaded by remember { mutableStateOf(noteId == 0L) }
-    var viewer by remember { mutableStateOf<String?>(null) }
     var showDelete by remember { mutableStateOf(false) }
     var showDiscard by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -145,6 +164,20 @@ fun NoteDetailScreen(
     /** 保存/删除进行中：不挡的话双击「保存」会对新建笔记插两条（original 还没回写，两次 base.id 都是 0）。 */
     var busy by remember { mutableStateOf(false) }
 
+    /**
+     * 删掉「本次从正文移除、且全库已无引用」的附件文件（DESIGN §4.20）。
+     *
+     * 差集在共享层算：`imageRefs` 是 domain 的纯函数，引用来源是笔记正文 + 作业详情两个仓库。
+     * 落盘删除交给 [editor]——`null` 说明本平台没有附件目录，跳过即可（也没有文件可删）。
+     */
+    suspend fun deleteUnreferenced(candidates: Set<String>) {
+        val ui = editor ?: return
+        val referenced = (noteRepo.allBodies() + homeworkRepo.allDetails())
+            .flatMap { imageRefs(it) }
+            .toSet()
+        ui.deleteFiles(candidates - referenced)
+    }
+
     /** 保存：正文归库，随后清理「本次移除且已无任何引用」的附件文件（DESIGN §4.20）。 */
     fun save(onSaved: () -> Unit = {}) {
         if (busy) return
@@ -163,16 +196,13 @@ fun NoteDetailScreen(
         val newBody = body.text
         val newTitle = title.text.trim()
         val titleAtSave = title.text
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         busy = true
         scope.launch {
             try {
                 val id = noteRepo.save(base.copy(title = newTitle, body = newBody))
                 val removed = imageRefs(base.body) - imageRefs(newBody)
-                if (removed.isNotEmpty()) {
-                    val referenced = store.referencedNames(noteRepo.allBodies() + homeworkRepo.allDetails())
-                    store.deleteIfUnreferenced(removed, referenced)
-                }
+                if (removed.isNotEmpty()) deleteUnreferenced(removed)
                 val refreshed = base.copy(id = if (base.id > 0) base.id else id, title = newTitle, body = newBody)
                 // 新笔记的首存时间由仓库盖；展示与后续保存都以「现在」为准（重建后也不会变回 0）
                 original = if (base.id > 0) {
@@ -209,10 +239,7 @@ fun NoteDetailScreen(
             try {
                 noteRepo.delete(note.id)
                 val removed = imageRefs(note.body)
-                if (removed.isNotEmpty()) {
-                    val referenced = store.referencedNames(noteRepo.allBodies() + homeworkRepo.allDetails())
-                    store.deleteIfUnreferenced(removed, referenced)
-                }
+                if (removed.isNotEmpty()) deleteUnreferenced(removed)
                 onBack()
             } finally {
                 busy = false
@@ -221,14 +248,7 @@ fun NoteDetailScreen(
     }
 
     // 返回有未保存修改：先确认（不让用户白写一场）
-    BackHandler(enabled = dirty) { showDiscard = true }
-
-    // 图片插入：Photo Picker → 私有目录 → 光标处插引用（零权限，DESIGN §4.20）
-    val pickImages = rememberImageInserter(
-        value = body,
-        onValueChange = { body = it },
-        onNotice = showNotice,
-    )
+    AppBackHandler(enabled = dirty) { showDiscard = true }
 
     val created = original?.createdAt ?: createdAt
     val updated = original?.updatedAt ?: created
@@ -323,15 +343,15 @@ fun NoteDetailScreen(
             )
         },
         bottomBar = {
-            if (editing) {
-                MarkdownEditorBottomBar(
-                    value = body,
-                    onValueChange = { body = it },
-                    onPickImages = pickImages,
-                    onRemoveImage = { name ->
-                        body = TextFieldValue(removeImageRef(body.text, name))
-                    },
-                    onOpenImage = { viewer = it },
+            // null = 本平台没有附件图落盘：底栏整块不渲染（格式工具条与附件条一起消失）
+            val bar = editor?.bottomBar
+            if (editing && bar != null) {
+                bar(
+                    body,
+                    { body = it },
+                    showNotice,
+                    { name -> body = TextFieldValue(removeImageRef(body.text, name)) },
+                    { name -> images?.openViewer(name) },
                 )
             }
         },
@@ -400,23 +420,22 @@ fun NoteDetailScreen(
                         EmptyHint(title = "笔记是空的", body = "点右上角铅笔进入编辑。")
                     }
                 } else {
-                    MarkdownView(
+                    // 正文渲染：解析 / 排版 / 点击命中在共享层，位图绘制交给 markdownImages。
+                    // onImageClick 为 null = 本平台没有全屏查看器，图不可点（不是点了没反应）。
+                    MarkdownContent(
                         markdown = body.text,
                         modifier = Modifier.padding(top = 8.dp),
-                        onImageClick = { viewer = it },
-                        onLinkClick = { url ->
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                            runCatching { context.startActivityOutsideApp(intent) }
-                                .onFailure { showNotice("打不开这个链接", NoticeTone.Warning) }
+                        onImageClick = images?.let { ui -> { name: String -> ui.openViewer(name) } },
+                        onLinkClick = onOpenLink?.let { open ->
+                            { url: String ->
+                                if (!open(url)) showNotice("打不开这个链接", NoticeTone.Warning)
+                            }
                         },
+                        images = markdownImages,
                     )
                 }
             }
         }
-    }
-
-    viewer?.let { fileName ->
-        ImageViewerDialog(fileName = fileName, onDismiss = { viewer = null })
     }
 
     if (showDelete) {

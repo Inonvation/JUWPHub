@@ -31,23 +31,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.repo.CurriculumSync
 import edu.jxslu.schedule.domain.CurriculumCourse
 import edu.jxslu.schedule.domain.CurriculumRules
 import edu.jxslu.schedule.domain.CurriculumYear
+import edu.jxslu.schedule.domain.TextFmt
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.rememberRevealSpacePx
 import edu.jxslu.schedule.ui.common.scrollToReveal
@@ -59,7 +59,7 @@ import edu.jxslu.schedule.ui.common.AppCardDefaults
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
-import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
+import edu.jxslu.schedule.ui.jw.JwWebActionButton
 import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.launch
 
@@ -73,21 +73,33 @@ import kotlinx.coroutines.launch
  * 课程明细）——教务给的就是「第几个学期建议上什么」，收起的卡片列表即一份目录，
  * 想通读整个方案也可以逐张点开。每门课一行，点开底部弹层看编号/各类学时等完整字段。
  * 「开设学期」是**计划口径**（建议修读学期），不等于实际开课/选课安排，脚注里写明。
+ *
+ * ## 依赖从哪来（iOS 移植 V4，2026-11-25）
+ *
+ * 原来三行 `Graph.xxx(context)`（`LocalContext` 的唯一用途）改成
+ * `Services.current.xxx()`：仓库与同步都在 `commonMain`，两端装配根各给同一份单例。
+ * 抓取链路走 `JwReadSession`，iOS 侧同样非空——「重新导入」在 iOS 上真的能抓。
+ *
+ * 顶栏「在教务网页核对」是唯一的平台动作：`null` = 本平台没有内置浏览窗口，那只图标不渲染
+ * （口径见 `design/ios-port.md` §11.2 ④）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CurriculumScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val repo = remember { Graph.curriculumRepository(context) }
-    val sync = remember { Graph.curriculumSync(context) }
-    val prefs = remember { Graph.displayPrefs(context) }
+fun CurriculumScreen(
+    onBack: () -> Unit,
+    /** 在内置浏览窗口打开教务页面；null = 本平台没有这个窗口。 */
+    onOpenWebPage: ((title: String, url: String) -> Unit)? = null,
+) {
+    val repo = remember { Services.current.curriculumRepository() }
+    val sync = remember { Services.current.curriculumSync() }
+    val prefs = remember { Services.current.displayPrefs() }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
     // null = Room 流首帧还没到（未就绪），非 null 空列表 = 确实没有数据。
     // 与学业完成情况同一处收口：不区分的话首帧会闪一下「暂无数据」再跳真实内容。
-    val coursesState by repo.courses.collectAsState(initial = null)
-    val planName by prefs.curriculumPlanName.collectAsState(initial = "")
+    val coursesState by repo.courses.collectAsStateWithLifecycle(initialValue = null)
+    val planName by prefs.curriculumPlanName.collectAsStateWithLifecycle(initialValue = "")
     val ready = coursesState != null
     val courses = coursesState.orEmpty()
     val years = remember(courses) { CurriculumRules.byYear(courses) }
@@ -163,7 +175,7 @@ fun CurriculumScreen(onBack: () -> Unit) {
         snackbar = snackbar,
         state = listState,
         actions = {
-            JwWebActionButton("培养方案", JwUrls.CURRICULUM)
+            JwWebActionButton("培养方案", JwUrls.CURRICULUM, onOpenWebPage)
             PageRefreshAction(
                 busy = busy,
                 onClick = { runSync(force = true, silent = false) },
@@ -476,11 +488,4 @@ private fun termText(term: Int): String {
 }
 
 /** 数值展示：整数不带小数点，小数最多两位（161.0 → 161，23.75 → 23.75）。 */
-private fun trimNum(value: Double): String {
-    val rounded = Math.round(value * 100) / 100.0
-    return if (rounded == rounded.toLong().toDouble()) {
-        rounded.toLong().toString()
-    } else {
-        rounded.toString().trimEnd('0').trimEnd('.')
-    }
-}
+private fun trimNum(value: Double): String = TextFmt.trim(value)

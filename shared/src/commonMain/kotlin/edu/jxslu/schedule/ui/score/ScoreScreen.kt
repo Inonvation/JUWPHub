@@ -626,13 +626,9 @@ private fun ExportTranscriptCard(
 }
 
 /**
- * 去掉无意义的尾部 0：3.0 → 3、84.50 → 84.5、84.0 → 84。
+ * 去掉无意义的尾部 0：3.0 → 3、84.50 → 84.5、84.0 → 84；`null`（无成绩）给破折号。
  *
- * 原实现是 `"%.2f".format(v)`（JVM 专有）。现在走 [TextFmt.decimals]——它对着一份
- * `String.format` 的全量单测，舍入口径（HALF_UP）与 Java 的 `%f` 一致，尾零裁剪保持原样。
+ * 裁剪逻辑在 [TextFmt.trim]（学业完成情况 / 培养方案两页共用同一份，2026-11-25 合并）。
+ * 舍入口径走 [TextFmt.decimals]：对着一份 `String.format` 的全量单测，HALF_UP 与 Java 的 `%f` 一致。
  */
-private fun trimNum(v: Double?): String {
-    if (v == null) return "—"
-    val s = TextFmt.decimals(v, 2).trimEnd('0').trimEnd('.')
-    return s.ifEmpty { "0" }
-}
+private fun trimNum(v: Double?): String = v?.let { TextFmt.trim(it) } ?: "—"

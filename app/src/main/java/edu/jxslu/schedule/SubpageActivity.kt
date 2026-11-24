@@ -55,6 +55,8 @@ import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.campus.postYktPaymentInbox
 import edu.jxslu.schedule.ui.common.rememberAttachmentImageUi
+import edu.jxslu.schedule.ui.common.rememberMarkdownEditorUi
+import edu.jxslu.schedule.ui.common.rememberMarkdownImageUi
 import edu.jxslu.schedule.ui.common.rememberMarkdownUi
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
@@ -509,8 +511,16 @@ class SubpageActivity : ComponentActivity() {
                     onOpenJwImport = actions.openJwImport,
                 )
             }
-            SubpageScreen.SCHOLAR -> ScholarScreen(onBack = onBack)
-            SubpageScreen.CURRICULUM -> CurriculumScreen(onBack = onBack)
+            // 学业 / 培养方案已搬进 shared/commonMain（iOS 移植 V4）：唯一平台动作是顶栏
+            // 「在教务网页核对」，由本侧的 `JwScreenPlatformActions.openWebPage` 给。
+            SubpageScreen.SCHOLAR -> {
+                val actions = rememberJwScreenPlatformActions()
+                ScholarScreen(onBack = onBack, onOpenWebPage = actions.openWebPage)
+            }
+            SubpageScreen.CURRICULUM -> {
+                val actions = rememberJwScreenPlatformActions()
+                CurriculumScreen(onBack = onBack, onOpenWebPage = actions.openWebPage)
+            }
             SubpageScreen.INTERNSHIP_BASES -> InternshipBasesScreen(onBack = onBack)
             // 选课四页已在 shared/commonMain（iOS 移植 S13），平台动作用
             // `rememberSelectionScreenActions` 补齐；`client` 是选课接口（真身仍在 :app）。
@@ -631,7 +641,9 @@ class SubpageActivity : ComponentActivity() {
                 viewModel = viewModel { WeatherViewModel(Services.current.weatherRepository()) },
                 onBack = onBack,
             )
+            // 天气设置（V4 搬进共享层）同样由宿主建 VM：`viewModel { }` 保留配置变更不重建。
             SubpageScreen.WEATHER_SETTINGS -> WeatherSettingsScreen(
+                viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
                 onBack = onBack,
                 onOpenWeather = { SubpageActivity.start(this, SubpageScreen.WEATHER) },
             )
@@ -745,11 +757,17 @@ class SubpageActivity : ComponentActivity() {
                 },
                 images = rememberAttachmentImageUi(),
             )
+            // 笔记详情已搬进 shared/commonMain（iOS 移植 V4）：附件图 / 正文渲染 / 编辑底栏 /
+            // 外链四件平台能力由本侧注入，共享层只认可空参数。
             SubpageScreen.NOTE_DETAIL -> NoteDetailScreen(
                 courseName = courseName.orEmpty(),
                 noteId = itemId,
                 startEditing = startEditing,
                 onBack = onBack,
+                markdownImages = rememberMarkdownImageUi(),
+                images = rememberAttachmentImageUi(),
+                editor = rememberMarkdownEditorUi(),
+                onOpenLink = { url -> openLink(this, url) },
             )
             // 作业：课程库 → 课程列表 → 详情/编辑 + 作业中心
             // 库 / 课程列表 / 作业中心已在 shared/commonMain（iOS 移植 S13）；附件图、Markdown
@@ -787,11 +805,18 @@ class SubpageActivity : ComponentActivity() {
                 onOpenLink = { url -> openLink(this, url) },
                 onHomeworkChanged = { ClassReminder.enqueueCheck(this) },
             )
+            // 作业详情已搬进 shared/commonMain（iOS 移植 V4）：与上面三页同一组平台参数，
+            // 另加编辑底栏（`rememberMarkdownEditorUi`）。
             SubpageScreen.HOMEWORK_DETAIL -> HomeworkDetailScreen(
                 courseName = courseName.orEmpty(),
                 homeworkId = itemId,
                 startEditing = startEditing,
                 onBack = onBack,
+                markdownImages = rememberMarkdownImageUi(),
+                images = rememberAttachmentImageUi(),
+                editor = rememberMarkdownEditorUi(),
+                onOpenLink = { url -> openLink(this, url) },
+                onHomeworkChanged = { ClassReminder.enqueueCheck(this) },
             )
             SubpageScreen.HOMEWORK_TODO -> HomeworkTodoScreen(
                 onBack = onBack,

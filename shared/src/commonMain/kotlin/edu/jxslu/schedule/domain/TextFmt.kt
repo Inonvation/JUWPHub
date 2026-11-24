@@ -31,4 +31,16 @@ object TextFmt {
 
     /** 定点小数，等价 `String.format(Locale.ROOT, "%.<places>f", value)`。 */
     fun decimals(value: Double, places: Int): String = formatFixed(value, places)
+
+    /**
+     * 去掉无意义的尾部 0：`3.0 → 3`、`84.50 → 84.5`、`84.0 → 84`。
+     *
+     * 学分 / 学时这类数在教务里有整数也有两位小数，页面上「79 学分」比「79.00 学分」好读。
+     * 舍入口径走 [decimals]（HALF_UP，与 Java 的 `%f` 一致），不在这里另写一套。
+     *
+     * 收在这里而不是各页各写一份：学业完成情况 / 培养方案 / 成绩三页原本各有一份
+     * 逐字相同的 `trimNum`（2026-11-25 合并）。
+     */
+    fun trim(value: Double, places: Int = 2): String =
+        decimals(value, places).trimEnd('0').trimEnd('.').ifEmpty { "0" }
 }

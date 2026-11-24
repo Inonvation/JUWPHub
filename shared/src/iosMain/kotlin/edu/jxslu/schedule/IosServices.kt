@@ -12,7 +12,8 @@ import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
-import edu.jxslu.schedule.data.repo.DormRepairStore
+import edu.jxslu.schedule.data.repo.CurriculumRepository
+import edu.jxslu.schedule.data.repo.CurriculumSync
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
@@ -28,6 +29,8 @@ import edu.jxslu.schedule.data.repo.SelectionRoundsStore
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.repo.ScholarProgressRepository
+import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.session.IosJwReadSession
 import edu.jxslu.schedule.data.session.IosAiApiKeyStore
 import edu.jxslu.schedule.data.session.IosSessionExpirySink
@@ -486,4 +489,35 @@ class IosServices : AppServices {
     fun warmUp() {
         scope.launch { repository.ensureDefaults() }
     }
+
+    // ---- 学业完成情况 / 培养方案（iOS 移植 V4，2026-11-25） ----
+    //
+    // 四项全部非空：两个仓库只认 `juwDatabase()`（与课表同一个库文件），两个同步只认
+    // [session]（`IosJwReadSession`，Cookie 来自 `WKWebView`）。所以 iOS 侧这两页的
+    // 「重新导入」是**真的能用**，不是空壳——登录在导入页的 `WKWebView` 里完成后，
+    // Cookie 就在 `WebCookies` 里，抓取链路与 Android 走同一份 `JwReadSession` 接口。
+    //
+    // 单例的理由与 Android 侧一致：两个 Sync 内部的 Mutex 是「单飞」的全部依据。
+
+    private val scholarProgressRepo: ScholarProgressRepository by lazy {
+        ScholarProgressRepository(juwDatabase())
+    }
+
+    private val scholarProgressSyncImpl: ScholarProgressSync by lazy {
+        ScholarProgressSync(cas = session, repo = scholarProgressRepo, prefs = prefs)
+    }
+
+    private val curriculumRepo: CurriculumRepository by lazy { CurriculumRepository(juwDatabase()) }
+
+    private val curriculumSyncImpl: CurriculumSync by lazy {
+        CurriculumSync(cas = session, repo = curriculumRepo, prefs = prefs)
+    }
+
+    override fun scholarProgressRepository(): ScholarProgressRepository = scholarProgressRepo
+
+    override fun scholarProgressSync(): ScholarProgressSync = scholarProgressSyncImpl
+
+    override fun curriculumRepository(): CurriculumRepository = curriculumRepo
+
+    override fun curriculumSync(): CurriculumSync = curriculumSyncImpl
 }
