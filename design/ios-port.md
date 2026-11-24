@@ -454,8 +454,18 @@ JVM/Android 依赖，必须同批处理，否则改完 `:shared` 还是编不过
 | `android.util.Log` | 6 / 25 | ✅ **已解决（2026-11-24）**：`shared/.../platform/Logger.kt` 立好了 expect/actual，Android 落 `android.util.Log`（含 throwable，照旧打完整栈）、iOS 落 `NSLog`。全仓 179 处 `Log.*` 散在 52 个文件里，**按需迁移**（文件搬进 `:shared` 时顺手换），不做一次性全量扫 |
 | `BuildConfig` | 3 / 25 | AGP 生成的，`:shared` 没有。做法：改成构造参数/常量，由 `:app` 侧调用点传进来（`UpdateCheckClient` 就是这么改的：无参构造删掉，`JuwApplication` 与 `AboutScreens` 传 `BuildConfig.VERSION_NAME`） |
 
-**已迁移清单（2026-11-24）**：`data/weather/WeatherApi`、`data/repo/UpdateCheckClient`。
-两个都验证过 `commonMain` 元数据门禁 + 2418 个单测全绿。
+**已迁移清单（2026-11-24）**：`data/weather/WeatherApi`、`data/repo/UpdateCheckClient`、
+`data/wenqu/WenquApi`、`data/wenqu/WenquServerClock`。四个都验证过 `commonMain` 元数据门禁 +
+2418 个单测全绿。剩余 OkHttp/Retrofit 文件 **26 → 22**。
+
+`WenquServerClock` 那次顺带解决了一类通用问题：**OkHttp 的 `Interceptor` 在 Ktor 里没有等价物**。
+它的实现是「发前取钟 → 收后取钟 → 读 `Date` 头算偏移」，改成在 `send()` 里就地记账即可——
+不必去找 Ktor 的插件机制。下次遇到 `Interceptor` 就先问「它到底做了什么」，多数时候是一段
+能内联进调用点的记账逻辑。
+
+还有一个反复踩的书写坑：**KDoc 里不能出现星号紧跟斜杠**（会把块注释提前闭合）。
+`Accept: application/json, text/plain,*/*` 这个头值就踩了两次，编译器只报一串
+`Expecting member declaration`，病因得自己往回找。对策是把这类值抽成常量，KDoc 只引名。
 
 **剩余 23 个文件按耦合与行数的实测排序**（`行数 / 额外耦合`，用来定下一批的派活）：
 
