@@ -13,24 +13,24 @@ import edu.jxslu.schedule.data.local.EncryptedPrefs
  * 静默重登才能不劳用户重新输入（token 本身仍仅内存，见 `KqcxSessionRepository`）。
  * `secure_kqcx.xml` 已排除出云备份与设备迁移（backup_rules / data_extraction_rules）。
  */
-class KqxCredentialStore(context: Context) {
+class KqxCredentialStore(context: Context) : KqcxCredentialStore {
     private val prefs: SharedPreferences by lazy {
         EncryptedPrefs.open(context, FILE, TAG)
     }
 
     /** 凭证缺失（未登录）返回 null。密码落的是**明文原文**，MD5 在请求时现算——服务端口径如此。 */
-    fun readCredential(): Pair<String, String>? {
+    override fun readCredential(): Pair<String, String>? {
         val mobile = prefs.getString(KEY_MOBILE, null) ?: return null
         val password = prefs.getString(KEY_PASSWORD, null) ?: return null
         if (mobile.isBlank() || password.isBlank()) return null
         return mobile to password
     }
 
-    fun saveCredential(mobile: String, password: String) {
+    override fun saveCredential(mobile: String, password: String) {
         prefs.edit().putString(KEY_MOBILE, mobile).putString(KEY_PASSWORD, password).apply()
     }
 
-    fun clear() {
+    override fun clear() {
         prefs.edit().remove(KEY_MOBILE).remove(KEY_PASSWORD).apply()
     }
 

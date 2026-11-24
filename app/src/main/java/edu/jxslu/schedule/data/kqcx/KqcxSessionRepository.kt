@@ -41,7 +41,7 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class KqcxSessionRepository(
     private val client: KqcxAuthClient,
-    private val credentials: KqxCredentialStore,
+    private val credentials: KqcxCredentialStore,
     /** 「登录状态已过期」留痕（见 [SessionExpiryStore]）：静默重登失败时写、进页消费。 */
     private val expiry: SessionExpiryStore? = null,
 ) : KvcxRideSession, KvcxZoneSource {
