@@ -1,10 +1,5 @@
 package edu.jxslu.schedule.ui.ai
 
-import android.content.ClipboardManager
-import android.content.Context
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.expandVertically
@@ -49,26 +44,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.repo.AiImageStore
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
-import edu.jxslu.schedule.ui.common.ImageSource
-import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.NoticeTone
+import edu.jxslu.schedule.ui.common.copyPlainText
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.common.showNotice
@@ -92,30 +80,27 @@ import kotlinx.coroutines.launch
  * - **无后台调用**：只有点「分析」才发请求，失败不自动重试；
  * - 会话与图片都**不落盘**（进程内），杀进程即清；
  * - 拒绝项（rejected）**必须可见**；思考过程默认折叠限高。
+ *
+ * ## iOS 移植（2026-11-25）：平台能力都是可空参数
+ *
+ * | 参数 | `null` 时 |
+ * |---|---|
+ * | [imageUi] | 缩略图 / 选图 / 粘图 / 全屏看图四处入口整行不渲染（本平台没有落盘与解码） |
+ *
+ * 纯文本复制不在这里：它走共享层现成的 `ui/common/Clipboard`（两端都有实现）。
+ *
+ * ViewModel 由宿主创建（`design/ios-port.md` §11.2 ①）：Android 走 `viewModel { }`，
+ * iOS 走 `remember { }`。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiChatScreen(
+    viewModel: AiChatViewModel,
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenHistory: () -> Unit,
+    imageUi: AiImageUi? = null,
 ) {
-    val context = LocalContext.current
-    // 注意 `Graph.aiApplyHistoryStore(context)` 的构造会同步读一次 filesDir 里的 JSON（上限 50 条）。
-    // 2026-11-06 审计 2-B 复核后**不动**：它不参与首帧（只服务应用/撤销/留痕同步），理论上可以
-    // 延后到协程里构造；但 (a) Graph 把它做成进程单例，整个进程只付一次，
-    // (b) 读盘在 `data/repo/AiApplyHistoryStore` 的构造里，延后就得把 provider 穿进 ViewModel
-    // 的三个调用点（apply / undo / 留痕刷新）。改面大、收益是一次几毫秒 —— 不值。
-    val viewModel: AiChatViewModel = viewModel(
-        factory = AiChatViewModel.Factory(
-            Graph.repository(context),
-            Graph.aiCredentialStore(context),
-            Graph.aiScheduleClient(context),
-            Graph.aiImageStore(context),
-            Graph.aiApplyHistoryStore(context),
-        ),
-    )
-
     val work by viewModel.work.collectAsStateWithLifecycle()
     val draft by viewModel.draft.collectAsStateWithLifecycle()
     val attachments by viewModel.attachments.collectAsStateWithLifecycle()
@@ -139,15 +124,22 @@ fun AiChatScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val haptics = rememberAppHaptics()
-    val clipboard = LocalClipboardManager.current
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
 
-    var viewingImage by remember { mutableStateOf<String?>(null) }
-
-    val imagePicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickMultipleVisualMedia(maxItems = AiImageStore.MAX_IMAGES),
-    ) { uris -> uris.forEach(viewModel::addImage) }
+    // 粘图：把剪贴板里的图逐张交给 VM；一张都没有时给一次性提示（迁移前是同一条口径）
+    val onPasteImage: (() -> Unit)? = imageUi?.pasteImages?.let { paste ->
+        {
+            val pasted = paste()
+            if (pasted.isEmpty()) {
+                scope.launch {
+                    snackbar.showNotice(AppNoticeVisuals("剪贴板里没有图片", tone = NoticeTone.Warning))
+                }
+            } else {
+                pasted.forEach(viewModel::addImage)
+            }
+        }
+    }
 
     LaunchedEffect(imageNotice) {
         imageNotice?.let {
@@ -218,31 +210,18 @@ fun AiChatScreen(
                     work = work,
                     draft = draft,
                     attachments = attachments,
+                    thumb = imageUi?.thumb,
                     onDraftChange = viewModel::setDraft,
-                    onPickImages = {
-                        imagePicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    },
-                    onPasteImage = {
-                        val pasted = readClipboardImages(context)
-                        if (pasted.isEmpty()) {
-                            scope.launch {
-                                snackbar.showNotice(
-                                    AppNoticeVisuals("剪贴板里没有图片", tone = NoticeTone.Warning),
-                                )
-                            }
-                        } else {
-                            pasted.forEach(viewModel::addImage)
-                        }
-                    },
+                    onPickImages = imageUi?.pickImages,
+                    onPasteImage = onPasteImage,
                     onRemoveImage = viewModel::removeImage,
-                    onOpenImage = { viewingImage = it },
+                    onOpenImage = { name -> imageUi?.openViewer?.invoke(name) },
                     onClear = viewModel::clearInputs,
                 )
 
-                // 未配 Key 时先给引导（不拦截发送，失败路径照常给「去配置」）
-                if (!hasApiKey && work.phase == AiPhase.IDLE) {
+                // 未配 Key 时先给引导（不拦截发送，失败路径照常给「去配置」）。
+                // 本平台存不住 Key（`canStoreKey` 为 false）就不给这条死路。
+                if (!hasApiKey && viewModel.canStoreKey && work.phase == AiPhase.IDLE) {
                     ConfigureGuideRow(onOpenSettings)
                 }
 
@@ -297,7 +276,10 @@ fun AiChatScreen(
                                     }
                                 },
                                 onCopyHeadline = { text ->
-                                    clipboard.setText(AnnotatedString(text))
+                                    // 纯文本复制走共享层的现成缝（`ui/common/Clipboard`：
+                                    // Android 是 ClipboardManager、iOS 是 UIPasteboard），
+                                    // 不需要宿主再给一条回调
+                                    copyPlainText("AI 调课", text)
                                     scope.launch {
                                         snackbar.showNotice(
                                             AppNoticeVisuals("已复制", tone = NoticeTone.Success),
@@ -330,15 +312,6 @@ fun AiChatScreen(
                 },
             )
         }
-    }
-
-    // ---- 全屏看图（复用项目统一的查看器；ai_img 目录的口径在 ImageSource.AiNotice）
-    viewingImage?.let { name ->
-        ImageViewerDialog(
-            fileName = name,
-            onDismiss = { viewingImage = null },
-            source = ImageSource.AiNotice,
-        )
     }
 
     // ---- 首次隐私确认：**两键决策**（同意并分析 / 取消），骨架走 AppConfirmDialog
@@ -385,16 +358,6 @@ fun AiChatScreen(
                 ) { Text("去开启图片识别") }
             },
         )
-    }
-}
-
-/** 从系统剪贴板取图片 URI（截图后直接粘，不用去相册）。 */
-private fun readClipboardImages(context: Context): List<android.net.Uri> {
-    val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        ?: return emptyList()
-    val clip = manager.primaryClip ?: return emptyList()
-    return (0 until clip.itemCount).mapNotNull { index ->
-        clip.getItemAt(index).uri?.takeIf { it.scheme == "content" }
     }
 }
 

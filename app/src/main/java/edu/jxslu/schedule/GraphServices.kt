@@ -1,11 +1,13 @@
 package edu.jxslu.schedule
 
 import android.content.Context
+import edu.jxslu.schedule.data.ai.AiScheduleClient
 import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
@@ -93,8 +95,20 @@ class GraphServices(private val context: Context) : AppServices {
     // 转给 `Graph` 的同一份单例：今日页顶栏提示与天气详情页共用它（30 分钟 TTL 才有意义）。
     override fun weatherRepository(): WeatherRepository = Graph.weatherRepository(appContext)
 
-    /** 共享层与 `:app` 拿到的是**同一个**库实例（`juwDatabase(context)` 自带单例缓存）。 */
+    /** 与课表 / 成绩 / 收件箱同一个库实例（`juwDatabase(context)` 自带单例缓存）。 */
     override fun database(): JuwDatabase = juwDatabase(appContext)
+
+    // ---- AI 调课（iOS 移植 S15 收尾，2026-11-25） ----
+    //
+    // 两件都是 `Graph` 的既有单例，必须转接同一份：
+    // 客户端持有 Ktor 连接池（每次进页 new 一个等于重开池）；留痕按 id 对账
+    // （两个实例会各写一份 JSON，撤销就撤不动对方写的记录）。
+    // 图片存储与 API Key 存储**不在这里**：它们是页面侧的可空参数（`AiImageUi` / `AiApiKeys`），
+    // 由 `SubpageActivity` 用 `Graph.aiImageStore` / `Graph.aiCredentialStore` 就地建。
+
+    override fun aiScheduleClient(): AiScheduleClient = Graph.aiScheduleClient(appContext)
+
+    override fun aiApplyHistoryStore(): AiApplyHistoryStore = Graph.aiApplyHistoryStore(appContext)
 
     // ---- 课表页背景图 / 主题换色（S17） ----
     //

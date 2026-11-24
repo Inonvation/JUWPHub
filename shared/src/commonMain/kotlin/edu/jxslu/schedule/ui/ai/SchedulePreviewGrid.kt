@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.ai
 
 import androidx.compose.foundation.background
-import kotlinx.datetime.toJavaLocalDate
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -240,8 +239,11 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color, outline: Boolea
  * 自旧对话式 UI 的 `AiMessageBubbles` 迁来（2026-10-07）：它是预览的伴生逻辑，
  * 与 [SchedulePreviewGrid] 同属一处。改动条目按勾选计；FOLLOW 借来的课
  * 画在**目标日**的格子上（借课日按源槽位周次的课程描边）。
+ *
+ * `public` 而不是 `internal`：`AiWorkflowTest` 在 `:app` 的测试源集里钉住它，
+ * 而跨模块 `internal` 不可见（iOS 移植 2026-11-25 随页面搬进共享层时放开）。
  */
-internal fun changedCellSet(
+fun changedCellSet(
     changes: List<ScheduleDiff.Change>,
     accepted: Set<Int>,
     overrides: List<ScheduleOverride>,
@@ -293,14 +295,18 @@ internal fun changedCellSet(
  *
  * 旧实现只在有覆盖时才有周次、纯课表改动一律回落第 1 周——改动不涉及第 1 周时
  * 「应用前 / 应用后」两栏长得一模一样，预览等于白做（本次修的就是这个）。
+ *
+ * `public` 的理由同 [changedCellSet]：`:app` 的测试要用它。
  */
-internal fun previewWeeksOf(
+fun previewWeeksOf(
     changes: List<ScheduleDiff.Change>,
     accepted: Set<Int>,
     overrides: List<ScheduleOverride>,
     semester: SemesterConfig?,
 ): List<Int> {
-    val out = sortedSetOf<Int>()
+    // 迁移前是 `sortedSetOf<Int>()`（JVM 专有集合），换成 `mutableSetOf` + 末尾排序：
+    // 调用方（周次候选行）要的是升序，集合本身只要去重
+    val out = mutableSetOf<Int>()
     out += ScheduleOverrides.weeksOf(overrides, semester)
     changes.forEachIndexed { index, change ->
         if (index !in accepted) return@forEachIndexed
@@ -313,5 +319,5 @@ internal fun previewWeeksOf(
             removedWeeks.minOrNull()?.let { out += it }
         }
     }
-    return out.toList()
+    return out.sorted()
 }

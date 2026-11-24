@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.ai
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.AiApplyRecord
@@ -97,14 +96,5 @@ class AiHistoryViewModel(
         } finally {
             undoing = false
         }
-    }
-
-    class Factory(
-        private val repo: ScheduleRepository,
-        private val historyStore: AiApplyHistoryStore,
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            AiHistoryViewModel(repo, historyStore) as T
     }
 }

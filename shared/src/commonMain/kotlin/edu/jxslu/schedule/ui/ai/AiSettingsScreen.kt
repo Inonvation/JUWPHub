@@ -31,16 +31,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.ai.Effort
 import edu.jxslu.schedule.domain.AiScheduleConfig
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
@@ -57,26 +54,26 @@ import kotlinx.coroutines.launch
  * AI 调课的服务配置页（DESIGN §4.39，2026-10-06）。
  *
  * 预填 DeepSeek 的 OpenAI 兼容端点与默认模型，**用户通常只需填 API Key**；
- * 地址与模型可清空自定义其它兼容服务。API Key 落 `AiCredentialStore`
- * （EncryptedSharedPreferences，`secure_ai.xml` 已排除备份），不进 DataStore。
+ * 地址与模型可清空自定义其它兼容服务。API Key 落加密存储
+ * （Android：`AiCredentialStore` = EncryptedSharedPreferences，`secure_ai.xml` 已排除备份），
+ * 不进 DataStore。
  *
  * 「测试连接」= 拉一次 `/models`：既验证地址与 Key，也把可用模型列出来供选。
  *
  * 2026-10-07 排版收口：「能力」节拆掉——图片识别开关并入「服务」节（紧跟模型行，
  * 语义顺序：先选模型、再声明能力）；挂在节尾的两条「模型名看着像…」说明 Text 删除
  * （说教式文案，判断依据已由「从上游获取」的模型列表替代）；隐私节说明收进节副标题。
+ *
+ * iOS 移植（2026-11-25）：ViewModel 由宿主创建（`design/ios-port.md` §11.2 ①）。
+ * 本平台没有加密凭证存储时（`AiSettingsViewModel.canStoreKey` 为 false），
+ * 「API Key」与「测试连接」两行整块不渲染。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AiSettingsScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val viewModel: AiSettingsViewModel = viewModel(
-        factory = AiSettingsViewModel.Factory(
-            Graph.repository(context),
-            Graph.aiCredentialStore(context),
-            Graph.aiScheduleClient(context),
-        ),
-    )
+fun AiSettingsScreen(
+    viewModel: AiSettingsViewModel,
+    onBack: () -> Unit,
+) {
     val baseUrl by viewModel.baseUrl.collectAsStateWithLifecycle()
     val model by viewModel.model.collectAsStateWithLifecycle()
     val maskTeacher by viewModel.maskTeacher.collectAsStateWithLifecycle()
@@ -136,36 +133,40 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                     onCheckedChange = viewModel::setSupportsImage,
                     icon = AppIcons.Image01,
                 )
-                SettingItem(
-                    title = "API Key",
-                    subtitle = if (apiKey.isNullOrBlank()) "未配置" else "已配置",
-                    icon = AppIcons.LockPassword,
-                    onClick = { editingKey = true },
-                )
-                SettingItem(
-                    title = "测试连接",
-                    subtitle = "验证地址与 Key",
-                    icon = AppIcons.Refresh,
-                    enabled = !busy,
-                    onClick = {
-                        scope.launch {
-                            val result = viewModel.probe()
-                            val message = result.fold(
-                                onSuccess = { list ->
-                                    if (list.isEmpty()) "连接成功，但上游没有返回模型列表"
-                                    else "连接成功，可用模型 ${list.size} 个"
-                                },
-                                onFailure = { aiErrorText(it) },
-                            )
-                            snackbar.showNotice(
-                                AppNoticeVisuals(
-                                    message,
-                                    tone = if (result.isSuccess) NoticeTone.Success else NoticeTone.Error,
-                                ),
-                            )
-                        }
-                    },
-                )
+                // API Key 与「测试连接」都要一个能存 Key 的地方：本平台没有加密凭证存储时
+                // 两行整块不渲染（口径见 `AiSettingsViewModel.canStoreKey`）
+                if (viewModel.canStoreKey) {
+                    SettingItem(
+                        title = "API Key",
+                        subtitle = if (apiKey.isNullOrBlank()) "未配置" else "已配置",
+                        icon = AppIcons.LockPassword,
+                        onClick = { editingKey = true },
+                    )
+                    SettingItem(
+                        title = "测试连接",
+                        subtitle = "验证地址与 Key",
+                        icon = AppIcons.Refresh,
+                        enabled = !busy,
+                        onClick = {
+                            scope.launch {
+                                val result = viewModel.probe()
+                                val message = result.fold(
+                                    onSuccess = { list ->
+                                        if (list.isEmpty()) "连接成功，但上游没有返回模型列表"
+                                        else "连接成功，可用模型 ${list.size} 个"
+                                    },
+                                    onFailure = { aiErrorText(it) },
+                                )
+                                snackbar.showNotice(
+                                    AppNoticeVisuals(
+                                        message,
+                                        tone = if (result.isSuccess) NoticeTone.Success else NoticeTone.Error,
+                                    ),
+                                )
+                            }
+                        },
+                    )
+                }
             }
 
             SettingsSection(
@@ -227,7 +228,8 @@ fun AiSettingsScreen(onBack: () -> Unit) {
             ModelSheet(
                 initial = model,
                 suggestions = AiScheduleConfig.MODEL_SUGGESTIONS,
-                onFetch = { viewModel.probe() },
+                // 没有 Key 存储就没有「从上游获取」这条路（拉 /models 必须先有 Key）
+                onFetch = if (viewModel.canStoreKey) ({ viewModel.probe() }) else null,
                 onConfirm = { value ->
                     viewModel.setModel(value)
                     editingModel = false
@@ -308,12 +310,13 @@ private fun TextEditSheet(
     }
 }
 
-/** 模型弹层：手输 + 「从上游获取」列出可选模型（取不到就退回手输，不阻塞）。 */
+/** 模型弹层：手输 + 「从上游获取」列出可选模型（取不到就退回手输，不阻塞）。
+ *  [onFetch] 为 null 时不渲染「从上游获取」（本平台没有 Key 存储，拉不动 `/models`）。 */
 @Composable
 private fun ModelSheet(
     initial: String,
     suggestions: List<String>,
-    onFetch: suspend () -> Result<List<String>>,
+    onFetch: (suspend () -> Result<List<String>>)?,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -339,21 +342,23 @@ private fun ModelSheet(
             singleLine = true,
         )
         Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            TextButton(
-                onClick = {
-                    fetching = true
-                    error = null
-                    scope.launch {
-                        onFetch()
-                            .onSuccess { fetched = it }
-                            .onFailure { error = aiErrorText(it) }
-                        fetching = false
-                    }
-                },
-                enabled = !fetching,
-            ) { Text(if (fetching) "获取中…" else "从上游获取") }
-            Spacer(Modifier.weight(1f))
+        if (onFetch != null) {
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                TextButton(
+                    onClick = {
+                        fetching = true
+                        error = null
+                        scope.launch {
+                            onFetch()
+                                .onSuccess { fetched = it }
+                                .onFailure { error = aiErrorText(it) }
+                            fetching = false
+                        }
+                    },
+                    enabled = !fetching,
+                ) { Text(if (fetching) "获取中…" else "从上游获取") }
+                Spacer(Modifier.weight(1f))
+            }
         }
         val options = if (fetched.isNotEmpty()) fetched else suggestions
         options.take(12).forEach { name ->

@@ -1,32 +1,29 @@
 package edu.jxslu.schedule.ui.ai
 
-import android.net.Uri
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.ai.AiCredentialStore
 import edu.jxslu.schedule.data.ai.AiScheduleClient
 import edu.jxslu.schedule.data.ai.Effort
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.AiApplyRecord
-import edu.jxslu.schedule.data.repo.AiImageStore
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.toRow
 import edu.jxslu.schedule.domain.AiScheduleConfig
 import edu.jxslu.schedule.domain.AiSchedulePrompt
 import edu.jxslu.schedule.domain.AiScheduleTool
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.domain.ScheduleOverride
 import edu.jxslu.schedule.domain.SemesterConfig
 import edu.jxslu.schedule.domain.scheduleApplySummary
 import edu.jxslu.schedule.ui.common.NoticeTone
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,7 +34,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.toKotlinLocalDate
+import kotlinx.datetime.LocalDate
 
 /**
  * AI 调课 · 单页工作单的状态容器（DESIGN §3.25 / §4.39 / §4.40，2026-10-07 v2 重构）。
@@ -54,14 +51,23 @@ import kotlinx.datetime.toKotlinLocalDate
  * - 模型的 tool_call 只是**提议**，落库必须过用户逐条勾选 + 显式应用；
  * - 写库走 [ScheduleRepository.applyLocalChanges]（与手动改课同语义，**不推基线**）；
  * - **无后台调用**：只有用户点「分析」才发请求；不自动重试、不自动追问。
+ *
+ * ## iOS 移植（2026-11-25）：构造只吃共享层类型
+ *
+ * 三样平台能力按 `design/ios-port.md` §11.2 ④ 收成**可空参数**，由宿主建：
+ * - [imageStore]（图片落盘 / 解码，Android 是 `AiImageStore`）：`null` = 没有截图能力；
+ * - [apiKeys]（API Key 加密存储，Android 是 `AiCredentialStore`）：`null` = 没有加密凭证存储；
+ * - [todayProvider] 默认走 `AppClock.today()`（`java.time.LocalDate.now()` 是 JVM 专有）。
  */
 class AiChatViewModel(
     private val repo: ScheduleRepository,
-    private val credentialStore: AiCredentialStore,
     private val client: AiScheduleClient,
-    private val imageStore: AiImageStore,
     private val historyStore: AiApplyHistoryStore,
-    private val todayProvider: () -> java.time.LocalDate = { java.time.LocalDate.now() },
+    /** 图片附件存储；`null` = 本平台没有落盘与解码能力（输入区的截图整行不渲染）。 */
+    private val imageStore: AiImageAttachments? = null,
+    /** API Key 读写；`null` = 本平台没有加密凭证存储（一律按「未配置」处理）。 */
+    private val apiKeys: AiApiKeys? = null,
+    private val todayProvider: () -> LocalDate = AppClock::today,
 ) : ViewModel() {
 
     /**
@@ -113,9 +119,15 @@ class AiChatViewModel(
      * 再消失，比主线程读一次盘更刺眼。
      * 成本可控：`AiCredentialStore.prefs` 是 `lazy`，`Graph.aiCredentialStore` 又是进程单例，
      * 所以整个进程只在这里付一次；同一进程再进本页命中内存。
+     *
+     * `apiKeys` 为 null（本平台没有加密凭证存储）时恒 false——没有地方能配 Key，
+     * 也就不存在「已配置」。
      */
-    private val _hasApiKey = MutableStateFlow(credentialStore.readApiKey() != null)
+    private val _hasApiKey = MutableStateFlow(apiKeys?.read() != null)
     val hasApiKey: StateFlow<Boolean> = _hasApiKey.asStateFlow()
+
+    /** 本平台能不能配 Key（决定「还没有配置 AI 服务」那张引导卡渲不渲染）。 */
+    val canStoreKey: Boolean get() = apiKeys != null
 
     private val _work = MutableStateFlow(AiWorkState())
     val work: StateFlow<AiWorkState> = _work.asStateFlow()
@@ -124,7 +136,7 @@ class AiChatViewModel(
     private val _draft = MutableStateFlow("")
     val draft: StateFlow<String> = _draft.asStateFlow()
 
-    /** 待发送的图片（[AiImageStore] 的文件名）。 */
+    /** 待发送的图片（[AiImageAttachments] 落盘后的文件名）。 */
     private val _attachments = MutableStateFlow<List<String>>(emptyList())
     val attachments: StateFlow<List<String>> = _attachments.asStateFlow()
 
@@ -185,10 +197,15 @@ class AiChatViewModel(
     }
 
     override fun onCleared() {
-        // 退出页面也要清图片：会话级、不留痕。viewModelScope 此刻已取消，走 appScope。
+        // 退出页面也要清图片：会话级、不留痕。viewModelScope 此刻已取消，走独立作用域。
+        //
+        // 迁移前用的是 `Graph.appScope`（`:app` 的进程级作用域）；共享层没有它，也不该为
+        // 一次清理往 `AppServices` 加成员——`clear()` 只有「删文件 + 清 LRU」两件事，
+        // 一个用完即弃的 scope 足够，且不会把 VM 的生命周期挂到别处。
         val store = imageStore
-        clearAiImageCache()
-        Graph.appScope.launch { store.clear() }
+        if (store != null) {
+            CoroutineScope(SupervisorJob() + Dispatchers.Default).launch { store.clear() }
+        }
         super.onCleared()
     }
 
@@ -208,35 +225,38 @@ class AiChatViewModel(
      * 选/粘一张图：压缩转正后落盘，超出上限或失败都给一次性提示。
      * 上限按「已落盘 + 在途」一起数；导入完成后核对会话代数——用户可能
      * 在压缩途中点了「清空」，那时这张图属于上一场会话，不能再挂上来。
+     *
+     * [source] 是平台侧的选中物（Android 传 `android.net.Uri`），共享层只负责转交。
      */
-    fun addImage(uri: Uri) {
-        if (_attachments.value.size + pendingImports >= AiImageStore.MAX_IMAGES) {
-            _imageNotice.value = "最多 ${AiImageStore.MAX_IMAGES} 张图片"
+    fun addImage(source: Any) {
+        val store = imageStore ?: return
+        if (_attachments.value.size + pendingImports >= store.maxImages) {
+            _imageNotice.value = "最多 ${store.maxImages} 张图片"
             return
         }
         pendingImports++
         val seq = sessionSeq
         viewModelScope.launch {
             // 取图失败只提示「没能读取」；协程取消必须穿透（页面销毁时别吞成静默失败）
-            val imported = runCatching { imageStore.importUri(uri) }.getOrElse {
+            val imported = runCatching { store.import(source) }.getOrElse {
                 if (it is CancellationException) throw it
                 null
             }
             pendingImports--
             when {
                 imported == null -> _imageNotice.value = "这张图片没能读取（已跳过）"
-                seq != sessionSeq -> imageStore.fileFor(imported.fileName).delete()
-                _attachments.value.size >= AiImageStore.MAX_IMAGES ->
-                    imageStore.fileFor(imported.fileName).delete()
+                seq != sessionSeq -> store.delete(imported)
+                _attachments.value.size >= store.maxImages -> store.delete(imported)
 
-                else -> _attachments.update { it + imported.fileName }
+                else -> _attachments.update { it + imported }
             }
         }
     }
 
     fun removeImage(fileName: String) {
         _attachments.update { it - fileName }
-        viewModelScope.launch { imageStore.fileFor(fileName).delete() }
+        val store = imageStore ?: return
+        viewModelScope.launch { store.delete(fileName) }
     }
 
     /**
@@ -250,13 +270,13 @@ class AiChatViewModel(
         sessionSeq++
         _draft.value = ""
         _attachments.value = emptyList()
-        clearAiImageCache()
-        viewModelScope.launch { imageStore.clear() }
+        val store = imageStore ?: return
+        viewModelScope.launch { store.clear() }
     }
 
     /** 从配置页返回后刷新「是否已配 Key」（凭证存储不是响应式的，得手动重读）。 */
     fun refreshCredentials() {
-        _hasApiKey.value = credentialStore.readApiKey() != null
+        _hasApiKey.value = apiKeys?.read() != null
     }
 
     fun acknowledgePrivacy() {
@@ -324,7 +344,10 @@ class AiChatViewModel(
         val dropped = _attachments.value
         if (dropped.isNotEmpty()) {
             _attachments.value = emptyList()
-            viewModelScope.launch { dropped.forEach { imageStore.fileFor(it).delete() } }
+            val store = imageStore
+            if (store != null) {
+                viewModelScope.launch { dropped.forEach { store.delete(it) } }
+            }
         }
         retry(withoutImages = true)
     }
@@ -426,12 +449,13 @@ class AiChatViewModel(
                     fail("请先在「配置」里填写服务地址")
                     return@launch
                 }
-                val key = credentialStore.readApiKey().orEmpty()
+                val key = apiKeys?.read().orEmpty()
                 if (key.isBlank()) {
                     fail("请先在「配置」里填写 API Key")
                     return@launch
                 }
-                val files = images.map { imageStore.fileFor(it) }.filter { it.isFile }
+                // 只发还在盘上的图（用户可能在请求发出前删掉了一张）
+                val files = imageStore?.let { store -> images.mapNotNull { store.payload(it) } }.orEmpty()
                 client.chatStream(
                     baseUrl = url,
                     apiKey = key,
@@ -442,7 +466,7 @@ class AiChatViewModel(
                         courses = rows,
                         maskTeacher = maskTeacher.value,
                         semester = sem,
-                        today = todayProvider().toKotlinLocalDate(),
+                        today = todayProvider(),
                         existingOverrides = existingOverrides,
                     ),
                     effort = Effort.fromWire(thinkingEffort.value),
@@ -604,7 +628,7 @@ class AiChatViewModel(
                 return Result.failure(AiNothingApplied(result.report.skipped))
             }
             val record = AiApplyRecord(
-                id = System.currentTimeMillis(),
+                id = AppClock.nowMillis(),
                 appliedCourses = result.report.applied,
                 appliedOverrides = result.overrideIds.size,
                 skipped = result.report.skipped,
@@ -770,21 +794,14 @@ class AiChatViewModel(
     /** 在途的图片导入数（与 [addImage] 一起构成上限判据）。 */
     private var pendingImports = 0
 
-    private fun now(): String = LocalTime.now().format(TIME_FORMAT)
-
-    class Factory(
-        private val repo: ScheduleRepository,
-        private val credentialStore: AiCredentialStore,
-        private val client: AiScheduleClient,
-        private val imageStore: AiImageStore,
-        private val historyStore: AiApplyHistoryStore,
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            AiChatViewModel(repo, credentialStore, client, imageStore, historyStore) as T
-    }
-
-    private companion object {
-        val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("H:mm")
+    /**
+     * 当前钟点，形如 `9:41`（通知卡头的「已分析 · H:mm」）。
+     *
+     * `java.time.format.DateTimeFormatter.ofPattern("H:mm")` 是 JVM 专有，改成手写：
+     * `H` 不带前导零、`mm` 补两位。`AppClock` 取的是系统默认时区，与迁移前同口径。
+     */
+    private fun now(): String {
+        val time = AppClock.nowDateTime()
+        return "${time.hour}:${time.minute.toString().padStart(2, '0')}"
     }
 }
