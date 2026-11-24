@@ -1,7 +1,7 @@
 package edu.jxslu.schedule.data.prefs
 
-import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -9,13 +9,37 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import edu.jxslu.schedule.platform.appDataDir
+import okio.Path.Companion.toPath
 
 // DataStore 键集中一处：改键名 = 老用户偏好丢失，必须同时想迁移。
 
-// preferencesDataStore 是属性委托，必须用 by；一个文件只能声明一份，重复实例化同一文件会崩溃。
-internal val Context.displayDataStore: DataStore<Preferences> by
-    preferencesDataStore(name = "juw_display")
+/** 偏好库文件名（iOS 移植 P2，2026-11-24）。与旧 `preferencesDataStore(name = "juw_display")` 的生成物同名。 */
+private const val DATASTORE_FILE_NAME = "juw_display.preferences_pb"
+
+/**
+ * 全局唯一一份偏好库（进程内）。
+ *
+ * 原来是 `Context.preferencesDataStore(name = "juw_display")` 属性委托——那是 Android 专有的，
+ * commonMain 里不存在。换成显式工厂：文件位置由共享层的 [appDataDir] 决定（Android 侧就是
+ * `context.filesDir`，与旧委托落点 `filesDir/datastore/juw_display.preferences_pb` 完全同一个路径，
+ * 所以老用户的数据原地可读、不需要迁移；iOS 侧见 `AppDirs.ios.kt`）。
+ *
+ * 三条不能改的地方：
+ *
+ * 1. **必须 `by lazy`**：同一个文件开两个 DataStore 实例，首次写入会抛
+ *    「There are multiple DataStores active for the same file」。
+ * 2. **不用自己建目录**：`OkioStorageConnection.writeScope` 会先
+ *    `createDirectories(path.parent)`（datastore-core-okio 1.1.1 实测），旧的
+ *    `preferencesDataStore` 委托同样不 mkdir——两条路径的目录行为一致。
+ * 3. **`toPath()` 来自 okio**，不是 `java.nio.file.Path`（后者 Kotlin/Native 上没有）。
+ *    注意 `FileSystem.SYSTEM` 在 commonMain 里**不可见**（okio 把它声明在各平台源集），
+ *    所以这里只拼路径、不碰文件系统。
+ */
+internal val displayDataStore: DataStore<Preferences> by lazy {
+    val file = (appDataDir() + "/datastore/" + DATASTORE_FILE_NAME).toPath()
+    PreferenceDataStoreFactory.createWithPath(produceFile = { file })
+}
         // ---- 全局项（现行有效） ----
 internal val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
 internal val KEY_HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
@@ -100,10 +124,15 @@ internal val KEY_EBIKE_LAST_LAT = floatPreferencesKey("ebike_last_lat")
 internal val KEY_EBIKE_LAST_LNG = floatPreferencesKey("ebike_last_lng")
 internal val KEY_EBIKE_LAST_AT = longPreferencesKey("ebike_last_at")
 
-/** 地图底图选择的三个取值（见 [KEY_EBIKE_AMAP_CHOICE]）。 */
-internal const val AMAP_CHOICE_UNSET = "unset"
-internal const val AMAP_CHOICE_AGREED = "agreed"
-internal const val AMAP_CHOICE_DECLINED = "declined"
+/**
+ * 地图底图选择的三个取值（见 [KEY_EBIKE_AMAP_CHOICE]）。
+ *
+ * 2026-11-24 起是 **public**：本文件搬进 `:shared` 后，`:app` 的 `BikeMapHost` /
+ * `EbikeSettingsSheet` / `EbikeViewModel` 仍要拿这三个常量做比较与写入（`internal` 跨不了模块）。
+ */
+const val AMAP_CHOICE_UNSET = "unset"
+const val AMAP_CHOICE_AGREED = "agreed"
+const val AMAP_CHOICE_DECLINED = "declined"
 internal val AMAP_CHOICE_VALUES = setOf(AMAP_CHOICE_UNSET, AMAP_CHOICE_AGREED, AMAP_CHOICE_DECLINED)
 internal val KEY_EBIKE_VIEW_LAT = floatPreferencesKey("ebike_view_lat")
 internal val KEY_EBIKE_VIEW_LNG = floatPreferencesKey("ebike_view_lng")

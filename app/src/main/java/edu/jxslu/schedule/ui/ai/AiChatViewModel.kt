@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.ai.AiCredentialStore
 import edu.jxslu.schedule.data.ai.AiScheduleClient
+import edu.jxslu.schedule.data.ai.Effort
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.AiApplyRecord
 import edu.jxslu.schedule.data.repo.AiImageStore
@@ -93,7 +94,7 @@ class AiChatViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     val thinkingEffort: StateFlow<String> = repo.aiThinkingEffort
-        .stateIn(viewModelScope, SharingStarted.Eagerly, AiScheduleClient.Effort.NONE.wire)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, Effort.NONE.wire)
 
     val showReasoning: StateFlow<Boolean> = repo.aiShowReasoning
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -444,7 +445,7 @@ class AiChatViewModel(
                         today = todayProvider().toKotlinLocalDate(),
                         existingOverrides = existingOverrides,
                     ),
-                    effort = AiScheduleClient.Effort.fromWire(thinkingEffort.value),
+                    effort = Effort.fromWire(thinkingEffort.value),
                     images = files,
                 ).collect { event ->
                     when (event) {

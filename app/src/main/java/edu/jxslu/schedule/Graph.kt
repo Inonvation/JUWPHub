@@ -318,10 +318,17 @@ object Graph {
     /** 由 [JuwApplication.onCreate] 注入；首次访问早于注入说明时序有问题，直接抛错暴露。 */
     internal lateinit var contextProvider: () -> Context
 
-    /** 显示偏好用 applicationContext 建，保证与 Activity 生命周期无关。 */
-    fun displayPrefs(context: Context): DisplayPrefsStore =
+    /**
+     * 显示偏好仓库。
+     *
+     * iOS 移植 P2（2026-11-24）起 [DisplayPrefsStore] 不再吃 `Context`：DataStore 的文件位置
+     * 由共享层的 `appDataDir()` 决定，而它已经在 [JuwApplication.onCreate] 里注入过
+     * （Android 侧就是 `context.filesDir`，落点与旧的 `preferencesDataStore` 委托一致）。
+     * [context] 参数保留只为不动 60+ 处调用点，**不参与建实例**。
+     */
+    fun displayPrefs(@Suppress("UNUSED_PARAMETER") context: Context): DisplayPrefsStore =
         prefsStore ?: synchronized(this) {
-            prefsStore ?: DisplayPrefsStore(context.applicationContext).also { prefsStore = it }
+            prefsStore ?: DisplayPrefsStore().also { prefsStore = it }
         }
 
     /**
