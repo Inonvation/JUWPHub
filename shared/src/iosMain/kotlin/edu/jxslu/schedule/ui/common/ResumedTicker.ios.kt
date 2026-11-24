@@ -36,3 +36,16 @@ actual fun rememberResumedNow(intervalMillis: Long, key: Any?): State<Long> =
             delay(intervalMillis)
         }
     }
+
+/**
+ * 「回到前台」计数：**iOS 侧恒为 0**。
+ *
+ * 没有 `LocalLifecycleOwner` 就无从知道「回来了」；但这一项在 iOS 上的用途只有
+ * 「进页读一次一次性快照」，而进页本身就会重组（切 Tab 会重建那一屏的组合），
+ * 所以恒 0 不会让页面停在旧数据上。
+ *
+ * shortcut: 同 [ResumedTickerEffect]——CMP 升到带 iOS LifecycleOwner 的版本后换成真实现；
+ * 升级条件 = CMP ≥ 1.8 与 Glance 1.2.0 的冲突被解开。
+ */
+@Composable
+actual fun rememberResumeTick(): Int = 0
