@@ -90,6 +90,10 @@ kotlin {
             // 另注：KMP 下 `viewModel()` 必须给 initializer（Native 无反射），Hilt 也不可用；
             // 我们用 `Graph` 单例装配，改成可注入容器即可。
             api("androidx.lifecycle:lifecycle-viewmodel:2.8.7")
+            // DataStore 的 KMP 变体（`:app` 同版本 1.1.1，不抬线；module metadata 里确有
+            // iosArm64/X64/SimArm64）。`preferences-core` 是纯 KMP 的读写信箱，靠 okio Path
+            // 定位文件；Android 的 `preferencesDataStore` 属性委托是 Android 专属，不能进共享层。
+            api("androidx.datastore:datastore-preferences-core:1.1.1")
             // Ktor 3（iOS 移植 P1 第一个试点模块）：OkHttp 与 Retrofit 都是 JVM 库，iOS 上没有；
             // Ktor 的 core 在 commonMain，引擎按平台各自声明（Android 仍走 OkHttp，iOS 走 Darwin）。
             // 版本选 3.0.3 是配现有的 kotlinx-coroutines 1.9.0（3.1+ 要 1.10.x），
