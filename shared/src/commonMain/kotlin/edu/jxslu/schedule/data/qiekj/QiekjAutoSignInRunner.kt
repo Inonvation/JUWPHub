@@ -1,9 +1,9 @@
 package edu.jxslu.schedule.data.qiekj
 
-import android.util.Log
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.QiekjAutoSignInRules
-import java.time.LocalDate
+import edu.jxslu.schedule.platform.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -17,6 +17,10 @@ import kotlinx.coroutines.sync.Mutex
  *
  * [onFreshSignIn] 只在「本次真签到成功」（服务端确认新签，非幂等已签）时回调，
  * 由调用方（MainActivity）发成功提醒；「今天已签」与失败都不回调。
+ *
+ * iOS 移植 S11（2026-11-24）：搬进 `:shared`，两处跟着换——`java.time.LocalDate` →
+ * [AppClock]（commonMain 没有 `java.time`；[AppClock.today] 与 `LocalDate.now()` 同为
+ * 系统默认时区，落库口径一致），`android.util.Log` → [Logger]（两端门面）。
  */
 object QiekjAutoSignInRunner {
     private val mutex = Mutex()
@@ -24,7 +28,7 @@ object QiekjAutoSignInRunner {
     suspend fun runIfDue(
         prefs: DisplayPrefsStore,
         repo: QiekjRepository,
-        today: String = LocalDate.now().toString(),
+        today: String = AppClock.today().toString(),
         onFreshSignIn: (QiekjDailySignInResult) -> Unit = {},
     ) {
         if (!mutex.tryLock()) return
@@ -40,7 +44,7 @@ object QiekjAutoSignInRunner {
                 .onFailure { error ->
                     if (error is CancellationException) throw error
                     if (error is TokenExpiredException) repo.markExpired()
-                    Log.w("QiekjAutoSignIn", "auto sign-in failed", error)
+                    Logger.w("QiekjAutoSignIn", "auto sign-in failed", error)
                 }
         } finally {
             mutex.unlock()
