@@ -75,6 +75,7 @@ import edu.jxslu.schedule.data.jw.TranscriptException
 import edu.jxslu.schedule.data.jw.TranscriptTerm
 import edu.jxslu.schedule.data.jw.unwrapJsString
 import edu.jxslu.schedule.data.session.SessionStatus
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.TranscriptHistory
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardRow
@@ -196,7 +197,7 @@ fun TranscriptScreen(onBack: () -> Unit) {
                 val cookie = TranscriptCookies.sessionHeader()
                     ?: throw TranscriptException.SessionExpired()
                 val bytes = client.export(picked, cookie)
-                val name = PtworkTranscript.defaultFileName(picked, System.currentTimeMillis())
+                val name = PtworkTranscript.defaultFileName(picked, AppClock.nowMillis())
                 val file = withContext(Dispatchers.IO) { store.save(bytes, name) }
                 savedFile = file
                 savedTerms = picked

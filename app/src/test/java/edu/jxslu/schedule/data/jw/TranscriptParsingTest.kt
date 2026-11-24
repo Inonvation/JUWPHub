@@ -1,5 +1,8 @@
 package edu.jxslu.schedule.data.jw
 
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -180,10 +183,11 @@ class TranscriptParsingTest {
 
     @Test
     fun buildsReadableFileName() {
-        // 2026-09-24 10:30（东八区）→ 固定时间戳，避免依赖运行机器的时区
-        val zone = java.time.ZoneId.of("Asia/Shanghai")
-        val millis = java.time.ZonedDateTime.of(2026, 9, 24, 10, 30, 0, 0, zone)
-            .toInstant().toEpochMilli()
+        // 2026-09-24 10:30（东八区）→ 固定时间戳，避免依赖运行机器的时区。
+        // 时区类型是 kotlinx-datetime 的 TimeZone：defaultFileName 已随解析层搬进 commonMain，
+        // 那边没有 java.time（见 PtworkTranscript 的 KDoc）。
+        val zone = TimeZone.of("Asia/Shanghai")
+        val millis = LocalDateTime(2026, 9, 24, 10, 30).toInstant(zone).toEpochMilliseconds()
         assertEquals(
             "成绩单-2025-2026-2-20260924-1030.pdf",
             PtworkTranscript.defaultFileName(listOf("2025-2026-2"), millis, zone),

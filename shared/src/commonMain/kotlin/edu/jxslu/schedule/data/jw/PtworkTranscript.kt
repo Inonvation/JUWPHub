@@ -1,15 +1,16 @@
 package edu.jxslu.schedule.data.jw
 
+import edu.jxslu.schedule.domain.TextFmt
+import io.ktor.http.encodeURLParameter
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import java.net.URLEncoder
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /**
  * 签章系统（`jwxyxx.juwp.edu.cn`）成绩单导出的契约与纯逻辑（DESIGN §4.25）。
@@ -37,6 +38,18 @@ import java.time.format.DateTimeFormatter
  *
  * 另一个坑不在本文件里：签章系统只有 HTTP 明文（443 实测连接超时），CAS 票据与成绩单都走
  * 明文回传。学校就这么部署的，App 端无法兜底，只能在导出页写明。
+ *
+ * ## iOS 移植 S9（2026-11-24）：整份搬进 `shared/commonMain`
+ *
+ * 这里只有契约、表单与解析，没有任何网络与文件 API，所以是**纯搬**（包名不变）。两处必须换：
+ * - `java.net.URLEncoder` → [`encodeURLParameter`]（JVM 专有）。[CAS_ENTRY] 编码的是
+ *   [CAS_SERVICE] 这个纯 ASCII 常量（`:`/`/`/`.`），两种写法输出逐字相同
+ *   （`http%3A%2F%2Fjwxyxx.juwp.edu.cn%2Fptwork%2Fcas`）；换成带空格的值时要重新核对，
+ *   两者只在「空格 → `%20` vs `+`」上有分歧。
+ * - `java.time` → kotlinx-datetime（[defaultFileName] 的时区参数由 `ZoneId` 变 [TimeZone]）。
+ *
+ * 传输层（`TranscriptTransport` 的 Ktor 实现）在 `TranscriptClient.kt` 里；读 WebView
+ * Cookie 的那一半仍是 Android 专属，留在 `:app`（见那边的 KDoc）。
  */
 object PtworkTranscript {
 
@@ -51,7 +64,7 @@ object PtworkTranscript {
 
     /** 授权窗口的起始地址：统一认证登录页，service 指向签章系统。 */
     val CAS_ENTRY: String =
-        JwUrls.CAS_BASE + "/cas/login?service=" + URLEncoder.encode(CAS_SERVICE, Charsets.UTF_8.name())
+        JwUrls.CAS_BASE + "/cas/login?service=" + CAS_SERVICE.encodeURLParameter()
 
     const val LIST_PATH = "/ptwork/DzqzController/ddqzcjList"
     const val PRINT_PATH = "/ptwork/DzqzController/printStartCj"
@@ -77,8 +90,6 @@ object PtworkTranscript {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     private val alertRe = Regex("""wzalert\(\s*'([^']*)'\s*\)""")
-
-    private val stampFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmm")
 
     /** 列表接口的表单。`xnxq` 多值用重复字段表达；空列表 = 全部学期（服务端按空串处理）。 */
     fun listForm(terms: List<String>, page: Int): List<Pair<String, String>> {
@@ -214,18 +225,27 @@ object PtworkTranscript {
     /**
      * 本地文件名。学期标签取**最新的那个**（调用方按倒序传），多学期写成「…等N个学期」，
      * 末尾带导出时刻，避免同一学期重复导出互相覆盖。
+     *
+     * 末尾 `yyyyMMdd-HHmm` 与 `TranscriptHistory.STAMP_RE` 逐字对应（那边靠它从文件名
+     * 反推展示标签），改格式要两处一起改。
+     *
+     * [zone] 从 `java.time.ZoneId` 换成 kotlinx-datetime 的 [TimeZone]（commonMain 没有
+     * `java.time`）。默认值仍是**系统时区**而非写死东八区：设备出境或用户手动改时区时，
+     * 文件名里的时刻要跟着走。
      */
     fun defaultFileName(
         terms: List<String>,
         nowMillis: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): String {
         val label = when {
             terms.isEmpty() -> "全部学期"
             terms.size == 1 -> terms.first()
             else -> "${terms.first()}等${terms.size}个学期"
         }
-        val stamp = Instant.ofEpochMilli(nowMillis).atZone(zone).format(stampFormatter)
+        val t = Instant.fromEpochMilliseconds(nowMillis).toLocalDateTime(zone)
+        val stamp = TextFmt.pad(t.year, 4) + TextFmt.pad(t.monthNumber) +
+            TextFmt.pad(t.dayOfMonth) + "-" + TextFmt.pad(t.hour) + TextFmt.pad(t.minute)
         return "成绩单-${sanitizeFileLabel(label)}-$stamp.pdf"
     }
 
