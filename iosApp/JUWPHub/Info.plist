@@ -44,5 +44,12 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<!-- 课表导出（CSV/JSON）落在 App 沙箱的 Documents/exports/，让它出现在「文件」App 里：
+	     没有这两项，用户存完之后在自己的手机上根本找不到那个文件（写成功了却等于没存）。
+	     代价是 Documents/ 会进 iCloud 备份，见 shared/.../platform/AppDirs.ios.kt 的说明。 -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>

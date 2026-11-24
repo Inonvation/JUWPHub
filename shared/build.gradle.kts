@@ -124,6 +124,13 @@ kotlin {
             // `repeatOnLifecycle` 在那个 actual 里用（`ui/common/ResumedTicker.android.kt`），
             // 与 `:app` 同版本。iOS 没有等价物，那边的 actual 自己起循环。
             implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+            // `ui/platform/FilePickers.android.kt` 的 `rememberLauncherForActivityResult`。
+            // 版本与 `:app` 一致（1.9.3），别单独升：共享库解析出另一版会让宿主的
+            // ActivityResultRegistryOwner 与这里的 launcher 类变成两份。
+            implementation("androidx.activity:activity-compose:1.9.3")
+            // 上面那行的传递依赖是 `androidx.core:core-ktx:1.13.1`，与 `:app` 的 1.17.0 会撞成两份
+            // （本机离线缓存里也只有 1.17.0 这一版的 aar）。按 `:app` 的版本对齐，Android 侧解析结果不变。
+            implementation("androidx.core:core-ktx:1.17.0")
         }
 
         iosMain.dependencies {

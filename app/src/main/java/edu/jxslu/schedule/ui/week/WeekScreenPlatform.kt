@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.week
 
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -14,36 +13,42 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.calendar.CalendarSyncer
 import edu.jxslu.schedule.domain.ScheduleExporter
 import edu.jxslu.schedule.ui.common.AppPermissions
-import edu.jxslu.schedule.ui.common.readTextFromUri
 import edu.jxslu.schedule.ui.platform.CalendarSyncOutcome
-import kotlinx.coroutines.Dispatchers
+import edu.jxslu.schedule.ui.platform.rememberFileSaver
+import edu.jxslu.schedule.ui.platform.rememberTextFilePicker
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * 课表页要宿主代劳的那几件平台事（iOS 移植 M1，2026-11-25）。
  *
- * ## 为什么从 WeekScreen 里搬出来
+ * ## 四个字段里两个已经搬到共享层
  *
- * `WeekScreen` 已在 `shared/commonMain`，那里没有 `Context` / `Uri` / `ActivityResultLauncher`。
- * 原来内联在页面里的四段平台代码——SAF 选文件、SAF 另存、申请日历权限再写日历、
- * 查背景图文件在不在——原样搬到这个文件，**行为一字不改**（连"先关分享弹层再申请权限"
- * 那种顺序细节都还是原来的位置，只是现在由页面侧在调用前关）。
+ * `WeekScreen` 在 `shared/commonMain`，那里没有 `Context` / `Uri` / `ActivityResultLauncher`。
+ * 原来内联在页面里的四段平台代码被收成这组回调。其中**选文件与另存**两端都要，已经上移成
+ * `ui/platform/FilePickers.kt` 的 expect/actual（iOS 移植 S8，2026-11-25）；这里只剩转发——
+ * 对外形状（4 个字段、`MainActivity` 的调用点）保持不变，是为了让课表页与本文件一起演进时
+ * 不用再动调用方。
  *
- * ## 为什么用「一组回调」而不是 expect/actual
+ * | 字段 | 现在在哪 |
+ * |---|---|
+ * | [pickJsonFile] | 转发 `rememberTextFilePicker`（SAF `OpenDocument`，iOS 是 `UIDocumentPickerViewController`） |
+ * | [saveTextFile] | 转发 `rememberFileSaver`（SAF `CreateDocument(mime)`，iOS 落沙箱 `exports/`） |
+ * | [syncCalendar] | **仍在本文件**：`CalendarSyncer` 吃 `Context` + `ContentResolver`，`AppPermissions` 是 Android 运行时权限，iOS 没有对应物（`CalendarSyncOutcome.Unsupported`） |
+ * | [backgroundExists] | **仍在本文件**：`Graph.scheduleBackground` 还是 Android 实现 |
  *
- * 这些动作全都需要 `rememberLauncherForActivityResult`，也就是**必须在组合里创建**；
- * 而共享层能给的东西只有显式参数。把包装成 `expect @Composable` 反而要在
- * `shared/androidMain` 里重新声明一遍 `Context` / `androidx.core` 依赖，
- * 还得多搭一层「共享层注册、`:app` 填实现」的钩子——比直接把回调传下去复杂得多。
+ * 后两件留在这里是「这个平台确实没有等价能力」，不是还没搬完——把它们也做成 expect
+ * 只会多一层必然返回 `Unsupported` / `false` 的空实现。
  *
- * 换来的代价是：iOS 侧没有这一组回调，于是课表页的 JSON 导入、CSV/JSON 导出、
- * 日历同步这三个入口**整行不出现**（见 `WeekScreen` 头部的参数表）。
+ * ## 转发为什么还要多存两个「待办」变量
+ *
+ * 新缝的回调必须在**组合期**交给 launcher（`rememberLauncherForActivityResult` 只在建 launcher
+ * 时收一次 `onResult`），而这里的回调是**每次点击**换一个的闭包（谁能拿到结果只有点击方知道）。
+ * 所以本文件只留一个「最新一次点击的回调」槽，缝那边回调进来时读槽、清槽。
  */
 class WeekScreenPlatformActions(
-    /** 选一个文本文件（SAF `OpenDocument`）；读不出来给 null。 */
+    /** 选一个文本文件；读不出来给 null。 */
     val pickJsonFile: (onText: (String?) -> Unit) -> Unit,
-    /** 另存一段文本（SAF `CreateDocument`），按 mime 分派到两个合同上。 */
+    /** 另存一段文本，按 mime 分派到两个不同的 saver 实例。 */
     val saveTextFile:
         (fileName: String, mimeType: String, text: String, onSaved: (Boolean) -> Unit) -> Unit,
     /** 申请日历权限并写入系统日历。 */
@@ -57,9 +62,6 @@ class WeekScreenPlatformActions(
     val backgroundExists: (String) -> Boolean,
 )
 
-/** 一次性待写入内容：`CreateDocument` 的回调里拿不到调用时刻的文本，只能先存下来。 */
-private class PendingSave(val text: String, val onSaved: (Boolean) -> Unit)
-
 /** 待跑的一次日历同步：权限对话框返回后才知道该不该跑。 */
 private class PendingCalendarSync(
     val events: List<ScheduleExporter.CourseEvent>,
@@ -72,48 +74,25 @@ fun rememberWeekScreenPlatformActions(): WeekScreenPlatformActions {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // --- 选 JSON 文件 ---
+    // --- 选 JSON 文件：转发给共享层的缝，槽里放「这一次点击」的回调 ---
     var pendingPick by remember { mutableStateOf<((String?) -> Unit)?>(null) }
-    val jsonPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri: Uri? ->
-        val callback = pendingPick
-        pendingPick = null
-        if (uri == null) {
-            callback?.invoke(null)
-        } else {
-            // 读文件必须离开主线程：大备份 JSON 有几 MB，读在主线程会掉帧（搬迁前同口径）
-            scope.launch { callback?.invoke(readTextFromUri(context, uri)) }
-        }
-    }
+    val launchPicker = rememberTextFilePicker(
+        onPicked = { text ->
+            val callback = pendingPick
+            pendingPick = null
+            callback?.invoke(text)
+        },
+    )
 
-    // --- 另存文本（CSV / JSON 各一个合同，mime 在建 launcher 时就固定）---
-    var pendingSave by remember { mutableStateOf<PendingSave?>(null) }
-    fun writeTo(uri: Uri?) {
-        val pending = pendingSave
+    // --- 另存文本：mime 在建 launcher 时就固化，所以仍是两个实例（与搬迁前的两个合同一一对应）---
+    var pendingSave by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
+    fun finishSave(saved: Boolean) {
+        val callback = pendingSave
         pendingSave = null
-        if (pending == null) return
-        if (uri == null) {
-            pending.onSaved(false)
-            return
-        }
-        scope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                runCatching {
-                    context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
-                        out.write(pending.text.toByteArray(Charsets.UTF_8))
-                    } != null
-                }.getOrDefault(false)
-            }
-            pending.onSaved(ok)
-        }
+        callback?.invoke(saved)
     }
-    val csvSaver = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/csv"),
-    ) { uri -> writeTo(uri) }
-    val jsonSaver = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json"),
-    ) { uri -> writeTo(uri) }
+    val csvSaver = rememberFileSaver("text/csv") { finishSave(it) }
+    val jsonSaver = rememberFileSaver("application/json") { finishSave(it) }
 
     // --- 日历同步：先看权限，缺了先申请，授予后再跑 ---
     var pendingSync by remember { mutableStateOf<PendingCalendarSync?>(null) }
@@ -155,17 +134,15 @@ fun rememberWeekScreenPlatformActions(): WeekScreenPlatformActions {
 
     val backgroundStore = remember(context) { Graph.scheduleBackground(context) }
 
-    return remember(context) {
+    return remember(context, launchPicker, csvSaver, jsonSaver) {
         WeekScreenPlatformActions(
             pickJsonFile = { onText ->
                 pendingPick = onText
-                jsonPicker.launch(
-                    arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"),
-                )
+                launchPicker()
             },
             saveTextFile = { fileName, mimeType, text, onSaved ->
-                pendingSave = PendingSave(text, onSaved)
-                if (mimeType == "text/csv") csvSaver.launch(fileName) else jsonSaver.launch(fileName)
+                pendingSave = onSaved
+                if (mimeType == "text/csv") csvSaver(fileName, text) else jsonSaver(fileName, text)
             },
             syncCalendar = { events, reminderMinutes, onResult ->
                 val pending = PendingCalendarSync(events, reminderMinutes, onResult)
