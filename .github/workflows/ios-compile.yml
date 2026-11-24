@@ -11,9 +11,10 @@
 # 与本地 `:shared:metadataCommonMainClasses` 的区别（两个都要跑，别互相替代）：
 # - 元数据编译只证明「commonMain 里没有 JVM 专有 API」；
 # - 这里证明「用到的 API 在 Native 侧真的存在、签名也对」，以及 `androidMain` / `iosMain`
-#   里那些**从未编译过**的 actual 实现（`PlatformFormat` / `Barcode` / `Logger` /
+#   里那些 actual 实现（`PlatformFormat` / `Barcode` / `Logger` /
 #   `PlatformDynamicColorScheme` / 动画缩放）到底通不通。
-# 预计首次会红：iosMain 的 5 个 actual 是照着文档推的，没有一行经过编译器。
+# 历史：首轮 7 个错、次轮 4 个，全部是 CoreImage / KVC / NSString 的 K/N 绑定差异，
+# 修完即绿——所以这个 workflow 现在是常规闸门，不是「预计会红」。
 
 name: iOS Compile
 

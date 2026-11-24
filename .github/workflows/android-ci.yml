@@ -31,9 +31,12 @@ permissions:
   contents: read
 
 jobs:
+  # 分两个 job 不是为了清晰，是为了并行：release 那条（R8 3m37 + lintVital 2m11）
+  # 与 debug 那条互不依赖，串在同一个 runner 上会把关键路径从 ~6 分钟拉到 13 分钟
+  # （实测 run 45015435991：整 job 13m18s，其中 assembleRelease 占 7m52s）。
   unit-test-and-build:
     runs-on: ubuntu-latest
-    # 防跑飞：R8 那步卡住时默认要等 6 小时才判超时，白占 runner。
+    # 防跑飞：卡住时默认要等 6 小时才判超时，白占 runner。
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -72,9 +75,33 @@ jobs:
       - name: 组装 Debug APK
         run: ./gradlew :app:assembleDebug
 
-      # R8 的问题不在编译期暴露（AGENTS.md 记了三个坑），只跑 debug 挡不住整类问题。
-      # CI 上没有 keystore.properties，build.gradle.kts 会回退 debug 签名并打一条 warning，构建照样过。
-      - name: 组装 Release APK（R8 冒烟）
+      - name: 上传测试报告（失败时定位用）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: app/build/test-results/testDebugUnitTest/
+
+  # R8 的问题不在编译期暴露（AGENTS.md 记了三个坑），只跑 debug 挡不住整类问题。
+  # CI 上没有 keystore.properties，build.gradle.kts 会回退 debug 签名并打一条 warning，构建照样过。
+  #
+  # 这一段单独成 job：与上面的单测/assemblDebug 并行，关键路径取两者较慢的那条。
+  # 同一个 runner 上串行跑实测是 13m18s，拆开后约 8 分钟（release 那条现在是瓶颈——
+  # 想再快就把 lintVitalRelease 也拆出去，它是 2m11s 且与 R8 无依赖关系）。
+  release-r8:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 组装 Release APK（R8 + lintVital 冒烟）
         run: ./gradlew :app:assembleRelease
 
       # 体积护栏（2026-11-18）：高德 SDK 的两个 so 让 release 从 5.4MB 涨到 16.1MB，
@@ -89,10 +116,3 @@ jobs:
             echo "::error::release APK 超过 17MB。高德 SDK 的两个 so 是主要来源，砍 ABI 前先看 AGENTS.md「工程实况」。"
             exit 1
           fi
-
-      - name: 上传测试报告（失败时定位用）
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-results
-          path: app/build/test-results/testDebugUnitTest/

@@ -8,8 +8,14 @@
 # `Payload/JUWPHub.app` 打包，用户侧用 Sideloadly / SideStore 自签后安装
 # （免费 Apple ID 7 天、最多 3 个 App；¥688/年 开发者账号 1 年）。
 #
-# 与 ios-compile.yml 的分工：那个只验「编得过、链得过」（4~9 分钟，快）；
-# 这个额外跑 xcodegen + xcodebuild + 打包（更久，出的是可交付物）。
+# 与 ios-compile.yml 的分工：push 只走本 workflow（见 `on:` 里的注释），
+# 所以它是 push 路径上唯一的 iOS 闸门：compile + link arm64 + xcodegen + xcodebuild + 打包。
+# ios-compile 只留 PR 与手工触发，用来在不打 IPA 时快速验一遍编译。
+#
+# 提速靠缓存，不靠少跑：
+# - Gradle User Home 缓存显式可写（gradle/actions 默认只在默认分支写）；
+# - ~/.konan 单独用 actions/cache 管（不在 Gradle User Home 范围内）；
+# - 只链 arm64，模拟器 framework 不在 CI 构建（CI 里没有一条路径消费它）。
 
 name: iOS Unsigned IPA
 
@@ -17,7 +23,8 @@ on:
   workflow_dispatch:
   push:
     branches: [feat/ios-port]
-    # 只有碰到 iOS 工程或共享代码才值得花 macOS 机时
+    # `shared/**` 必须在：push 只走本 workflow（ios-compile 已改为只在 PR / 手工触发），
+    # 拿掉它，改共享层就再没有任何 iOS 编译验证。
     paths:
       - 'iosApp/**'
       - 'shared/**'
@@ -51,15 +58,28 @@ jobs:
           yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
           "$SDKMGR" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
-      - uses: gradle/actions/setup-gradle@v4
+      # 两个缓存都显式打开：gradle/actions 默认只在 main 上写缓存，特性分支是只读的
+      # （理由和实测日志见 ios-compile.yml 同名步骤）。~/.konan 不在 Gradle User Home 里，
+      # 必须单独用 actions/cache 管。
+      - name: 缓存 Kotlin/Native 工具链（~/.konan）
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('build.gradle.kts', 'shared/build.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: konan-${{ runner.os }}-
 
-      # 只链设备用的 arm64 framework；模拟器那份给 ios-compile.yml 验
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      # 只链设备用的 arm64 framework；模拟器那份不在 CI 里构建（见 ios-compile.yml）
       - name: 链接 Shared.framework（device arm64）
         run: ./gradlew :shared:linkDebugFrameworkIosArm64 --stacktrace
 
       # 工程是生成的，不把 .xcodeproj 提交进仓库（见 iosApp/project.yml 文件头）
+      # macos-15 镜像已带 xcodegen 时跳过 brew（brew update 本身就要几十秒）
       - name: 安装 xcodegen
-        run: brew install xcodegen
+        run: command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
 
       - name: 生成 Xcode 工程
         working-directory: iosApp
