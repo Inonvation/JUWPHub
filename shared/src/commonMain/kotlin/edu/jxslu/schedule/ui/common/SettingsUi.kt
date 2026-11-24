@@ -354,9 +354,12 @@ fun SettingsDivider(modifier: Modifier = Modifier) {
  * 目前两个使用方：桌面小组件设置页（§3.6 的「后台及时性」两行）与
  * 权限设置页（§3.12）。同一条规格只留一处定义，别再复制。
  * `granted = null` 表示无系统 API 可查（如厂商自启动），不显示徽标。
+ *
+ * **为什么公开**：定义搬进 `:shared`、两个调用页（`AboutScreens` / `WidgetSettingsScreen`）
+ * 还在 `:app`，跨模块看不见 `internal`。
  */
 @Composable
-internal fun PermissionRow(
+fun PermissionRow(
     title: String,
     detail: String,
     granted: Boolean?,

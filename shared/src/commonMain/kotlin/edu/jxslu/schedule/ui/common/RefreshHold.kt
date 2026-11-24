@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlin.time.Clock
 import kotlinx.coroutines.delay
 
 /**
@@ -35,8 +36,11 @@ const val RefreshMinDwellMillis: Long = 650L
  * - **点亮后只在「不 busy 且距 begin 已满 [minDwellMillis]」才收**——快速刷新与逐请求抖动
  *   都不再透传；
  * - **busy 变化只续命**，计时基准固定在 begin，不会被重启成无限驻留。
+ *
+ * **为什么公开**：定义搬进 `:shared` 后，`:app` 的 `RefreshHoldGateTest` 直接构造它；
+ * 跨模块看不见 `internal`。
  */
-internal class RefreshHoldGate(private val minDwellMillis: Long = RefreshMinDwellMillis) {
+class RefreshHoldGate(private val minDwellMillis: Long = RefreshMinDwellMillis) {
 
     private var beganAtMillis = 0L
     private var holding = false
@@ -79,7 +83,7 @@ class RefreshHoldState internal constructor(internal val gate: RefreshHoldGate) 
      * ViewModel 的刷新协程要下一帧才把 loading 置真，这一帧的窗口就靠它兜住。
      */
     fun begin() {
-        gate.begin(System.currentTimeMillis())
+        gate.begin(Clock.System.now().toEpochMilliseconds())
         refreshing = true
         pullTick++
     }
@@ -107,10 +111,10 @@ fun rememberRefreshHold(
 ): RefreshHoldState {
     val hold = remember(minDwellMillis) { RefreshHoldState(RefreshHoldGate(minDwellMillis)) }
     LaunchedEffect(busy, hold.pullTick) {
-        hold.refreshing = hold.gate.settle(busy, System.currentTimeMillis())
+        hold.refreshing = hold.gate.settle(busy, Clock.System.now().toEpochMilliseconds())
         if (!hold.refreshing || busy) return@LaunchedEffect
-        delay(hold.gate.remainingMillis(System.currentTimeMillis()))
-        hold.refreshing = hold.gate.settle(false, System.currentTimeMillis())
+        delay(hold.gate.remainingMillis(Clock.System.now().toEpochMilliseconds()))
+        hold.refreshing = hold.gate.settle(false, Clock.System.now().toEpochMilliseconds())
     }
     return hold
 }
