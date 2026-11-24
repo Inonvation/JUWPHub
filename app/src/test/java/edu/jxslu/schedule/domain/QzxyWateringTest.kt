@@ -1,5 +1,8 @@
 package edu.jxslu.schedule.domain
 
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -113,6 +116,21 @@ class QzxyWateringTest {
         val clock = QzxyWateringFormat.clockText(watering.startedAtMillis)
         assertEquals(5, clock.length)
         assertEquals(":", clock.substring(2, 3))
+    }
+
+    @Test
+    fun `开阀时刻补零到两位`() {
+        // clockText 按系统默认时区折算，期望值就不能写死「某个 epoch 等于 21:02」——那样只在
+        // 东八区的机器上成立。这里先把墙上时刻按同一时区折成 epoch 再比字符串，换哪个时区都成立。
+        // 日期挑 1 月 15 日：远离各时区的夏令时切换日，LocalDateTime → epoch 不会落进空档被顺移。
+        val zone = TimeZone.currentSystemDefault()
+        fun epochOf(hour: Int, minute: Int): Long =
+            LocalDateTime(2026, 1, 15, hour, minute).toInstant(zone).toEpochMilliseconds()
+
+        assertEquals("09:05", QzxyWateringFormat.clockText(epochOf(9, 5)))
+        assertEquals("10:00", QzxyWateringFormat.clockText(epochOf(10, 0)))
+        assertEquals("00:00", QzxyWateringFormat.clockText(epochOf(0, 0)))
+        assertEquals("23:59", QzxyWateringFormat.clockText(epochOf(23, 59)))
     }
 
     @Test

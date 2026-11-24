@@ -1,8 +1,5 @@
 package edu.jxslu.schedule.domain
 
-import javax.crypto.Cipher
-import javax.crypto.spec.IvParameterSpec
-import javax.crypto.spec.SecretKeySpec
 import okio.ByteString.Companion.decodeBase64
 
 /**
@@ -24,6 +21,10 @@ import okio.ByteString.Companion.decodeBase64
  *
  * 模式是 ECB，按无填充处理，所以这里也走 `NoPadding`，再手工剥 PKCS#7——
  * 有填充就剥，没有就原样返回。
+ *
+ * 解密本身走 [AesBlock] 的纯 Kotlin 实现，不碰 `javax.crypto`：iOS 侧的
+ * Kotlin/Native 没有这套 API，而这里解的只是一张常量密钥签发的凭据，
+ * 自己实现比给两端各挂一套平台加密库更省事，两端结果也逐字节一致。
  */
 object QzxyClData {
 
@@ -45,38 +46,14 @@ object QzxyClData {
     fun decrypt(encoded: String?): ByteArray? {
         val text = encoded?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         val cipherText = decodeCipherText(text) ?: return null
-        val key = SecretKeySpec(KEY.toByteArray(Charsets.US_ASCII), "AES")
-        val ecb = runCatching {
-            stripPadding(transform("AES/ECB/NoPadding", key, cipherText, null))
-        }.getOrNull()
+        val key = KEY.toByteArray(Charsets.US_ASCII)
+        val ecb = runCatching { stripPadding(AesBlock.decryptEcb(key, cipherText)) }.getOrNull()
         if (ecb != null && isPrintable(ecb)) return ecb
         val cbc = runCatching {
-            stripPadding(
-                transform(
-                    "AES/CBC/NoPadding",
-                    key,
-                    cipherText,
-                    IvParameterSpec(IV.toByteArray(Charsets.US_ASCII)),
-                ),
-            )
+            stripPadding(AesBlock.decryptCbc(key, IV.toByteArray(Charsets.US_ASCII), cipherText))
         }.getOrNull()
         if (cbc != null && isPrintable(cbc)) return cbc
         return ecb
-    }
-
-    private fun transform(
-        algorithm: String,
-        key: SecretKeySpec,
-        cipherText: ByteArray,
-        iv: IvParameterSpec?,
-    ): ByteArray {
-        val cipher = Cipher.getInstance(algorithm)
-        if (iv == null) {
-            cipher.init(Cipher.DECRYPT_MODE, key)
-        } else {
-            cipher.init(Cipher.DECRYPT_MODE, key, iv)
-        }
-        return cipher.doFinal(cipherText)
     }
 
     private fun isPrintable(bytes: ByteArray): Boolean =

@@ -97,7 +97,15 @@ object QzxyWateringFormat {
         }
     }
 
-    /** 开阀时刻的短文案，用于「上次开阀 21:02」。 */
-    fun clockText(epochMillis: Long): String =
-        java.text.SimpleDateFormat("HH:mm", java.util.Locale.CHINA).format(java.util.Date(epochMillis))
+    /**
+     * 开阀时刻的短文案，用于「上次开阀 21:02」。
+     *
+     * 时区必须是系统默认：[AppClock.dateTimeOf] 用的就是 `TimeZone.currentSystemDefault()`。
+     * 旧实现的时区同样取默认时区（它带的地区参数只影响语言、不影响时区），所以这里不能顺手
+     * 写成 `Asia/Shanghai`——设备换到别的时区时，钟点得跟着变。
+     */
+    fun clockText(epochMillis: Long): String {
+        val time = AppClock.dateTimeOf(epochMillis)
+        return "${TextFmt.pad(time.hour)}:${TextFmt.pad(time.minute)}"
+    }
 }

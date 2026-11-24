@@ -19,8 +19,17 @@ object AppClock {
 
     fun nowMillis(): Long = Clock.System.now().toEpochMilliseconds()
 
-    fun nowDateTime(): LocalDateTime =
-        Instant.fromEpochMilliseconds(nowMillis()).toLocalDateTime(TimeZone.currentSystemDefault())
+    fun nowDateTime(): LocalDateTime = dateTimeOf(nowMillis())
+
+    /**
+     * epoch 毫秒 → 本地墙上时刻。
+     *
+     * 与 `Instant.ofEpochMilli(x).atZone(ZoneId.systemDefault()).toLocalDateTime()` 同口径：
+     * 时区取**系统默认**，不写死东八区——设备出国、用户手动改时区时，界面上「开阀 21:02」
+     * 这类文案要跟着走，钉死 `Asia/Shanghai` 会显示成别的时区的钟点。
+     */
+    fun dateTimeOf(epochMillis: Long): LocalDateTime =
+        Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(TimeZone.currentSystemDefault())
 
     fun today(): LocalDate = nowDateTime().date
 

@@ -1,7 +1,5 @@
 package edu.jxslu.schedule.domain
 
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-
 /**
  * 教务处官网校历的取数规则（2026-10-07）——校历的**主源**。
  *
@@ -14,7 +12,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * 内容）——见 2026-10-07 排查。
  *
  * 本对象只放纯逻辑（拼地址、解析、定文件名），网络在
- * [edu.jxslu.schedule.data.repo.CampusCalendarStore]。纯 Kotlin，JVM 可测。
+ * [edu.jxslu.schedule.data.repo.CampusCalendarStore]。纯 Kotlin，JVM 可测；
+ * 地址解析走 [UrlRef]——不依赖 JVM 专有库，iOS 移植要用。
  */
 object CampusCalendarSchoolRules {
 
@@ -47,8 +46,7 @@ object CampusCalendarSchoolRules {
     fun parseArticleLinks(html: String, pageUrl: String): List<Pair<String, String>> =
         LINK_RE.findAll(html).mapNotNull { m ->
             val year = YEAR_RE.find(m.value) ?: return@mapNotNull null
-            val url = pageUrl.toHttpUrlOrNull()?.resolve(m.groupValues[1])?.toString()
-                ?: return@mapNotNull null
+            val url = UrlRef.resolve(pageUrl, m.groupValues[1]) ?: return@mapNotNull null
             url to "${year.groupValues[1]}-${year.groupValues[2]}"
         }.toList()
 
@@ -61,7 +59,7 @@ object CampusCalendarSchoolRules {
         val raw = ORISRC_RE.find(html)?.groupValues?.get(1)
             ?: LOCAL_SRC_RE.find(html)?.groupValues?.get(1)
             ?: return null
-        return articleUrl.toHttpUrlOrNull()?.resolve(raw)?.toString()
+        return UrlRef.resolve(articleUrl, raw)
     }
 
     /** 由图片 URL 定本地/缓存文件名：`calendar_<year>.<jpg|png>`（与镜像口径一致）。 */
