@@ -29,8 +29,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.domain.YearMonthKey
 import edu.jxslu.schedule.ui.icon.AppIcons
-import java.time.YearMonth
 
 /**
  * 月份导航与月份选择（消费流水页 / 缴费账单页共用，2026-09-26）。
@@ -38,6 +38,11 @@ import java.time.YearMonth
  * 此前两页都是 `TextButton("‹")` / `TextButton("›")` 逐月点：默认 48dp 触摸高度把标题行
  * 撑高，翻到十个月前要点十次，且没有回到当月的快捷。现在箭头换 40dp 图标按钮，
  * 标题可点开 [MonthPickerDialog] 直接跳月，另给一枚「本月」（已在当月时不出现）。
+ *
+ * iOS 移植 S20（2026-11-25）：本文件从 `:app` 的 `ui/common` 搬进 `shared/commonMain`，
+ * 包名不变；月份参数从 `java.time.YearMonth` 换成 [YearMonthKey]（`java.time` 在
+ * Kotlin/Native 上不存在）。仍在 `:app` 的 `ui/ebike` 订单页要吃 `YearMonth` 版，
+ * 适配重载留在 `:app` 的 `MonthPickerJavaTime.kt`，这里不为了它把 `java.time` 引回来。
  */
 
 /**
@@ -98,13 +103,16 @@ fun MonthNavRow(
  *
  * 分组而不是「2025 年 10 月」整串塞进格子：格宽只有约 100dp，整串在字体放大档位下会换行；
  * 年份抬头 + 「10 月」的格子在任何字号下都读得下。
+ *
+ * [months] 由调用方给（各有各的窗口：缴费账单取流水窗口、消费流水取近 12 个月），
+ * 本弹窗不自己算「现在几月」，否则跨月时弹窗与页面标题会各说一套。
  */
 @Composable
 fun MonthPickerDialog(
-    months: List<YearMonth>,
-    selected: YearMonth,
+    months: List<YearMonthKey>,
+    selected: YearMonthKey,
     onDismiss: () -> Unit,
-    onSelect: (YearMonth) -> Unit,
+    onSelect: (YearMonthKey) -> Unit,
     title: String = "选择月份",
 ) {
     AlertDialog(
@@ -131,7 +139,7 @@ fun MonthPickerDialog(
                         ) {
                             row.forEach { month ->
                                 MonthCell(
-                                    label = "${month.monthValue} 月",
+                                    label = "${month.month} 月",
                                     selected = month == selected,
                                     onClick = { onSelect(month) },
                                     modifier = Modifier.weight(1f),

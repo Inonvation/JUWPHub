@@ -1,11 +1,7 @@
 package edu.jxslu.schedule.ui.life
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.jw.JwVpnDetector
 import edu.jxslu.schedule.data.power.PowerBill
 import edu.jxslu.schedule.data.power.PowerBillMonth
 import edu.jxslu.schedule.data.power.PowerException
@@ -94,12 +90,27 @@ sealed interface PowerBillEvent {
  * + 同一份流水（用来把充值加进去的电扣掉）。读数落库、流水不落库——流水条数少、
  * 平台随时可查，本地存一份反而要处理增量与冲突（一卡通流水落库是因为它同时是
  * 「消费流水」页的数据源，电费没有这个需求）。
+ *
+ * iOS 移植 S20（2026-11-25）：搬进 `shared/commonMain`。构造签名里原来的
+ * `PowerBillViewModel.Factory(context)` 删掉了——共享层没有 `viewModel()`，
+ * 依赖由宿主从 `Services.current` 取好再传进来（`design/ios-port.md` §11.2 ①②③）；
+ * `JwVpnDetector` 是 Android 专有（读 ConnectivityManager），改成构造参数注入。
  */
 class PowerBillViewModel(
     private val repo: PowerRepository,
-    private val credentialStore: YktCredentialStore,
+    /**
+     * 校园卡凭证存储；**null = 本平台还没有加密凭证存储**（iOS 的 Keychain 未实现）。
+     *
+     * 没有凭证就没有账单可取：此时页面进「凭证未配置」态、一条请求都不发，
+     * 但本机攒的电表读数照样能出曲线（「用电统计」分页不依赖凭证）。
+     * 传 null 而不是抛，与 `AppServices.yktCredentialStore()` 的口径一致（§11.2 ④）。
+     */
+    private val credentialStore: YktCredentialStore?,
     private val readingStore: PowerReadingStore,
-    /** VPN / 代理探测：网络类失败时按它给「关代理」或「换网络」（口径见 `NetworkHint`）。 */
+    /**
+     * VPN / 代理探测：网络类失败时按它给「关代理」或「换网络」（口径见 `NetworkHint`）。
+     * 默认 `false` = 本平台没有这个探测能力（iOS 侧暂未接），此时文案退到「换一条网络」。
+     */
     private val isVpnActive: () -> Boolean = { false },
 ) : ViewModel() {
 
@@ -125,7 +136,7 @@ class PowerBillViewModel(
 
     /** 取一次流水。[force] = true 绕过仓库缓存（下拉刷新用）。 */
     fun load(force: Boolean = false) {
-        val credentials = credentialStore.read()
+        val credentials = credentialStore?.read()
         if (credentials == null) {
             _uiState.update {
                 it.copy(loading = false, loaded = true, noCredentials = true, error = null)
@@ -187,7 +198,7 @@ class PowerBillViewModel(
      */
     fun refresh() {
         load(force = true)
-        val credentials = credentialStore.read() ?: return
+        val credentials = credentialStore?.read() ?: return
         viewModelScope.launch {
             runCatching {
                 repo.snapshot(
@@ -243,7 +254,7 @@ class PowerBillViewModel(
                 readings = readings.value,
                 recharges = recharges,
                 range = state.usage.range,
-                nowMs = System.currentTimeMillis(),
+                nowMs = AppClock.nowMillis(),
                 zone = TimeZone.currentSystemDefault(),
             )
         }
@@ -273,7 +284,7 @@ class PowerBillViewModel(
      * 与侧栏电费卡那条路同一份实现口径——先拿深链，失败给一次性提示。
      */
     fun openPlatformPage(onReady: (String) -> Unit) {
-        val credentials = credentialStore.read()
+        val credentials = credentialStore?.read()
         if (credentials == null) {
             _events.trySend(
                 PowerBillEvent.Notice("请先在「我的 → 校园卡」开启一卡通，再打开缴费平台", NoticeTone.Warning),
@@ -292,18 +303,6 @@ class PowerBillViewModel(
                     PowerBillEvent.Notice("缴费平台打不开：${e.message ?: "未知错误"}", NoticeTone.Error),
                 )
             }
-        }
-    }
-
-    companion object {
-        fun Factory(context: Context) = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = PowerBillViewModel(
-                Graph.powerRepository(context.applicationContext),
-                Graph.yktCredentialStore(context.applicationContext),
-                Graph.powerReadingStore(context.applicationContext),
-                isVpnActive = { JwVpnDetector.isVpnActive(context.applicationContext) },
-            ) as T
         }
     }
 }

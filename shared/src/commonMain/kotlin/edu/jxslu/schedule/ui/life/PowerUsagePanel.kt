@@ -25,22 +25,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.power.PowerBill
 import edu.jxslu.schedule.data.power.PowerModels
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.BalanceAlert
 import edu.jxslu.schedule.domain.PowerUsage
 import edu.jxslu.schedule.domain.PowerUsageBucket
 import edu.jxslu.schedule.domain.PowerUsageRange
 import edu.jxslu.schedule.domain.PowerUsageSummary
+import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.ui.common.AppBarChart
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.BarChartItem
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.NoticeTone
-import java.time.LocalDate
-import edu.jxslu.schedule.domain.TextFmt
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toKotlinLocalDate
 import kotlinx.datetime.toLocalDateTime
 
 /**
@@ -52,6 +51,10 @@ import kotlinx.datetime.toLocalDateTime
  *
  * 2026-09-26 改：柱状换 `AppBarChart`（与另两处统计同款），柱子可点、选中格在标题行显示数值；
  * 逐桶列表收进一张卡（行间细线），选中的那一行带一层浅底——此前一行一张卡，纵向浪费一半。
+ *
+ * iOS 移植 S20（2026-11-25）：搬进 `shared/commonMain`。日期来源从 `java.time.LocalDate.now()`
+ * 换成 [AppClock.today]（kotlinx 的 `LocalDate`），`toKotlinLocalDate()` 这层换算随之消失——
+ * `PowerUsage.labelOf` 收的本来就是 kotlinx 的 `LocalDate`。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun LazyListScope.powerUsageItems(
@@ -202,14 +205,14 @@ private fun UsageSummaryCard(
             val buckets = summary.buckets
             val selectedKey = state.selectedKey ?: buckets.lastOrNull()?.key
             val selectedBucket = buckets.firstOrNull { it.key == selectedKey }
-            val today = LocalDate.now()
+            val today = AppClock.today()
             Spacer(Modifier.height(14.dp))
             AppBarChart(
                 items = buckets.mapIndexed { index, bucket ->
                     BarChartItem(
                         key = bucket.key,
                         value = bucket.usedKwh.toFloat(),
-                        title = PowerUsage.labelOf(range, bucket.key, today.toKotlinLocalDate()),
+                        title = PowerUsage.labelOf(range, bucket.key, today),
                         axisLabel = when (index) {
                             0 -> axisText(range, bucket.key)
                             buckets.lastIndex -> "${axisText(range, bucket.key)}（今）"
@@ -220,7 +223,7 @@ private fun UsageSummaryCard(
                 selectedKey = selectedKey,
                 header = "用电量（度）",
                 selectedText = selectedBucket?.let { bucket ->
-                    val head = "${PowerUsage.labelOf(range, bucket.key, today.toKotlinLocalDate())} · " +
+                    val head = "${PowerUsage.labelOf(range, bucket.key, today)} · " +
                         "${PowerUsage.kwhText(bucket.usedKwh)} 度"
                     bucket.usedYuan?.let { yuan -> "$head · ≈ ${PowerBill.amountText(PowerModels.fen(yuan))}" } ?: head
                 },
@@ -245,7 +248,7 @@ private fun windowTotalText(summary: PowerUsageSummary, range: PowerUsageRange):
  */
 @Composable
 private fun UsageBucketRow(range: PowerUsageRange, bucket: PowerUsageBucket, selected: Boolean) {
-    val today = LocalDate.now()
+    val today = AppClock.today()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -261,7 +264,7 @@ private fun UsageBucketRow(range: PowerUsageRange, bucket: PowerUsageBucket, sel
     ) {
         Column(Modifier.weight(1f)) {
             Text(
-                text = PowerUsage.labelOf(range, bucket.key, today.toKotlinLocalDate()),
+                text = PowerUsage.labelOf(range, bucket.key, today),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
             )

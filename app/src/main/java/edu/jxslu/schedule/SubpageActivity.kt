@@ -7,7 +7,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.viewmodel.compose.viewModel
+import edu.jxslu.schedule.data.jw.JwVpnDetector
 import edu.jxslu.schedule.domain.CourseKind
+import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.me.CalendarSettingsScreen
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
@@ -29,6 +31,8 @@ import edu.jxslu.schedule.ui.campus.DormRepairScreen
 import edu.jxslu.schedule.ui.campus.LeaveHubScreen
 import edu.jxslu.schedule.ui.campus.PayCodeScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
+import edu.jxslu.schedule.ui.campus.StatementViewModel
+import edu.jxslu.schedule.ui.campus.postYktPaymentInbox
 import edu.jxslu.schedule.ui.common.rememberAttachmentImageUi
 import edu.jxslu.schedule.ui.common.rememberMarkdownUi
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
@@ -39,6 +43,8 @@ import edu.jxslu.schedule.ui.exam.ExamScreen
 import edu.jxslu.schedule.ui.exam.rememberExamScreenActions
 import edu.jxslu.schedule.ui.exam.ExamSettingsScreen
 import edu.jxslu.schedule.ui.life.PowerBillScreen
+import edu.jxslu.schedule.ui.life.PowerBillViewModel
+import edu.jxslu.schedule.ui.life.openExternal
 import edu.jxslu.schedule.ui.homework.HomeworkCourseScreen
 import edu.jxslu.schedule.ui.homework.HomeworkDetailScreen
 import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
@@ -411,14 +417,47 @@ class SubpageActivity : ComponentActivity() {
                 onBack = onBack,
                 onOpenStatement = { SubpageActivity.start(this, SubpageScreen.CAMPUS_STATEMENT) },
             )
-            SubpageScreen.CAMPUS_STATEMENT -> StatementScreen(
-                onBack = onBack,
-                onOpenSettings = { SubpageActivity.start(this, SubpageScreen.CAMPUS_CARD_SETTINGS) },
-            )
-            SubpageScreen.POWER_BILL -> PowerBillScreen(
-                onBack = onBack,
-                onOpenSettings = { SubpageActivity.start(this, SubpageScreen.CAMPUS_CARD_SETTINGS) },
-            )
+            // 缴费账单（iOS 移植 S20 搬进共享层）：VM 由宿主建（共享层没有 `viewModel()`），
+            // 凭证存储 / VPN 探测 / 拉起浏览器都是 Android 侧能力，从这里注入。
+            // 用 `viewModel {}` 而不是 `remember`：本页跑在独立 Activity 里，旋转时保住 VM。
+            SubpageScreen.POWER_BILL -> {
+                val services = Services.current
+                val billViewModel: PowerBillViewModel = viewModel {
+                    PowerBillViewModel(
+                        repo = services.powerRepository(),
+                        credentialStore = services.yktCredentialStore(),
+                        readingStore = services.powerReadingStore(),
+                        isVpnActive = { JwVpnDetector.isVpnActive(this@SubpageActivity) },
+                    )
+                }
+                PowerBillScreen(
+                    viewModel = billViewModel,
+                    onBack = onBack,
+                    onOpenSettings = { SubpageActivity.start(this, SubpageScreen.CAMPUS_CARD_SETTINGS) },
+                    // 打不开时失败原因进日志，屏上由页面给一句通用提示（页面不该知道 Intent 细节）
+                    onOpenPlatformUrl = { url ->
+                        openExternal(this, url) { message, _ -> Logger.w("PowerBill", message) }
+                    },
+                )
+            }
+            // 消费流水（S20）：同样由宿主建 VM；新消费入收件箱是 Android 侧的落点
+            // （`InboxRepository` + `SubpageScreen` 路由），以回调注入，iOS 侧传 null 即不留痕。
+            SubpageScreen.CAMPUS_STATEMENT -> {
+                val services = Services.current
+                val statementViewModel: StatementViewModel = viewModel {
+                    StatementViewModel(
+                        repo = services.yktRepository(),
+                        credentialStore = services.yktCredentialStore(),
+                        db = services.database(),
+                        postInbox = { row -> postYktPaymentInbox(this@SubpageActivity, row) },
+                    )
+                }
+                StatementScreen(
+                    viewModel = statementViewModel,
+                    onBack = onBack,
+                    onOpenSettings = { SubpageActivity.start(this, SubpageScreen.CAMPUS_CARD_SETTINGS) },
+                )
+            }
             // 笔记·课件（DESIGN §3.11）：课程库 → 课程列表 → 详情/编辑
             // 库与课程列表已在 shared/commonMain（iOS 移植 S13）；附件图能力由
             // `rememberAttachmentImageUi` 注入（缩略图解码 + 全屏查看器仍在 :app）。

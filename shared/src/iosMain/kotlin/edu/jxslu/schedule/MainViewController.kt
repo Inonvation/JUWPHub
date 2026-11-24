@@ -35,7 +35,11 @@ import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.DataSelfTestResult
 import edu.jxslu.schedule.ui.DataSelfTestStrip
 import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
+import edu.jxslu.schedule.ui.campus.StatementScreen
+import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.inbox.InboxScreen
+import edu.jxslu.schedule.ui.life.PowerBillScreen
+import edu.jxslu.schedule.ui.life.PowerBillViewModel
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.selection.SelectionScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
@@ -157,6 +161,33 @@ private fun IosRoot(services: IosServices) {
                             }
                             WeatherScreen(viewModel = viewModel, onBack = { page = IosPage.Week })
                         }
+                        // 电费账单（S20 搬进共享层）：iOS 没有加密凭证存储
+                        // （`IosServices.yktCredentialStore()` 返回 null），所以进页落在
+                        // 「凭证未配置」态——「用电统计」分页照样画本机攒下的读数，充值账单为空。
+                        // 「去设置」「在缴费平台打开」两个入口传 null，整行不渲染（§11.2 ④）。
+                        IosPage.PowerBill -> {
+                            val vm = remember {
+                                PowerBillViewModel(
+                                    repo = services.powerRepository(),
+                                    credentialStore = services.yktCredentialStore(),
+                                    readingStore = services.powerReadingStore(),
+                                )
+                            }
+                            PowerBillScreen(viewModel = vm, onBack = { page = IosPage.Week })
+                        }
+                        // 消费流水（S20）：同上。凭证为 null 时只显示本地 `ykt_turnovers` 表，
+                        // 空库就是空态；`postInbox` 不传 = iOS 没有收件箱落点，同步照跑但不留痕。
+                        IosPage.Statement -> {
+                            val vm = remember {
+                                StatementViewModel(
+                                    repo = services.yktRepository(),
+                                    credentialStore = services.yktCredentialStore(),
+                                    db = services.database(),
+                                )
+                            }
+                            StatementScreen(viewModel = vm, onBack = { page = IosPage.Week })
+                        }
+                        }
                     }
                 }
                 hint?.let { text ->
@@ -205,6 +236,8 @@ private enum class IosPage(val label: String) {
     Exam("考试"),
     Inbox("收件箱"),
     Weather("天气"),
+    PowerBill("电费"),
+    Statement("流水"),
 }
 
 /**

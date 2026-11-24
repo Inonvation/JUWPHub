@@ -317,17 +317,21 @@ fun RechargeHost(
     // MainActivity 根层，所有页面共用一份——从今日页「+ → 付款码」出码付款后也能当场消费结果。
 }
 
-/** 打开站外链接（缴费平台网页）；失败给一次性提示。同包内（缴费账单页页脚）共用。 */
+/**
+ * 打开站外链接（缴费平台网页）；返回 false = 没能打开。
+ *
+ * 同包内共用（缴费账单页页脚）：页面搬进共享层后，这个动作留在 Android 侧
+ * （`startActivityOutsideApp` 顺手把本窗口的推入/滑出过渡换成静止），
+ * 由 `SubpageActivity` 以 `onOpenPlatformUrl` 注入，返回值决定要不要给提示。
+ */
 internal fun openExternal(
     context: android.content.Context,
     url: String,
     onError: (String, NoticeTone) -> Unit,
-) {
-    runCatching {
-        context.startActivityOutsideApp(
-            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-    }.onFailure {
-        onError("打不开浏览器：${it.message ?: "未知错误"}", NoticeTone.Error)
-    }
-}
+): Boolean = runCatching {
+    context.startActivityOutsideApp(
+        Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
+}.onFailure {
+    onError("打不开浏览器：${it.message ?: "未知错误"}", NoticeTone.Error)
+}.isSuccess

@@ -1,6 +1,8 @@
 package edu.jxslu.schedule
 
 import android.content.Context
+import edu.jxslu.schedule.data.local.JuwDatabase
+import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
@@ -85,4 +87,7 @@ class GraphServices(private val context: Context) : AppServices {
     //
     // 转给 `Graph` 的同一份单例：今日页顶栏提示与天气详情页共用它（30 分钟 TTL 才有意义）。
     override fun weatherRepository(): WeatherRepository = Graph.weatherRepository(appContext)
+
+    /** 共享层与 `:app` 拿到的是**同一个**库实例（`juwDatabase(context)` 自带单例缓存）。 */
+    override fun database(): JuwDatabase = juwDatabase(appContext)
 }

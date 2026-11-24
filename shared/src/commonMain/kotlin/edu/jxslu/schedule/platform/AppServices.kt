@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.platform
 
+import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
@@ -157,6 +158,20 @@ interface AppServices {
      * 30 分钟 TTL 等于白设（免费档按请求数算）。
      */
     fun weatherRepository(): WeatherRepository
+
+    /**
+     * 应用唯一的 Room 库（`JuwDatabase`，v21）。
+     *
+     * 为什么需要：消费流水页的 ViewModel 直接读 DAO 的响应式流
+     * （`observeMonth` / `observeMonthSummary` / `observeMonthByType` / `observeCount`），
+     * 并把库交给 `YktTurnoverSyncer` 落库——这两件事都没法包在某个仓库后面，
+     * 包一层等于把同一个 DAO 再抄一遍。
+     *
+     * **非空**：Room 是本地表，两端都建得起来（Android 走 `juwDatabase(context)`，
+     * iOS 走 `BundledSQLiteDriver` 的同一个库）。共享层拿到的必须是**同一份实例**，
+     * 否则两个库文件各写一半，页面看不到对方写进去的行。
+     */
+    fun database(): JuwDatabase
 }
 
 /**
