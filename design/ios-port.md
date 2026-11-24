@@ -263,8 +263,6 @@ iosApp/            薄壳：Xcode 工程、SwiftUI 入口、WidgetKit 扩展、I
 > 两个测试（`InboxRulesTest` / `InboxGroupingTest` 的 `ZonedDateTime.of` → `LocalDateTime(...).toInstant(zone)`）。
   **`domain/` 的 `java.time` 到此清零，只剩 `Homework` 那一条刻意保留的 Room 实体字段。**
 
-## P-1 剩余欠账（日期之后）
-
 **P2 的已知欠账**：`domain/` 之外还有 **280 处 `System.currentTimeMillis()`**（挨个做太碎，
 随 UI 平移一起换成 `Clock.System.now().toEpochMilliseconds()`）；护栏只扫 `domain/`，
 届时要把扫描根目录扩到 `shared/`。
@@ -279,9 +277,9 @@ iosApp/            薄壳：Xcode 工程、SwiftUI 入口、WidgetKit 扩展、I
 
 | API | 处数 | 卡点 |
 |---|---|---|
-| `java.time` | 5 处 | 只剩 `InboxMessage.timeGroupOf`（4，全限定名）与 `Homework` 的实体字段（1，按约定保留） |
+| `java.time` | 1 处 | 只剩 `Homework.dueDate`（Room 实体字段，按约定保留；转换都在 domain 边界做） |
 | `java.text.SimpleDateFormat` / `java.util.Date` | 各 1 处 | `QzxyWatering` 的开阀时刻文案，随 java.time 一起换 |
-| `java.util.Locale` | 5 处 | 随 java.time 与 `TextFmt.decimals` 一起清 |
+| `java.util.Locale` | 2 处 | `TextFmt.decimals` 的 `Locale.ROOT`（P1 随 `String.format` 一起变 expect/actual）与另一处 |
 | `com.google.zxing` | 17 | iOS 无对应，需换 KMP 条码库或只保留生成侧 |
 | `javax.crypto` | 3 | `QzxyClData` 的 AES，要 CommonCrypto expect/actual |
 | `okhttp3` | 1 | `HttpUrl`，随网络层一起换 |
