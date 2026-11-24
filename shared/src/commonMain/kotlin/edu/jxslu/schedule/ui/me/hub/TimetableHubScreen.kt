@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -41,27 +39,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.DefaultData
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.SettingsTag
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.me.MeUiState
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.OneShot
 import edu.jxslu.schedule.ui.me.TimeSlotEditorCard
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Instant
 
 /**
  * 设置 → 课表（DESIGN §3.3，2026-11-01 与「课表设置」合并）。
@@ -77,9 +74,11 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun TimetableHubScreen(
     onBack: () -> Unit,
-    viewModel: MeViewModel = viewModel(
-        factory = MeViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
+    /**
+     * 「我的」与显示设置的共享 ViewModel，**由宿主创建**（Android `viewModel {}`、
+     * iOS `remember {}`），见 `design/ios-port.md` §11.1。
+     */
+    viewModel: MeViewModel,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val oneShot by viewModel.oneShot.collectAsStateWithLifecycle()
@@ -109,7 +108,7 @@ fun TimetableHubScreen(
                 title = { Text("课表") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
             )
@@ -192,7 +191,7 @@ fun TimetableHubScreen(
         // 避免上一次取消的选择残留
         val dateState = rememberDatePickerState(
             initialSelectedDateMillis = runCatching {
-                LocalDate.parse(startDateText).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+                LocalDate.parse(startDateText).atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
             }.getOrNull(),
         )
         DatePickerDialog(
@@ -202,12 +201,12 @@ fun TimetableHubScreen(
                     onClick = {
                         datePickerOpen = false
                         val picked = dateState.selectedDateMillis?.let { millis ->
-                            Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                            Instant.fromEpochMilliseconds(millis).toLocalDateTime(TimeZone.UTC).date
                         }
                         if (picked != null) {
                             // 选完即存：日期由控件保证合法，不再需要「保存」按钮收口
                             viewModel.saveSemester(
-                                picked.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                                picked.toString(),
                                 totalWeeks,
                             )
                         }

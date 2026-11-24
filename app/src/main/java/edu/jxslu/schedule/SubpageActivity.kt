@@ -335,7 +335,11 @@ class SubpageActivity : ComponentActivity() {
                 onOpenStatement = { SubpageActivity.start(this, SubpageScreen.CAMPUS_STATEMENT) },
             )
             SubpageScreen.JW_ACCOUNT -> JwAccountScreen(onBack = onBack)
-            SubpageScreen.TIMETABLE_HUB -> TimetableHubScreen(onBack = onBack)
+            SubpageScreen.TIMETABLE_HUB -> TimetableHubScreen(
+                onBack = onBack,
+                // ViewModel 由宿主创建（design/ios-port.md §11.2 ①）
+                viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
+            )
             SubpageScreen.SCHEDULE_CHANGES -> ScheduleChangesScreen(
                 onBack = onBack,
                 onOpenHistory = { SubpageActivity.start(this, SubpageScreen.AI_HISTORY) },
