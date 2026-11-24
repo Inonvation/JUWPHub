@@ -26,6 +26,10 @@
 	<!-- 不声明 UILaunchScreen 的话 iOS 会给应用加黑边，界面按小尺寸渲染 -->
 	<key>UILaunchScreen</key>
 	<dict/>
+	<!-- Compose Multiplatform 的 PlistSanityCheck 在启动时强制校验这一项，缺了直接抛异常
+	     终止进程（侧载包一启动就闪退，栈顶是 PlistSanityCheck）。顺带解锁 ProMotion 120Hz。 -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
