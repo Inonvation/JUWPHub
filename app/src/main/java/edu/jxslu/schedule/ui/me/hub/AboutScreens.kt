@@ -100,7 +100,7 @@ fun AboutUpdateScreen(
         }
     }
 
-    val updateClient = remember { UpdateCheckClient() }
+    val updateClient = remember { UpdateCheckClient(BuildConfig.VERSION_NAME) }
     var updateChecking by remember { mutableStateOf(false) }
     var updateAvailable by remember { mutableStateOf<UpdateManifest?>(null) }
     var showUpdateDialog by remember { mutableStateOf(false) }

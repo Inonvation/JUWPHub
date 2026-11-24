@@ -242,7 +242,7 @@ class JuwApplication : Application() {
                     android.util.Log.i("JuwApplication", "update check: recent failure, skipped")
                     return@runCatching
                 }
-                val result = UpdateCheckClient().check()
+                val result = UpdateCheckClient(BuildConfig.VERSION_NAME).check()
                 if (result !is UpdateCheckResult.Failed) {
                     gate.edit().remove(KEY_LAST_UPDATE_FAILURE).apply()
                 }
