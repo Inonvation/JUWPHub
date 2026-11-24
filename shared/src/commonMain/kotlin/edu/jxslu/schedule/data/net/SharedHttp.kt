@@ -10,8 +10,8 @@ import io.ktor.client.plugins.HttpTimeout
  * iOS 上没有。这里只保留**两端都成立**的那部分：一份进程共享的 client + 超时口径。
  *
  * 引擎不在这里指定：`:shared` 的 `androidMain` 引 `ktor-client-okhttp`、`iosMain` 引
- * `ktor-client-darwin`，Ktor 在运行期按各平台注册的引擎自动解析——所以 commonMain 只写
- * `HttpClient { … }`，不出现任何平台类型。
+ * `ktor-client-darwin`，具体引擎与它的平台开关由 [createPlatformHttpClient] 各端实现
+ * （Android 要在引擎上挂 IPv4 优先 DNS），commonMain 只负责两端口径一致的插件装配。
  *
  * ## 与 `AppHttp` 的口径对应关系
  *
@@ -53,17 +53,14 @@ object SharedHttp {
         connectTimeoutSeconds: Long = CONNECT_TIMEOUT_SECONDS,
         socketTimeoutSeconds: Long = SOCKET_TIMEOUT_SECONDS,
         followRedirects: Boolean = true,
-    ): HttpClient = HttpClient {
-        // 非 2xx 不抛异常：现状各模块都是自己判 `isSuccessful` 再换算成各自的异常类型，
-        // 打开这个开关会把「HTTP 500」变成 Ktor 自己的异常，错误文案就变了。
-        expectSuccess = false
-        // 默认跟随重定向；一卡通充值下单那类**要靠 302 的 Location 拿收银台 URL**，
-        // 必须拿到原始 302 而不是落地页，所以给调用方留一个关掉的开关。
-        this.followRedirects = followRedirects
-        install(HttpTimeout) {
-            requestTimeoutMillis = requestTimeoutSeconds * 1000
-            connectTimeoutMillis = connectTimeoutSeconds * 1000
-            socketTimeoutMillis = socketTimeoutSeconds * 1000
-        }
-    }
+        cookieStorage: HttpSupport.InMemoryCookieStorage? = null,
+        countRequests: Boolean = false,
+    ): HttpClient = createPlatformHttpClient(
+        requestTimeoutSeconds = requestTimeoutSeconds,
+        connectTimeoutSeconds = connectTimeoutSeconds,
+        socketTimeoutSeconds = socketTimeoutSeconds,
+        followRedirects = followRedirects,
+        cookieStorage = cookieStorage,
+        countRequests = countRequests,
+    )
 }
