@@ -1060,7 +1060,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | 功能 | 代码量 | 为什么做不到 | 要补什么 |
 |---|---|---|---|
 | 共享单车地图（`ui/ebike`） | 30 文件 / 17,879 行 | 底图是**高德 Android SDK**（`com.amap.api:3dmap`，含 32MB `.so`）。iOS 是另一套 SDK（`AMap3DMap`，CocoaPods/SPM），API 形状完全不同，且要单独申请 iOS key（绑 `edu.jxslu.schedule.ios`） | 接 iOS 高德 SDK + 重写 17,879 行里的地图宿主、覆盖物、路径动画；账号/订单/卡券那部分（HTTP）可以先搬 |
-| 趣智校园蓝牙开阀 | `QzxyGattLink` 643 行 + 状态机（已在共享层） | `android.bluetooth` 的 GATT API 与 CoreBluetooth 是两套模型：前者回调在主线程、后者要自己建 `CBCentralManager` 串行队列 | 用 CoreBluetooth 重写传输层，**必须有真水控设备**才能验证；协议帧已在共享层，可复用 |
+| 趣智校园蓝牙开阀 | `QzxyGattLink` 643 行 + 状态机（已在共享层；iOS 侧只有失败桩，且缺 5 个平台件，所以整页不路由） | `android.bluetooth` 的 GATT API 与 CoreBluetooth 是两套模型：前者回调在主线程、后者要自己建 `CBCentralManager` 串行队列 | 用 CoreBluetooth 重写传输层，**必须有真水控设备**才能验证；协议帧已在共享层，可复用 |
 | 桌面小组件 | `ui/widget` 12 文件 / 3,112 行 | Glance 是 Android 的 Compose-for-appwidget；iOS 对应物 WidgetKit + SwiftUI，是另一套渲染与数据共享模型（要 App Group + Timeline Provider） | 用 SwiftUI 重写，数据通过 App Group 共享（共享层已有 JSON 落盘，可复用） |
 | 快捷设置磁贴 | `ui/widget` 内 | Android 的 `TileService`；iOS 控制中心不支持第三方磁贴 | 无替代。iOS 侧只保留 App 内入口 |
 | 免费骑行倒计时「灵动岛」 | `ui/reminder` 内 | 用的是 Android 16 的标准 Live Updates（`setRequestPromotedOngoing` + chronometer） | iOS 对应物是 Live Activity（ActivityKit），要写 SwiftUI 布局 + 推送更新；**能做，是另一份实现** |
@@ -1097,7 +1097,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份），底栏「今日 / 课表 / 教务 / 我的」+ 「更多」打开抽屉，抽屉按 Android 的分组列 31 条。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的手势与视差；`我的` 那一格在 Android 上是从抽屉进的 |
 | 教务登录后的自动填表 | iOS 用 `WKWebView` 让用户手点登录，登录成功落地后自动 `archive` | Android 有自动填表；iOS 需要注入 JS，能做 |
 | 凭证存储 | `IosKeychain`（CoreFoundation）+ 六个第三方存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI）已写，**iOS 编译验证卡在 runner 容量** | 一卡通 / 教务（CAS）那两套仍返回 `null`：还要「CAS 学号 + 登录闸门」两样，它们在 `:app` 的 `CredentialVault` 里 |
-| 第三方仓库 | `qiekjRepository()` / `qzxyRepository()` / `ujingRepository()` / `wenquRepository()` / `kqcxSession()` 仍返回 `null` | 所以开水房 / 趣智 / U净 / 问渠四个页面**在 iOS 上没有入口**——不是点了没反应，是路由不给。凭证那一半已经接上 Keychain，缺的是订单快照 / 收藏 / 历史那几份 `KeyValuePrefs` 落点（各写一份 `appDataDir()` JSON 即可） |
+| 第三方仓库 | **胖乖 / U净 / 问渠已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 与 `kqcxSession()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账），快趣的 core 还在 `:app` |
 | 支付调起 | 一卡通走「收银台 URL 进 `WKWebView`」；胖乖 / 趣智走 `alipays://` 深链 | `Info.plist` 还没有 `LSApplicationQueriesSchemes`（`alipays` / `weixin`），深链会被系统拦 |
 | App 图标 | **已补**（2026-11-25）：`iosApp/JUWPHub/Assets.xcassets/AppIcon.appiconset`，1024 单尺寸 universal。用 `tools/app-icon/source.png` 的**前景层**重新合成满幅图——原图把圆角与投影烤进了像素，直接用会与 iOS 遮罩叠成双层圆角 | 启动屏仍不给（`UILaunchScreen` 空 dict = 纯色） |
 
@@ -1117,14 +1117,16 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 |---|---|---|---|
 | 1 | 打开 App | 进「今日」页，不闪退 | `PlistSanityCheck` 缺键（`CADisableMinimumFrameDurationOnPhone`）或 Compose 初始化失败 |
 | 2 | 底栏「课表」 | 空态显示「去导入课表」；有数据时出网格 | Room 没起来（iOS 沙箱目录问题） |
-| 3 | 「更多」→ 抽屉 | 列出 44 条，按「学习 / 教务 / 钱包 / 生活 / 设置 / 账号 / 江水生活」分组 | 导航层没编过 |
+| 3 | 「更多」→ 抽屉 | 列出 50 条，按「学习 / 教务 / 钱包 / 生活 / 设置 / 账号 / 江水生活」分组 | 导航层没编过 |
 | 4 | 课表空态「去导入课表」 | 打开教务登录 WebView，手输账号密码，落到教务首页后顶栏出现「导入完成」 | `IosJwReadSession` 的 Cookie 读取失败 |
 | 5 | 抽屉 →「AI 调课」→ 设置 | 能填 API Key 并保存；杀掉进程再进来仍在 | **Keychain 首次真机验证**（`IosKeychain` 只过了编译） |
+| 5b | 抽屉 →「江水生活」→「开水房」 | 登录（短信验证码）→ 能看到设备与余额 → 点开阀 | **胖乖是 HTTP 不是蓝牙**，这条链 iOS 上能真开出水 |
+| 5c | 抽屉 →「江水生活」→「问渠」 | 登录（手机号 + 密码）→ 活动列表 → 报名 / 取消 → 工时记录 | 纯 HTTP，蹲点提醒那类通知入口不渲染 |
+| 5d | 抽屉 →「江水生活」→「U净洗衣房」 | 看板能看附近洗衣机与在用订单；扫码与支付入口不渲染 | 三份本地存储已接（Keychain + NSUserDefaults） |
 | 6 | 抽屉 →「笔记」/「作业」 | 列表可读；点条目进详情页，正文是纯文本（图片位置显示「附件图不在本机显示」） | Markdown 槽位（iOS 传 null 是有意的） |
 | 7 | 抽屉 →「消费流水」/「电费」 | 落在「凭证未配置」态，本地表为空 | 正常（一卡通凭证存储还没接） |
 | 8 | 抽屉 →「账号中心」 | 十个入口都在，全部显示「未配置 / 未登录」 | 正常（凭证与第三方仓库仍是 null） |
 
-**已知在 iOS 上点了会落在「这一页还在 Android 侧」的**：开水房、趣智、U净、问渠（四个都要
-加密凭证 + 本地订单快照，见 §12.3）、骑行 / 快趣、教务账号、校园卡设置、成绩单、评教、
-请假、校历、时间表管理、调课、分享、提醒设置、小组件设置、外观设置、安静时段、权限、
-关于更新、条款、赞赏、付款码。
+**已知在 iOS 上点了会落在「这一页还在 Android 侧」的**：趣智（缺蓝牙扫描与设备表）、
+骑行 / 快趣、校园卡设置、成绩单、评教、分享、小组件设置、外观设置、安静时段、权限与存储、
+付款码、水印 / 拼接（纯位图管线）。
