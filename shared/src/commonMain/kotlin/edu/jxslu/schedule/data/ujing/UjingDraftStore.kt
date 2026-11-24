@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * 故意**不落盘**：草稿是几秒内的一次性交接，进程被回收就丢，重扫一次即可；
  * 真正必须跨进程的订单号在 `UjingOrderStore`（社区实测教训，见其类 KDoc）。
+ *
+ * iOS 移植 S15（2026-11-24）：整类原样搬进 `:shared`——它只用 StateFlow，本来就与平台无关。
  */
 class UjingDraftStore {
 

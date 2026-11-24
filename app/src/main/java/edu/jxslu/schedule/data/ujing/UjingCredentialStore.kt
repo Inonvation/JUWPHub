@@ -4,29 +4,24 @@ import android.content.Context
 import android.content.SharedPreferences
 import edu.jxslu.schedule.data.local.EncryptedPrefs
 
-/** U净 本机会话（DESIGN §4.37）：手机号 + JWT。 */
-data class UjingSession(
-    val mobile: String,
-    val token: String,
-    val userId: String = "",
-) {
-    val isComplete: Boolean get() = mobile.isNotBlank() && token.isNotBlank()
-}
-
 /**
- * U净 登录凭证加密存储（DESIGN §4.37）。
+ * U净 登录凭证加密存储（DESIGN §4.37）：[UjingSessionStore] 的 Android 实现。
  *
  * 与胖乖 / 趣智 / 快趣同方案、**不同文件**（`secure_ujing`）：各自会话互不相干，
  * 混在一个文件里退登录会互相牵连。创建与自愈口径见 [EncryptedPrefs.open]。
  * 新文件同样要排除两套备份规则（`backup_rules.xml` / `data_extraction_rules.xml`），
  * 不跟云备份与设备迁移走。
+ *
+ * iOS 移植 S15（2026-11-24）：仓库与模型都进了 `:shared`，**只有这个文件留在 `:app`**——
+ * 介质是 `EncryptedSharedPreferences` + Android Keystore；iOS 侧对应 Keychain。
+ * 契约在共享层的 [UjingSessionStore]。
  */
-class UjingSessionStore(context: Context) {
+class UjingCredentialStore(context: Context) : UjingSessionStore {
     private val prefs: SharedPreferences by lazy {
-        EncryptedPrefs.open(context, FILE_NAME, "UjingSessionStore")
+        EncryptedPrefs.open(context, FILE_NAME, "UjingCredentialStore")
     }
 
-    fun read(): UjingSession? {
+    override fun read(): UjingSession? {
         val token = prefs.getString(KEY_TOKEN, null)?.takeIf { it.isNotBlank() } ?: return null
         return UjingSession(
             mobile = prefs.getString(KEY_MOBILE, "").orEmpty(),
@@ -36,9 +31,9 @@ class UjingSessionStore(context: Context) {
     }
 
     /** 登录表单预填用：上次登录的手机号。 */
-    fun lastMobile(): String = prefs.getString(KEY_MOBILE, "").orEmpty()
+    override fun lastMobile(): String = prefs.getString(KEY_MOBILE, "").orEmpty()
 
-    fun save(session: UjingSession) {
+    override fun save(session: UjingSession) {
         prefs.edit()
             .putString(KEY_MOBILE, session.mobile)
             .putString(KEY_TOKEN, session.token)
@@ -47,11 +42,11 @@ class UjingSessionStore(context: Context) {
     }
 
     /** 会话过期：只清 token、保留手机号（重新登录少输一次号码）。 */
-    fun clearToken() {
+    override fun clearToken() {
         prefs.edit().remove(KEY_TOKEN).apply()
     }
 
-    fun clear() {
+    override fun clear() {
         prefs.edit().clear().apply()
     }
 

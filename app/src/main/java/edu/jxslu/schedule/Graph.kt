@@ -35,12 +35,14 @@ import edu.jxslu.schedule.data.qzxy.QzxyClearStore
 import edu.jxslu.schedule.data.qzxy.QzxyWateringStore
 import edu.jxslu.schedule.data.qzxy.QzxyGattLink
 import edu.jxslu.schedule.data.qzxy.QzxySessionStore
-import edu.jxslu.schedule.data.ujing.UjingHouseStore
-import edu.jxslu.schedule.data.ujing.UjingOrderStore
-import edu.jxslu.schedule.data.ujing.UjingRepository
-import edu.jxslu.schedule.data.ujing.UjingSessionStore
+import edu.jxslu.schedule.data.ujing.UjingCredentialStore
 import edu.jxslu.schedule.data.ujing.UjingDraftStore
+import edu.jxslu.schedule.data.ujing.UjingHouseStore
 import edu.jxslu.schedule.data.ujing.UjingHistoryStore
+import edu.jxslu.schedule.data.ujing.UjingRepository
+import edu.jxslu.schedule.data.ujing.androidUjingHistoryStore
+import edu.jxslu.schedule.data.ujing.androidUjingHouseStore
+import edu.jxslu.schedule.data.ujing.androidUjingOrderStore
 import edu.jxslu.schedule.data.wenqu.WenquCredentialStore
 import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
@@ -707,13 +709,14 @@ object Graph {
     fun ujing(context: Context): UjingRepository =
         ujingRepository ?: synchronized(this) {
             ujingRepository ?: UjingRepository(
-                UjingSessionStore(context.applicationContext),
-                UjingOrderStore(context.applicationContext),
+                UjingCredentialStore(context.applicationContext),
+                androidUjingOrderStore(context.applicationContext),
                 ujingHistory(context.applicationContext),
                 // debug 专用：扫码后把 program/info 原始响应落盘，供补投放加购的协议样本
+                // （共享层只认绝对路径字符串：commonMain 里没有 java.io.File）
                 debugDumpDir = File(context.applicationContext.filesDir, "ujing_debug")
-                    .takeIf { BuildConfig.DEBUG },
-                expiry = sessionExpiry(context.applicationContext),
+                    .absolutePath.takeIf { BuildConfig.DEBUG },
+                expiry = sessionExpirySink(context.applicationContext),
                 onWashDone = { snapshot ->
                     inboxRepository(context).post(
                         kind = InboxKind.UJING_ORDER,
@@ -731,7 +734,7 @@ object Graph {
     /** U净 收藏的洗衣房（DESIGN §4.37）。纯本地偏好（普通 prefs），与登录会话分开存。 */
     fun ujingHouses(context: Context): UjingHouseStore =
         ujingHouseStore ?: synchronized(this) {
-            ujingHouseStore ?: UjingHouseStore(context.applicationContext)
+            ujingHouseStore ?: androidUjingHouseStore(context.applicationContext)
                 .also { ujingHouseStore = it }
         }
 
@@ -747,7 +750,7 @@ object Graph {
     /** U净 历史账单（DESIGN §4.37）：本 App 发起的订单留痕，主页入口行与账单页共用。 */
     fun ujingHistory(context: Context): UjingHistoryStore =
         ujingHistoryStore ?: synchronized(this) {
-            ujingHistoryStore ?: UjingHistoryStore(context.applicationContext)
+            ujingHistoryStore ?: androidUjingHistoryStore(context.applicationContext)
                 .also { ujingHistoryStore = it }
         }
 
