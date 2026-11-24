@@ -47,9 +47,20 @@ jobs:
       # Gradle 配置阶段会连带配置 `:app`（AGP 要 compileSdk 36 的平台），
       # 所以 macOS 上也得把 Android SDK 装齐，否则会在配置期就失败，
       # 报「Failed to find target with hash string 'android-36'」而不是我们想看的那类错。
-      - uses: android-actions/setup-android@v3
+      #
+      # 不用 `android-actions/setup-android@v3`：它会去装一个叫 `tools` 的包，
+      # 而新版 SDK 仓库里已经没有这个包，2026-11-24 实测直接
+      # `Warning: Failed to find package 'tools'` + exit 1（见 run 45354030959）。
+      # macOS runner 自带 Android SDK，直接用它自带的 sdkmanager 就够。
       - name: 装 Android SDK 36
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+        run: |
+          SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+          echo "SDK=$SDK"
+          SDKMGR="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMGR" || SDKMGR="$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -1)"
+          echo "sdkmanager=$SDKMGR"
+          yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
+          "$SDKMGR" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
       - uses: gradle/actions/setup-gradle@v4
 
