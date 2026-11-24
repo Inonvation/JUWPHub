@@ -7,6 +7,7 @@ import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.NoteRepository
+import edu.jxslu.schedule.data.repo.ProfileSync
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
@@ -101,4 +102,11 @@ class GraphServices(private val context: Context) : AppServices {
     override suspend fun onThemePaletteChanged() {
         LifeWidgetSync.onThemePaletteChanged(appContext)
     }
+
+    // ---- 设置首页（S17） ----
+
+    /** 版本名来自 `:app` 的 `BuildConfig`——共享层看不见它，只能由装配根给。 */
+    override fun appVersion(): String = BuildConfig.VERSION_NAME
+
+    override fun profileSync(): ProfileSync = Graph.profileSync(appContext)
 }

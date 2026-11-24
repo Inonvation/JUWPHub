@@ -6,6 +6,7 @@ import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.NoteRepository
+import edu.jxslu.schedule.data.repo.ProfileSync
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
@@ -159,6 +160,28 @@ interface AppServices {
      * `suspend`：Android 侧要重跑一次小组件快照（读库 + 拼 RemoteViews），是挂起调用。
      */
     suspend fun onThemePaletteChanged() {}
+
+    // ---- 设置首页（iOS 移植 S17，2026-11-25） ----
+    //
+    // `SettingsScreen` 搬进共享层带出来的两件：一个是版本号（装配根才知道），
+    // 一个是教务身份补抓（只要会话 + 偏好，两端都建得起来，所以非空）。
+
+    /**
+     * 应用版本名（设置页「关于与更新」那一行的 `v…`）。
+     *
+     * 非空且由装配根给：`BuildConfig` 在 `:app` 的构建里，共享层看不见它；
+     * iOS 侧对应 `CFBundleShortVersionString`。读不到就返回空串，页面写成 `v—`。
+     */
+    fun appVersion(): String
+
+    /**
+     * 教务身份补抓（DESIGN §3.3：班级为空时进设置页顺手抓一次，`ProfileSyncRules` 有闸门）。
+     *
+     * **非空**：它只要一条教务会话 + 偏好存储，两端都有（Android 是 `CasSession`，
+     * iOS 是 `IosJwReadSession`）。没登录时 `syncOnce` 自己失败、调用方 `runCatching` 吞掉，
+     * 不需要用 null 表达「本平台没这能力」。
+     */
+    fun profileSync(): ProfileSync
 }
 
 /**

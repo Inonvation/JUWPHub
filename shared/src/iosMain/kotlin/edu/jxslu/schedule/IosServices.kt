@@ -10,6 +10,7 @@ import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.NoteRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
+import edu.jxslu.schedule.data.repo.ProfileSync
 import edu.jxslu.schedule.data.repo.ScheduleBaselineStore
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
@@ -32,6 +33,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import platform.Foundation.NSBundle
 
 /**
  * iOS 侧的共享服务装配（iOS 移植 M1 起，M2 补齐教务三件套）。
@@ -217,6 +219,26 @@ class IosServices : AppServices {
      * 在那之前显示设置面板的「背景」整组不渲染——选图入口给一个点了没反应的按钮更糟。
      */
     override fun scheduleBackgroundFiles(): ScheduleBackgroundFiles? = null
+
+    // ---- 设置首页（S17，2026-11-25） ----
+
+    /**
+     * 版本名取 `Info.plist` 的 `CFBundleShortVersionString`（Xcode 工程里的 MARKETING_VERSION）。
+     * 读不到就返回空串，设置页写成 `v—`——不编一个假版本号。
+     */
+    override fun appVersion(): String =
+        (NSBundle.mainBundle.objectForInfoDictionaryKey("CFBundleShortVersionString") as? String)
+            .orEmpty()
+
+    /**
+     * 教务身份补抓：与 Android 同一条共享实现（`ProfileSync`），会话换成
+     * [IosJwReadSession]。没登录时 `syncOnce` 自己失败，调用方 `runCatching` 吞掉。
+     */
+    private val profileSyncImpl: ProfileSync by lazy {
+        ProfileSync(cas = session, prefs = prefs)
+    }
+
+    override fun profileSync(): ProfileSync = profileSyncImpl
 
     init {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
