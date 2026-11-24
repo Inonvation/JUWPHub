@@ -5,8 +5,12 @@ import edu.jxslu.schedule.domain.InboxRules
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.LocalDate
-import java.time.ZoneId
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
+import kotlinx.datetime.toInstant
 
 /**
  * 收件箱列表的分段展开（[inboxListItems]）。
@@ -18,10 +22,10 @@ import java.time.ZoneId
  */
 class InboxGroupingTest {
 
-    private val zone: ZoneId = ZoneId.of("Asia/Shanghai")
+    private val zone: TimeZone = TimeZone.of("Asia/Shanghai")
 
     /** 固定「今天」：2026-11-06 是周五，所在 ISO 周 = 11-02(周一) … 11-08(周日)。 */
-    private val today: LocalDate = LocalDate.of(2026, 11, 6)
+    private val today: LocalDate = LocalDate(2026, 11, 6)
 
     private fun msg(id: Long, date: LocalDate, hour: Int = 12): InboxMessageEntity =
         InboxMessageEntity(
@@ -30,7 +34,8 @@ class InboxGroupingTest {
             dedupeKey = "k$id",
             title = "t$id",
             body = "b$id",
-            createdAt = date.atTime(hour, 0).atZone(zone).toInstant().toEpochMilli(),
+            createdAt = LocalDateTime(date.year, date.monthNumber, date.dayOfMonth, hour, 0)
+                .toInstant(zone).toEpochMilliseconds(),
             readAt = null,
             deletedAt = null,
             route = null,
@@ -71,9 +76,9 @@ class InboxGroupingTest {
         val rows = inboxListItems(
             listOf(
                 msg(4, today),
-                msg(3, today.minusDays(1)),
-                msg(2, LocalDate.of(2026, 10, 20)),
-                msg(1, LocalDate.of(2026, 9, 1)),
+                msg(3, today.minus(DatePeriod(days = 1))),
+                msg(2, LocalDate(2026, 10, 20)),
+                msg(1, LocalDate(2026, 9, 1)),
             ),
             zone,
             today,
@@ -96,7 +101,7 @@ class InboxGroupingTest {
         val rows = inboxListItems(
             listOf(
                 msg(3, today),
-                msg(2, LocalDate.of(2026, 9, 1)),
+                msg(2, LocalDate(2026, 9, 1)),
                 msg(1, today),
             ),
             zone,
@@ -120,8 +125,8 @@ class InboxGroupingTest {
         // 周一 11-02 起算：本周一 → THIS_WEEK；上周日 11-01 → OLDER（距今 5 天也不并进本周）
         val rows = inboxListItems(
             listOf(
-                msg(2, LocalDate.of(2026, 11, 2)),
-                msg(1, LocalDate.of(2026, 11, 1)),
+                msg(2, LocalDate(2026, 11, 2)),
+                msg(1, LocalDate(2026, 11, 1)),
             ),
             zone,
             today,
@@ -135,7 +140,7 @@ class InboxGroupingTest {
     @Test
     fun `key稳定且分组头与消息不撞车`() {
         val rows = inboxListItems(
-            listOf(msg(7, today), msg(8, today.minusDays(1))),
+            listOf(msg(7, today), msg(8, today.minus(DatePeriod(days = 1)))),
             zone,
             today,
         )

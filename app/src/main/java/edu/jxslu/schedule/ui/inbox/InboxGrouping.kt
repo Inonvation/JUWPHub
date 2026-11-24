@@ -2,9 +2,9 @@ package edu.jxslu.schedule.ui.inbox
 
 import edu.jxslu.schedule.data.local.InboxMessageEntity
 import edu.jxslu.schedule.domain.InboxRules
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
 
 /**
  * 收件箱列表的一项：**分组头或消息行**（时间分段「今天 / 昨天 / 本周 / 更早」）。
@@ -49,13 +49,13 @@ internal sealed interface InboxListItem {
  */
 internal fun inboxListItems(
     messages: List<InboxMessageEntity>,
-    zone: ZoneId,
+    zone: TimeZone,
     today: LocalDate,
 ): List<InboxListItem> = buildList {
     var last: InboxRules.TimeGroup? = null
     val occurrences = mutableMapOf<InboxRules.TimeGroup, Int>()
     for (msg in messages) {
-        val group = InboxRules.timeGroupOf(Instant.ofEpochMilli(msg.createdAt), zone, today)
+        val group = InboxRules.timeGroupOf(Instant.fromEpochMilliseconds(msg.createdAt), zone, today)
         if (group != last) {
             val n = (occurrences[group] ?: 0) + 1
             occurrences[group] = n

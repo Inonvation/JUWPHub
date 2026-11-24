@@ -1,5 +1,12 @@
 package edu.jxslu.schedule.domain
 
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
+import kotlinx.datetime.toLocalDateTime
+
 /**
  * 收件箱消息（DESIGN §3.24 / §4.38）：应用内重要事实的留痕层。
  *
@@ -248,15 +255,15 @@ object InboxRules {
      * 落 [TimeGroup.THIS_WEEK]——「上周六」不在本周但距今 5 天，归更早比归本周诚实。
      */
     fun timeGroupOf(
-        createdAt: java.time.Instant,
-        zone: java.time.ZoneId,
-        today: java.time.LocalDate,
+        createdAt: Instant,
+        zone: TimeZone,
+        today: LocalDate,
     ): TimeGroup {
-        val date = createdAt.atZone(zone).toLocalDate()
+        val date = createdAt.toLocalDateTime(zone).date
         return when {
             date == today -> TimeGroup.TODAY
-            date == today.minusDays(1) -> TimeGroup.YESTERDAY
-            !date.isBefore(today.with(java.time.DayOfWeek.MONDAY)) -> TimeGroup.THIS_WEEK
+            date == today.minus(DatePeriod(days = 1)) -> TimeGroup.YESTERDAY
+            date >= today.minus(DatePeriod(days = today.dayOfWeek.ordinal)) -> TimeGroup.THIS_WEEK
             else -> TimeGroup.OLDER
         }
     }

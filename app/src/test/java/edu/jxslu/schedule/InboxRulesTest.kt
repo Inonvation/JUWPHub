@@ -8,9 +8,12 @@ import edu.jxslu.schedule.domain.InboxRules.TimeGroup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.ZonedDateTime
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
+import kotlinx.datetime.toInstant
 
 /**
  * 收件箱投递与清理决策（DESIGN §4.38）：去重语义与保留策略的契约。
@@ -122,14 +125,14 @@ class InboxRulesTest {
     // 时间分组
     // ------------------------------------------------------------------
 
-    private val zone: ZoneId = ZoneId.of("Asia/Shanghai")
+    private val zone: TimeZone = TimeZone.of("Asia/Shanghai")
 
     /** 2026-10-06 是周二：本周一 = 10-05，上周一 = 09-28。 */
-    private val today: LocalDate = LocalDate.of(2026, 10, 6)
+    private val today: LocalDate = LocalDate(2026, 10, 6)
 
     private fun groupOf(date: LocalDate, hour: Int = 12): TimeGroup =
         InboxRules.timeGroupOf(
-            ZonedDateTime.of(date, java.time.LocalTime.of(hour, 0), zone).toInstant(),
+            LocalDateTime(date.year, date.monthNumber, date.dayOfMonth, hour, 0).toInstant(zone),
             zone,
             today,
         )
@@ -139,27 +142,29 @@ class InboxRulesTest {
         assertEquals(TimeGroup.TODAY, groupOf(today))
         // 当天凌晨 0 点前按本地日期判，仍算今天
         assertEquals(TimeGroup.TODAY, groupOf(today, hour = 0))
-        assertEquals(TimeGroup.YESTERDAY, groupOf(today.minusDays(1)))
+        assertEquals(TimeGroup.YESTERDAY, groupOf(today.minus(DatePeriod(days = 1))))
     }
 
     @Test
     fun `昨天到本周一之间归本周`() {
         // 2026-10-06 周二：本周一 10-05 = 昨天；10-04（周日）、09-28（上周一）→ 更早；
         // 本周没有「昨天之外」的日子可测（周一只比今天早一天），构造周三做锚再验
-        val wednesday = LocalDate.of(2026, 10, 7)
+        val wednesday = LocalDate(2026, 10, 7)
         val zoneW = zone
+        val twoDaysBefore = wednesday.minus(DatePeriod(days = 2))
         assertEquals(
             TimeGroup.THIS_WEEK,
             InboxRules.timeGroupOf(
-                ZonedDateTime.of(wednesday.minusDays(2), java.time.LocalTime.NOON, zoneW).toInstant(),
+                LocalDateTime(twoDaysBefore.year, twoDaysBefore.monthNumber, twoDaysBefore.dayOfMonth, 12, 0)
+                    .toInstant(zoneW),
                 zoneW,
                 wednesday,
             ),
         )
         // 上周一（距今天 8 天）不在本周
-        assertEquals(TimeGroup.OLDER, groupOf(LocalDate.of(2026, 9, 28)))
+        assertEquals(TimeGroup.OLDER, groupOf(LocalDate(2026, 9, 28)))
         // 上周日（昨天之前、不在本周）归更早
-        assertEquals(TimeGroup.OLDER, groupOf(LocalDate.of(2026, 10, 4)))
+        assertEquals(TimeGroup.OLDER, groupOf(LocalDate(2026, 10, 4)))
     }
 
     @Test

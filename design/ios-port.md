@@ -257,6 +257,13 @@ iosApp/            薄壳：Xcode 工程、SwiftUI 入口、WidgetKit 扩展、I
 > **护栏这次抓到两个 import 扫描漏掉的文件**：`AiScheduleTool` 和 `InboxMessage` 用的是
 > **全限定名**（`java.time.LocalDate` 直接写进签名），按 import 分组的统计看不见它们。
 > 这就是护栏扫正文而不是只扫 import 的价值。
+- 第 25 批（收件箱，P-1 收尾）✅ `InboxMessage.timeGroupOf` 换 kotlinx（`createdAt.toLocalDateTime(zone).date`、
+> `today.minus(DatePeriod(days = 1))`、本周一 `today.minus(DatePeriod(days = dayOfWeek.ordinal))`），
+> 连带 `InboxGrouping` 的 `zone` 参数、`InboxScreen.timeLabel`（三个 `DateTimeFormatter` 换成手拼）、
+> 两个测试（`InboxRulesTest` / `InboxGroupingTest` 的 `ZonedDateTime.of` → `LocalDateTime(...).toInstant(zone)`）。
+  **`domain/` 的 `java.time` 到此清零，只剩 `Homework` 那一条刻意保留的 Room 实体字段。**
+
+## P-1 剩余欠账（日期之后）
 
 **P2 的已知欠账**：`domain/` 之外还有 **280 处 `System.currentTimeMillis()`**（挨个做太碎，
 随 UI 平移一起换成 `Clock.System.now().toEpochMilliseconds()`）；护栏只扫 `domain/`，

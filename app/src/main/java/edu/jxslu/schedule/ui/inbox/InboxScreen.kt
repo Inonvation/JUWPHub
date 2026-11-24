@@ -49,10 +49,11 @@ import edu.jxslu.schedule.data.local.InboxMessageEntity
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.SkeletonBox
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.TextFmt
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Inbox
@@ -152,8 +153,8 @@ fun InboxScreen(onBack: () -> Unit) {
                     // 列表本身按 createdAt 倒序。**分组头先算成独立 item**（[inboxListItems]），
                     // 不在 items 的内容 lambda 里推进可变变量——那个 lambda 只为可见项、
                     // 按滚动/复用顺序执行，用变量记「上一条的桶」会让分组头重复或缺失。
-                    val zone = remember { ZoneId.systemDefault() }
-                    val today = LocalDate.now(zone)
+                    val zone = remember { TimeZone.currentSystemDefault() }
+                    val today = AppClock.today()
                     val rows = remember(list, zone, today) { inboxListItems(list, zone, today) }
                     LazyColumn(
                         modifier = Modifier
@@ -361,12 +362,13 @@ private fun EmptyState() {
 
 /** 时间标签：当天只给 HH:mm，当年给「M月d日 HH:mm」，更早带年份。 */
 private fun timeLabel(createdAt: Long): String {
-    val zone = ZoneId.systemDefault()
-    val time = Instant.ofEpochMilli(createdAt).atZone(zone)
-    val today = LocalDate.now(zone)
+    val zone = TimeZone.currentSystemDefault()
+    val time = Instant.fromEpochMilliseconds(createdAt).toLocalDateTime(zone)
+    val today = AppClock.today()
+    val hhmm = "${TextFmt.pad(time.hour)}:${TextFmt.pad(time.minute)}"
     return when {
-        time.toLocalDate() == today -> time.format(DateTimeFormatter.ofPattern("HH:mm"))
-        time.year == today.year -> time.format(DateTimeFormatter.ofPattern("M月d日 HH:mm"))
-        else -> time.format(DateTimeFormatter.ofPattern("yyyy年M月d日"))
+        time.date == today -> hhmm
+        time.year == today.year -> "${time.monthNumber}月${time.dayOfMonth}日 $hhmm"
+        else -> "${time.year}年${time.monthNumber}月${time.dayOfMonth}日"
     }
 }
