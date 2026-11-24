@@ -9,6 +9,8 @@ import edu.jxslu.schedule.data.repo.ScheduleBaselineStore
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.repo.ScoreRepository
+import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.session.IosJwReadSession
 import edu.jxslu.schedule.data.session.IosWebCookieSource
 import edu.jxslu.schedule.data.session.JwReadSession
@@ -73,6 +75,20 @@ class IosServices : AppServices {
         ScheduleSync(cas = session, repo = repository, prefs = prefs, inbox = inbox)
     }
 
+    /**
+     * 成绩仓库（S10，2026-11-25）：成绩页与成绩设置页搬进共享层后要它。
+     *
+     * 与课表共用同一个 Room（`juwDatabase()`），不需要会话——读的是本地表。
+     */
+    private val scoreRepositoryImpl: ScoreRepository by lazy {
+        ScoreRepository(juwDatabase())
+    }
+
+    /** 成绩自动导入与变动检测（口径同 [examSyncImpl]：会话 + 仓库 + 偏好 + 收件箱）。 */
+    private val scoreSyncImpl: ScoreSync by lazy {
+        ScoreSync(cas = session, repo = scoreRepositoryImpl, prefs = prefs, inbox = inbox)
+    }
+
     private val examSyncImpl: ExamSync by lazy {
         ExamSync(
             cas = session,
@@ -97,9 +113,13 @@ class IosServices : AppServices {
 
     override fun scheduleRepository(): ScheduleRepository = repository
 
+    override fun scoreRepository(): ScoreRepository = scoreRepositoryImpl
+
     override fun scheduleSync(): ScheduleSync = sync
 
     override fun examSync(): ExamSync = examSyncImpl
+
+    override fun scoreSync(): ScoreSync = scoreSyncImpl
 
     override fun scheduleTermImport(): ScheduleTermImport = termImport
 

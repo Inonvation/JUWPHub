@@ -5,6 +5,8 @@ import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.repo.ScoreRepository
+import edu.jxslu.schedule.data.repo.ScoreSync
 
 /**
  * 共享层向「各平台装配根」要服务的唯一入口（iOS 移植 M1，2026-11-25）。
@@ -40,15 +42,32 @@ interface AppServices {
     fun scheduleRepository(): ScheduleRepository
 
     /**
+     * 成绩仓库（Room，与课表共用一个库）。
+     *
+     * 非空：成绩是本地表，哪一端都能读写，不存在「没有这个能力」的情况——
+     * 成绩页与成绩设置页都直接读它（iOS 移植 S10）。
+     */
+    fun scoreRepository(): ScoreRepository
+
+    /** 考试安排同步；null 的语义同 [scheduleSync]。 */
+    fun examSync(): ExamSync?
+
+    /**
+     * 成绩自动导入与变动检测；null 的语义同 [scheduleSync]。
+     *
+     * 页面不直接消费它（成绩页读的是 [scoreRepository]），这里是给「设置页改完提醒后
+     * 立刻按新规则核对一次」那条链路留的口子（Android 侧由 `ScoreAlertReminder` 现在占着，
+     * iOS 侧接后台核对时用）。
+     */
+    fun scoreSync(): ScoreSync?
+
+    /**
      * 课表直取与变动检测；**null = 本平台还没接教务直取链**。
      *
      * 返回 null 而不是抛：课表页的「快速检测」按钮据此隐藏，而不是点下去才发现不支持。
      * iOS 侧要等 WebView 会话 + `JwReadSession` 的 Ktor 实现（M2）才拿得到它。
      */
     fun scheduleSync(): ScheduleSync?
-
-    /** 考试安排同步；null 的语义同 [scheduleSync]。 */
-    fun examSync(): ExamSync?
 
     /** 学期归档 / 新学期探测；null 的语义同 [scheduleSync]。 */
     fun scheduleTermImport(): ScheduleTermImport?

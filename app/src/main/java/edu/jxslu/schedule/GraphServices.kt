@@ -6,6 +6,8 @@ import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.repo.ScoreRepository
+import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.platform.AppServices
 
 /**
@@ -33,9 +35,13 @@ class GraphServices(private val context: Context) : AppServices {
 
     override fun scheduleRepository(): ScheduleRepository = Graph.repository(appContext)
 
+    override fun scoreRepository(): ScoreRepository = Graph.scoreRepository(appContext)
+
     override fun scheduleSync(): ScheduleSync = Graph.scheduleSync(appContext)
 
     override fun examSync(): ExamSync = Graph.examSync(appContext)
+
+    override fun scoreSync(): ScoreSync = Graph.scoreSync(appContext)
 
     override fun scheduleTermImport(): ScheduleTermImport = Graph.scheduleTermImport(appContext)
 }
