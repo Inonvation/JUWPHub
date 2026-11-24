@@ -4,11 +4,15 @@ import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
+import edu.jxslu.schedule.data.repo.HomeworkRepository
+import edu.jxslu.schedule.data.repo.NoteRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
 import edu.jxslu.schedule.data.repo.ScheduleBaselineStore
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.repo.SelectionRepository
+import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.session.IosJwReadSession
@@ -122,6 +126,15 @@ class IosServices : AppServices {
     override fun scoreSync(): ScoreSync = scoreSyncImpl
 
     override fun scheduleTermImport(): ScheduleTermImport = termImport
+
+    // 下面四个都是本地表仓库，iOS 侧直接可用（Room 已搬过来，构造只要一个 JuwDatabase）。
+    override fun selectionRepository(): SelectionRepository = SelectionRepository(juwDatabase())
+
+    override fun selectionSync(): SelectionSync? = null
+
+    override fun noteRepository(): NoteRepository = NoteRepository(juwDatabase())
+
+    override fun homeworkRepository(): HomeworkRepository = HomeworkRepository(juwDatabase())
 
     init {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，

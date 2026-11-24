@@ -2,9 +2,13 @@ package edu.jxslu.schedule.platform
 
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.ExamSync
+import edu.jxslu.schedule.data.repo.HomeworkRepository
+import edu.jxslu.schedule.data.repo.NoteRepository
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.repo.SelectionRepository
+import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
 
@@ -71,6 +75,25 @@ interface AppServices {
 
     /** 学期归档 / 新学期探测；null 的语义同 [scheduleSync]。 */
     fun scheduleTermImport(): ScheduleTermImport?
+
+    // ---- 本地表仓库：非空 ----
+    //
+    // 下面四个都是**本地表**（Room 或文件），哪一端都能读写，不存在「没有这个能力」。
+    // 它们的类型早就在 commonMain，所以先放进来；其余业务仓库（一卡通 / 电费 / 问渠 /
+    // U净 / AI）的类型还在 `:app`，等各自那条流把数据层搬过来之后再加，
+    // **不要**为了「先占位」把一个 `:app` 的类型引进本接口。
+
+    /** 选课记录仓库（DESIGN §4.35）。 */
+    fun selectionRepository(): SelectionRepository
+
+    /** 选课轮次与记录抓取；null 的语义同 [scheduleSync]。 */
+    fun selectionSync(): SelectionSync?
+
+    /** 笔记仓库（DESIGN §3.11）。 */
+    fun noteRepository(): NoteRepository
+
+    /** 作业仓库（DESIGN §3.11）。 */
+    fun homeworkRepository(): HomeworkRepository
 }
 
 /**

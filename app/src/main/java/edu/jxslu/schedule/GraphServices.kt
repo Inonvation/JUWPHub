@@ -3,9 +3,13 @@ package edu.jxslu.schedule
 import android.content.Context
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.ExamSync
+import edu.jxslu.schedule.data.repo.HomeworkRepository
+import edu.jxslu.schedule.data.repo.NoteRepository
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.repo.SelectionRepository
+import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.platform.AppServices
@@ -44,4 +48,12 @@ class GraphServices(private val context: Context) : AppServices {
     override fun scoreSync(): ScoreSync = Graph.scoreSync(appContext)
 
     override fun scheduleTermImport(): ScheduleTermImport = Graph.scheduleTermImport(appContext)
+
+    override fun selectionRepository(): SelectionRepository = Graph.selectionRepository(appContext)
+
+    override fun selectionSync(): SelectionSync = Graph.selectionSync(appContext)
+
+    override fun noteRepository(): NoteRepository = Graph.noteRepository(appContext)
+
+    override fun homeworkRepository(): HomeworkRepository = Graph.homeworkRepository(appContext)
 }
