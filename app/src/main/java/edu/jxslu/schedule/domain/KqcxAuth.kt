@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.domain
 
+import kotlin.math.ceil
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -526,7 +527,7 @@ object KqcxAuth {
      */
     fun formatRideDuration(totalSeconds: Long?): String? {
         if (totalSeconds == null) return null
-        val minutes = Math.ceil(totalSeconds.coerceAtLeast(0) / 60.0).toLong()
+        val minutes = ceil(totalSeconds.coerceAtLeast(0) / 60.0).toLong()
         val h = minutes / 60
         val m = minutes % 60
         return if (h > 0) {

@@ -314,9 +314,12 @@ object ScheduleTips {
      * `size = 2` 时**不能用 `dayOfYear % 2`**：那等价于 dayOfYear 的奇偶，
      * 同一年里要么永远选第一条、要么永远选第二条（2026-10-13 是偶数 286，长变体一次都出不来）。
      * `/ 2` 让下标每相邻两天交替一次，两条变体都能轮到。
+     *
+     * 取余用 `mod`（向下取整口径，等价 `Math.floorMod`）：换成 `%` 时负的被除数的余数也是负的，
+     * 会直接当数组下标用出去。
      */
     private fun poolIndex(date: LocalDate, salt: Int, size: Int): Int =
-        Math.floorMod(date.dayOfYear / 2 + salt, size)
+        (date.dayOfYear / 2 + salt).mod(size)
 
     /** 两个变体里按天挑一个。 */
     private fun variant(date: LocalDate, first: String, second: String): String =

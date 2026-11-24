@@ -6,10 +6,13 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlin.math.PI
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -583,6 +586,10 @@ object BikeNearby {
      * 从 [lat]/[lng] 沿 [bearingDegrees] 走 [meters] 米。
      *
      * 几百米尺度上用等距圆柱近似（把经纬度当平面），误差在厘米级，不值得为它上正算公式。
+     *
+     * 弧度一律写 `度 * (PI / 180.0)`：JDK 与 Android 的 `Math.toRadians` 就是
+     * `angdeg * DEGREES_TO_RADIANS`（`degrees * (pi / 180)`）。写成 `度 / 180.0 * PI` 会有
+     * 约四分之一的输入差 1 ulp，簇落点与距离跟着末位漂。
      */
     private fun offsetBy(
         lat: Double,
@@ -590,10 +597,10 @@ object BikeNearby {
         meters: Double,
         bearingDegrees: Double,
     ): GcjPoint {
-        val bearing = Math.toRadians(bearingDegrees)
-        val dLat = meters * Math.cos(bearing) / METERS_PER_DEGREE_LAT
-        val dLng = meters * Math.sin(bearing) /
-            (METERS_PER_DEGREE_LAT * Math.cos(Math.toRadians(lat)))
+        val bearing = bearingDegrees * (PI / 180.0)
+        val dLat = meters * cos(bearing) / METERS_PER_DEGREE_LAT
+        val dLng = meters * sin(bearing) /
+            (METERS_PER_DEGREE_LAT * cos(lat * (PI / 180.0)))
         return GcjPoint(lat + dLat, lng + dLng)
     }
 
@@ -645,7 +652,7 @@ object BikeNearby {
         }
 
         // 阈值比较用等距圆柱近似就够（校园尺度内误差厘米级），省掉 n² 次 haversine 的三角函数
-        val cosLat = cos(Math.toRadians(bikes.first().lat))
+        val cosLat = cos(bikes.first().lat * (PI / 180.0))
         val radiusSquared = CLUSTER_RADIUS_METERS * CLUSTER_RADIUS_METERS
         for (i in bikes.indices) {
             for (j in i + 1 until bikes.size) {
@@ -707,10 +714,10 @@ object BikeNearby {
      */
     fun distanceMeters(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
         val earthRadius = 6371008.8
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLng = Math.toRadians(lng2 - lng1)
+        val dLat = (lat2 - lat1) * (PI / 180.0)
+        val dLng = (lng2 - lng1) * (PI / 180.0)
         val h = sin(dLat / 2).let { it * it } +
-            cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLng / 2).let { it * it }
+            cos(lat1 * (PI / 180.0)) * cos(lat2 * (PI / 180.0)) * sin(dLng / 2).let { it * it }
         return 2 * earthRadius * asin(min(1.0, sqrt(h)))
     }
 
@@ -860,9 +867,10 @@ object BikeNearby {
      * 两个未标注簇至少隔着 [CLUSTER_RADIUS_METERS]，四舍五入不会落进同一格，键不会撞。
      */
     private fun gridKey(lat: Double, lng: Double): String {
-        val factor = Math.pow(10.0, CLUSTER_GRID_DECIMALS.toDouble())
-        val gridLat = Math.round(lat * factor) / factor
-        val gridLng = Math.round(lng * factor) / factor
+        val factor = 10.0.pow(CLUSTER_GRID_DECIMALS.toDouble())
+        // roundToLong 对应 Math.round（0.5 向正无穷）；round 走 Math.rint（0.5 取偶），.5 边界上差一格
+        val gridLat = (lat * factor).roundToLong() / factor
+        val gridLng = (lng * factor).roundToLong() / factor
         return "$gridLat,$gridLng"
     }
 

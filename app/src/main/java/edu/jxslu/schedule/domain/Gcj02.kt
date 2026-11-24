@@ -1,5 +1,11 @@
 package edu.jxslu.schedule.domain
 
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
+
 /**
  * WGS84 → GCJ-02 坐标转换（DESIGN §3.9 / §4.23）。
  *
@@ -38,14 +44,14 @@ object Gcj02 {
 
         var latOffset = transformLat(lng - 105.0, lat - 35.0)
         var lngOffset = transformLng(lng - 105.0, lat - 35.0)
-        val radLat = lat / 180.0 * Math.PI
-        var magic = Math.sin(radLat)
+        val radLat = lat / 180.0 * PI
+        var magic = sin(radLat)
         magic = 1 - ECCENTRICITY_SQUARED * magic * magic
-        val sqrtMagic = Math.sqrt(magic)
+        val sqrtMagic = sqrt(magic)
         latOffset = (latOffset * 180.0) /
-            ((SEMI_MAJOR_AXIS * (1 - ECCENTRICITY_SQUARED)) / (magic * sqrtMagic) * Math.PI)
+            ((SEMI_MAJOR_AXIS * (1 - ECCENTRICITY_SQUARED)) / (magic * sqrtMagic) * PI)
         lngOffset = (lngOffset * 180.0) /
-            (SEMI_MAJOR_AXIS / sqrtMagic * Math.cos(radLat) * Math.PI)
+            (SEMI_MAJOR_AXIS / sqrtMagic * cos(radLat) * PI)
         return GcjPoint(lat + latOffset, lng + lngOffset)
     }
 
@@ -58,19 +64,19 @@ object Gcj02 {
 
     private fun transformLat(x: Double, y: Double): Double {
         var result = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y +
-            0.2 * Math.sqrt(Math.abs(x))
-        result += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0
-        result += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2.0 / 3.0
-        result += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320.0 * Math.sin(y * Math.PI / 30.0)) * 2.0 / 3.0
+            0.2 * sqrt(abs(x))
+        result += (20.0 * sin(6.0 * x * PI) + 20.0 * sin(2.0 * x * PI)) * 2.0 / 3.0
+        result += (20.0 * sin(y * PI) + 40.0 * sin(y / 3.0 * PI)) * 2.0 / 3.0
+        result += (160.0 * sin(y / 12.0 * PI) + 320.0 * sin(y * PI / 30.0)) * 2.0 / 3.0
         return result
     }
 
     private fun transformLng(x: Double, y: Double): Double {
         var result = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y +
-            0.1 * Math.sqrt(Math.abs(x))
-        result += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0
-        result += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2.0 / 3.0
-        result += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2.0 / 3.0
+            0.1 * sqrt(abs(x))
+        result += (20.0 * sin(6.0 * x * PI) + 20.0 * sin(2.0 * x * PI)) * 2.0 / 3.0
+        result += (20.0 * sin(x * PI) + 40.0 * sin(x / 3.0 * PI)) * 2.0 / 3.0
+        result += (150.0 * sin(x / 12.0 * PI) + 300.0 * sin(x / 30.0 * PI)) * 2.0 / 3.0
         return result
     }
 }

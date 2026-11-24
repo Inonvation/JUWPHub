@@ -1,5 +1,7 @@
 package edu.jxslu.schedule.domain
 
+import kotlin.math.roundToLong
+
 /**
  * 一条课程成绩（DESIGN §4.15）。成绩不是课程（没有排课语义），独立存储、按学期替换。
  *
@@ -134,7 +136,17 @@ object ScoreCalculator {
         else -> false
     }
 
-    private fun round2(v: Double): Double = Math.round(v * 100.0) / 100.0
+    /**
+     * 四舍五入到两位（**不是**截断）。用 `roundToLong` 而不是 `round`：`round(Double)` 在 JVM 上走
+     * `Math.rint`（0.5 取偶），`roundToLong` 走 `Math.round`（0.5 向正无穷），后者才是原口径。
+     *
+     * 非有限值兜成 `0.0`：`roundToLong` 对 `NaN` / 无穷**抛异常**，而 `Math.round(NaN)` 返回 0。
+     * 分数与绩点是宽容串解析出来的（`toDoubleOrNull` 认 `"NaN"`），不能让一个脏值把成绩页崩掉。
+     */
+    private fun round2(v: Double): Double {
+        if (!v.isFinite()) return 0.0
+        return (v * 100.0).roundToLong() / 100.0
+    }
 }
 
 /** 一个学年的成绩分组：`2024-2025-1/2` 归并为学年 `2024-2025`（DESIGN §4.15）。 */

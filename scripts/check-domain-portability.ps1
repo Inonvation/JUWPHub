@@ -39,12 +39,16 @@ foreach ($r in $roots) {
 }
 
 # 允许清单：前缀 -> 欠账原因。只对老域层（第二个根）生效。
+# 2026-11-24 P0 第 2 批后**已全部清零**（java.time / zxing / javax.crypto / okhttp3 /
+# SimpleDateFormat / Date / Locale 都不欠了），所以这里是空表。再欠新账就往里加，并写清原因。
 $allowed = [ordered]@{
-    'java.time.'        = 'Homework.dueDate 是 Room 实体字段，换 kotlinx 要配 TypeConverter（P1）'
-    'com.google.zxing.' = '条码生成/识别，待 KMP 条码库或 expect/actual'
 }
 
-$pattern = '(java\.[a-zA-Z]|javax\.[a-zA-Z]|okhttp3\.|com\.google\.zxing\.|(?<![A-Za-z.])System\.)'
+# `Math.` 也算违规：`java.lang.Math` 在 Kotlin/JVM 里是默认导入，`Math.cos` 这类能编过，
+# 但 commonMain 里 `Math` 是未解析符号。迁到 `kotlin.math` 的 `cos` / `sqrt` / `roundToLong` /
+# `PI` 与 `Int.floorDiv` / `Int.mod`（`floorMod` 在标准库里叫 `mod`）。
+# 注意 `round` 是 `Math.rint`（0.5 取偶），`roundToLong` 才是 `Math.round`，别搞反。
+$pattern = '(java\.[a-zA-Z]|javax\.[a-zA-Z]|okhttp3\.|com\.google\.zxing\.|(?<![A-Za-z.])Math\.|(?<![A-Za-z.])System\.)'
 $violations = New-Object System.Collections.Generic.List[string]
 $pending = @{}
 foreach ($key in $allowed.Keys) { $pending[$key] = 0 }

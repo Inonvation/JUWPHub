@@ -49,11 +49,14 @@ object AppClock {
      * kotlinx-datetime 的 `LocalDateTime.plus(Int, DateTimeUnit)` 在本版本里签名对不上
      * （`DateTimeUnit` 只收 `TimeBased`），这里用「当天分钟数 + 天数进位」自己算，
      * 跨零点与负偏移都覆盖。
+     *
+     * 进位用 `floorDiv` / `mod`，与 `Math.floorDiv` / `Math.floorMod` 同为「向下取整」口径：
+     * 凌晨回拨到前一天时 `total` 为负，`%` 会给负余数、把钟点算到前一天的负分钟上。
      */
     fun plusMinutes(value: LocalDateTime, minutes: Int): LocalDateTime {
         val total = value.hour * 60 + value.minute + minutes
-        val dayShift = Math.floorDiv(total, MINUTES_PER_DAY)
-        val inDay = Math.floorMod(total, MINUTES_PER_DAY)
+        val dayShift = total.floorDiv(MINUTES_PER_DAY)
+        val inDay = total.mod(MINUTES_PER_DAY)
         return LocalDateTime(
             value.year, value.monthNumber, value.dayOfMonth, inDay / 60, inDay % 60,
         ).let { if (dayShift == 0) it else shiftDays(it, dayShift) }

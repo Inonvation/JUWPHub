@@ -128,7 +128,13 @@ object ScheduleExporter {
             }
         }
 
-    internal fun teacherDescription(teacher: String): String =
+    /**
+     * 日历事件描述里的教师行。
+     *
+     * 2026-11-24（iOS 移植 P0）：原来是 `internal`，但外部调用方 `data/calendar/CalendarSyncer`
+     * 会留在 `:app` 而本文件搬进 `:shared`，跨模块访问不到 `internal`，所以放开成 public。
+     */
+    fun teacherDescription(teacher: String): String =
         if (teacher.isBlank()) "" else "教师：$teacher"
 
     /** RFC 4180：含 `,` `"` `\n` 的字段包引号，内部 `"` 翻倍。 */

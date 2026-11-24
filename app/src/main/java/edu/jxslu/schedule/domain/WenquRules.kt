@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.domain
 
 import edu.jxslu.schedule.data.wenqu.WenquActivity
+import kotlin.math.roundToLong
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -561,9 +562,19 @@ object WenquRules {
     /** 星级文案：1 → 「一星」，越界回空串（宁缺勿错，别显示「0 星」）。 */
     fun starLabel(level: Int): String = STAR_LABELS.getOrElse(level) { "" }
 
-    /** 工时展示：整数不带小数点（100 而不是 100.0）。 */
+    /**
+     * 工时展示：整数不带小数点（100 而不是 100.0）。
+     *
+     * 舍入必须是 `roundToLong`（JVM 上是 `Math.round`，0.5 向正无穷），不能用 `round`——
+     * 后者走 `Math.rint`，1.25 会舍成 1.2 而不是 1.3。
+     *
+     * `NaN` / 无穷先兜成 `0`：`roundToLong` 对非有限值**抛异常**，而 `Math.round(NaN)` 返回 0。
+     * 平台字段是宽容串（[hoursOf] 走 `toDoubleOrNull`，`"NaN"` 也能解析成 NaN），
+     * 不兜的话一个脏字段就能让工时文案崩掉。
+     */
     fun formatHours(hours: Double): String {
-        val rounded = Math.round(hours * 10.0) / 10.0
+        if (!hours.isFinite()) return "0"
+        val rounded = (hours * 10.0).roundToLong() / 10.0
         return if (rounded == rounded.toLong().toDouble()) rounded.toLong().toString() else rounded.toString()
     }
 

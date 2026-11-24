@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.domain
 
+import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
 
@@ -57,7 +58,10 @@ object PolygonSimplify {
         }
 
         val scaleLat = METERS_PER_DEGREE_LAT
-        val scaleLng = METERS_PER_DEGREE_LAT * cos(Math.toRadians(source[0].lat))
+        // 弧度换算写成 `度 * (PI / 180.0)`：JDK 与 Android 的 `Math.toRadians` 都是
+        // `angdeg * DEGREES_TO_RADIANS`（pi/180 那个常量）。写成 `度 / 180.0 * PI` 会有 27% 的值
+        // 差 1 ulp，形状与聚簇落点会跟着变。
+        val scaleLng = METERS_PER_DEGREE_LAT * cos(source[0].lat * (PI / 180.0))
         var tolerance = INITIAL_TOLERANCE_METERS
         var simplified = douglasPeucker(source, tolerance, scaleLat, scaleLng)
         var round = 0
