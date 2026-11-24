@@ -143,9 +143,8 @@ android {
 // Room schema 导出目录（2026-11-06）：`exportSchema = true` 后 KSP 把每一版的 schema JSON
 // 写到这里并入库。作用是把「实体改了但忘写迁移」变成一次可见的 schema diff ——
 // Room 自己的运行时校验只在**升级设备**上跑，开发机全新安装永远不报。
-ksp {
-    arg("room.schemaLocation", "$projectDir/schemas")
-}
+// iOS 移植 P2（2026-11-24）：`@Database` 已搬进 `:shared`，导出目录随之改到 `shared/schemas/`，
+// 这里的 ksp arg 与 room-compiler 一起摘掉——`:app` 已经没有注解可处理了。
 
 dependencies {
     // iOS 移植 P0（2026-11-24）：`:shared` 放两个平台都要用的纯逻辑，`:app` 只留平台实现。
@@ -185,9 +184,10 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    // Room 的运行时仍在（Repository 拿 JuwDatabase / DAO 当参数），但代码生成已经搬到 `:shared`
+    // （`@Database` 在那边的 commonMain），这里不再声明 room-compiler。
     implementation("androidx.room:room-runtime:2.7.1")
     implementation("androidx.room:room-ktx:2.7.1")
-    ksp("androidx.room:room-compiler:2.7.1")
 
     // 桌面小组件（DESIGN §3.6 / §4.13）：Compose 风格 API，与项目技术栈一致。
     // 传递引入 work-runtime（Glance 内部排更新走 androidx.startup 默认初始化）与 core-remoteviews；

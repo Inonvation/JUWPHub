@@ -415,7 +415,7 @@ class PayCodeViewModel(
             Graph.yktRepository(context.applicationContext),
             Graph.yktCredentialStore(context.applicationContext),
             Graph.displayPrefs(context.applicationContext),
-            edu.jxslu.schedule.data.local.JuwDatabase.get(context.applicationContext),
+            edu.jxslu.schedule.data.local.juwDatabase(context.applicationContext),
         ) as T
     }
 }

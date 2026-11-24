@@ -5,6 +5,9 @@ plugins {
     // iOS 移植 P2：`ui/theme` 这批纯 Compose 文件要搬进来，`@Composable` 必须有编译器插件。
     // 版本与根 build.gradle.kts 一致，别单独升。
     id("org.jetbrains.kotlin.plugin.compose")
+    // Room 的代码生成（KSP）。`@Database` 在 commonMain 之后，`JuwDatabase_Impl` 与
+    // `JuwDatabaseConstructor` 的 actual 都要靠它逐 target 生成。
+    id("com.google.devtools.ksp")
 }
 
 /**
@@ -78,6 +81,13 @@ kotlin {
             // 避免为了一个试点模块把全仓协程抬一个版本。
             // 只引 core：WeatherApi 是手解析 JSON 的，不需要 content-negotiation。
             api("io.ktor:ktor-client-core:3.0.3")
+            // Room 2.7.1 起是 KMP 库：实体 / DAO / `@Database` 都在 commonMain，
+            // Android 侧仍由 `:app` 用 Context 打开库（迁移链也留在那边）。
+            // 用 api 而不是 implementation：`:app` 的 Repository 直接拿 JuwDatabase 与 DAO 类型当参数。
+            api("androidx.room:room-runtime:2.7.1")
+            // 自带一份编译好的 SQLite（iOS 侧没有可依赖的系统 SQLite 版本口径）。
+            // 代价是 iOS 二进制 +1.5~3MB，见 design/ios-port.md。
+            api("androidx.sqlite:sqlite-bundled:2.5.0")
         }
 
         androidMain.dependencies {
@@ -93,6 +103,21 @@ kotlin {
             implementation("io.ktor:ktor-client-darwin:3.0.3")
         }
     }
+}
+
+// Room 的 KSP 依赖必须**逐 target**声明（写在 commonMain 里不会生成各平台的 actual）。
+// 少了哪一行，那个平台就没有 `JuwDatabase_Impl`，开库时报「no implementation found」。
+dependencies {
+    add("kspAndroid", "androidx.room:room-compiler:2.7.1")
+    add("kspIosArm64", "androidx.room:room-compiler:2.7.1")
+    add("kspIosX64", "androidx.room:room-compiler:2.7.1")
+    add("kspIosSimulatorArm64", "androidx.room:room-compiler:2.7.1")
+}
+
+// schema 导出目录：跟着 `@Database` 走，所以从 `app/schemas` 搬到 `shared/schemas`
+// （21 个 JSON 一起搬，内容一字未改，git 里应是纯 rename）。
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 android {

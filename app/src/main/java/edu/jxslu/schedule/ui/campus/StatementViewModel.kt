@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.local.JuwDatabase
+import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.local.YktTurnoverEntity
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktException
@@ -225,7 +226,7 @@ class StatementViewModel(
                 context.applicationContext,
                 Graph.yktRepository(context.applicationContext),
                 Graph.yktCredentialStore(context.applicationContext),
-                JuwDatabase.get(context.applicationContext),
+                juwDatabase(context.applicationContext),
             ) as T
         }
     }

@@ -26,7 +26,7 @@ import org.junit.Test
  */
 class JuwMigrationChainTest {
 
-    private val migrations: List<Migration> = JuwDatabase.ALL_MIGRATIONS
+    private val migrations: List<Migration> = ALL_MIGRATIONS
 
     @Test
     fun chainCoversEveryVersionStep() {

@@ -3,6 +3,7 @@ package edu.jxslu.schedule
 import android.content.Context
 import java.io.File
 import edu.jxslu.schedule.data.local.JuwDatabase
+import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.ai.AiCredentialStore
 import edu.jxslu.schedule.data.ai.AiScheduleClient
 import edu.jxslu.schedule.data.kqcx.KqcxAuthClient
@@ -339,7 +340,7 @@ object Graph {
     fun repository(context: Context): ScheduleRepository =
         repository ?: synchronized(this) {
             repository ?: ScheduleRepository(
-                JuwDatabase.get(context),
+                juwDatabase(context),
                 displayPrefs(context),
                 ScheduleBaselineStore(context.applicationContext),
             ).also { repository = it }
@@ -377,13 +378,13 @@ object Graph {
 
     /** 成绩仓库单例（DESIGN §4.15）：与课表共用数据库，按学期整体替换。 */    fun scoreRepository(context: Context): ScoreRepository =
         scoreRepository ?: synchronized(this) {
-            scoreRepository ?: ScoreRepository(JuwDatabase.get(context)).also { scoreRepository = it }
+            scoreRepository ?: ScoreRepository(juwDatabase(context)).also { scoreRepository = it }
         }
 
     /** 学业完成情况仓库单例（DESIGN §4.29）：与课表共用数据库，整体替换。 */
     fun scholarProgressRepository(context: Context): ScholarProgressRepository =
         scholarProgressRepository ?: synchronized(this) {
-            scholarProgressRepository ?: ScholarProgressRepository(JuwDatabase.get(context))
+            scholarProgressRepository ?: ScholarProgressRepository(juwDatabase(context))
                 .also { scholarProgressRepository = it }
         }
 
@@ -405,7 +406,7 @@ object Graph {
     /** 培养方案仓库单例（DESIGN §4.41）：与课表共用数据库，整体替换。 */
     fun curriculumRepository(context: Context): CurriculumRepository =
         curriculumRepository ?: synchronized(this) {
-            curriculumRepository ?: CurriculumRepository(JuwDatabase.get(context))
+            curriculumRepository ?: CurriculumRepository(juwDatabase(context))
                 .also { curriculumRepository = it }
         }
 
@@ -465,7 +466,7 @@ object Graph {
     /** 收件箱仓库单例（DESIGN §4.38）：应用内重要事实的留痕层，不发网络请求。 */
     fun inboxRepository(context: Context): InboxRepository =
         inboxRepository ?: synchronized(this) {
-            inboxRepository ?: InboxRepository(JuwDatabase.get(context.applicationContext).inboxDao())
+            inboxRepository ?: InboxRepository(juwDatabase(context.applicationContext).inboxDao())
                 .also { inboxRepository = it }
         }
 
@@ -509,7 +510,7 @@ object Graph {
     /** 选课记录仓库单例（DESIGN §4.35）：与课表共用数据库，按学期整体替换。 */
     fun selectionRepository(context: Context): SelectionRepository =
         selectionRepository ?: synchronized(this) {
-            selectionRepository ?: SelectionRepository(JuwDatabase.get(context))
+            selectionRepository ?: SelectionRepository(juwDatabase(context))
                 .also { selectionRepository = it }
         }
 
@@ -544,13 +545,13 @@ object Graph {
     /** 笔记·课件仓库单例（DESIGN §4.20）：归属键是课程名，与课表无关。 */
     fun noteRepository(context: Context): NoteRepository =
         noteRepository ?: synchronized(this) {
-            noteRepository ?: NoteRepository(JuwDatabase.get(context)).also { noteRepository = it }
+            noteRepository ?: NoteRepository(juwDatabase(context)).also { noteRepository = it }
         }
 
     /** 本机骑行记录单例（DESIGN §3.9「最近骑行」）：只有本机还车成功会写。 */
     fun rideRecordStore(context: Context): RideRecordStore =
         rideRecordStore ?: synchronized(this) {
-            rideRecordStore ?: RideRecordStore(JuwDatabase.get(context).rideRecordDao())
+            rideRecordStore ?: RideRecordStore(juwDatabase(context).rideRecordDao())
                 .also { rideRecordStore = it }
         }
 
@@ -560,14 +561,14 @@ object Graph {
      */
     fun kqcxOrderCache(context: Context): KqcxOrderCache =
         kqcxOrderCache ?: synchronized(this) {
-            kqcxOrderCache ?: KqcxOrderCache(JuwDatabase.get(context).kqcxOrderDao())
+            kqcxOrderCache ?: KqcxOrderCache(juwDatabase(context).kqcxOrderDao())
                 .also { kqcxOrderCache = it }
         }
 
     /** 作业仓库单例（DESIGN §4.20）：与笔记共用一套附件与渲染口径。 */
     fun homeworkRepository(context: Context): HomeworkRepository =
         homeworkRepository ?: synchronized(this) {
-            homeworkRepository ?: HomeworkRepository(JuwDatabase.get(context)).also { homeworkRepository = it }
+            homeworkRepository ?: HomeworkRepository(juwDatabase(context)).also { homeworkRepository = it }
         }
 
     /** 图片附件存储单例（DESIGN §4.20）：应用私有目录 notes_img，无网络出口。 */
@@ -978,7 +979,7 @@ object Graph {
     /** 电表读数本机记录（DESIGN §3.13「用电统计」）：仓库写入、账单页读取共用一份。 */
     fun powerReadingStore(context: Context): PowerReadingStore =
         powerReadingStore ?: synchronized(this) {
-            powerReadingStore ?: PowerReadingStore(JuwDatabase.get(context.applicationContext).powerReadingDao())
+            powerReadingStore ?: PowerReadingStore(juwDatabase(context.applicationContext).powerReadingDao())
                 .also { powerReadingStore = it }
         }
 

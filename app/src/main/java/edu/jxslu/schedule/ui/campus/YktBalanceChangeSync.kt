@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.local.JuwDatabase
+import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.prefs.setYktLastBalanceFen
 import edu.jxslu.schedule.data.prefs.yktLastBalanceFen
 import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer
@@ -74,7 +75,7 @@ object YktBalanceChangeSync {
                     if (previous != cardFen) prefs.setYktLastBalanceFen(cardFen)
                     if (!pull) return@withLock
                     val credentials = Graph.yktCredentialStore(appContext).read() ?: return@withLock
-                    YktTurnoverSyncer(Graph.yktRepository(appContext), JuwDatabase.get(appContext)) {
+                    YktTurnoverSyncer(Graph.yktRepository(appContext), juwDatabase(appContext)) {
                         postYktPaymentInbox(appContext, it)
                     }.sync(
                         username = credentials.username,

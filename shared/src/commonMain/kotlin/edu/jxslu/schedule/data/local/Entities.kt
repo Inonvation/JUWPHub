@@ -124,7 +124,7 @@ private fun Course.worstCaseWeeksCsv(): String =
 
 /**
  * 作息表。v3 起每张课表一份：主键从 number 变为 (timetableId, number)。
- * SQLite 不能改主键，v2→v3 迁移用「建新表→搬数据→改名」重建（见 JuwDatabase.MIGRATION_2_3）。
+ * SQLite 不能改主键，v2→v3 迁移用「建新表→搬数据→改名」重建（见 `:app` 的 `JuwDatabaseAndroid.kt` 里 MIGRATION_2_3）。
  */
 @Entity(tableName = "time_slots", primaryKeys = ["timetableId", "number"])
 data class TimeSlotEntity(
