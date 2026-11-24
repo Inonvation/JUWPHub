@@ -1,6 +1,9 @@
 package edu.jxslu.schedule.ui.week
 
 import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.MutableTransitionState
@@ -30,6 +33,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -38,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -45,6 +50,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.ui.common.ImageSource
+import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.theme.Motion
@@ -115,6 +123,29 @@ internal fun DisplaySettingsOverlay(
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val density = LocalDensity.current
 
+    // ---- 背景图（DESIGN §4.21）：选图、缩略图、大图预览三件都是 Android 专有物 ----
+    //
+    // 面板主体在 shared/commonMain，那里看不见 Context / Uri / Bitmap。所以：
+    // 选图器与落盘留在本文件，面板只收一个「点选择」的动作；
+    // 缩略图与预览弹窗以槽位/回调形式传进去，iOS 侧这两个都传 null（对应入口不渲染）。
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val bgStore = remember(context) { Graph.scheduleBackground(context) }
+    var bgViewer by remember { mutableStateOf<String?>(null) }
+    // 取消时 uri 为 null：静默收尾（清掉「处理中」，不提示）
+    val bgPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) {
+            viewModel.finishBackgroundImport(null)
+        } else {
+            scope.launch {
+                val name = bgStore.importUri(uri)
+                viewModel.finishBackgroundImport(name, failed = name == null)
+            }
+        }
+    }
+
     // 档位在 dp 域算（吸附函数 [nearestAnchor] 也是 dp 域，一处口径），并夹进
     // [PanelMinHeight, 上限档]：小屏上 25% 可能不足 180dp。
     // 上限先抬到不低于下限：极矮的分屏窗口里 60% 可能小于 180dp，coerceIn 会抛。
@@ -145,7 +176,6 @@ internal fun DisplaySettingsOverlay(
     // 位移用 Animatable：手势中逐帧 snapTo（跟手，不带缓动），撤回 / 收尾才跑动画。
     // 提交时先补完剩余位移再 onDismiss()，避免面板从半途位置整块消失。
     val backOffsetPx = remember { Animatable(0f) }
-    val scope = rememberCoroutineScope()
     PredictiveBackHandler(enabled = true) { progressEvents ->
         try {
             progressEvents.collect { event -> backOffsetPx.snapTo(event.progress * panelHeightPx) }
@@ -251,10 +281,36 @@ internal fun DisplaySettingsOverlay(
                         viewModel = viewModel,
                         headerMinDp = headerMinDp,
                         modifier = Modifier.weight(1f),
+                        // 选图：先置「处理中」，再弹系统 Photo Picker（零权限，与笔记插图同口径）
+                        onPickBackground = {
+                            viewModel.beginBackgroundImport()
+                            bgPicker.launch(
+                                PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                ),
+                            )
+                        },
+                        // 缩略图与大图预览仍是 Android 的 Bitmap 实现
+                        backgroundThumb = { fileName, thumbModifier ->
+                            ScheduleBackgroundThumb(
+                                fileName = fileName,
+                                modifier = thumbModifier,
+                            )
+                        },
+                        onPreviewBackground = { name -> bgViewer = name },
                     )
                 }
             }
         }
+    }
+
+    // 点缩略图看大图。弹窗是独立窗口，会盖住面板——看完关掉就回到面板，位置不丢。
+    bgViewer?.let { name ->
+        ImageViewerDialog(
+            fileName = name,
+            source = ImageSource.ScheduleBackground,
+            onDismiss = { bgViewer = null },
+        )
     }
 }
 

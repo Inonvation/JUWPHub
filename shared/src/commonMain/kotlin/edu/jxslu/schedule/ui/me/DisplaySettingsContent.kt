@@ -1,8 +1,5 @@
 package edu.jxslu.schedule.ui.me
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,8 +26,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -39,35 +34,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.BgScale
 import edu.jxslu.schedule.domain.CourseFilter
 import edu.jxslu.schedule.domain.GridFont
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.TimetablePrefs
-import edu.jxslu.schedule.ui.common.ImageSource
-import edu.jxslu.schedule.ui.common.ImageViewerDialog
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.week.ScheduleBackgroundThumb
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
- * 显示设置的选项面板主体（字号 / 布局尺寸 / 格子样式 / 内容与开关）。
+ * 显示设置的选项面板主体（字号 / 布局尺寸 / 格子样式 / 内容与开关 / 背景）。
  *
- * 唯一宿主是课表页的**覆盖弹层**（WeekScreen 的 DisplaySettingsOverlay，
- * 入口 = 课表页顶栏眼睛图标；「我的」侧跨 Tab 触发已于 2026-09-20 删除）：
+ * 唯一宿主是课表页的**覆盖弹层**（Android 是 `DisplaySettingsOverlay`，iOS 是
+ * `MainViewController` 里的 `IosDisplaySettingsOverlay`，见 `WeekScreen` 的 `displaySettings` 槽）：
  * 真实课表在面板上方保持可见，所有改动在真实网格上即时生效。
  *
  * [headerMinDp]：表头高度滑块的动态下限（随日期字号，见 minHeaderHeightForDateFont）。
@@ -81,38 +70,39 @@ import kotlin.math.roundToInt
  * **两组例外，恒展开**：「内容与开关」（都是常用开关，收起来只剩一次多余的点击）与
  * 「背景」（选图是这组唯一的入口，收起后用户找不到换图/移除；2026-11-06 复核：
  * 设过图但没拖滑块时，旧的判定会把它判成「没改过」而收起）。
+ *
+ * ## 平台动作（iOS 移植 S17，2026-11-25 搬进共享层时切出来的）
+ *
+ * 本文件在 `commonMain`，看不见 `Context` / `Uri` / Photo Picker / `Bitmap`：
+ *
+ * | 参数 | null 的含义 |
+ * |---|---|
+ * | [onPickBackground] | 本平台没有背景图能力 → 「背景」**整组**不渲染（选图是这组唯一的入口） |
+ * | [backgroundThumb] | 本平台画不出缩略图 → 只画占位底，其余行照旧 |
+ * | [onPreviewBackground] | 本平台没有大图预览 → 缩略图不可点 |
+ *
+ * 选图本身（弹选择器、解码压缩、落盘）由宿主完成，结果经 `viewModel.beginBackgroundImport`
+ * / `finishBackgroundImport` 回报；面板只读 `bgImporting` / `bgNotice` 两个状态。
  */
 @Composable
 fun DisplaySettingsContent(
     viewModel: MeViewModel,
     headerMinDp: Float,
     modifier: Modifier = Modifier,
+    /** 「选择 / 更换」背景图；平台动作，见上方参数表。 */
+    onPickBackground: (() -> Unit)? = null,
+    /** 背景图缩略图；参数是文件名。null = 本平台没有缩略图能力。 */
+    backgroundThumb: (@Composable (fileName: String, modifier: Modifier) -> Unit)? = null,
+    /** 点缩略图看大图（平台弹窗）。 */
+    onPreviewBackground: ((fileName: String) -> Unit)? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val prefs = state.displayPrefs
     // 列数口径必须与真实网格一致（见 ScheduleCalculator.visibleDays）
     val days = ScheduleCalculator.visibleDays(prefs.showSaturday, prefs.showSunday).size
 
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    // 背景图文件存储仍是 `:app` 的东西（解码压缩 + 私有目录）；VM 只收文件名并管顺序
-    val bgStore = remember(context) { Graph.scheduleBackground(context) }
     val bgImporting by viewModel.bgImporting.collectAsStateWithLifecycle()
     val bgNotice by viewModel.bgNotice.collectAsStateWithLifecycle()
-    var bgViewerOpen by rememberSaveable { mutableStateOf(false) }
-    // 选图走系统 Photo Picker（零权限，与笔记插图同一口径）；取消时 uri 为 null，静默返回
-    val bgPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        if (uri == null) {
-            viewModel.finishBackgroundImport(null)
-        } else {
-            scope.launch {
-                val name = bgStore.importUri(uri)
-                viewModel.finishBackgroundImport(name, failed = name == null)
-            }
-        }
-    }
     // 失败提示是瞬时的：一直挂着会把下面的滑块往下顶
     LaunchedEffect(bgNotice) {
         if (bgNotice != null) {
@@ -338,84 +328,74 @@ fun DisplaySettingsContent(
         // 恒展开：这一组里唯一的入口（选图 / 换图 / 移除）不能藏在折叠头后面。
         // 旧判定「没设图 || 滑块被动过」在「设了图但没拖滑块」时会判成没改过而收起，
         // 用户找不到换图入口（2026-11-06 复核）。四行而已，不值得为它做判定。
-        CollapsibleSection(title = "背景") {
-            BackgroundImageRow(
-                fileName = prefs.bgImageName,
-                importing = bgImporting,
-                onPick = {
-                    viewModel.beginBackgroundImport()
-                    bgPicker.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                    )
-                },
-                onPreview = { bgViewerOpen = true },
-            )
-            bgNotice?.let { message ->
-                InlineNoticeRow(
-                    message = message,
-                    tone = NoticeTone.Error,
-                    modifier = Modifier.padding(bottom = 6.dp),
+        //
+        // 整组只在 [onPickBackground] 非空时渲染：选图是这组唯一的入口，没有它，
+        // 下面那四根滑块拖了也不会有效果（本平台设不了背景图）。
+        if (onPickBackground != null) {
+            CollapsibleSection(title = "背景") {
+                BackgroundImageRow(
+                    fileName = prefs.bgImageName,
+                    importing = bgImporting,
+                    onPick = onPickBackground,
+                    onPreview = onPreviewBackground,
+                    thumb = backgroundThumb,
                 )
-            }
-            if (prefs.bgImageName != null) {
-                SliderSettingRow(
-                    title = "图片不透明度",
-                    valueText = percentLabel(
-                        prefs.bgImageOpacity.coerceIn(TimetablePrefs.MinBgImageOpacity, 1f),
-                    ),
-                    value = prefs.bgImageOpacity.coerceIn(TimetablePrefs.MinBgImageOpacity, 1f),
-                    valueRange = TimetablePrefs.MinBgImageOpacity..1f,
-                    onValueChange = { viewModel.setBgImageOpacity(snapStep(it, 0.05f)) },
-                    onReset = { viewModel.setBgImageOpacity(1f) },
-                    minText = "${(TimetablePrefs.MinBgImageOpacity * 100).roundToInt()}%",
-                    maxText = "100%",
-                )
-                SliderSettingRow(
-                    title = "变暗遮罩",
-                    valueText = percentLabel(prefs.bgImageDim.coerceIn(0f, TimetablePrefs.MaxBgImageDim)),
-                    value = prefs.bgImageDim.coerceIn(0f, TimetablePrefs.MaxBgImageDim),
-                    valueRange = 0f..TimetablePrefs.MaxBgImageDim,
-                    onValueChange = { viewModel.setBgImageDim(snapStep(it, 0.05f)) },
-                    onReset = { viewModel.setBgImageDim(0f) },
-                    minText = "0%",
-                    maxText = "${(TimetablePrefs.MaxBgImageDim * 100).roundToInt()}%",
-                )
-                SliderSettingRow(
-                    title = "模糊",
-                    valueText = percentLabel(prefs.bgImageBlur.coerceIn(0f, 1f)),
-                    value = prefs.bgImageBlur.coerceIn(0f, 1f),
-                    valueRange = 0f..1f,
-                    onValueChange = { viewModel.setBgImageBlur(snapStep(it, 0.25f)) },
-                    onReset = { viewModel.setBgImageBlur(0f) },
-                    minText = "0%",
-                    maxText = "100%",
-                )
-                BackgroundScaleRow(
-                    scale = prefs.bgImageScale,
-                    onChange = viewModel::setBgImageScale,
-                )
-                TextButton(
-                    onClick = { viewModel.removeScheduleBackground() },
-                    modifier = Modifier.padding(top = 2.dp),
-                ) {
-                    Text(
-                        "移除背景",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.error,
+                bgNotice?.let { message ->
+                    InlineNoticeRow(
+                        message = message,
+                        tone = NoticeTone.Error,
+                        modifier = Modifier.padding(bottom = 6.dp),
                     )
                 }
+                if (prefs.bgImageName != null) {
+                    SliderSettingRow(
+                        title = "图片不透明度",
+                        valueText = percentLabel(
+                            prefs.bgImageOpacity.coerceIn(TimetablePrefs.MinBgImageOpacity, 1f),
+                        ),
+                        value = prefs.bgImageOpacity.coerceIn(TimetablePrefs.MinBgImageOpacity, 1f),
+                        valueRange = TimetablePrefs.MinBgImageOpacity..1f,
+                        onValueChange = { viewModel.setBgImageOpacity(snapStep(it, 0.05f)) },
+                        onReset = { viewModel.setBgImageOpacity(1f) },
+                        minText = "${(TimetablePrefs.MinBgImageOpacity * 100).roundToInt()}%",
+                        maxText = "100%",
+                    )
+                    SliderSettingRow(
+                        title = "变暗遮罩",
+                        valueText = percentLabel(prefs.bgImageDim.coerceIn(0f, TimetablePrefs.MaxBgImageDim)),
+                        value = prefs.bgImageDim.coerceIn(0f, TimetablePrefs.MaxBgImageDim),
+                        valueRange = 0f..TimetablePrefs.MaxBgImageDim,
+                        onValueChange = { viewModel.setBgImageDim(snapStep(it, 0.05f)) },
+                        onReset = { viewModel.setBgImageDim(0f) },
+                        minText = "0%",
+                        maxText = "${(TimetablePrefs.MaxBgImageDim * 100).roundToInt()}%",
+                    )
+                    SliderSettingRow(
+                        title = "模糊",
+                        valueText = percentLabel(prefs.bgImageBlur.coerceIn(0f, 1f)),
+                        value = prefs.bgImageBlur.coerceIn(0f, 1f),
+                        valueRange = 0f..1f,
+                        onValueChange = { viewModel.setBgImageBlur(snapStep(it, 0.25f)) },
+                        onReset = { viewModel.setBgImageBlur(0f) },
+                        minText = "0%",
+                        maxText = "100%",
+                    )
+                    BackgroundScaleRow(
+                        scale = prefs.bgImageScale,
+                        onChange = viewModel::setBgImageScale,
+                    )
+                    TextButton(
+                        onClick = { viewModel.removeScheduleBackground() },
+                        modifier = Modifier.padding(top = 2.dp),
+                    ) {
+                        Text(
+                            "移除背景",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
-        }
-    }
-
-    // 点缩略图看大图。弹窗是独立窗口，会盖住面板——看完关掉就回到面板，位置不丢。
-    if (bgViewerOpen) {
-        prefs.bgImageName?.let { name ->
-            ImageViewerDialog(
-                fileName = name,
-                source = ImageSource.ScheduleBackground,
-                onDismiss = { bgViewerOpen = false },
-            )
         }
     }
 }
@@ -706,15 +686,19 @@ private fun SliderSettingRow(
  * 背景图预览行（DESIGN §4.21）：缩略图 + 状态 + 选择/更换。
  *
  * 有图时缩略图可点（点开看大图）；没图时它就是一块占位底，不给点击。
- * 导入中按钮转「处理中…」并禁用——Photo Picker 返回后落盘要几十到几百毫秒，
+ * 导入中按钮转「处理中…」并禁用——选图器返回后落盘要几十到几百毫秒，
  * 期间再点一次会并发写同一份偏好。
+ *
+ * 缩略图与大图都是平台物（Android 是 `BitmapFactory` + `ImageViewerDialog`）：
+ * [thumb] 为 null 时只画占位底，[onPreview] 为 null 时缩略图不可点。
  */
 @Composable
 private fun BackgroundImageRow(
     fileName: String?,
     importing: Boolean,
     onPick: () -> Unit,
-    onPreview: () -> Unit,
+    onPreview: ((fileName: String) -> Unit)?,
+    thumb: (@Composable (fileName: String, modifier: Modifier) -> Unit)?,
 ) {
     val haptics = rememberAppHaptics()
     Row(
@@ -729,7 +713,7 @@ private fun BackgroundImageRow(
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
                 .then(
-                    if (fileName == null) {
+                    if (fileName == null || onPreview == null) {
                         Modifier
                     } else {
                         Modifier.clickable(
@@ -737,16 +721,13 @@ private fun BackgroundImageRow(
                             onClickLabel = "查看背景大图",
                         ) {
                             haptics.tap()
-                            onPreview()
+                            onPreview(fileName)
                         }
                     },
                 ),
         ) {
-            if (fileName != null) {
-                ScheduleBackgroundThumb(
-                    fileName = fileName,
-                    modifier = Modifier.fillMaxSize(),
-                )
+            if (fileName != null && thumb != null) {
+                thumb(fileName, Modifier.fillMaxSize())
             }
         }
         Spacer(Modifier.width(12.dp))
@@ -755,7 +736,7 @@ private fun BackgroundImageRow(
                 text = if (fileName == null) "未设置" else "自定义图片",
                 style = MaterialTheme.typography.bodyLarge,
             )
-            if (fileName != null) {
+            if (fileName != null && onPreview != null) {
                 Text(
                     text = "点缩略图看大图",
                     style = MaterialTheme.typography.bodySmall,
