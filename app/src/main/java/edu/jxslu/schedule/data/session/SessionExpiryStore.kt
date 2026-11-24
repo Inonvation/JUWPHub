@@ -2,15 +2,6 @@ package edu.jxslu.schedule.data.session
 
 import android.content.Context
 
-/** 有独立登录态、会过期的第三方功能（账号中心「生活服务」那几行）。 */
-enum class SessionService(val id: String) {
-    Qiekj("qiekj"),
-    Qzxy("qzxy"),
-    Ujing("ujing"),
-    Kqcx("kqcx"),
-    Wenqu("wenqu"),
-}
-
 /**
  * 「登录状态已过期」留痕（2026-10-21 用户要求）。
  *
@@ -50,8 +41,14 @@ class SessionExpiryStore(context: Context) {
     }
 
     companion object {
-        /** 进页提示的统一文案（各页与失效当场的提示共用）。 */
-        const val NOTICE_TEXT = "登录状态已过期，请重新登录"
+        /**
+         * 进页提示的统一文案（各页与失效当场的提示共用）。
+         *
+         * 字面量在共享层的 [SESSION_EXPIRED_NOTICE]：`SessionExpiredNotice` 与账号中心页
+         * 已搬进 `commonMain`，它们读不到 `:app` 的常量。这里保留同名别名，是为了让
+         * `:app` 三个 ViewModel（水控 / U净 / 趣智）的调用点一行都不用改。
+         */
+        const val NOTICE_TEXT = SESSION_EXPIRED_NOTICE
 
         private const val FILE = "session_expiry"
     }
