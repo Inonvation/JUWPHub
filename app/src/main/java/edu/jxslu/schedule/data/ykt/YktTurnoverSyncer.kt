@@ -149,7 +149,9 @@ class YktTurnoverSyncer(
                     .toInstant()
                     .toEpochMilli()
             }.getOrDefault(0L)
-            val key = if (orderId.isNullOrBlank()) "syn_${jndatetimeStr}_$tranamtFen" else orderId
+            // `orderId` 是 `:shared` 里 `YktTurnover` 的公开属性，跨模块不能智能转换，
+            // 所以用 orEmpty() 收口（else 分支里它必然非空非空串，orEmpty 只是让类型落定）
+            val key = if (orderId.isNullOrBlank()) "syn_${jndatetimeStr}_$tranamtFen" else orderId.orEmpty()
             return YktTurnoverEntity(
                 orderId = key,
                 jndatetime = epoch,

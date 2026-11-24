@@ -52,10 +52,14 @@ object SharedHttp {
         requestTimeoutSeconds: Long = REQUEST_TIMEOUT_SECONDS,
         connectTimeoutSeconds: Long = CONNECT_TIMEOUT_SECONDS,
         socketTimeoutSeconds: Long = SOCKET_TIMEOUT_SECONDS,
+        followRedirects: Boolean = true,
     ): HttpClient = HttpClient {
         // 非 2xx 不抛异常：现状各模块都是自己判 `isSuccessful` 再换算成各自的异常类型，
         // 打开这个开关会把「HTTP 500」变成 Ktor 自己的异常，错误文案就变了。
         expectSuccess = false
+        // 默认跟随重定向；一卡通充值下单那类**要靠 302 的 Location 拿收银台 URL**，
+        // 必须拿到原始 302 而不是落地页，所以给调用方留一个关掉的开关。
+        this.followRedirects = followRedirects
         install(HttpTimeout) {
             requestTimeoutMillis = requestTimeoutSeconds * 1000
             connectTimeoutMillis = connectTimeoutSeconds * 1000

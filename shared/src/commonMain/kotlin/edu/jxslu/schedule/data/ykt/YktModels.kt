@@ -10,6 +10,8 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import okio.ByteString.Companion.decodeBase64
+import kotlin.math.roundToLong
 
 /**
  * 一卡通（慧新e校）响应模型（DESIGN §4.19）。字段对齐 2026-09-20 实测，
@@ -204,8 +206,11 @@ sealed class YktException(message: String, cause: Throwable? = null) : Exception
  * Spring Security OAuth 的英文原文（如 "Bad credentials"），直接透出就是用户看到的
  * 英文报错。这里只把明确的凭证类消息映射成「密码错误」文案，其余一律给通用中文——
  * 不把平台原文当文案透出，也不猜其他错误的具体原因。
+ *
+ * 2026-11-24（iOS 移植 P1）：本文件搬进 `:shared` 后从 `internal` 放开成 public——
+ * 调用方 `YktRepository` 与 `YktTurnoverSyncer` 留在 `:app`，跨模块看不见 `internal`。
  */
-internal fun yktCredentialErrorText(raw: String): String {
+fun yktCredentialErrorText(raw: String): String {
     val lower = raw.lowercase()
     val credentialLike = "bad credentials" in lower ||
         "invalid_grant" in lower ||
@@ -252,7 +257,12 @@ object YktModels {
         return YktKeyboardData(
             uuid = uuid,
             numberKeyboard = kb,
-            numberKeyboardImage = images.map { android.util.Base64.decode(it, android.util.Base64.DEFAULT) },
+            // `android.util.Base64` 是 Android 专有的；okio 的 decodeBase64 跨平台，
+            // 解析不出来时返回 null 而不是抛——这里统一当成协议漂移（与周围一致）
+            numberKeyboardImage = images.map {
+                it.decodeBase64()?.toByteArray()
+                    ?: throw YktException.Protocol("键盘字形图不是合法 Base64")
+            },
             samplePassword = obj["password"]?.jsonPrimitive?.content,
         )
     }
@@ -286,7 +296,9 @@ object YktModels {
                 if (type.endsWith("-000")) {
                     val rawBalance = (io["balance"] as? JsonPrimitive)?.content
                     val fen = rawBalance?.toLongOrNull()
-                        ?: rawBalance?.toDoubleOrNull()?.let { Math.round(it) }
+                        // `Math.round(Double)` 是 JVM 的；这里要的就是「四舍五入到整数再转 Long」，
+                        // `roundToLong()` 同口径（0.5 向正无穷）
+                        ?: rawBalance?.toDoubleOrNull()?.let { it.roundToLong() }
                     return type to (fen ?: 0L)
                 }
             }
