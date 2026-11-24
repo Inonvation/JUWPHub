@@ -51,8 +51,13 @@ import edu.jxslu.schedule.ui.me.ShortcutSettingsViewModel
 import edu.jxslu.schedule.ui.me.hub.AboutUpdateScreen
 import edu.jxslu.schedule.ui.me.hub.SupportDevScreen
 import edu.jxslu.schedule.ui.me.hub.TermsDeclarationsScreen
+import edu.jxslu.schedule.ui.timetable.ScheduleChangesScreen
+import edu.jxslu.schedule.ui.timetable.TimetableManageScreen
+import edu.jxslu.schedule.ui.timetable.TimetableViewModel
 import edu.jxslu.schedule.ui.toolbox.CainiaoQueryScreen
 import edu.jxslu.schedule.ui.toolbox.ToolboxScreen
+import edu.jxslu.schedule.ui.tweak.CourseTweakScreen
+import edu.jxslu.schedule.ui.tweak.CourseTweakViewModel
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
@@ -175,6 +180,11 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     IosDrawerEntry("生活", IosRoute(SubpageScreen.WEATHER), "天气"),
     IosDrawerEntry("生活", IosRoute(SubpageScreen.WEATHER_SETTINGS), "天气设置"),
     // 设置
+    // 课表三页（iOS 移植 X1，2026-11-25）：Android 侧在「设置 → 课表」与「设置 → 数据与权限」，
+    // 这里同组相邻，顺序照 Android 的设置页
+    IosDrawerEntry("设置", IosRoute(SubpageScreen.COURSE_TWEAK), "调课"),
+    IosDrawerEntry("设置", IosRoute(SubpageScreen.SCHEDULE_CHANGES), "变动检测"),
+    IosDrawerEntry("设置", IosRoute(SubpageScreen.TIMETABLE_MANAGE), "课表管理"),
     IosDrawerEntry("设置", IosRoute(SubpageScreen.DATA_SETTINGS), "数据与备份"),
     IosDrawerEntry("设置", IosRoute(SubpageScreen.CALENDAR_SETTINGS), "校历与日历同步"),
     IosDrawerEntry("设置", IosRoute(SubpageScreen.REMINDER_SETTINGS), "上课提醒"),
@@ -462,6 +472,28 @@ internal fun IosRouteContent(
         SubpageScreen.TOOLBOX -> ToolboxScreen(onBack = pop)
 
         SubpageScreen.TOOLBOX_CAINIAO -> CainiaoQueryScreen(onBack = pop)
+
+        // ---------------------------------------------------------------- 课表管理 / 调课 / 变动检测
+        //
+        // 三页（iOS 移植 X1，2026-11-25 搬进共享层）在 iOS 上都是**完整可用**的：
+        // 仓库是同一个 Room 库，教务直取走 `IosJwReadSession`（Cookie 来自 WKWebView），
+        // 归档链 `scheduleTermImport()` 也非空，所以「从教务导入全部学期」在 iOS 上真能跑。
+        // 唯一没有的是提醒调度（WorkManager + 通知渠道）——两个回调不传，开关照常落库、
+        // 这一侧不排任务（见 `ScheduleChangesScreen` 的 KDoc）。
+        SubpageScreen.TIMETABLE_MANAGE -> {
+            val vm = remember { TimetableViewModel(services.scheduleRepository()) }
+            TimetableManageScreen(onBack = pop, viewModel = vm)
+        }
+
+        SubpageScreen.COURSE_TWEAK -> {
+            val vm = remember { CourseTweakViewModel(services.scheduleRepository()) }
+            CourseTweakScreen(onBack = pop, viewModel = vm)
+        }
+
+        SubpageScreen.SCHEDULE_CHANGES -> ScheduleChangesScreen(
+            onBack = pop,
+            onOpenHistory = { push(IosRoute(SubpageScreen.AI_HISTORY)) },
+        )
 
         // ---------------------------------------------------------------- 我的 · 设置子页
         //

@@ -46,17 +46,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.ScheduleCalculator
+import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.TweakMode
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.SettingsSection
@@ -65,9 +63,11 @@ import edu.jxslu.schedule.ui.common.courseColor
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneOffset
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Instant
 import edu.jxslu.schedule.domain.monthDayText
 
 /**
@@ -75,14 +75,20 @@ import edu.jxslu.schedule.domain.monthDayText
  *
  * 与拾光的差别（详见 DESIGN）：本页固定作用于**当前课表**，不做跨课表调课；
  * 覆盖/交换属破坏性操作，执行前弹一次确认（拾光直接生效）。
+ *
+ * ## iOS 移植 X1（2026-11-25）搬进 `commonMain`
+ *
+ * [viewModel] 改成必填、由宿主创建（Android `viewModel {}`、iOS `remember {}`）——
+ * `commonMain` 里没有 `viewModel()` 那个 Composable 入口（`design/ios-port.md` §11.1）。
+ * 日期控件仍用 M3 的 `DatePicker`，只是换算口径换成 `kotlinx.datetime` + UTC 当日零点：
+ * `rememberDatePickerState` 的毫秒按 UTC 解释，写死 UTC 才不会因本地时区差一天。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CourseTweakScreen(
     onBack: () -> Unit,
-    viewModel: CourseTweakViewModel = viewModel(
-        factory = CourseTweakViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
+    /** 由宿主创建（Android `viewModel {}`、iOS `remember {}`），见 `design/ios-port.md` §11.2 ①。 */
+    viewModel: CourseTweakViewModel,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val message by viewModel.messages.collectAsStateWithLifecycle()
@@ -272,7 +278,7 @@ fun CourseTweakScreen(
     }
 }
 
-private fun dateText(date: LocalDate): String = monthDayText(date.monthValue, date.dayOfMonth)
+private fun dateText(date: LocalDate): String = monthDayText(date.monthNumber, date.dayOfMonth)
 
 /** 一张日期卡：标题、日期、周次与星期；不在学期内时整卡标红。 */
 @Composable
@@ -408,7 +414,7 @@ private fun PreviewRow(course: Course, slots: List<TimeSlot>) {
 private fun metaLine(slots: List<TimeSlot>, course: Course): String {
     val start = ScheduleCalculator.courseStartMinutes(slots, course)
     val end = ScheduleCalculator.courseEndMinutes(slots, course)
-    val clock = if (start != null && end != null) "${clock(start)}–${clock(end)}" else null
+    val clock = if (start != null && end != null) "${TextFmt.clock(start)}–${TextFmt.clock(end)}" else null
     val section = if (course.endSection > course.startSection) {
         "第${course.startSection}-${course.endSection}节"
     } else {
@@ -418,8 +424,6 @@ private fun metaLine(slots: List<TimeSlot>, course: Course): String {
     return listOfNotNull(section, clock, place, course.teacher.takeIf { it.isNotBlank() })
         .joinToString(" · ")
 }
-
-private fun clock(minutes: Int): String = "%02d:%02d".format(minutes / 60, minutes % 60)
 
 private fun weeksShort(weeks: Set<Int>): String {
     val text = ScheduleCalculator.formatWeeks(weeks)
@@ -435,8 +439,11 @@ private fun DatePickDialog(
 ) {
     // rememberDatePickerState 放在调用处包着的 if 块内：每次打开重建，初始选中跟随当前值，
     // 避免上一次取消的选择残留（与课表设置页同一处理）。
+    //
+    // 毫秒按 **UTC 当日零点** 换算（M3 的 DatePicker 就是这么解释 selectedDateMillis 的），
+    // 用本地时区会在东八区把「今天」读成前一天。
     val dateState = rememberDatePickerState(
-        initialSelectedDateMillis = initial.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+        initialSelectedDateMillis = initial.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds(),
     )
     DatePickerDialog(
         onDismissRequest = onDismiss,
@@ -444,7 +451,7 @@ private fun DatePickDialog(
             TextButton(
                 onClick = {
                     dateState.selectedDateMillis?.let { millis ->
-                        onPick(Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate())
+                        onPick(Instant.fromEpochMilliseconds(millis).toLocalDateTime(TimeZone.UTC).date)
                     } ?: onDismiss()
                 },
             ) { Text("确定") }

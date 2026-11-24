@@ -109,6 +109,7 @@ import edu.jxslu.schedule.ui.notes.NoteCourseScreen
 import edu.jxslu.schedule.ui.notes.NoteDetailScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.reminder.ClassReminder
+import edu.jxslu.schedule.ui.reminder.ScoreAlertReminder
 import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.score.rememberScoreScreenActions
 import edu.jxslu.schedule.ui.score.ScoreSettingsScreen
@@ -137,7 +138,9 @@ import edu.jxslu.schedule.ui.ai.rememberAiImageStore
 import edu.jxslu.schedule.ui.ai.rememberAiImageUi
 import edu.jxslu.schedule.ui.timetable.ScheduleChangesScreen
 import edu.jxslu.schedule.ui.timetable.TimetableManageScreen
+import edu.jxslu.schedule.ui.timetable.TimetableViewModel
 import edu.jxslu.schedule.ui.tweak.CourseTweakScreen
+import edu.jxslu.schedule.ui.tweak.CourseTweakViewModel
 import edu.jxslu.schedule.ui.ujing.UjingHistoryScreen
 import edu.jxslu.schedule.ui.ujing.UjingOrderScreen
 import edu.jxslu.schedule.ui.ujing.UjingScreen
@@ -264,13 +267,23 @@ class SubpageActivity : ComponentActivity() {
         ujingScanRaw: String? = null,
     ) {
         when (screen) {
-            SubpageScreen.TIMETABLE_MANAGE -> TimetableManageScreen(onBack = onBack)
+            // 课表管理（iOS 移植 X1，2026-11-25 搬进 shared/commonMain）：ViewModel 由宿主创建
+            // （design/ios-port.md §11.2 ①）。归档链与仓库都从 `Services` 取，页面本身零平台能力。
+            SubpageScreen.TIMETABLE_MANAGE -> TimetableManageScreen(
+                onBack = onBack,
+                viewModel = viewModel { TimetableViewModel(Services.current.scheduleRepository()) },
+            )
             SubpageScreen.DATA_SETTINGS -> DataSettingsScreen(
                 onBack = onBack,
                 // ViewModel 由宿主创建（design/ios-port.md §11.2 ①）
                 viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
             )
-            SubpageScreen.COURSE_TWEAK -> CourseTweakScreen(onBack = onBack)
+            // 调课（DESIGN §4.11，iOS 移植 X1 搬进共享层）：同上，ViewModel 由宿主创建。
+            // 日期控件与周次换算已换成 kotlinx-datetime，两端同一份实现。
+            SubpageScreen.COURSE_TWEAK -> CourseTweakScreen(
+                onBack = onBack,
+                viewModel = viewModel { CourseTweakViewModel(Services.current.scheduleRepository()) },
+            )
             SubpageScreen.WATER -> WaterScreen(
                 onBack = onBack,
                 autoStart = autoStart,
@@ -664,9 +677,17 @@ class SubpageActivity : ComponentActivity() {
                 // ViewModel 由宿主创建（design/ios-port.md §11.2 ①）
                 viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
             )
+            // 变动检测处置页（iOS 移植 X1 搬进共享层）：提醒开关与间隔改完要重排后台核对，
+            // 那是 WorkManager + 通知渠道（`ui/reminder/ScheduleAlertReminder`，Android 专有），
+            // 按 §11.2 ④ 收成两个可空回调从这里注入。
             SubpageScreen.SCHEDULE_CHANGES -> ScheduleChangesScreen(
                 onBack = onBack,
                 onOpenHistory = { SubpageActivity.start(this, SubpageScreen.AI_HISTORY) },
+                onScheduleAlertToggle = { enabled ->
+                    ScoreAlertReminder.ensurePeriodicWork(this)
+                    if (enabled) ScoreAlertReminder.enqueueCheck(this)
+                },
+                onScheduleAlertSettingsChanged = { ScoreAlertReminder.onSettingsChanged(this) },
             )
             // AI 调课三页（S15 收尾，2026-11-25 搬进 shared/commonMain）：
             // ViewModel 由宿主建（design/ios-port.md §11.2 ①），图片与 API Key 两条平台能力
