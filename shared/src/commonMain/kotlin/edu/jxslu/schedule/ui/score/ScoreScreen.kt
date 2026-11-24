@@ -16,13 +16,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -38,7 +33,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,31 +40,27 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.JwImportActivity
-import edu.jxslu.schedule.SubpageActivity
-import edu.jxslu.schedule.SubpageScreen
-import edu.jxslu.schedule.TranscriptActivity
 import edu.jxslu.schedule.domain.ScoreCalculator
 import edu.jxslu.schedule.domain.ScoreGroups
-import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import edu.jxslu.schedule.domain.ScoreRecord
 import edu.jxslu.schedule.domain.ScoreSortMode
 import edu.jxslu.schedule.domain.TermSummary
+import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.domain.YearGroup
-import edu.jxslu.schedule.ui.common.EmptyHint
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardRow
+import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.SectionHeader
-import edu.jxslu.schedule.ui.jwvw.JwImportMode
+import edu.jxslu.schedule.ui.icon.AppIcons
+import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import kotlinx.coroutines.launch
 
 /** 「全部」档的选中哨兵值：学期号/学年号不可能出现的字符串，避免与真实数据撞值。 */
@@ -80,7 +70,7 @@ private const val SCOPE_ALL = "\u0000all"
  * 成绩查询（DESIGN §4.15）：按学期 / 按学年两种分组切换展示 + 汇总 + 课程卡列表，
  * 两种视图首位都有「全部」档（全量聚合：总加权平均 / 总绩点 / 总修得学分）。
  *
- * 数据全局归属学生、按学期整体替换；页内「导入」复用教务 WebView（[JwImportMode.Scores]），
+ * 数据全局归属学生、按学期整体替换；页内「导入」复用教务 WebView，
  * 清空学期已迁到「成绩设置」的「数据」段（选择学期后二次确认）。
  * 评教未完成（pendingReview）的课程不显示分数也不进统计，单独呈现「待评教」标记，
  * 避免用户误以为成绩丢失。
@@ -90,12 +80,32 @@ private const val SCOPE_ALL = "\u0000all"
  *
  * 列表排序（DESIGN §4.15）：设置页三档——默认/成绩/绩点，只作用于学期分组内部；
  * 加权平均分与平均绩点不计任选课（通识任选、专业任选等），汇总卡展示计算公式并标注「仅供参考」。
+ *
+ * ## 平台动作全在参数里（iOS 移植 S10，2026-11-25）
+ *
+ * 本文件在共享层，拿不到 `Context` / `Activity`。原来三处 `XxxActivity.start(context, …)`
+ * 收成可空回调，**null = 这个平台没有这项能力，入口整行不渲染**（口径同 `WeekScreen`）：
+ *
+ * | 参数 | null 的含义 |
+ * |---|---|
+ * | [onImportScores] | 平台没有导入窗口 → 顶栏「从教务导入」与空态「去导入」都不出现 |
+ * | [onOpenSettings] | 平台没有二级页路由 → 隐藏「成绩设置」齿轮与空态「出分提醒」卡 |
+ * | [onOpenTranscript] | 平台没有签章单导出 → 隐藏「导出带章成绩单」卡 |
+ *
+ * 数据本身两端同源：成绩读的是 [Services.current] 给的 Room 仓库，不依赖会话。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScoreScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val scoreRepo = remember { Graph.scoreRepository(context) }
+fun ScoreScreen(
+    onBack: () -> Unit,
+    /** 从教务导入成绩（Android 走 `JwImportActivity.start(context, JwImportMode.Scores)`）。 */
+    onImportScores: (() -> Unit)? = null,
+    /** 成绩设置二级页。 */
+    onOpenSettings: (() -> Unit)? = null,
+    /** 导出带章成绩单（Android 走 `TranscriptActivity.start`）。 */
+    onOpenTranscript: (() -> Unit)? = null,
+) {
+    val scoreRepo = remember { Services.current.scoreRepository() }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
@@ -106,9 +116,9 @@ fun ScoreScreen(onBack: () -> Unit) {
     // 不区分的话，首帧会先渲染「还没有成绩」空态再跳真实数据（与今日页 ready
     // 门闸同根因的闪屏，今日页修在 ViewModel，这里数据流是冷流直订，收口在 UI 侧）
     val termsState by scoreRepo.observeTerms()
-        .collectAsState(initial = null)
+        .collectAsStateWithLifecycle(initialValue = null)
     val allByTermState by scoreRepo.observeAllGroupedByTerm()
-        .collectAsState(initial = null)
+        .collectAsStateWithLifecycle(initialValue = null)
     val ready = termsState != null && allByTermState != null
     val terms = termsState.orEmpty()
     val allByTerm = allByTermState.orEmpty()
@@ -116,10 +126,12 @@ fun ScoreScreen(onBack: () -> Unit) {
 
     // 分组模式/排序/任选课口径持久化在 DataStore（DESIGN §4.15）：重进页面不重置；
     // 学期内具体选中项页内记忆即可
-    val prefsStore = remember { Graph.displayPrefs(context) }
-    val includeFreeElectives by prefsStore.scoreIncludeFreeElectives.collectAsState(initial = false)
-    val groupByYear by prefsStore.scoreGroupByYear.collectAsState(initial = false)
-    val sortMode by prefsStore.scoreSortMode.collectAsState(initial = ScoreSortMode.Default)
+    val prefsStore = remember { Services.current.displayPrefs() }
+    val includeFreeElectives by prefsStore.scoreIncludeFreeElectives
+        .collectAsStateWithLifecycle(initialValue = false)
+    val groupByYear by prefsStore.scoreGroupByYear.collectAsStateWithLifecycle(initialValue = false)
+    val sortMode by prefsStore.scoreSortMode
+        .collectAsStateWithLifecycle(initialValue = ScoreSortMode.Default)
     var selectedTerm by remember { mutableStateOf<String?>(null) }
     var selectedYear by remember { mutableStateOf<String?>(null) }
 
@@ -159,17 +171,19 @@ fun ScoreScreen(onBack: () -> Unit) {
                 title = { Text("成绩查询", style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        JwImportActivity.start(context, JwImportMode.Scores)
-                    }) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "从教务导入")
+                    if (onImportScores != null) {
+                        IconButton(onClick = onImportScores) {
+                            Icon(AppIcons.Refresh, contentDescription = "从教务导入")
+                        }
                     }
-                    IconButton(onClick = { SubpageActivity.start(context, SubpageScreen.SCORE_SETTINGS) }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "成绩设置")
+                    if (onOpenSettings != null) {
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(AppIcons.Settings01, contentDescription = "成绩设置")
+                        }
                     }
                 },
             )
@@ -198,43 +212,49 @@ fun ScoreScreen(onBack: () -> Unit) {
                 ) {
                     EmptyHint(
                         title = "还没有成绩",
-                        body = "从教务导入全部学期的成绩后，这里会按学期展示。\n导入只读教务数据，不会写入课表。",
-                        actionLabel = "去导入",
-                        onAction = {
-                            JwImportActivity.start(context, JwImportMode.Scores)
+                        body = if (onImportScores != null) {
+                            "从教务导入全部学期的成绩后，这里会按学期展示。\n导入只读教务数据，不会写入课表。"
+                        } else {
+                            "本平台还没有成绩导入窗口，要等导入过成绩之后这里才会有内容。"
                         },
+                        actionLabel = if (onImportScores != null) "去导入" else null,
+                        onAction = onImportScores,
                     )
-                    Spacer(Modifier.height(8.dp))
-                    // 本地没导入过成绩，也照样能从教务处签章系统导出正式单据（两边数据源不同）
-                    ExportTranscriptCard(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        onClick = { TranscriptActivity.start(context) },
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    // 提醒等出分是主场景之一：空态给一行入口卡（与导出卡同语言，
-                    // 开关与间隔在「成绩设置」页承载——别在这再长出一个设置块）
-                    AppCardRow(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        onClick = { SubpageActivity.start(context, SubpageScreen.SCORE_SETTINGS) },
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "出分提醒",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                "新出成绩或复查改分时通知 · 在成绩设置里开启",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    if (onOpenTranscript != null) {
+                        Spacer(Modifier.height(8.dp))
+                        // 本地没导入过成绩，也照样能从教务处签章系统导出正式单据（两边数据源不同）
+                        ExportTranscriptCard(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            onClick = onOpenTranscript,
+                        )
+                    }
+                    if (onOpenSettings != null) {
+                        Spacer(Modifier.height(10.dp))
+                        // 提醒等出分是主场景之一：空态给一行入口卡（与导出卡同语言，
+                        // 开关与间隔在「成绩设置」页承载——别在这再长出一个设置块）
+                        AppCardRow(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            onClick = onOpenSettings,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "出分提醒",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    "新出成绩或复查改分时通知 · 在成绩设置里开启",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                )
+                            }
+                            Icon(
+                                AppIcons.BellRing,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
                             )
                         }
-                        Icon(
-                            AppIcons.BellRing,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
                     }
                 }
             }
@@ -262,7 +282,7 @@ fun ScoreScreen(onBack: () -> Unit) {
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    contentPadding = PaddingValues(
                         horizontal = 16.dp,
                         vertical = 12.dp,
                     ),
@@ -334,10 +354,10 @@ fun ScoreScreen(onBack: () -> Unit) {
                                 ScoreCard(row.record, Modifier.animateItem())
                         }
                     }
-                    item {
-                        ExportTranscriptCard(
-                            onClick = { TranscriptActivity.start(context) },
-                        )
+                    if (onOpenTranscript != null) {
+                        item {
+                            ExportTranscriptCard(onClick = onOpenTranscript)
+                        }
                     }
                     item {
                         Text(
@@ -574,6 +594,9 @@ private fun ScoreCard(record: ScoreRecord, modifier: Modifier = Modifier) {
  * 与「从教务导入」并列但不同源：导入读的是强智成绩接口（本地按学期存），
  * 导出拿的是签章系统生成的正式 PDF。文案里把「教务处电子签章」写出来，
  * 因为这个入口的实际用途就是评优评先要交的那张单据。
+ *
+ * 图标从 `Icons.Filled.FileDownload` 换成 [AppIcons.FileExport]（共享层没有 material
+ * 图标集；选 `FileExport` 而不是 `ImageDownload`：这里出的是 PDF 单据，不是图片）。
  */
 @Composable
 private fun ExportTranscriptCard(
@@ -595,18 +618,21 @@ private fun ExportTranscriptCard(
             )
         }
         Icon(
-            Icons.Filled.FileDownload,
+            AppIcons.FileExport,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
         )
     }
 }
 
-/** 去掉无意义的尾部 0：3.0 → 3、84.50 → 84.5、84.0 → 84。 */
+/**
+ * 去掉无意义的尾部 0：3.0 → 3、84.50 → 84.5、84.0 → 84。
+ *
+ * 原实现是 `"%.2f".format(v)`（JVM 专有）。现在走 [TextFmt.decimals]——它对着一份
+ * `String.format` 的全量单测，舍入口径（HALF_UP）与 Java 的 `%f` 一致，尾零裁剪保持原样。
+ */
 private fun trimNum(v: Double?): String {
     if (v == null) return "—"
-    var s = "%.2f".format(v)
-    s = s.trimEnd('0').trimEnd('.')
+    val s = TextFmt.decimals(v, 2).trimEnd('0').trimEnd('.')
     return s.ifEmpty { "0" }
 }
-

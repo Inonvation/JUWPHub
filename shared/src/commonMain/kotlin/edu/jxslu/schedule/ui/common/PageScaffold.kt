@@ -16,9 +16,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -36,6 +33,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 
 /**
@@ -51,6 +49,11 @@ import edu.jxslu.schedule.ui.theme.Motion
  *
  * 与 `ui-common.md` 的分工：那份文件讲**为什么**（观感与已知的坑），本文件是它的
  * 可执行版本。改这里的数值等于改全 App 的二级页排版，改前先过一遍 DESIGN §3.2。
+ *
+ * **2026-11-25 起本文件在 `shared/commonMain`**（iOS 移植 S10）：考试 / 成绩两页搬进共享层
+ * 要用同一套骨架，而骨架本来就是「口径的唯一出处」——为 iOS 另抄一份等于把两套口径重新分叉。
+ * 包名与签名一字未改，`:app` 的 14 个页面无需改动就继续用；唯一改的是两个图标
+ * （`Icons.Filled.Refresh` / `Icons.AutoMirrored.Filled.ArrowBack` → `AppIcons`）。
  */
 object PageDefaults {
     /** 页面左右边距：全 App 二级页统一 16dp。 */
@@ -93,11 +96,11 @@ data class PageEmpty(
     val onAction: (() -> Unit)? = null,
 )
 
-/** 二级页统一返回键：`AutoMirrored`（RTL 会翻转）+ 48dp 命中区（IconButton 默认）。 */
+/** 二级页统一返回键：`AppIcons.ArrowLeft01` + 48dp 命中区（IconButton 默认）。 */
 @Composable
 fun PageBackButton(onBack: () -> Unit) {
     IconButton(onClick = onBack) {
-        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
     }
 }
 
@@ -129,7 +132,7 @@ fun RowScope.PageRefreshAction(
         }
     } else {
         IconButton(onClick = onClick) {
-            Icon(Icons.Filled.Refresh, contentDescription = label)
+            Icon(AppIcons.Refresh, contentDescription = label)
         }
     }
 }

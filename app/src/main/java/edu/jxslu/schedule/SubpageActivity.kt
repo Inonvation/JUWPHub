@@ -32,6 +32,7 @@ import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
 import edu.jxslu.schedule.ui.ebike.RideScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
+import edu.jxslu.schedule.ui.exam.rememberExamScreenActions
 import edu.jxslu.schedule.ui.exam.ExamSettingsScreen
 import edu.jxslu.schedule.ui.life.PowerBillScreen
 import edu.jxslu.schedule.ui.homework.HomeworkCourseScreen
@@ -48,6 +49,7 @@ import edu.jxslu.schedule.ui.notes.NoteCourseScreen
 import edu.jxslu.schedule.ui.notes.NoteDetailScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.score.ScoreScreen
+import edu.jxslu.schedule.ui.score.rememberScoreScreenActions
 import edu.jxslu.schedule.ui.score.ScoreSettingsScreen
 import edu.jxslu.schedule.ui.score.TranscriptHistoryScreen
 import edu.jxslu.schedule.ui.qzxy.QzxyScreen
@@ -235,10 +237,43 @@ class SubpageActivity : ComponentActivity() {
             SubpageScreen.REMINDER_SETTINGS -> ReminderSettingsScreen(onBack = onBack)
             SubpageScreen.SHORTCUTS ->
                 ShortcutSettingsScreen(onBack = onBack, focusItemId = focusItemId)
-            SubpageScreen.SCORES -> ScoreScreen(onBack = onBack)
-            SubpageScreen.SCORE_SETTINGS -> ScoreSettingsScreen(onBack = onBack)
-            SubpageScreen.EXAMS -> ExamScreen(onBack = onBack)
-            SubpageScreen.EXAM_SETTINGS -> ExamSettingsScreen(onBack = onBack)
+            // 成绩与考试四页已在 shared/commonMain（iOS 移植 S10），平台动作用
+            // `rememberScoreScreenActions` / `rememberExamScreenActions` 补齐；
+            // 回调里 null 的语义是「本平台没这项能力」，入口整行不渲染。
+            SubpageScreen.SCORES -> {
+                val actions = rememberScoreScreenActions()
+                ScoreScreen(
+                    onBack = onBack,
+                    onImportScores = actions.openImport,
+                    onOpenSettings = actions.openSettings,
+                    onOpenTranscript = actions.openTranscript,
+                )
+            }
+            SubpageScreen.SCORE_SETTINGS -> {
+                val actions = rememberScoreScreenActions()
+                ScoreSettingsScreen(
+                    onBack = onBack,
+                    onRequestNotifPermission = actions.requestNotifPermission,
+                    onAlertSettingsChanged = actions.alertSettingsChanged,
+                )
+            }
+            SubpageScreen.EXAMS -> {
+                val actions = rememberExamScreenActions()
+                ExamScreen(
+                    onBack = onBack,
+                    onOpenJwPage = actions.openJwPage,
+                    onOpenSettings = actions.openSettings,
+                )
+            }
+            SubpageScreen.EXAM_SETTINGS -> {
+                val actions = rememberExamScreenActions()
+                ExamSettingsScreen(
+                    onBack = onBack,
+                    onRequestNotifPermission = actions.requestNotifPermission,
+                    onAlertSettingsChanged = actions.alertSettingsChanged,
+                    onOpenImport = actions.openImport,
+                )
+            }
             SubpageScreen.TEXTBOOKS -> TextbookScreen(onBack = onBack)
             SubpageScreen.THEORY_SCHEDULE ->
                 JwScheduleListScreen(kind = CourseKind.Theory, onBack = onBack)

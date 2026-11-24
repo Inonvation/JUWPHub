@@ -10,54 +10,48 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.SubpageActivity
-import edu.jxslu.schedule.SubpageScreen
-import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.repo.ExamSnapshot
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.ExamChangeDetector
 import edu.jxslu.schedule.domain.ExamMapper.ExamEntry
+import edu.jxslu.schedule.domain.TextFmt
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
+import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.PageEmpty
 import edu.jxslu.schedule.ui.common.PageRefreshAction
 import edu.jxslu.schedule.ui.common.PageScaffold
-import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.showNotice
-import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.LocalDate
 
 /**
- * 考试页（DESIGN §4.33，2026-09-30）：考试变动提醒从课表 hub 内联两行抽成独立入口，
+ * 考试页（DESIGN §4.33，2026-09-30）：从课表 hub 内联两行抽成独立入口，
  * 入口最终落在「我的 → 学习 → 成绩与考试 → 考试安排」（考试与成绩同属教务给的学习
  * 数据，用户口径），页内把「教务眼里的考试安排」一条一卡铺开——口径与成绩页一致：
  * 数据来自教务，不依赖是否导入过课表。
@@ -65,22 +59,41 @@ import kotlinx.coroutines.withContext
  * 两件事：
  *
  * 1. **考试列表**：读 [ExamSnapshotStore]（[ExamSync] 每次检查成功后落的基线）——
- *    顶栏「更新」强制走一次 `ExamSync.sync(force = true)`（OkHttp 直取；检测到变动时
+ *    顶栏「更新」强制走一次 `ExamSync.sync(force = true)`（直取教务；检测到变动时
  *    按开关自动合并当前课表），本次探测到的变动在对应卡上标「新增 / 调整」；
  *    已结束的排到列表末尾并置灰；
  * 2. **设置入口**：提醒开关 / 自动检查间隔 / 自动合并课表 / 手动导入统一收进「考试设置」
- *    （[SubpageScreen.EXAM_SETTINGS]）。
+ *    （二级页 `EXAM_SETTINGS`）。
  *
- * 导入窗口现在从「考试设置」页打开，本页不再消费导入结果。
+ * ## 平台动作全在参数里（iOS 移植 S10，2026-11-25）
+ *
+ * 本文件在共享层，拿不到 `Context`、`Activity`、`JwImportActivity`。原来内联在页面里的
+ * 三件平台事收成可空回调，**null = 这个平台确实没有这项能力，入口整行不渲染**
+ * （口径同 `WeekScreen` 头部的参数表）：
+ *
+ * | 参数 | null 的含义 |
+ * |---|---|
+ * | [onOpenJwPage] | 平台没有内置 WebView 容器 → 隐藏「在教务网页核对」 |
+ * | [onOpenSettings] | 平台没有二级页路由 → 隐藏「考试设置」齿轮 |
+ *
+ * 教务直取链（`ExamSync`）由 [Services.current] 给：返回 null（iOS 尚未接）时
+ * 「更新」按钮与空态里的「从教务更新」都不出现——点一下才知道不支持比一开始就没有更糟。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExamScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
+fun ExamScreen(
+    onBack: () -> Unit,
+    /** 在教务网页核对（Android 走 `JwImportActivity.startBrowse`）。 */
+    onOpenJwPage: (() -> Unit)? = null,
+    /** 考试设置二级页。 */
+    onOpenSettings: (() -> Unit)? = null,
+) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    val prefs = remember { Graph.displayPrefs(context) }
+    val prefs = remember { Services.current.displayPrefs() }
     val snapshotStore = remember { ExamSnapshotStore() }
+    // 教务直取链：null = 本平台没有（iOS 的会话实现还没接），与之相关的入口一律不渲染
+    val examSync = remember { Services.current.examSync() }
 
     // null = 还没读完盘：首帧不渲染空态，免得「还没有考试安排」闪一下再跳真实列表
     var snapshot by remember { mutableStateOf<ExamSnapshot.Snapshot?>(null) }
@@ -94,7 +107,9 @@ fun ExamScreen(onBack: () -> Unit) {
     var changes by remember { mutableStateOf<Map<String, ExamChangeDetector.Kind>>(emptyMap()) }
 
     suspend fun reload() {
-        snapshot = withContext(Dispatchers.IO) { snapshotStore.load() }
+        // 快照是一份几十 KB 的 JSON，读盘离开主线程；共享层没有 `Dispatchers.IO`，
+        // 这里用 Default（与 `JsonFileStore` 的 suspend 版同一口径）
+        snapshot = withContext(Dispatchers.Default) { snapshotStore.load() }
         checkedAtMillis = prefs.examAlertCheckMillis()
     }
 
@@ -102,10 +117,23 @@ fun ExamScreen(onBack: () -> Unit) {
 
     fun refresh() {
         if (busy) return
+        val sync = examSync
+        if (sync == null) {
+            // 入口本来就不渲染（见上），这里兜住并发/状态错位：说清原因，不静默
+            scope.launch {
+                snackbar.showNotice(
+                    AppNoticeVisuals(
+                        "本平台还没有教务直取链，考试安排要等导入后才有",
+                        tone = NoticeTone.Warning,
+                    ),
+                )
+            }
+            return
+        }
         busy = true
         scope.launch {
             try {
-                val result = Graph.examSync(context).sync(force = true)
+                val result = sync.sync(force = true)
                 when (result) {
                     is ExamSync.Result.Updated -> {
                         changes = result.changes
@@ -144,15 +172,24 @@ fun ExamScreen(onBack: () -> Unit) {
     val rows = remember(snapshot, checkedAtMillis, changes) {
         snapshot?.let { buildRows(it, checkedAtMillis, changes) }.orEmpty()
     }
+    val canSync = examSync != null
     PageScaffold(
         title = "考试安排",
         onBack = onBack,
         snackbar = snackbar,
         actions = {
-            JwWebActionButton("考试安排", JwUrls.EXAM_QUERY)
-            PageRefreshAction(busy = busy, onClick = { refresh() }, label = "从教务更新")
-            IconButton(onClick = { SubpageActivity.start(context, SubpageScreen.EXAM_SETTINGS) }) {
-                Icon(Icons.Filled.Settings, contentDescription = "考试设置")
+            if (onOpenJwPage != null) {
+                IconButton(onClick = onOpenJwPage) {
+                    Icon(AppIcons.ExternalLink, contentDescription = "在教务网页核对考试安排")
+                }
+            }
+            if (canSync) {
+                PageRefreshAction(busy = busy, onClick = { refresh() }, label = "从教务更新")
+            }
+            if (onOpenSettings != null) {
+                IconButton(onClick = onOpenSettings) {
+                    Icon(AppIcons.Settings01, contentDescription = "考试设置")
+                }
             }
         },
         loading = snapshot == null,
@@ -160,10 +197,15 @@ fun ExamScreen(onBack: () -> Unit) {
         empty = if (rows.isEmpty()) {
             PageEmpty(
                 title = "还没有考试安排",
-                body = "教务通常在考前数周才录入考试。点右上角「更新」从教务读一次；" +
-                    "也可能这一学期还没排考。",
-                actionLabel = "从教务更新",
-                onAction = { refresh() },
+                body = if (canSync) {
+                    "教务通常在考前数周才录入考试。点右上角「更新」从教务读一次；" +
+                        "也可能这一学期还没排考。"
+                } else {
+                    "教务通常在考前数周才录入考试；本平台还没有教务直取链，" +
+                        "要等导入过考试安排之后这里才会有内容。"
+                },
+                actionLabel = if (canSync) "从教务更新" else null,
+                onAction = if (canSync) ({ refresh() }) else null,
             )
         } else null,
     ) {
@@ -203,22 +245,30 @@ private class Dated(val entry: ExamEntry, val date: LocalDate?)
 /**
  * 列表顺序：**待考的按日期升序在前**（最近要考的先看到），已结束的整块挪到末尾、
  * 内部按日期倒序（刚考完的在最前），两块之间插一行「已结束」标签。
+ *
+ * 「今天」走 [AppClock.today]（iOS 移植 S10）：原来直接 `LocalDate.now()`，Kotlin/Native
+ * 上没有 `java.time`，而跨零点这件事必须与其余页面同源。
  */
 private fun buildRows(
     snapshot: ExamSnapshot.Snapshot,
     checkedAtMillis: Long,
     changes: Map<String, ExamChangeDetector.Kind>,
 ): List<ExamRow> {
-    val today = LocalDate.now()
+    val today = AppClock.today()
     val dated = snapshot.exams.map { entry ->
         Dated(entry, parseExamDate(entry.date))
     }
+    // kotlinx-datetime 的 LocalDate 没有 MAX 哨兵：`date == null` 用 Int.MAX 排到最后，
+    // 与原来 `LocalDate.MAX` 的落点一致
     val upcoming = dated
-        .filter { it.date?.isBefore(today) != true }
-        .sortedWith(compareBy({ it.date ?: LocalDate.MAX }, { it.entry.startTime }))
+        .filter { it.date?.let { d -> d < today } != true }
+        .sortedWith(compareBy({ it.date?.toEpochDays() ?: Int.MAX_VALUE }, { it.entry.startTime }))
     val finished = dated
-        .filter { it.date?.isBefore(today) == true }
-        .sortedWith(compareByDescending<Dated> { it.date }.thenBy { it.entry.startTime })
+        .filter { it.date?.let { d -> d < today } == true }
+        .sortedWith(
+            compareByDescending<Dated> { it.date?.toEpochDays() ?: Int.MIN_VALUE }
+                .thenBy { it.entry.startTime },
+        )
 
     val rows = mutableListOf<ExamRow>()
     if (snapshot.term.isNotBlank()) {
@@ -340,7 +390,7 @@ private fun ExamCard(row: ExamRow.Item) {
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     // 学期已在列表头上，日期只留「几月几日」；解析失败才回落原始串
-                    date?.let { "${it.monthValue}月${it.dayOfMonth}日" }
+                    date?.let { "${it.monthNumber}月${it.dayOfMonth}日" }
                         ?: entry.date.ifBlank { "时间待定" },
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
@@ -386,17 +436,18 @@ private fun ExamBadge(text: String, emphasize: Boolean) {
     )
 }
 
+/** `2026-06-20` → LocalDate；脏日期返回 null（页面回落原始串）。 */
 private fun parseExamDate(date: String): LocalDate? = runCatching {
     LocalDate.parse(date.trim())
 }.getOrNull()
 
-private fun weekdayLabel(date: LocalDate): String = when (date.dayOfWeek.value) {
-    1 -> "周一"
-    2 -> "周二"
-    3 -> "周三"
-    4 -> "周四"
-    5 -> "周五"
-    6 -> "周六"
+private fun weekdayLabel(date: LocalDate): String = when (date.dayOfWeek.ordinal) {
+    0 -> "周一"
+    1 -> "周二"
+    2 -> "周三"
+    3 -> "周四"
+    4 -> "周五"
+    5 -> "周六"
     else -> "周日"
 }
 
@@ -406,9 +457,15 @@ private fun formatTimeRange(start: String, end: String): String = when {
     else -> "$start – $end"
 }
 
-/** 上次成功检查时间；0 = 从没成功过（那时只可能看到空态或旧基线）。 */
+/**
+ * 上次成功检查时间；0 = 从没成功过（那时只可能看到空态或旧基线）。
+ *
+ * `Instant.ofEpochMilli(millis).atZone(systemDefault())` 换成 [AppClock.dateTimeOf]：
+ * 时区口径不变（系统默认），补零走 [TextFmt.pad]。
+ */
 private fun formatCheckedAt(millis: Long): String {
     if (millis <= 0) return "还没成功检查过"
-    val at = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
-    return "更新于 ${at.monthValue}月${at.dayOfMonth}日 " + "%02d:%02d".format(at.hour, at.minute)
+    val at = AppClock.dateTimeOf(millis)
+    return "更新于 ${at.monthNumber}月${at.dayOfMonth}日 " +
+        "${TextFmt.pad(at.hour)}:${TextFmt.pad(at.minute)}"
 }

@@ -1,11 +1,5 @@
 package edu.jxslu.schedule.ui.score
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,8 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -30,19 +22,17 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.ScoreAlertDefaults
 import edu.jxslu.schedule.domain.ScoreSortMode
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.SettingItem
@@ -50,7 +40,7 @@ import edu.jxslu.schedule.ui.common.SettingsNote
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.showNotice
-import edu.jxslu.schedule.ui.reminder.ScoreAlertReminder
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.launch
 
 /**
@@ -62,39 +52,50 @@ import kotlinx.coroutines.launch
  * （选择学期后二次确认）。
  *
  * 考试变动提醒**不在这里**：2026-09-30 起在独立考试页（`ui/exam/ExamScreen.kt`，
- * `SubpageScreen.EXAMS`，入口「我的 → 学习 → 成绩与考试 → 考试安排」），
+ * 二级页 `EXAMS`，入口「我的 → 学习 → 成绩与考试 → 考试安排」），
  * 两个提醒共用检查间隔 [ScoreAlertDefaults]（同一份 DataStore 值，这里改了那边也变）。
+ *
+ * ## 平台动作全在参数里（iOS 移植 S10，2026-11-25）
+ *
+ * 原来这个文件里有两段纯 Android 的东西：`rememberLauncherForActivityResult`
+ * + `android.Manifest` / `ContextCompat` 的通知权限申请，和 `ScoreAlertReminder`
+ * （WorkManager + 通知，Android 专有）。它们搬回 `:app` 的
+ * `ScoreScreenPlatform.kt`（`maybeRequestNotifPermission` 原样保留在那里，包名不变，
+ * 问渠设置页的 import 不受影响），本页只留两个可空回调：
+ *
+ * | 参数 | null 的含义 |
+ * |---|---|
+ * | [onRequestNotifPermission] | 平台没有运行时权限模型 → 开开关时不弹权限框，开关照常生效 |
+ * | [onAlertSettingsChanged] | 平台没有后台核对 → 改完只落偏好，不重排任务 |
+ *
+ * 清空学期走 [Services.current] 给的仓库，两端同源。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScoreSettingsScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
+fun ScoreSettingsScreen(
+    onBack: () -> Unit,
+    /** 申请通知权限；拒绝时回调 `onDenied`（页面据此给一条提示）。 */
+    onRequestNotifPermission: ((onDenied: () -> Unit) -> Unit)? = null,
+    /** 提醒开关 / 间隔改动后，让本平台按新规则重新评估一次后台核对。 */
+    onAlertSettingsChanged: (() -> Unit)? = null,
+) {
     val scope = rememberCoroutineScope()
-    val prefs = remember { Graph.displayPrefs(context) }
-    val scoreRepo = remember { Graph.scoreRepository(context) }
+    val prefs = remember { Services.current.displayPrefs() }
+    val scoreRepo = remember { Services.current.scoreRepository() }
     val snackbar = remember { SnackbarHostState() }
 
-    val groupByYear by prefs.scoreGroupByYear.collectAsState(initial = false)
-    val includeFreeElectives by prefs.scoreIncludeFreeElectives.collectAsState(initial = false)
-    val sortMode by prefs.scoreSortMode.collectAsState(initial = ScoreSortMode.Default)
-    val scoreAlertEnabled by prefs.scoreAlertEnabled.collectAsState(initial = true)
-    val intervalHours by prefs.scoreAlertIntervalHours.collectAsState(initial = ScoreAlertDefaults.INTERVAL_DEFAULT)
-    val terms by scoreRepo.observeTerms().collectAsState(initial = emptyList())
+    val groupByYear by prefs.scoreGroupByYear.collectAsStateWithLifecycle(initialValue = false)
+    val includeFreeElectives by prefs.scoreIncludeFreeElectives
+        .collectAsStateWithLifecycle(initialValue = false)
+    val sortMode by prefs.scoreSortMode
+        .collectAsStateWithLifecycle(initialValue = ScoreSortMode.Default)
+    val scoreAlertEnabled by prefs.scoreAlertEnabled.collectAsStateWithLifecycle(initialValue = true)
+    val intervalHours by prefs.scoreAlertIntervalHours
+        .collectAsStateWithLifecycle(initialValue = ScoreAlertDefaults.INTERVAL_DEFAULT)
+    val terms by scoreRepo.observeTerms().collectAsStateWithLifecycle(initialValue = emptyList())
     var intervalPickerOpen by remember { mutableStateOf(false) }
     var clearDialogOpen by remember { mutableStateOf(false) }
     var clearTerm by remember { mutableStateOf<String?>(null) }
-
-    // 开启提醒那一刻请求 POST_NOTIFICATIONS（API 33+），拒绝不阻塞开关本身
-    // （口径同 CampusCardSettingsScreen：功能在系统设置里授权后自动生效）
-    val notifPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (!granted) {
-            scope.launch {
-                snackbar.showNotice("未授予通知权限，提醒不会显示；可在系统设置里重新开启")
-            }
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -102,7 +103,7 @@ fun ScoreSettingsScreen(onBack: () -> Unit) {
                 title = { Text("成绩设置", style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
             )
@@ -170,8 +171,17 @@ fun ScoreSettingsScreen(onBack: () -> Unit) {
                             onCheckedChange = { want ->
                                 scope.launch { prefs.setScoreAlertEnabled(want) }
                                 if (want) {
-                                    maybeRequestNotifPermission(context, notifPermissionLauncher)
-                                    scope.launch { ScoreAlertReminder.onSettingsChanged(context) }
+                                    // 开启提醒那一刻请求 POST_NOTIFICATIONS（Android API 33+），
+                                    // 拒绝不阻塞开关本身（口径同 CampusCardSettingsScreen：
+                                    // 功能在系统设置里授权后自动生效）
+                                    onRequestNotifPermission?.invoke {
+                                        scope.launch {
+                                            snackbar.showNotice(
+                                                "未授予通知权限，提醒不会显示；可在系统设置里重新开启",
+                                            )
+                                        }
+                                    }
+                                    onAlertSettingsChanged?.invoke()
                                 }
                             },
                         )
@@ -217,7 +227,7 @@ fun ScoreSettingsScreen(onBack: () -> Unit) {
                 val value = ScoreAlertDefaults.INTERVAL_CHOICES[index]
                 scope.launch {
                     prefs.setScoreAlertIntervalHours(value)
-                    ScoreAlertReminder.onSettingsChanged(context)
+                    onAlertSettingsChanged?.invoke()
                 }
             },
             onDismiss = { intervalPickerOpen = false },
@@ -273,22 +283,5 @@ fun ScoreSettingsScreen(onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-    }
-}
-
-/**
- * 通知权限申请：API 33+ 且未授予才弹（模式同 CampusCardSettingsScreen）。
- * internal 自 2026-09-30：考试页的开提醒也要同一份口径，别再复制一处。
- */
-internal fun maybeRequestNotifPermission(
-    context: android.content.Context,
-    launcher: ActivityResultLauncher<String>,
-) {
-    if (Build.VERSION.SDK_INT >= 33 &&
-        ContextCompat.checkSelfPermission(
-            context, Manifest.permission.POST_NOTIFICATIONS,
-        ) != PackageManager.PERMISSION_GRANTED
-    ) {
-        launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 }
