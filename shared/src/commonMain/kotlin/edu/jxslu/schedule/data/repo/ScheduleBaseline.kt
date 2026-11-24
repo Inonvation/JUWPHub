@@ -7,11 +7,12 @@ import kotlinx.serialization.Serializable
 /**
  * 调课检测基线的**读写口**（iOS 移植 S4，2026-11-24）。
  *
- * [ScheduleRepository] 搬进 `shared/commonMain` 之后还要读 / 推进基线，而真身
- * `ScheduleBaselineStore` 靠 `Context` + `java.io.File` 落盘（`JsonFileStore`），
- * 留在 `:app`。这里只抽它被仓库层用到的那三个东西：`load` / `save` / [Snapshot]。
+ * [ScheduleRepository] 搬进 `shared/commonMain` 之后还要读 / 推进基线，而那时真身
+ * `ScheduleBaselineStore` 还在 `:app`（要 `Context` + `java.io.File` 落盘），所以先把
+ * 「`load` / `save` / [Snapshot]」抽在这里。**S7（2026-11-24）起实现也搬进来了**
+ * （落盘目录由 `appDataDir()` 决定），接口与实现同在 `data/repo`。
  *
- * 不是第二套实现：全仓只有 `:app` 的 `ScheduleBaselineStore` 一个实现，
+ * 不是第二套实现：全仓只有 `ScheduleBaselineStore` 一个实现，
  * 语义（允许空列表、文件坏了按「没有基线」、文件名不变）仍写在那个实现类上。
  */
 interface ScheduleBaseline {

@@ -1,9 +1,7 @@
 package edu.jxslu.schedule.data.repo
 
-import android.content.Context
 import edu.jxslu.schedule.data.local.MirroredJsonStore
 import edu.jxslu.schedule.domain.DormRepairSnapshot
-import java.io.File
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.Json
 
@@ -20,7 +18,7 @@ private const val MAX_NOTIFIED = 50
 private val DormRepairJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
 /**
- * 宿舍报修本机快照（DESIGN §4.49）：`filesDir/dorm_repair.json` 一份 JSON。
+ * 宿舍报修本机快照（DESIGN §4.49）：`appDataDir()/dorm_repair.json` 一份 JSON。
  *
  * 不建 Room 表：这是「单条在途记录 + 最近 20 条历史」的只读镜像，没有查询/关联需求；
  * 与 `ExamSnapshotStore` / `InternshipSnapshotStore` 同一套选型。文件里只有宿舍号、
@@ -29,9 +27,12 @@ private val DormRepairJson = Json { ignoreUnknownKeys = true; encodeDefaults = t
  * 骨架（内存 StateFlow 是真值 + 整份落盘镜像 + 构造期同步读）已收进
  * `data/local/MirroredJsonStore`，本类只剩「与内存合并」的业务语义。
  * 落盘失败静默（合并前也没打日志），失败不回滚内存。
+ *
+ * iOS 移植 S7（2026-11-24）：本类搬进 `shared/commonMain`，构造器不再吃 `Context`——
+ * 目录来自 `appDataDir()`（Android 侧仍是 `filesDir`，与搬移前同一路径）。
  */
-class DormRepairStore(context: Context) : MirroredJsonStore<DormRepairSnapshot>(
-    file = File(context.applicationContext.filesDir, SNAPSHOT_FILE),
+class DormRepairStore : MirroredJsonStore<DormRepairSnapshot>(
+    fileName = SNAPSHOT_FILE,
     serializer = DormRepairSnapshot.serializer(),
     empty = DormRepairSnapshot(),
     json = DormRepairJson,

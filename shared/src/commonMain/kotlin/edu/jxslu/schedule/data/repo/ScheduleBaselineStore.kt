@@ -1,11 +1,10 @@
 package edu.jxslu.schedule.data.repo
 
-import android.content.Context
 import edu.jxslu.schedule.data.local.JsonFileStore
 
 /**
  * 课表基线快照（DESIGN §4.17，2026-10-04 重立）：「上次与教务达成一致时的课表状态」，
- * `filesDir` 下一份 JSON。
+ * `appDataDir()` 下一份 JSON。
  *
  * 调课检测拿它与教务最新抓取做对比——**不是**拿当前课表比：用户手动改课、手动加课
  * 都只动 Room，基线保持不动，差异才纯粹是「教务那边变了什么」。基线在三个时点推进：
@@ -17,10 +16,11 @@ import edu.jxslu.schedule.data.local.JsonFileStore
  * 文件坏了按「没有基线」处理，下轮检查重建，不影响主链路。只存课表条目，不存任何凭证。
  *
  * iOS 移植 S4（2026-11-24）：[ScheduleRepository] 搬进了 `shared/commonMain`，它要读 / 推进
- * 基线，而落盘离不开 `Context` + `File`。所以读写的**形状**抽成共享层接口
- * [ScheduleBaseline]（`Snapshot` / `snapshotOf` 一并搬过去），本类只剩实现。
+ * 基线，所以读写的**形状**先抽成共享层接口 [ScheduleBaseline]（`Snapshot` / `snapshotOf`
+ * 一并搬过去）。**S7 起本类也搬进 `shared/commonMain`**：落盘目录来自 `appDataDir()`
+ * （Android 侧仍是 `filesDir`），构造器不再吃 `Context`。
  */
-class ScheduleBaselineStore(context: Context) : ScheduleBaseline {
+class ScheduleBaselineStore : ScheduleBaseline {
 
     /**
      * 落盘交给共享实现（2026-11-06 审计 C2）。**用同步版**：`load`/`save` 是同步 API，
@@ -29,7 +29,7 @@ class ScheduleBaselineStore(context: Context) : ScheduleBaseline {
      * **文件名不能改**（`schedule_baseline.json`）：改名等于用户丢掉基线，下次检查按首跑重建、
      * 静默吞掉一轮「教务改了什么」。
      */
-    private val store = JsonFileStore(context, SNAPSHOT_FILE, ScheduleBaseline.Snapshot.serializer())
+    private val store = JsonFileStore(SNAPSHOT_FILE, ScheduleBaseline.Snapshot.serializer())
 
     override fun load(): ScheduleBaseline.Snapshot = store.readBlocking() ?: ScheduleBaseline.Snapshot()
 

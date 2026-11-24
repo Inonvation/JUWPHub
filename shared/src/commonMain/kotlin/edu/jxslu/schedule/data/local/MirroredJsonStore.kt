@@ -1,6 +1,6 @@
 package edu.jxslu.schedule.data.local
 
-import java.io.File
+import edu.jxslu.schedule.platform.appDataDir
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,7 +12,8 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 
 /**
- * 「内存 StateFlow 是真值、磁盘只是镜像」的 store 基类（2026-11-06 审计 C2 第二轮）。
+ * 「内存 StateFlow 是真值、磁盘只是镜像」的 store 基类（2026-11-06 审计 C2 第二轮；
+ * iOS 移植 S7 搬进 `:shared`，不再吃 `Context`）。
  *
  * 合并前 `AiApplyHistoryStore` / `QuietHoursQueue` / `DormRepairStore` 是逐行相同的骨架：
  * 一把 Mutex + 一个 `MutableStateFlow` + 每次写都是「在锁里读内存 → 变换 → 写内存 → 落盘整份」，
@@ -38,17 +39,20 @@ import kotlinx.serialization.json.Json
  *
  * 子类不要自己再收一把锁、也不要自己再读写文件：所有落盘都经过 [JsonFileStore]（原子替换 +
  * 坏文件当空），所有内存变更都经过 [mutate]。
+ *
+ * 目录由 `appDataDir()` 决定（与搬移前的 `context.filesDir` 同一路径），[dir] 只给单测注入。
  */
 abstract class MirroredJsonStore<T>(
-    file: File,
+    fileName: String,
     serializer: KSerializer<T>,
     /** 读不到/文件坏了时的真值，也是 [clearStored] 之后回到的状态。 */
     private val empty: T,
     json: Json = JsonFileStore.DefaultJson,
     tag: String? = null,
+    dir: String = appDataDir(),
 ) {
 
-    private val store = JsonFileStore(file, serializer, json, tag)
+    private val store = JsonFileStore(fileName, serializer, json, tag, dir)
 
     /** 写入串行化：写入口来自多个窗口 / Worker / Receiver 上下文，并发写不能互相覆盖。 */
     private val writeLock = Mutex()
@@ -72,14 +76,16 @@ abstract class MirroredJsonStore<T>(
         writeLock.withLock {
             val next = transform(_state.value)
             _state.value = next
-            withContext(Dispatchers.IO) { store.writeBlocking(next) }
+            // `Dispatchers.IO` 在 commonMain 里不可见（与 `FileSystem.SYSTEM` 同一个原因），
+            // 用 Default 代替——这是与 Android 版唯一的行为差异（落盘跑在 Default 池）。
+            withContext(Dispatchers.Default) { store.writeBlocking(next) }
         }
     }
 
     /** 删文件 + 内存回到 [empty]（「换账号」这类要连磁盘一起清的动作）。 */
     protected suspend fun clearStored() {
         writeLock.withLock {
-            withContext(Dispatchers.IO) { store.delete() }
+            withContext(Dispatchers.Default) { store.delete() }
             _state.value = empty
         }
     }

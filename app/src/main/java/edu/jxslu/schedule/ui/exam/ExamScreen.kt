@@ -80,7 +80,7 @@ fun ExamScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val prefs = remember { Graph.displayPrefs(context) }
-    val snapshotStore = remember { ExamSnapshotStore(context) }
+    val snapshotStore = remember { ExamSnapshotStore() }
 
     // null = 还没读完盘：首帧不渲染空态，免得「还没有考试安排」闪一下再跳真实列表
     var snapshot by remember { mutableStateOf<ExamSnapshot.Snapshot?>(null) }

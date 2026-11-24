@@ -79,7 +79,8 @@ import kotlinx.datetime.LocalDate
  *
  * iOS 移植 S4（2026-11-24）搬进 `shared/commonMain`，三处平台依赖换了形状：
  * `Graph.appScope` → 构造参数 [scope]（`:app` 传进来，仍是同一个应用级作用域）；
- * `ScheduleBaselineStore` → 共享层接口 [ScheduleBaseline]（实现仍在 `:app`，要 Context+File）；
+ * `ScheduleBaselineStore` → 共享层接口 [ScheduleBaseline]（那时实现还在 `:app`，要 Context+File；
+ * S7 起实现也搬进 `shared/commonMain`，接口保留只为不扩大改动面）；
  * `db.withTransaction` → [inTransaction]（`withTransaction` 只在 Room 的 Android 变体里）。
  */
 class ScheduleRepository(

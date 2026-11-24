@@ -1,10 +1,9 @@
 package edu.jxslu.schedule.data.repo
 
-import android.content.Context
 import edu.jxslu.schedule.data.local.JsonFileStore
 
 /**
- * 考试基线快照（DESIGN §4.33）：上次成功抓到的考试安排落盘（`filesDir` 下一份 JSON）。
+ * 考试基线快照（DESIGN §4.33）：上次成功抓到的考试安排落盘（`appDataDir()` 下一份 JSON）。
  *
  * 考试不像成绩有 Room 表——它只在手动导入时经 `ExamMapper` 映射成课程行，App 内没有
  * 「教务眼里的考试全量」可比对。变动检测需要旧值，就把上次成功抓取的最小字段存一份。
@@ -13,9 +12,10 @@ import edu.jxslu.schedule.data.local.JsonFileStore
  * 下次按「首跑」重建基线，不影响主链路。**只存考试条目，不存任何凭证**。
  *
  * iOS 移植 S4（2026-11-24）：[ExamSync] 搬进了 `shared/commonMain`，快照模型抽成共享层
- * 接口 [ExamSnapshot]，本类只剩 `JsonFileStore` 这一层落盘。
+ * 接口 [ExamSnapshot]。**S7 起本类也搬进 `shared/commonMain`**：落盘目录来自 `appDataDir()`
+ * （Android 侧仍是 `filesDir`），构造器不再吃 `Context`。
  */
-class ExamSnapshotStore(context: Context) : ExamSnapshot {
+class ExamSnapshotStore : ExamSnapshot {
 
     /**
      * 落盘交给共享实现（2026-11-06 审计 C2）。**用同步版**：本类 `load`/`save` 是同步 API，
@@ -24,7 +24,7 @@ class ExamSnapshotStore(context: Context) : ExamSnapshot {
      * 并发面改掉。**文件名不能改**（`exam_snapshot.json`）：改名等于用户丢掉已有基线，
      * 下轮按首跑重报「教务新增了 N 场考试」。
      */
-    private val store = JsonFileStore(context, SNAPSHOT_FILE, ExamSnapshot.Snapshot.serializer())
+    private val store = JsonFileStore(SNAPSHOT_FILE, ExamSnapshot.Snapshot.serializer())
 
     override fun load(): ExamSnapshot.Snapshot = store.readBlocking() ?: ExamSnapshot.Snapshot()
 

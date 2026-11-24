@@ -7,8 +7,9 @@ import kotlinx.serialization.Serializable
  * 选课轮次快照的**读写口**（iOS 移植 S4，2026-11-24）。
  *
  * 与 [ScheduleBaseline] 同一手法：[SelectionSync] 搬进 `shared/commonMain` 之后仍要把轮次
- * 落盘，而真身 `SelectionRoundsStore` 靠 `Context` + `java.io.File`（`JsonFileStore`）留在
- * `:app`。这里只抽「快照模型 + 读写两个方法」，实现仍只有那一个。
+ * 落盘，而那时真身 `SelectionRoundsStore` 还在 `:app`（要 `Context` + `java.io.File`），
+ * 所以先把「快照模型 + 读写两个方法」抽在这里。**S7（2026-11-24）起实现也搬进来了**，
+ * 接口与实现同在 `data/repo`。
  *
  * 语义（允许存空、文件坏了按「没有快照」、文件名不变）写在实现类的 KDoc 上。
  */

@@ -1,11 +1,9 @@
 package edu.jxslu.schedule.data.repo
 
-import android.content.Context
 import edu.jxslu.schedule.data.local.MirroredJsonStore
 import edu.jxslu.schedule.domain.AppliedEntry
 import edu.jxslu.schedule.domain.ScheduleCourseRow
 import edu.jxslu.schedule.domain.ScheduleDiff
-import java.io.File
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
@@ -30,7 +28,7 @@ private const val TAG = "AiApplyHistory"
  *
  * 为什么不是 Room：这层只是「用户做过什么」的旁路账本——语义与收件箱（留痕层）同类，
  * 与业务表没有外键关系；文件坏了按空处理，不影响主链路。选型与 `ScheduleBaselineStore`
- * 一致（filesDir + kotlinx JSON），数据是用户自己课表的派生记录，不加密、随备份走。
+ * 一致（`appDataDir()` + kotlinx JSON），数据是用户自己课表的派生记录，不加密、随备份走。
  *
  * **撤销是栈式的**：只能撤「最新一条未撤销」的 AI 记录（`latestUndoable`）。撤掉它之后，
  * 上一条才轮到可撤——调课是一串累积改动，倒着剥才是安全语义；跳着撤会让后来的改动
@@ -42,9 +40,12 @@ private const val TAG = "AiApplyHistory"
  *
  * 骨架（内存 StateFlow 是真值 + 整份落盘镜像）已收进 `data/local/MirroredJsonStore`，
  * 本类只剩留痕语义与纯逻辑；落盘失败留痕的 tag 也从构造参数传过去。
+ *
+ * iOS 移植 S7（2026-11-24）：本类搬进 `shared/commonMain`，构造器不再吃 `Context`——
+ * 目录来自 `appDataDir()`（Android 侧仍是 `filesDir`，与搬移前同一路径）。
  */
-class AiApplyHistoryStore(context: Context) : MirroredJsonStore<List<AiApplyRecord>>(
-    file = File(context.filesDir, HISTORY_FILE),
+class AiApplyHistoryStore : MirroredJsonStore<List<AiApplyRecord>>(
+    fileName = HISTORY_FILE,
     serializer = ListSerializer(AiApplyRecord.serializer()),
     empty = emptyList(),
     tag = TAG,
@@ -163,15 +164,25 @@ data class AiAppliedEntryRow(
     val after: ScheduleCourseRow? = null,
 )
 
-/** 落库前：域对象 → 存档行。 */
-internal fun AppliedEntry.toRow() = AiAppliedEntryRow(
+/**
+ * 落库前：域对象 → 存档行。
+ *
+ * 2026-11-24 起是 **public**（原 `internal`）：本文件搬进 `:shared` 后，`:app` 的
+ * `AiChatViewModel` 仍要在提交成功后构造留痕记录（`internal` 跨不了模块）。
+ */
+fun AppliedEntry.toRow() = AiAppliedEntryRow(
     kind = kind.name,
     before = before?.let(ScheduleCourseRow::of),
     after = after?.let(ScheduleCourseRow::of),
 )
 
-/** 撤销前：存档行 → 域对象；kind 认不出（脏数据）时返回 null，调用方跳过该条。 */
-internal fun AiAppliedEntryRow.toEntry(): AppliedEntry? {
+/**
+ * 撤销前：存档行 → 域对象；kind 认不出（脏数据）时返回 null，调用方跳过该条。
+ *
+ * 2026-11-24 起是 **public**（原 `internal`），理由同 [toRow]：撤销入口在 `:app`
+ * 的 `AiHistoryViewModel`。
+ */
+fun AiAppliedEntryRow.toEntry(): AppliedEntry? {
     val k = runCatching { ScheduleDiff.ChangeKind.valueOf(kind) }.getOrNull() ?: return null
     return AppliedEntry(
         kind = k,
