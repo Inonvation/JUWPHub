@@ -213,6 +213,7 @@ fun AboutUpdateScreen(
             UpdateAvailableDialog(
                 manifest = manifest,
                 onDismiss = { showUpdateDialog = false },
+                onOpenUrl = { url -> openUrl(context, url) },
                 onIgnore = {
                     showUpdateDialog = false
                     scope.launch { repo.setIgnoredUpdateVersion(manifest.version) }

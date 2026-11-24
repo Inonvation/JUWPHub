@@ -1,9 +1,5 @@
 package edu.jxslu.schedule.ui.me.hub
 
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,52 +20,44 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.UpdateCheck
 import edu.jxslu.schedule.domain.UpdateManifest
-import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.NoticeTone
+import edu.jxslu.schedule.ui.common.copyPlainText
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-
-/** 打开站外链接（下载页 / 开源仓库）；失败返回提示文案，成功 null。同包内（关于页）共用。 */
-internal fun openUrl(context: Context, url: String): String? = try {
-    // 二级页窗口拉起外部应用统一走 startActivityOutsideApp：抑制右推入过渡，
-    // 不然从浏览器回来时本页会凭空重放一次入场动画（devlog 4.26 的「页面跳动」）
-    context.startActivityOutsideApp(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-    null
-} catch (_: ActivityNotFoundException) {
-    "没有可打开链接的应用"
-}
 
 /**
  * 「发现新版本」弹窗（DESIGN §3.3）：更新日志可滚（长日志小屏不裁切）+ SHA-256 行
  * （点按复制）+ 下载双通道 + 「忽略此次更新」。镜像链接来自仓库镜像清单里维护的
- * `mirrorPrefix`，前缀缺失/不合法时只出「GitHub 下载」一个出口。下载都是
- * `ACTION_VIEW` 交给浏览器，App 不落 APK。
+ * `mirrorPrefix`，前缀缺失/不合法时只出「GitHub 下载」一个出口。下载都是交给系统浏览器
+ * 打开，App 不落 APK。
  *
- * 两处共用：关于页「检查更新」（手动）与 [UpdateAvailableDialogHost]（冷启动自动）。
- * 反馈收在弹窗内（[InlineNoticeRow]）——弹窗是独立窗口，外层 Snackbar 穿不透；
- * 根层宿主也没有 Scaffold 可挂 Snackbar。打开链接失败**不关弹窗**，提示留在原地。
+ * ## 2026-11-25：搬进 `shared/commonMain`
+ *
+ * 弹窗本体只有「文案 + 复制 + 打开链接」三件事，两端都成立；留在 `:app` 的只剩
+ * [UpdateAvailableDialogHost]（要 `Graph.appScope` 与 `Graph.repository`）和 `openUrl`
+ * （`ACTION_VIEW` 是平台能力）。所以把两件平台动作收成参数：
+ *
+ * - 复制：走 `ui/common/Clipboard` 那条缝（`copyPlainText`），不认 `Context`；
+ * - 打开链接：[onOpenUrl] 由宿主注入，**返回值就是失败文案**（null = 打开成功）。
+ *   为什么不让共享层自己给文案：Android 那句是「没有可打开链接的应用」
+ *   （`ActivityNotFoundException` 的实话），iOS 侧对应的是 `canOpenURL` 判否，
+ *   两端的失败原因不同，文案得跟着各平台走。
  *
  * @param onIgnore 点「忽略此次更新」：调用方负责落「已忽略的版本号」并关闭弹窗
  *   （自动检查不再弹该版本；手动检查不读它，永远弹）。
+ * @param onOpenUrl 打开下载页 / 开源仓库；返回 null = 打开成功，非 null = 失败文案。
  */
 @Composable
 fun UpdateAvailableDialog(
     manifest: UpdateManifest,
     onDismiss: () -> Unit,
     onIgnore: () -> Unit,
+    onOpenUrl: (String) -> String?,
 ) {
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     val mirrorUrl = UpdateCheck.mirrorDownloadUrl(manifest)
     // 复制反馈：每次点按重新计时（计数翻转触发重新延时），2 秒后自动收
     var copiedAt by remember { mutableStateOf(0) }
@@ -82,7 +70,7 @@ fun UpdateAvailableDialog(
     }
 
     fun openAndClose(url: String) {
-        val failure = openUrl(context, url)
+        val failure = onOpenUrl(url)
         if (failure == null) onDismiss() else openFailure = failure
     }
 
@@ -110,7 +98,7 @@ fun UpdateAvailableDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                clipboard.setText(AnnotatedString(manifest.sha256))
+                                copyPlainText(label = "SHA-256", text = manifest.sha256)
                                 copiedAt++
                             }
                             .padding(vertical = 2.dp),
@@ -145,33 +133,4 @@ fun UpdateAvailableDialog(
             }
         },
     )
-}
-
-/**
- * 启动自动检查的弹窗宿主：collect [UpdateAvailableBus]，非空就弹。
- * 挂在 MainActivity 根层（`CampusPayResultDialogHost` 旁）；用户关掉弹窗
- * （稍后 / 忽略 / 下载）时才消费——转屏重建时弹窗还在。
- *
- * @param enabled 展示闸门——引导未走完（onboardingSeen=false）或「同步完成」
- *   结果弹窗还没消费时先不抢镜（防叠窗），条件满足后自动接着弹。
- */
-@Composable
-fun UpdateAvailableDialogHost(enabled: Boolean) {
-    val context = LocalContext.current
-    val appContext = context.applicationContext
-    val manifest by UpdateAvailableBus.manifest.collectAsStateWithLifecycle()
-    val current = manifest
-    if (enabled && current != null) {
-        UpdateAvailableDialog(
-            manifest = current,
-            onDismiss = { UpdateAvailableBus.consume() },
-            onIgnore = {
-                UpdateAvailableBus.consume()
-                // 写偏好走 appScope：不随页面组合销毁；与关弹窗同刻落盘
-                Graph.appScope.launch {
-                    Graph.repository(appContext).setIgnoredUpdateVersion(current.version)
-                }
-            },
-        )
-    }
 }

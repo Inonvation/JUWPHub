@@ -1,50 +1,20 @@
 package edu.jxslu.schedule.ui.life
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.border
-import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,22 +24,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
@@ -86,9 +48,6 @@ import edu.jxslu.schedule.ui.common.ShortcutPinner
 import edu.jxslu.schedule.ui.common.ShortcutSheet
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberResumeTick
-import edu.jxslu.schedule.ui.common.rememberSheetDismisser
-import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -98,12 +57,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
-
-private enum class WalletDetail { Campus, Power }
 
 /** 侧栏 U净 行右侧空闲状态的刷新节流：空闲看板本身约 30 秒滞后，刷更勤没意义。 */
 private const val UJING_FREE_REFRESH_TTL_MILLIS = 30_000L
@@ -154,18 +108,6 @@ private suspend fun loadUjingFreeText(
 }
 
 /**
- * 四行服务的「进行中」标记（2026-10-21）：侧栏行描边高亮的依据。
- * 由调用侧从各真相源收集（快趣骑行/免费计时、胖乖 Working、趣智 watering、U净 在案订单），
- * 侧栏只消费布尔——数据口径与今日页「进行中服务卡」同源，两处展示不另立判据。
- */
-data class ServiceActiveFlags(
-    val ride: Boolean = false,
-    val water: Boolean = false,
-    val qzxy: Boolean = false,
-    val ujing: Boolean = false,
-)
-
-/**
  * 左侧栏内容（2026-10-20 第二轮）。
  *
  * - 头部用「我的」页同一份身份数据（姓名 / 遮罩学号 / 班级），不再写死应用名；
@@ -178,6 +120,14 @@ data class ServiceActiveFlags(
  *   （§3.29），侧栏不再重复挂入口；
  *   收件箱不进侧栏（2026-10-21 收口：唯一展示入口在今日页收件箱卡）；
  * - 底部左设置、右付款码，`navigationBarsPadding` 让开手势条，不再贴屏幕底。
+ *
+ * ## 2026-11-25：内容件与分组数据已搬进 `shared/commonMain`
+ *
+ * 本文件现在只剩**壳**：手势视差、`Graph` 装配、`viewModel()`、品牌位图资源 id 与刷新闸门。
+ * 头部 / 钱包区 / 行 / 段 / 两个弹层在 `ui/life/SideDrawerParts.kt`，三段的内容
+ * （哪几行、写什么、点开什么）在 `ui/life/SideDrawerGroups.kt` 的 [lifeDrawerGroups]。
+ * 分界线的判据写在 `SideDrawerParts.kt` 的文件头：要 `LocalContext` / `Graph` / `R` /
+ * `viewModel()` 的留在这里，收「字符串 + 布尔 + 回调」的搬走。
  */
 @Composable
 fun SideDrawerContent(
@@ -257,7 +207,7 @@ fun SideDrawerContent(
         // 侧栏是常驻组合：不在冷启动取数，展开时由下面的 effect 显式刷新
         factory = CampusCardViewModel.Factory(context.applicationContext, autoFetch = false),
     )
-    val lifeVm: LifeViewModel = viewModel(factory = LifeViewModel.Factory(context))
+    val lifeVm: LifeViewModel = viewModel(factory = lifeViewModelFactory(context))
     val campusEnabled by campusVm.enabled.collectAsStateWithLifecycle()
     // 百宝箱总开关（设置 → 功能）：2026-10-22 顶栏「+」删除后，入口只剩侧栏这一行，
     // 开关必须继续生效——关掉时整行不渲染（不是置灰）。
@@ -426,73 +376,38 @@ fun SideDrawerContent(
                 // 2026-10-21 用户口径：百宝箱 / 天气从「工具」并入「生活」；
                 // 快趣 / 胖乖 / 趣智 / U净 / 问渠五张服务卡单列「江水生活」。
                 // 天气行 2026-11-21 删除：天气页只从今日页顶栏天气句进，侧栏不重复挂入口。
-                DrawerSection("生活") {
-                    DrawerRow(
-                        label = "取快递",
-                        icon = AppIcons.Package01,
-                        onClick = { showShortcutSheet = true },
-                    )
-                    if (toolboxEnabled) {
-                        DrawerRow("百宝箱", AppIcons.Toolbox, onClick = onOpenToolbox)
-                    }
-                }
-                DrawerSection("江水生活") {
-                    // 一卡通账号（2026-11-21 用户口径）：「江水生活」首行、快趣卡片之上。
-                    // 图标用线性信用卡、不用水宝宝位图——品牌位图留给五张服务卡，
-                    // 账号行与「账号与登录」页的「一卡通 · 电费」共用同一颗。
-                    DrawerRow(
-                        label = "一卡通账号",
-                        icon = AppIcons.CreditCard,
-                        onClick = onOpenCampusAccount,
-                    )
-                    // 快趣/胖乖/趣智/U净/问渠五行走**官方品牌图标**（2026-10-21 用户口径）：
-                    // 位图自带彩色底，视觉体量比线性图标大，槽位取 24dp（线性 22dp）保持行内平衡
-                    DrawerRow(
-                        label = "快趣出行",
-                        brandIcon = R.drawable.ic_brand_kqcx,
-                        active = serviceActive.ride,
-                        onClick = onOpenRide,
-                    )
-                    // 三张卡（2026-10-21 用户口径）：**行本体直接进二级页**，右侧状态 / 余额
-                    // 才开原来的入口弹窗——「看状态」与「进页操作」是两个动作，不再让
-                    // 整行都落在弹窗上。U净 无登录 / 无收藏店时右侧没有状态文字，但箭头
-                    // 仍是入口（在案订单 / 扫码），命中区按 48dp 给足；数据侧等登录才拉。
-                    DrawerRow(
-                        label = "胖乖生活",
-                        brandIcon = R.drawable.ic_brand_pangguai,
-                        trailing = waterBalance,
-                        active = serviceActive.water,
-                        onClick = onOpenWater,
-                        onTrailingClick = onOpenWaterSheet,
-                    )
-                    DrawerRow(
-                        label = "趣智校园",
-                        brandIcon = R.drawable.ic_brand_qzxy,
-                        trailing = qzxyBalance,
-                        active = serviceActive.qzxy,
-                        onClick = onOpenQzxy,
-                        onTrailingClick = onOpenQzxySheet,
-                    )
-                    DrawerRow(
-                        label = "U净",
-                        brandIcon = R.drawable.ic_brand_ujing,
-                        trailing = ujingFreeText,
-                        trailingLoading = ujingFreeLoading,
-                        active = serviceActive.ujing,
-                        onClick = onOpenUjing,
-                        onTrailingClick = onOpenUjingSheet,
-                    )
-                    DrawerRow(
-                        label = "问渠 · 志愿服务",
-                        brandIcon = R.drawable.ic_brand_wenqu,
-                        trailing = wenquHours,
-                        onClick = onOpenWenqu,
-                    )
-                }
-                DrawerSection("学习") {
-                    DrawerRow("笔记 · 课件", AppIcons.Book01, onClick = onOpenNotes)
-                    DrawerRow("作业", AppIcons.Task01, onClick = onOpenHomework)
-                }
+                // 2026-11-25：三段的行与徽标数据在共享层 `lifeDrawerGroups`（iOS 要同一份）。
+                DrawerGroups(
+                    lifeDrawerGroups(
+                        toolboxEnabled = toolboxEnabled,
+                        serviceActive = serviceActive,
+                        brands = DrawerBrandIds(
+                            kqcx = R.drawable.ic_brand_kqcx,
+                            pangguai = R.drawable.ic_brand_pangguai,
+                            qzxy = R.drawable.ic_brand_qzxy,
+                            ujing = R.drawable.ic_brand_ujing,
+                            wenqu = R.drawable.ic_brand_wenqu,
+                        ),
+                        waterBalance = waterBalance,
+                        qzxyBalance = qzxyBalance,
+                        ujingFreeText = ujingFreeText,
+                        ujingFreeLoading = ujingFreeLoading,
+                        wenquHours = wenquHours,
+                        onOpenShortcutSheet = { showShortcutSheet = true },
+                        onOpenToolbox = onOpenToolbox,
+                        onOpenCampusAccount = onOpenCampusAccount,
+                        onOpenRide = onOpenRide,
+                        onOpenWater = onOpenWater,
+                        onOpenWaterSheet = onOpenWaterSheet,
+                        onOpenQzxy = onOpenQzxy,
+                        onOpenQzxySheet = onOpenQzxySheet,
+                        onOpenUjing = onOpenUjing,
+                        onOpenUjingSheet = onOpenUjingSheet,
+                        onOpenWenqu = onOpenWenqu,
+                        onOpenNotes = onOpenNotes,
+                        onOpenHomework = onOpenHomework,
+                    ),
+                )
                 Spacer(Modifier.height(16.dp))
             }
 
@@ -570,788 +485,3 @@ fun SideDrawerContent(
         )
     }
 }
-
-@Composable
-private fun DrawerHeader(
-    avatarText: String,
-    title: String,
-    subtitle: String,
-    onOpenStudentInfo: () -> Unit,
-    onScan: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 24.dp, end = 24.dp, top = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // 头像 + 姓名 + 班级整块可点：进「学籍信息」（2026-10-21 用户口径，
-        // 该入口从教务 Tab 的服务列表挪到这里）。扫一扫是独立按钮，不包进这块。
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(12.dp))
-                .clickable(onClickLabel = "学籍信息", onClick = onOpenStudentInfo)
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = avatarText,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
-        ScanCircle(onClick = onScan)
-    }
-}
-
-@Composable
-private fun ScanCircle(onClick: () -> Unit) {
-    val primary = MaterialTheme.colorScheme.primary
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.92f else 1f, label = "drawerScanScale")
-    Box(
-        modifier = Modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surface)
-            .clickable(
-                interactionSource = interaction,
-                indication = LocalIndication.current,
-                onClickLabel = "扫一扫",
-                onClick = onClick,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = AppIcons.QrCodeScan,
-            contentDescription = null,
-            tint = primary,
-            modifier = Modifier.size(20.dp),
-        )
-    }
-}
-
-/** 账号与登录：紧跟头像信息，不再占底部位置。 */
-@Composable
-private fun AccountRow(onClick: () -> Unit) {
-    val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-    Row(
-        modifier = Modifier
-            .padding(start = 24.dp, end = 24.dp, top = 4.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClickLabel = "账号与登录", onClick = onClick)
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("账号与登录", style = MaterialTheme.typography.labelMedium, color = muted)
-        Spacer(Modifier.width(2.dp))
-        Icon(
-            imageVector = AppIcons.ChevronRight,
-            contentDescription = null,
-            tint = muted,
-            modifier = Modifier.size(14.dp),
-        )
-    }
-}
-
-@Composable
-private fun WalletHero(
-    balanceText: String,
-    accountValue: String,
-    powerText: String,
-    /** 有充值等待到账（2026-10-22）：「校园卡余额」标签让位给状态文案，恢复旧钱包卡口径。 */
-    arrivalWatching: Boolean,
-    onCampusDetail: () -> Unit,
-    onPowerDetail: () -> Unit,
-    onRecharge: () -> Unit,
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    val muted = onSurface.copy(alpha = 0.55f)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize()
-            .padding(horizontal = 24.dp)
-            .padding(top = 12.dp),
-    ) {
-        // 等待到账时小标题行让位给状态文案（旧生活页钱包卡同款口径），正常时还原标签；
-        // animateContentSize 已挂在 Column 上，切换不跳。转圈 + 主色小字与
-        // 校园卡设置页的等待行同族。
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (arrivalWatching) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(12.dp),
-                    strokeWidth = 2.dp,
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    "有充值正在确认到账…",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = primary,
-                )
-            } else {
-                Text("校园卡余额", style = MaterialTheme.typography.labelSmall, color = muted)
-            }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            AnimatedContent(
-                targetState = balanceText,
-                // 进 state 档、退 tap 档：新内容淡入要看得清，旧内容让位要快——
-                // 两个方向同长会读成"两行字互相叠着糊一下"。这不是随手取的差值，
-                // 别把两者统一成同一档。
-                transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.exit()) },
-                label = "drawerBalance",
-                modifier = Modifier.weight(1f),
-            ) { text ->
-                // 金额按长度分三档：¥ 开头最多 7 字保持 34sp，8–9 字降 28sp，
-                // 再长降 24sp——大字号或四位数余额不会把充值按钮挤走。
-                val balanceSize = when {
-                    !text.startsWith("¥") -> 20.sp
-                    text.length <= 7 -> 34.sp
-                    text.length <= 9 -> 28.sp
-                    else -> 24.sp
-                }
-                Text(
-                    text = text,
-                    // tnum：余额刷新时数字宽度不抖
-                    style = MaterialTheme.typography.bodyLarge
-                        .copy(fontFeatureSettings = "tnum"),
-                    fontSize = balanceSize,
-                    lineHeight = when (balanceSize) {
-                        34.sp -> 40.sp
-                        28.sp -> 34.sp
-                        else -> 30.sp
-                    },
-                    fontWeight = FontWeight.Bold,
-                    color = primary,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClickLabel = "校园卡详情", onClick = onCampusDetail)
-                        .padding(vertical = 2.dp),
-                )
-            }
-            // 与余额数字同一行、垂直居中：上一版挂在「校园卡余额」小标题那一行，看着没对齐。
-            RechargeButton(
-                onClick = onRecharge,
-                // 一卡通充值有到账等待时锁入口（2026-10-22）：等待中再下一单会覆盖基线
-                // 与 pendingRecharge，第一笔的到账判定就丢了——与设置页「充值」按钮的
-                // enabled = watching == null 同一道闸。
-                enabled = !arrivalWatching,
-            )
-        }
-        // 电子账户与寝室电费并成一行（2026-10-21 用户口径）：两项都是可点的余额，
-        // 各占一半、中间一道细分隔线；从原来的两行（小字 + 电费行）压到一行，
-        // 也收掉了钱包区与「生活」段之间的空档。
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(onSurface.copy(alpha = 0.04f)),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            WalletStat(
-                label = "电子账户",
-                value = accountValue,
-                modifier = Modifier.weight(1f),
-                onClick = onCampusDetail,
-            )
-            Box(
-                Modifier
-                    .width(1.dp)
-                    .height(14.dp)
-                    .background(onSurface.copy(alpha = 0.08f)),
-            )
-            WalletStat(
-                label = "寝室电费",
-                value = powerText,
-                modifier = Modifier.weight(1f),
-                onClick = onPowerDetail,
-            )
-        }
-    }
-}
-
-/**
- * 钱包区的一格余额（2026-10-21）：小字标签 + 右对齐的数值，整格可点开详情。
- * 数值走 [AnimatedContent]：异步加载时「—」→ 金额是渐变而不是跳字。
- */
-@Composable
-private fun WalletStat(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClickLabel = "$label 详情", onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = onSurface.copy(alpha = 0.55f),
-            maxLines = 1,
-        )
-        Spacer(Modifier.width(6.dp))
-        AnimatedContent(
-            targetState = value,
-            transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.exit()) },
-            label = "drawerWalletStat",
-            modifier = Modifier.weight(1f),
-        ) { text ->
-            Text(
-                text = text,
-                // tnum：金额 / 电量的数字宽度固定，刷新时不会把分隔线挤动
-                style = MaterialTheme.typography.labelMedium
-                    .copy(fontFeatureSettings = "tnum"),
-                color = onSurface.copy(alpha = 0.8f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.End,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
-
-@Composable
-private fun RechargeButton(
-    onClick: () -> Unit,
-    /** 一卡通到账等待中为 false（2026-10-22）：置灰而非隐藏，闸的理由写在调用点。 */
-    enabled: Boolean = true,
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.94f else 1f, label = "drawerRechargeScale")
-    Row(
-        modifier = Modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(RoundedCornerShape(99.dp))
-            .background(if (enabled) primary.copy(alpha = 0.10f) else primary.copy(alpha = 0.05f))
-            .clickable(
-                interactionSource = interaction,
-                indication = LocalIndication.current,
-                enabled = enabled,
-                onClickLabel = "充值",
-                onClick = onClick,
-            )
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            AppIcons.Wallet01,
-            contentDescription = null,
-            tint = if (enabled) primary else muted,
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(Modifier.width(4.dp))
-        Text(
-            "充值",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = if (enabled) primary else muted,
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun WalletDetailSheet(
-    detail: WalletDetail,
-    campusCardFen: Long?,
-    campusAccountFen: Long?,
-    campusAt: Long?,
-    powerRemain: Double?,
-    powerRoom: String?,
-    powerAt: Long?,
-    /** 一卡通到账等待中锁「充值」（2026-10-22）：与钱包区 RechargeButton 同一道闸。 */
-    campusRechargeLocked: Boolean,
-    onDismiss: () -> Unit,
-    onOpenBill: () -> Unit,
-    onRecharge: () -> Unit,
-) {
-    val isCampus = detail == WalletDetail.Campus
-    val primary = MaterialTheme.colorScheme.primary
-    val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-    // 按钮动作先播完弹层退场再执行（账单页 / 充值弹层不会和这张弹层重叠一帧）
-    val sheetState = rememberModalBottomSheetState()
-    val dismissThen = rememberSheetDismisser(sheetState, onDismiss)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp),
-        ) {
-            Text(
-                text = if (isCampus) "校园卡" else "寝室电费",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = if (isCampus) {
-                    campusCardFen?.let { MoneyFormat.fromFen(it) } ?: "—"
-                } else {
-                    powerRemain?.let { "%.2f 度".format(it) } ?: "—"
-                },
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                color = primary,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            Text(
-                text = if (isCampus) {
-                    "正式卡余额；电子账户另计"
-                } else {
-                    powerRemain?.let { "约 ${MoneyFormat.fromYuan(it * 0.62)}（按 0.62 元/度估算）" } ?: "以缴费平台账单为准"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = muted,
-            )
-            Spacer(Modifier.height(12.dp))
-            if (isCampus) {
-                DetailRow("正式卡", campusCardFen?.let { MoneyFormat.fromFen(it) } ?: "—")
-                DetailRow("电子账户", campusAccountFen?.let { MoneyFormat.fromFen(it) } ?: "—")
-                DetailRow("更新时间", formatTime(campusAt))
-            } else {
-                DetailRow("房间", powerRoom ?: "—")
-                DetailRow("更新时间", formatTime(powerAt))
-            }
-            // 旧「生活」页的钱包说明随页面删除后挪到这里：详情弹层是余额/电费的
-            // 唯一常驻落点，这两句用户要求保留的口径不能丢。
-            Text(
-                text = if (isCampus) BALANCE_NOTE else ELECTRICITY_NOTE,
-                style = MaterialTheme.typography.bodySmall,
-                color = muted,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Row(
-                modifier = Modifier.padding(top = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                OutlinedButton(
-                    onClick = { dismissThen(onOpenBill) },
-                    modifier = Modifier.weight(1f),
-                ) { Text("账单") }
-                Button(
-                    onClick = { dismissThen(onRecharge) },
-                    modifier = Modifier.weight(1f),
-                    // 只锁一卡通那格的充值；电费充值没有到账轮询，不受影响
-                    enabled = !isCampus || !campusRechargeLocked,
-                ) { Text("充值") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DetailRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            modifier = Modifier.weight(1f),
-        )
-        Text(text = value, style = MaterialTheme.typography.bodyMedium)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun RechargeChoiceSheet(
-    onDismiss: () -> Unit,
-    onPickCampus: () -> Unit,
-    onPickPower: () -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState()
-    val dismissThen = rememberSheetDismisser(sheetState, onDismiss)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text("选择充值项目", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                text = "两个系统各充各的，请确认要充哪一个",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                RechargeTile(
-                    title = "一卡通充值",
-                    subtitle = "正式卡 / 电子账户",
-                    icon = AppIcons.Wallet01,
-                    modifier = Modifier.weight(1f),
-                    // 退场播完再弹下一张，两张弹层不叠在同一帧
-                    onClick = { dismissThen(onPickCampus) },
-                )
-                RechargeTile(
-                    title = "寝室电费充值",
-                    subtitle = "缴费平台 · 房间电表",
-                    icon = AppIcons.Bolt,
-                    modifier = Modifier.weight(1f),
-                    onClick = { dismissThen(onPickPower) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RechargeTile(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    Surface(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClickLabel = title, onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = RoundedCornerShape(14.dp),
-    ) {
-        Column(Modifier.padding(14.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(primary.copy(alpha = 0.10f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, contentDescription = null, tint = primary, modifier = Modifier.size(20.dp))
-            }
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 10.dp),
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-    }
-}
-
-private fun formatTime(at: Long?): String =
-    at?.let { SimpleDateFormat("MM-dd HH:mm", Locale.CHINA).format(Date(it)) } ?: "—"
-
-@Composable
-private fun DrawerSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-        // 2026-10-21 收窄：上一版段头上下 18/4dp，钱包区收成一行后仍显松，压到 14/2dp
-        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 14.dp, bottom = 2.dp),
-    )
-    Column(content = content)
-}
-
-/**
- * 侧栏一行入口（2026-10-21 双命中区）：
- * - **行本体**（图标 + 名称 + 空白）→ [onClick]，进对应二级页；
- * - **右侧状态 / 余额**（[trailing]，有 [onTrailingClick] 才可点）→ 开入口弹窗。
- *   命中区加大（垂直 24dp），别让状态文案小到点不准；
- * - 状态字号从 labelSmall 提到 **titleSmall + SemiBold + 主色**：余额 / 空闲数是
- *   这行最该被看到的信息，也是可点的目标，视觉上要立得住；
- * - 状态与箭头**收在同一列右缘**（2026-10-21）：金额一律右对齐、箭头始终在最右，
- *   各行扫下来是一条竖线（此前可点状态多一层 8dp 内边距，金额比不可点的行缩进一截）；
- *   右侧命中区**至少 48dp 宽**（U净未登录 / 无收藏店时只剩一枚箭头，16dp 宽点不准），
- *   内容仍贴右缘（`Arrangement.End`），箭头位置不因加宽而左移；
- * - [active] = 对应服务**正在进行中**（骑行 / 开水 / 用水 / 洗烘）：整行加主色描边 +
- *   浅 tonal 底（180ms 过渡，与 `AppCard.highlighted` 同族口径），展开侧栏一眼即见
- *   「这行有事在跑」——右侧状态数字只是信息，描边才是「现在就值得看」的信号；
- * - 按下整行轻微回缩（0.985，与扫一扫 / 付款码同族），松手回弹。
- */
-@Composable
-private fun DrawerRow(
-    label: String,
-    icon: ImageVector? = null,
-    /** 官方品牌图标（drawable 位图，自带彩色底）：与 [icon] 二选一，brandIcon 优先。 */
-    brandIcon: Int? = null,
-    trailing: String? = null,
-    trailingLoading: Boolean = false,
-    /** 服务进行中：主色描边点亮（见 KDoc）。 */
-    active: Boolean = false,
-    onClick: () -> Unit,
-    onTrailingClick: (() -> Unit)? = null,
-) {
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    val muted = onSurface.copy(alpha = 0.78f)
-    val rowShape = RoundedCornerShape(12.dp)
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
-        targetValue = if (pressed) 0.985f else 1f,
-        label = "drawerRowPress",
-    )
-    // 高亮过渡与 AppCard.highlighted 同一族（都走 `Motion.state()`）：描边色 / 底色 / 描边宽
-    // 三处一起动。2026-11-06 归并到 Motion 之后不再引 `AppCardDefaults.HighlightTransitionMillis`
-    // ——那个常量现在只是它的别名，绕一层没有意义。
-    val borderColor by animateColorAsState(
-        targetValue = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
-        animationSpec = Motion.state(),
-        label = "drawerRowBorder",
-    )
-    val containerColor by animateColorAsState(
-        targetValue = if (active) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.06f)
-        } else {
-            Color.Transparent
-        },
-        animationSpec = Motion.state(),
-        label = "drawerRowContainer",
-    )
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
-            }
-            .clip(rowShape)
-            .background(containerColor)
-            .border(1.dp, borderColor, rowShape)
-            .clickable(
-                interactionSource = interaction,
-                indication = LocalIndication.current,
-                onClickLabel = label,
-                onClick = onClick,
-            )
-            .heightIn(min = 50.dp)
-            // 纵向内边距 1dp：给右侧 48dp 的命中区留出空间，行高仍是 50dp
-            .padding(horizontal = 12.dp, vertical = 1.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        when {
-            // 品牌位图 24dp：彩色底自带视觉重量，比线性图标放大一档才不显小，
-            // 但仍比文字行高小一截（M3 行高 56dp 的 43%），不把行撑高
-            brandIcon != null -> Image(
-                painter = painterResource(brandIcon),
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-            )
-            else -> Icon(
-                imageVector = icon!!,
-                contentDescription = null,
-                tint = muted,
-                modifier = Modifier.size(22.dp),
-            )
-        }
-        Spacer(Modifier.width(16.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(8.dp))
-        if (trailingLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(12.dp),
-                strokeWidth = 1.5.dp,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.width(6.dp))
-        }
-        // 状态 + 箭头是一组、钉在行的右缘：金额在左、箭头在右，所有行共用同一条收边。
-        // 数值变化（余额 / 空闲数 / 工时异步到达）走淡入淡出，不跳字。
-        val trailingSlot: @Composable () -> Unit = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AnimatedContent(
-                    targetState = trailing,
-                    transitionSpec = { fadeIn(Motion.state()) togetherWith fadeOut(Motion.exit()) },
-                    contentAlignment = Alignment.CenterEnd,
-                    label = "drawerRowTrailing",
-                ) { text ->
-                    if (text == null) {
-                        Spacer(Modifier.size(0.dp))
-                    } else {
-                        Text(
-                            text = text,
-                            // tnum：余额 / 空闲数刷新时数字宽度不抖
-                            style = MaterialTheme.typography.titleSmall
-                                .copy(fontFeatureSettings = "tnum"),
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                if (trailing != null) Spacer(Modifier.width(2.dp))
-                Icon(
-                    imageVector = AppIcons.ChevronRight,
-                    contentDescription = null,
-                    tint = if (onTrailingClick != null) {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-                    } else {
-                        onSurface.copy(alpha = 0.3f)
-                    },
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        }
-        if (onTrailingClick != null) {
-            Row(
-                modifier = Modifier
-                    .widthIn(min = 48.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(
-                        onClickLabel = "$label 余额与入口",
-                        onClick = onTrailingClick,
-                    )
-                    // 20sp 文本 + 上下 14dp = 48dp 命中区（行内容高度正好 48dp）
-                    .padding(vertical = 14.dp),
-                // 内容贴右缘：补出来的宽度只长在左侧，箭头仍与其它行对齐
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                trailingSlot()
-            }
-        } else {
-            trailingSlot()
-        }
-    }
-}
-
-/** 左下角的设置入口：齿轮 + 文字，和右下付款码对称。 */
-@Composable
-private fun SettingsEntry(onClick: () -> Unit) {
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(99.dp))
-            .clickable(onClickLabel = "设置", onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = AppIcons.Settings01,
-            contentDescription = null,
-            tint = onSurface.copy(alpha = 0.7f),
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(5.dp))
-        Text(
-            text = "设置",
-            style = MaterialTheme.typography.labelLarge,
-            color = onSurface.copy(alpha = 0.7f),
-        )
-    }
-}
-
-/** 右下角的付款码图标入口：按下轻微缩放，松开回弹。 */
-@Composable
-private fun PaymentCodeEntry(onClick: () -> Unit) {
-    val primary = MaterialTheme.colorScheme.primary
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.94f else 1f,
-        label = "drawerPayScale",
-    )
-    Row(
-        modifier = Modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(RoundedCornerShape(99.dp))
-            .background(primary.copy(alpha = 0.10f))
-            .clickable(
-                interactionSource = interaction,
-                indication = LocalIndication.current,
-                onClickLabel = "出示付款码",
-                onClick = onClick,
-            )
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = AppIcons.QrCodeScan,
-            contentDescription = null,
-            tint = primary,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = "付款码",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = primary,
-        )
-    }
-}
-
-/** 一卡通余额说明（钱包详情弹层，2026-09-24 口径；旧生活页删掉后挪到侧栏）。 */
-private const val BALANCE_NOTE =
-    "一卡通余额与流水都来自一卡通平台，服务端落账有延迟，刚发生的消费或充值可能暂时不计入。"
-
-/** 电费说明（钱包详情弹层，2026-09-24 用户给的原话；只有这一处口径）。 */
-private const val ELECTRICITY_NOTE = "受服务器影响，实际费用可能有延迟，电费不足时请及时缴费"
