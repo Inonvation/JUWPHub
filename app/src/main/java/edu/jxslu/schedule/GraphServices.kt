@@ -15,6 +15,7 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
 import edu.jxslu.schedule.platform.AppServices
@@ -79,4 +80,9 @@ class GraphServices(private val context: Context) : AppServices {
     override fun powerRepository(): PowerRepository = Graph.powerRepository(appContext)
 
     override fun powerReadingStore(): PowerReadingStore = Graph.powerReadingStore(appContext)
+
+    // ---- 天气（S19） ----
+    //
+    // 转给 `Graph` 的同一份单例：今日页顶栏提示与天气详情页共用它（30 分钟 TTL 才有意义）。
+    override fun weatherRepository(): WeatherRepository = Graph.weatherRepository(appContext)
 }

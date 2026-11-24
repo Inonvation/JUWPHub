@@ -1,9 +1,9 @@
 package edu.jxslu.schedule.ui.weather
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.data.weather.WeatherRepository
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.WeatherSnapshot
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +19,15 @@ import kotlinx.coroutines.launch
  *
  * 不并进今日页 ViewModel：两者是不同窗口（今日页在主 Activity、详情页在二级页），
  * 共用的只有仓库单例。
+ *
+ * ## 搬进共享层改了什么（iOS 移植 S19，2026-11-25）
+ *
+ * - 构造只吃共享层类型（[WeatherRepository]），宿主各自创建：Android `viewModel { }`、
+ *   iOS `remember { }`。`commonMain` 没有 `viewModel()` 这个 Composable（见 design/ios-port.md §11.1）。
+ * - **删掉 `Factory`**：那是 `viewModel(factory = …)` 的产物，宿主改用 lambda 初始化后
+ *   就没有调用方了；留一个没人用的 `ViewModelProvider.Factory` 只是给下一批搬页面的人
+ *   一个「这里还要 factory」的错觉。
+ * - `System.currentTimeMillis()` → [AppClock.nowMillis]（`commonMain` 里没有 `System`）。
  */
 class WeatherViewModel(private val repo: WeatherRepository) : ViewModel() {
 
@@ -82,15 +91,9 @@ class WeatherViewModel(private val repo: WeatherRepository) : ViewModel() {
             refreshing = false,
             snapshot = snapshot,
             // 只有网络新取才盖新的「更新于」；沿用缓存时用那份数据自己的取数时刻
-            loadedAtMs = if (result.fresh) System.currentTimeMillis() else result.atMs,
+            loadedAtMs = if (result.fresh) AppClock.nowMillis() else result.atMs,
             // 主动刷了却没取到新数据 = 这份可能过期（首次加载的失败由空态接管）
             stale = force && snapshot != null && !result.fresh,
         )
-    }
-
-    class Factory(private val repo: WeatherRepository) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            WeatherViewModel(repo) as T
     }
 }

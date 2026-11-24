@@ -41,6 +41,8 @@ import edu.jxslu.schedule.ui.selection.SelectionScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
 import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.theme.JuwTheme
+import edu.jxslu.schedule.ui.weather.WeatherScreen
+import edu.jxslu.schedule.ui.weather.WeatherViewModel
 import edu.jxslu.schedule.ui.web.WebContentView
 import edu.jxslu.schedule.ui.web.WebViewController
 import edu.jxslu.schedule.ui.week.WeekScreen
@@ -147,6 +149,14 @@ private fun IosRoot(services: IosServices) {
                         // 只是不跳页（见 InboxScreen 头部参数表）。传个空 lambda 会变成
                         // 「点了没反应」，比没有更糟。
                         IosPage.Inbox -> InboxScreen(onBack = { page = IosPage.Week })
+                        // 天气（S19）：仓库是纯 Ktor + 进程内缓存，iOS 与 Android 同一份实现。
+                        // ViewModel 挂在组合上——iOS 没有配置变更重建，`remember` 就等于这一屏。
+                        IosPage.Weather -> {
+                            val viewModel = remember {
+                                WeatherViewModel(services.weatherRepository())
+                            }
+                            WeatherScreen(viewModel = viewModel, onBack = { page = IosPage.Week })
+                        }
                     }
                 }
                 hint?.let { text ->
@@ -181,7 +191,7 @@ private fun IosRoot(services: IosServices) {
 }
 
 /**
- * iOS 侧目前能进的一级页面（S13 起有笔记 / 作业 / 选课；S19 起有收件箱）。
+ * iOS 侧目前能进的一级页面（S13 起有笔记 / 作业 / 选课；S19 起有收件箱与天气）。
  *
  * 为什么用枚举而不是导航库：iOS 侧还没有二级页栈（`SubpageActivity` 那一套是 Android 的），
  * 这一版只要能切页就够验证「共享页面在 iOS 上真的画得出来」。等详情页搬完再换真正的路由。
@@ -194,6 +204,7 @@ private enum class IosPage(val label: String) {
     Score("成绩"),
     Exam("考试"),
     Inbox("收件箱"),
+    Weather("天气"),
 }
 
 /**

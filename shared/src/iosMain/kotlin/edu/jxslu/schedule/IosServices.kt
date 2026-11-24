@@ -23,6 +23,7 @@ import edu.jxslu.schedule.data.session.IosJwReadSession
 import edu.jxslu.schedule.data.session.IosWebCookieSource
 import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.data.session.WebCookies
+import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
@@ -208,6 +209,16 @@ class IosServices : AppServices {
     override fun powerRepository(): PowerRepository = powerRepo
 
     override fun powerReadingStore(): PowerReadingStore = powerReadings
+
+    /**
+     * 天气仓库（S19）：纯 Ktor + 进程内 TTL 缓存，与 Android 同一份实现。
+     *
+     * 惰性单例而不是每次 new：今日页顶栏提示与天气详情页共用它，
+     * 两个实例等于每次进页各打一次 Open-Meteo（免费档按请求数算）。
+     */
+    private val weatherRepo: WeatherRepository by lazy { WeatherRepository() }
+
+    override fun weatherRepository(): WeatherRepository = weatherRepo
 
     init {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
