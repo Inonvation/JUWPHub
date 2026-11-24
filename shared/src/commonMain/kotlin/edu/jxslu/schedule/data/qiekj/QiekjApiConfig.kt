@@ -6,6 +6,10 @@ package edu.jxslu.schedule.data.qiekj
  *
  * 每日签到走独立的 [POINTS_VERSION]：`doUserSignIn` 有版本门槛，旧版本会回
  * 「版本过低，请升级APP后再使用」；开水链路继续用 [VERSION]。
+ *
+ * iOS 移植 S11（2026-11-24）：随胖乖数据层搬进 `:shared`，内容一字未改。
+ * [USER_AGENT] 里的 `okhttp/3.14.9` **不是笔误**——它是发给服务端的 UA 指纹（对齐参考实现
+ * light-life 的抓包结果），与本地用什么 HTTP 客户端无关；迁移到 Ktor 后照样按这个字符串发。
  */
 object QiekjApiConfig {
     const val BASE_URL = "https://userapi.qiekj.com/"

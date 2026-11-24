@@ -24,6 +24,7 @@ import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.prefs.recordGuessOrder
+import edu.jxslu.schedule.data.qiekj.QiekjExpiryMarker
 import edu.jxslu.schedule.data.qiekj.QiekjOrderHistoryStore
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjTokenStore
@@ -88,6 +89,7 @@ import edu.jxslu.schedule.data.repo.TranscriptStore
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.data.session.CredentialVault
 import edu.jxslu.schedule.data.session.SessionExpiryStore
+import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
@@ -652,7 +654,13 @@ object Graph {
                 .also { sessionExpiryStore = it }
         }
 
-    /** 胖乖仓库单例（DESIGN §4.10）：Retrofit client 只建一次，token 存加密 prefs。 */
+    /**
+     * 胖乖仓库单例（DESIGN §4.10）：两条链路各一个 Ktor client，token 存加密 prefs。
+     *
+     * 仓库已搬进 `:shared`（iOS 移植 S11，2026-11-24），构造只吃三条存储接口的 Android 实现：
+     * 凭证（Keystore 加密 prefs）、订单快照（普通 prefs）、「已过期」标记（与账号中心共用）。
+     * 采样目录传**绝对路径字符串**——共享层没有 `java.io.File`。
+     */
     fun qiekj(context: Context): QiekjRepository =
         qiekjRepository ?: synchronized(this) {
             qiekjRepository ?: QiekjRepository(
@@ -660,9 +668,19 @@ object Graph {
                 QiekjOrderHistoryStore(context.applicationContext),
                 // debug 专用：只读查询与开水链路的响应原文落盘，供确认设备状态字段
                 debugDumpDir = File(context.applicationContext.filesDir, "qiekj_debug")
-                    .takeIf { BuildConfig.DEBUG },
-                expiry = sessionExpiry(context.applicationContext),
+                    .takeIf { BuildConfig.DEBUG }?.absolutePath,
+                expiry = qiekjExpiryMarker(context.applicationContext),
             ).also { qiekjRepository = it }
+        }
+
+    /**
+     * 胖乖的「登录状态已过期」留痕：共享层的 [QiekjExpiryMarker] 只是两条无参方法，
+     * 这里转发到五个第三方功能共用的 [SessionExpiryStore]（`SessionService.Qiekj` 那一格）。
+     */
+    private fun qiekjExpiryMarker(context: Context): QiekjExpiryMarker =
+        object : QiekjExpiryMarker {
+            override fun markExpired() = sessionExpiry(context).mark(SessionService.Qiekj)
+            override fun clearExpired() = sessionExpiry(context).clear(SessionService.Qiekj)
         }
 
     /**

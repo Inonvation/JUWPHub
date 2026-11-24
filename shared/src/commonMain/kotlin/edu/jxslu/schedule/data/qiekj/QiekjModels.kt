@@ -2,12 +2,16 @@ package edu.jxslu.schedule.data.qiekj
 
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.PromotionLine
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.Serializable
 
 /**
  * 胖乖接口统一响应包与线上 DTO（DESIGN §4.10）。
  * 端点、字段名与参考实现 light-life Models.kt 一致；可能返回非字符串形态的字段
  * 统一挂 [LenientStringSerializer]。业务异常模型（TokenExpired 等）也在这里。
+ *
+ * iOS 移植 S11（2026-11-24）：随数据层搬进 `:shared`。除了 [UnlockStopSignal] 换了
+ * 线程安全的承载（见该类注释），字段与判定函数一字未改。
  */
 
 @Serializable
@@ -312,12 +316,18 @@ class UnlockStoppedException(message: String = "已结束等待") : Exception(me
  * 开水流程的手动结束开关：UI 点「结束用水」置位，仓库在轮询循环里看到就进入结束分支
  * （支持远程关阀的机型发 `goods/endWater`，其余提示到设备上结束；两条路都继续等设备回报）。
  * 每次 [QiekjRepository.unlockDevice] 新建一个，流程结束即作废。
+ *
+ * 承载是 [MutableStateFlow] 而不是 `java.util.concurrent.atomic.AtomicBoolean`
+ * （commonMain 里没有 `java.util.concurrent`）：写侧是 UI 线程（`request()`），
+ * 读侧是轮询协程（`Dispatchers.Default`），需要跨线程可见性——`StateFlow` 的
+ * `value` 本身就是 volatile 语义，两端（JVM / Kotlin/Native）都成立，比 `platform/locked`
+ * 那种「iOS 上不加锁」的缝更适合这里。
  */
 class UnlockStopSignal {
-    private val flag = java.util.concurrent.atomic.AtomicBoolean(false)
-    val isRequested: Boolean get() = flag.get()
+    private val flag = MutableStateFlow(false)
+    val isRequested: Boolean get() = flag.value
     fun request() {
-        flag.set(true)
+        flag.value = true
     }
 }
 
