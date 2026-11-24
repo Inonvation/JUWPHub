@@ -23,7 +23,7 @@
 
 | 你要改 | 先读 |
 |--------|------|
-| 构建 / R8 / 签名 / 发版 / 包名 | `.agents/rules/build-release.md` |
+| 构建（含 iOS 侧载）/ R8 / 签名 / 发版 / 包名 | `.agents/rules/build-release.md` |
 | 找「某个行为被哪个测试钉住」 | `.agents/rules/tests.md` |
 | 导航 / 启动页 / 二级页 / 过渡 / 悬浮栏 / 背景图层级 | `.agents/rules/nav-window.md` |
 | 卡片 / 弹层 / 一次性提示 | `.agents/rules/ui-common.md` |
@@ -289,7 +289,7 @@ shared/       KMP 共享逻辑（iOS 移植 P0/P2 起）：commonMain 已装 **d
               `ui/common/CourseUi` `WheelPicker` `Haptics` `DialogWindowFade`）+ `data/DefaultData`
               （11 小节作息与默认学期的唯一来源；包名保留原样，所以 `data.qzxy.*` 也会出现在这里，是有意的）。
               已接 Compose Multiplatform 1.7.3。
-              androidMain / iosMain 只放 expect/actual 的平台实现（条码、定点小数、触感、
+              androidMain / iosMain 只放 expect/actual 的平台实现（条码、触感、
               弹窗窗口动画），另有 `shared/src/androidMain/res/`（弹窗动画样式与两个 `@anim`，
               R 在 `edu.jxslu.schedule.shared.R`）。
               **commonMain 必须零 JVM 专有 API**，判据是 `:shared:metadataCommonMainClasses`。

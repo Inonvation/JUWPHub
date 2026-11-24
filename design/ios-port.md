@@ -101,8 +101,9 @@ iosApp/            薄壳：Xcode 工程、SwiftUI 入口、WidgetKit 扩展、I
 
 - 第 3 批（定宽格式化）✅ 新增 `domain/TextFmt.kt`（`pad` / `clock` / `hex2` / `decimals`），
   把 11 个文件里的 14 处 `String.format`、`"%02d:%02d"`、`"%02x"`、`"%04d-%02d"` 全部收成一个入口；
-  `decimals` 暂时保留 `String.format` 是在**集中**而不是在清掉（浮点舍入手写会和原显示差一分钱），
-  P1 拆模块时它变成 `expect/actual`，`String(format:)` 在 iOS 上语义一致。
+  `decimals` 一开始保留 `String.format` 是在**集中**而不是在清掉（浮点舍入手写会和原显示差一分钱），
+  P1 拆模块时它变成 `expect/actual`。**这个决定 2026-11-24 被真机推翻了**：`String(format:)` 与
+  `String.format` 的舍入规则不同，见下方 P2 第 4 条硬规律；现在是 commonMain 一份纯 Kotlin 实现。
   新增 `TextFmtTest`（5 条）逐项对照旧 `String.format` 输出。2393 个单测全绿。
 
 - 第 4 批（金额）✅ 新增 `domain/Money.kt`（整数「分」的值对象：`parse` / `text` / `ofLi` /
@@ -287,7 +288,7 @@ iosApp/            薄壳：Xcode 工程、SwiftUI 入口、WidgetKit 扩展、I
 | `javax.crypto`（3 处，`QzxyClData` 的 AES-128） | 自己写纯 Kotlin AES（`domain/AesBlock.kt`），加密面只保留解密 + `NoPadding`。理由是这段只用**硬编码常量密钥**解服务端下发的一张凭据，风险等级低；纯实现让两个平台逐字节一致、可单测，还省掉一套 CommonCrypto 绑定。正确性用 FIPS-197 / SP 800-38A 标准向量钉死，并与 `javax.crypto`（只在测试侧用）交叉核对 |
 | `okhttp3`（1 处，`HttpUrl.resolve`） | 自己写 RFC 3986 §5.2 相对引用解析（`domain/UrlRef.kt`），照 §5.4 全套用例 + 本项目 5 类真实形态做测试。只覆盖「解析相对链接」这一件事，不是通用 URI 库 |
 | `java.text.SimpleDateFormat` / `java.util.Date`（各 1 处） | 换 `AppClock.dateTimeOf(epochMillis)` + `TextFmt.pad`。注意旧实现用的是 `SimpleDateFormat` 的**默认时区**（`Locale.CHINA` 只管语言不管时区），所以新实现走 `TimeZone.currentSystemDefault()`，不写死 `Asia/Shanghai` |
-| `java.util.Locale`（2 处，`TextFmt.decimals`） | `TextFmt` 搬进 `:shared/commonMain` 后，`decimals` 改成 `internal expect fun formatFixed(value, places)`：Android 用 `String.format`，iOS 用 `NSString(format:)`。**没有**手写浮点舍入——`1.045` 这类值「乘 100 再 round」会偏差一分（double 里 `1.045 * 100` 正好落在 `104.5`），金额显示扛不住，只能交给各平台的 printf |
+| `java.util.Locale`（2 处，`TextFmt.decimals`） | 现在 `decimals` 由 `domain/PlatformFormat.kt` 的纯 Kotlin `formatFixed` 实现（**不是** expect/actual）：取 `Double.toString()` 的最短往返表示，按十进制 HALF_UP 做整数串进位。等价于 Java 的 `%.Nf`，`TextFmtTest` 用 420 个值 × 5 档精度对着 `String.format` 逐一比对。原先「交给各平台 printf」的方案已废弃——Foundation 走十进制 HALF_EVEN，`0.05 → 0.0` |
 
 > `String.format` 已在第 3 批清零；`domain/` 里剩下的 `.format(…)` 全是日期格式化，随 `java.time` 一起处理。
 
@@ -620,7 +621,7 @@ agent 同时改（每个 agent 只改自己那几个文件、不跑 Gradle），
 `HapticsSettings.isEnabled` 由 `JuwApplication` 把 DataStore 的 `hapticsEnabled` 收集进来——开关只在
 手指按下那一刻读一次，不需要触发重组。这条让 `commonMain` 不必认识 `Graph` / `Context`。
 
-**三条踩出来的硬规律**：
+**四条踩出来的硬规律**：
 
 1. **同包引用是 import 扫描的盲区**。`CourseUi.kt` 的 import 全是 Compose 与 domain，看着完全可搬，
    实际引用了同包的 `WheelValueDialog`（在 `WheelPicker.kt`）与 `rememberAppHaptics`（在 `Haptics.kt`）。
@@ -633,6 +634,13 @@ agent 同时改（每个 agent 只改自己那几个文件、不跑 Gradle），
    `shared/src/androidMain/res/`（库自己那套 R 是 `edu.jxslu.schedule.shared.R`），留在 `:app` 里
    共享层根本拿不到。**别用「删掉调用」绕过去**——第一版就是那么干的，Android 侧三个滚轮弹窗
    白丢淡入淡出，这一版补回来了。
+4. **平台缝必须配一条能在本机跑通的对照测试，否则「两端一致」只是猜的**。定点小数就是这么翻的车：
+   `TextFmt.decimals` 走 `expect/actual`，Android 调 `String.format`、iOS 调 `NSString(format:)`，
+   假设「都走 printf 家族所以一致」。CI 编译通过，装真机一看 5 个边界值里 3 个不一致——
+   Java 是**最短十进制表示 + HALF_UP**，Foundation 是**十进制 HALF_EVEN**，`0.05 → 0.0`。
+   现在改成 `commonMain` 里一份纯 Kotlin 实现，`TextFmtTest` 拿 420 个值 × 5 档精度对着
+   `String.format` 比对，**本地跑通即等于两端一致**。判据很简单：这条缝的行为能不能在
+   没有 iPhone 的机器上被证伪？不能，就别用 `expect/actual`。
 
 **下一批（顺序按「搬完必编译」排，别再按包名猜耦合）**：
 
@@ -749,10 +757,14 @@ KMP framework 由 Xcode 的 Build Phase 调 `./gradlew :shared:embedAndSignApple
 - push 只由 `ios-ipa.yml` 接管（Android SDK + link arm64 + xcodegen + xcodebuild + 打包），
   `ios-compile.yml` 只留 PR 与手工触发——两个 macOS workflow 同时排队会抢不到 runner
   （实测报 `The job was not acquired by Runner of type hosted`）。
-- **`Info.plist` 必须有 `CADisableMinimumFrameDurationOnPhone = true`**。CMP 1.7 起这是硬性运行时
-  校验，缺了或为 false 时 iPhone 上启动即被 `PlistSanityCheck` 抛异常终止
-  （[CMP 1.7.0 breaking changes](https://github.com/JetBrains/compose-multiplatform/releases/tag/v1.7.0)）。
-  2026-11-24 第一版 IPA 就漏了这一项，侧载后点开直接闪退。
+- **`Info.plist` 必须有 `CADisableMinimumFrameDurationOnPhone = true`**，且**不能让 plist 变成生成物**
+  （XcodeGen 的 `info:` 或 `GENERATE_INFOPLIST_FILE=YES` 会静默冲掉这个键）。CMP 1.7 起由
+  `PlistSanityCheck.performIfNeeded` 强制校验，缺键 `terminateWithUnhandledException` → SIGABRT。
+  处理路径（崩溃报告怎么拉、栈顶怎么认）写在 `.agents/rules/build-release.md`「iOS 侧载包」一节，
+  这里不重复。
+  一处实测与文档不一致，如实记下：2026-11-24 那版 IPA **漏了这个键但仍能进入界面**（iPhone 13 类机型），
+  所以「缺键必崩」这条在不同机型/版本上并不一致。**结论不变**：按「必须有」处理，不要拿真机去试
+  「没有行不行」——省下的是十几分钟的 CI，赌上的是「用户装上去点不开」。
 - 必须 `-configuration Release` + `ENABLE_DEBUG_DYLIB=NO`：Debug 会把代码塞进
   `JUWPHub.debug.dylib`（实测 59 MB），主二进制只剩壳，侧载后容易起不来。workflow 里有断言。
 - Kotlin 侧仍链 **debug** framework（`linkDebugFrameworkIosArm64`）：它与 Xcode 的优化级别无关，

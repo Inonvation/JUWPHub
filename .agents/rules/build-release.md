@@ -1,6 +1,7 @@
 # 构建 · R8 · 签名 · 包名
 
-作用域：改 `proguard-rules.pro`、改 `build.gradle.kts` 的 release 配置、发版、装包、排查「只有 release 才炸」时读。
+作用域：改 `proguard-rules.pro`、改 `build.gradle.kts` 的 release 配置、发版、装包、排查「只有 release 才炸」时读；
+动 `iosApp/` 的工程描述或出 iOS 侧载包时读「iOS 侧载包」一节。
 版本号等工程实况见 `AGENTS.md`「工程实况」，跑测试与汇总用例数的口径见 `AGENTS.md`「常用命令」，
 测试类清单见 `tests.md`。
 
@@ -64,6 +65,27 @@ keytool -list -v -keystore $env:USERPROFILE\.android\debug.keystore -alias andro
 
 - 构建 release 后抽查一次：`app/build/generated/source/buildConfig/release/edu/jxslu/schedule/BuildConfig.java`
   的 `AMAP_KEY` 应等于 `amapKeyRelease`。
+
+## iOS 侧载包（iosApp + :shared，2026-11-24）
+
+约束：`iosApp/JUWPHub/Info.plist` 是手写源文件，`CADisableMinimumFrameDurationOnPhone = true`
+不可删、不可改回。
+理由：Compose Multiplatform 启动时由 `androidx.compose.ui.uikit.PlistSanityCheck.performIfNeeded`
+强制校验这一项，缺键直接 `terminateWithUnhandledException` → SIGABRT。现象是侧载包
+「点图标立刻闪退」，与签名、LiveContainer 无关（同机 Flutter 的 DSH Go 不做该校验，能正常开）。
+
+- **不要让 plist 变成生成物**：XcodeGen 的 `info:` 指令与 `GENERATE_INFOPLIST_FILE=YES`
+  都会重新生成 plist、静默冲掉这个键。`project.yml` 现在只用
+  `INFOPLIST_FILE: JUWPHub/Info.plist` 引用入库文件，所以 `xcodegen generate` 不改它的内容。
+- 启动即崩先拉崩溃报告，别先猜签名：
+
+  ```powershell
+  python -m pymobiledevice3 crash pull <目录> /JUWPHub-*.ips
+  ```
+
+  栈顶出现 `PlistSanityCheck` 就是这条。断言原文在二进制里：
+  `Error: 'Info.plist' doesn't have a valid 'CADisableMinimumFrameDurationOnPhone' entry.`
+- 验证根因只需改 IPA 内 plist 重新 zip（二进制不动），不必重编 iOS——本项目本地无 macOS 构建。
 
 ## 提交与推送
 
