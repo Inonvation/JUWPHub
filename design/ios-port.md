@@ -1069,38 +1069,28 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 
 ### 12.2 今晚没做完（能搬，时间不够）
 
-按 `:app` 里剩下的行数排（2026-11-25 03:15 实测）。共享层 `commonMain` 已从
-43.8% 涨到 **64.3%**（116,823 行 / `:app` 64,819 行）。
+按 `:app` 里剩下的行数排（2026-11-25 04:35 实测）。共享层 `commonMain` 已从
+43.8% 涨到 **66.5%**（121,299 行 / `:app` 61,140 行）。
 
 | 包 | 文件 | 行数 | 卡在哪 |
 |---|---|---|---|
 | `ui/ebike` | 30 | 17,879 | 见 12.1：高德 Android SDK |
 | `ui/reminder` | 15 | 4,107 | 见 12.1：通知 + WorkManager |
-| `ui/campus` | 9 | 3,991 | 学工表单 / 教务导入的 WebView 外壳（要文件上传、SSL、定位、WebSettings 那一层），`CampusCardViewModel` 被 `ui/life` 的禁改文件调着，`PayCodeScreen` 用 `FLAG_SECURE` + 屏幕亮度 |
-| `ui/me` | 9 | 3,847 | 日历设置（系统 Calendar Provider）、教务账号（三个 Activity 入口）、提醒设置（通知 + WorkManager）、快捷方式设置（`PackageManager` 查应用图标）、小组件设置（Glance） |
+| `ui/campus` | 8 | 3,735 | 学工表单 / 教务导入的 WebView 外壳（要文件上传、SSL、定位、WebSettings 那一层），`CampusCardViewModel` 被 `ui/life` 的禁改文件调着，`PayCodeScreen` 用 `FLAG_SECURE` + 屏幕亮度 |
 | `ui/widget` | 12 | 3,112 | 见 12.1：Glance |
-| `ui/onboarding` | 1 | 2,592 | 首启引导；多步向导 + 权限申请 + 图片素材 |
+| `ui/onboarding` | 1 | 2,592 | 首启引导；多步向导 + 权限申请 + 图片素材，iOS 侧这一版不做 |
 | `ui/jwvw` | 2 | 2,445 | `JwImportScreen`：教务导入总入口，WebView 全套 API + 文件选择 |
-| `ui/common` | 22 | 2,087 | 剩下的都是位图与 WebView 辅助（`DecodeSampled` / `CodeBitmaps` / `WebViewSupport` / `ImageViewerDialog`） |
+| `ui/common` | 22 | 2,089 | 剩下的都是位图与 WebView 辅助（`DecodeSampled` / `CodeBitmaps` / `WebViewSupport` / `ImageViewerDialog`） |
 | `ui/today` | 3 | 1,914 | `ActiveServiceCard`（1,389）与 `GuessYouWantCardPlatform`：依赖 `ui.ebike` + `ui.qzxy` + 五张品牌位图，已按槽位反转成宿主注入，本机实现仍留 `:app` |
+| `ui/me` | 5 | 1,760 | 小组件设置（Glance）、权限与存储（七个 Android 权限 launcher + FileProvider + 缓存清理） |
 | `ui/wenqu` | 5 | 1,737 | 蹲点提醒 / 前台服务 / `AlarmManager`（见 12.1 通知那一行） |
 | `ui/week` | 4 | 1,568 | 课表页的平台槽（文件选择、日历写入、背景图） |
 | `ui/life` | 5 | 1,311 | `RechargeHost` / `PowerBankPayScreen`（`android.webkit` 全家 + `@JavascriptInterface`） |
-| `ui/timetable` / `ui/tweak` / `ui/onboarding` 之外 | — | 各 0.7–1.1k | 时间表管理 / 调课面板：依赖 `data/session` 与二级页栈 |
-
-### 12.4 今晚（2026-11-25 01:30–03:30）实际推进了什么
-
-| 批次 | 内容 | 结果 |
-|---|---|---|
-| 第一波（5 条并行） | `data/session` 会话层 + 账号中心、开水房、问渠、AI 调课、U净 | 全部合并，门禁绿 |
-| 第二波（1 条） | 侧边栏内容 + 生活/电费 | 合并，门禁绿 |
-| 第三波（4 条并行） | 今日页（槽位反转）、学工/报修/教务 WebView 适配、趣智页面层 + 百宝箱、学业/培养方案/笔记作业详情页 | 全部合并，门禁绿 |
-| iOS 壳 | `IosNavigation` 用 `SubpageScreen` 当路由键 + 抽屉白名单（31 条）；`IosKeychain` + 六个第三方凭证存储；AI 三页、账号中心、报修、百宝箱、学业、培养方案、天气设置接进路由 | 见 §12.5 |
-| 工具 | `scripts/check_kt_balance.py`（括号平衡，976→1004 个文件全绿）；`runner-probe.yml`（runner 标签实测） | 已入库 |
-
-**没做到的**：`iosMain` 的编译验证卡在 GitHub macOS runner 容量上——今晚 6 次
-`cancelled` 里只有 2 次是代码错误，其余是排满 10–15 分钟拿不到机器（`steps=0`）。
-
+| `ui/toolbox` | 5 | 1,249 | 水印 / 拼接 / 渲染器 / 智能拼接：纯 `android.graphics.Bitmap` 管线 |
+| `ui/score` | 4 | 1,215 | 盖章成绩单（`WebView` + PDF 另存 + `FileProvider`）与成绩页的平台槽 |
+| `ui/timetable` | 2 | 1,079 | 时间表管理：依赖 `data/session` 与二级页栈 |
+| `ui/tweak` | 2 | 694 | 调课面板 |
+| 其余 | — | < 250 各 | `ui/ai`（图片位图）、`ui/tile`（快捷设置磁贴）、`ui/qzxy`（充值深链）、`ui/selection` / `ui/exam` / `ui/jw` / `ui/water` / `ui/homework` 的平台槽 |
 
 ### 12.3 iOS 壳本身还差的（不是「搬不动」，是没写）
 
