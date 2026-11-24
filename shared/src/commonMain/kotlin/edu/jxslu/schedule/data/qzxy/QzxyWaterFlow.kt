@@ -3,6 +3,7 @@ package edu.jxslu.schedule.data.qzxy
 import edu.jxslu.schedule.domain.QzxyClData
 import edu.jxslu.schedule.domain.QzxyFrame
 import edu.jxslu.schedule.domain.QzxyProtocol
+import kotlin.time.TimeSource
 
 /**
  * 用水流程的协议状态机（DESIGN §4.30）。
@@ -117,11 +118,13 @@ class QzxyWaterFlow(
     var onTiming: ((String, Long) -> Unit)? = null
 
     private suspend fun <T> timed(label: String, block: suspend () -> T): T {
-        val startedAt = System.nanoTime()
+        // `System.nanoTime()` 是 JVM 专有。这里要的是**单调**时钟（阶段耗时不能被改系统时间
+        // 或夏令时影响），所以用 kotlin.time 的 Monotonic 而不是 AppClock 的墙上时钟。
+        val mark = TimeSource.Monotonic.markNow()
         try {
             return block()
         } finally {
-            onTiming?.invoke(label, (System.nanoTime() - startedAt) / 1_000_000)
+            onTiming?.invoke(label, mark.elapsedNow().inWholeMilliseconds)
         }
     }
 

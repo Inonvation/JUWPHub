@@ -2039,8 +2039,12 @@ class QzxyViewModel(
     private fun handleSettled(result: QzxyWaterFlow.Outcome.Settled, quiet: Boolean = false) {
         // clData 展示与「试通哪条清除候选」的偏好都在这里落
         val clDataPlain = QzxyClData.decrypt(result.clDataRaw)
-        if (result.clDataRaw != null) {
-            log("clData ${result.clDataRaw.length} 字符 → ${QzxyClData.describe(clDataPlain)}")
+        // 先落一个局部变量再判空：`QzxyWaterFlow` 在 shared 模块，跨模块读它的属性
+        // **不触发智能转换**（`result.clDataRaw.length` 直接编不过）。这不只是写法问题——
+        // 少了这一行，`ui/qzxy` 整包都会因为「类在另一个模块」而编不过（2026-11-25）。
+        val clDataRaw = result.clDataRaw
+        if (clDataRaw != null) {
+            log("clData ${clDataRaw.length} 字符 → ${QzxyClData.describe(clDataPlain)}")
         }
         result.clearKey?.let { clearStore.preferredKey = it }
         _uiState.update {
