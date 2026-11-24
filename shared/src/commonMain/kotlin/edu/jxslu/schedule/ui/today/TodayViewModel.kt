@@ -1,17 +1,19 @@
 package edu.jxslu.schedule.ui.today
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Course
 import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
 import kotlinx.datetime.plus
-import kotlinx.datetime.toKotlinLocalDate
-import kotlinx.datetime.toKotlinLocalDateTime
+import kotlinx.datetime.toInstant
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.GuessPick
 import edu.jxslu.schedule.domain.GuessPickStabilizer
@@ -48,9 +50,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.ZoneId
 import kotlin.random.Random
 
 /**
@@ -60,17 +59,28 @@ import kotlin.random.Random
  * [buildTodayState]——桌面小组件（`ui/widget`）与今日页共用同一份纯函数，
  * 保证两边「哪节课算正在上 / 什么时候轮到明天上桌」的口径不会分叉。
  * 本类只负责把 Room 数据流与时间 tick 喂进去。
+ *
+ * ## iOS 移植 V1（2026-11-25）：搬进 `shared/commonMain` 时改的四处
+ *
+ * 1. `java.time.LocalDate` / `LocalDateTime` / `ZoneId` 换 `kotlinx.datetime` +
+ *    [AppClock]（默认参数 `AppClock::today` / `AppClock::nowDateTime`）；
+ * 2. `System.currentTimeMillis()` 换 [AppClock.nowMillis]（`refreshTick`）；
+ * 3. `LocalDateTime.dayOfWeek.value` 换 `.ordinal + 1`——kotlinx-datetime 的 `DayOfWeek`
+ *    没有 `value`，两者取值相同（周一 1 … 周日 7），全仓其余调用点也是这个写法；
+ * 4. **删掉 `Factory`**：`design/ios-port.md` §11.2 ① 规定 ViewModel 是页面的必填参数、
+ *    由宿主创建，Android 侧改成 `viewModel { TodayViewModel(...) }`，那个 `ViewModelProvider.Factory`
+ *    就没有调用方了。留着是给下一批搬页面的人猜「这个还要不要用」。
  */
 class TodayViewModel(
     private val repo: ScheduleRepository,
     private val homeworkRepo: HomeworkRepository,
-    private val todayProvider: () -> LocalDate = { LocalDate.now() },
+    private val todayProvider: () -> LocalDate = AppClock::today,
     /**
      * 天气仓库（DESIGN §3.29）。可空注入：测试与旧构造点不传时顶栏那行恒为空。
      */
     private val weatherRepo: WeatherRepository? = null,
     /** 天气提示的「现在」来源，独立于 [todayProvider]（它只给日期，提示要判 18:00）。 */
-    private val nowProvider: () -> LocalDateTime = { LocalDateTime.now() },
+    private val nowProvider: () -> LocalDateTime = AppClock::nowDateTime,
     /**
      * 有在案骑行（快趣单例 `state.ride != null`）。为真时「猜你想用」排除快趣：
      * 服务卡就在推荐卡上方，再推一次是同一件事说两遍（DESIGN §4.51，2026-11-18）。
@@ -149,7 +159,7 @@ class TodayViewModel(
                     semester = semester,
                     slots = slots,
                     courses = courses,
-                    today = todayProvider().toKotlinLocalDate(),
+                    today = todayProvider(),
                     now = LocalTimeLike.now(),
                     overrides = overrides,
                 )
@@ -173,7 +183,7 @@ class TodayViewModel(
      */
     val homeworkPending: StateFlow<PendingHomework> =
         combine(homeworkRepo.observePending(), tick) { list, _ ->
-            pendingHomework(list, todayProvider().toKotlinLocalDate())
+            pendingHomework(list, todayProvider())
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EMPTY)
 
     /**
@@ -246,7 +256,7 @@ class TodayViewModel(
         } else {
             null
         }
-        val appNow = now.toKotlinLocalDateTime()
+        val appNow = now
         if (snapshot != null) {
             return WeatherAdvice.segments(
                 snapshot = snapshot,
@@ -346,14 +356,14 @@ class TodayViewModel(
         )
         val slot = GuessRules.slotOf(minuteOfDay)
         // 骑行状态进 key：它决定快趣是否被排除，开骑 / 还车时卡片该跟着换
-        val key = "${now.toLocalDate()}|$slot|${signal?.kind?.name ?: "none"}|$riding"
+        val key = "${now.date}|$slot|${signal?.kind?.name ?: "none"}|$riding"
         val stable = guessStabilizer.resolve(key) {
             GuessRules.decide(
-                dayOfWeek = now.dayOfWeek.value,
+                dayOfWeek = now.dayOfWeek.ordinal + 1,
                 minuteOfDay = minuteOfDay,
                 signal = signal,
                 usages = usages,
-                nowMillis = now.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                nowMillis = now.toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds(),
                 roll = Random.nextDouble(),
                 blocked = if (riding) setOf(GuessTarget.KVCX) else emptySet(),
             )
@@ -372,7 +382,7 @@ class TodayViewModel(
 
     /** 界面每 30 秒调一次：让「还剩 X 分钟」和课的状态跟着时间走。 */
     fun refreshTick() {
-        tick.value = System.currentTimeMillis()
+        tick.value = AppClock.nowMillis()
     }
 
     fun upsert(course: Course) {
@@ -397,25 +407,5 @@ class TodayViewModel(
 
     fun consumeUndoable() {
         _undoable.value = null
-    }
-
-    class Factory(
-        private val repo: ScheduleRepository,
-        private val homeworkRepo: HomeworkRepository,
-            private val weatherRepo: WeatherRepository,
-        /** 在案骑行：为真时「猜你想用」排除快趣（DESIGN §4.51）。 */
-        private val kvcxRideActive: Flow<Boolean> = flowOf(false),
-        /** 快趣使用方式 / 免费计时起点：首帧同步读一次，见 [TodayViewModel.ebikeFirstFrame]。 */
-        private val ebikePrefs: DisplayPrefsStore? = null,
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                TodayViewModel(
-                    repo,
-                    homeworkRepo,
-                    weatherRepo = weatherRepo,
-                    kvcxRideActive = kvcxRideActive,
-                    ebikePrefs = ebikePrefs,
-                ) as T
     }
 }
