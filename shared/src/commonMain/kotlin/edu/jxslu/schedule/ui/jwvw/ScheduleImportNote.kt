@@ -7,11 +7,14 @@ package edu.jxslu.schedule.ui.jwvw
  * 不能只在文档里写。
  *
  * **三处共用这一个常量，别在各处另写一份**：
- * - 导入窗口写库成功后落回主界面的气泡（[scheduleOutcomeText]）；
+ * - 导入窗口写库成功后落回主界面的气泡（`JwImportScreen` 的 `scheduleOutcomeText`）；
  * - 首启引导后台归档的「同步完成」弹窗课表行（`MainActivity.OnboardingSyncResultDialog`）；
  * - 课表管理页「从教务导入全部学期」的结果提示（`TimetableManageScreen`）。
  *
  * 不带句末标点：调用点自己拼「。」，否则气泡里会出现「。。」。
+ *
+ * 从 `internal` 放开成 `public`：iOS 移植 V2（2026-11-25）搬进共享层后跨模块 `internal`
+ * 不可见，而三个调用点都在 `:app`（包名不变，导入语句零改动）。
  */
-internal const val SCHEDULE_IMPORT_CAVEAT =
+const val SCHEDULE_IMPORT_CAVEAT =
     "课表由脚本自动识别，调课等变动可能遗漏，请以教务课表为准，避免漏课或跑空"

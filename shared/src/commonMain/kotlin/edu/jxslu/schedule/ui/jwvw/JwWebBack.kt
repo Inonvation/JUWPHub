@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.jwvw
 
-import android.webkit.WebBackForwardList
 import edu.jxslu.schedule.data.jw.JwUrls
 
 /**
@@ -14,17 +13,26 @@ import edu.jxslu.schedule.data.jw.JwUrls
  *   对用户毫无意义（要重登有顶栏刷新 / 错误浮层的重试），同样会被当成"返回坏了"。
  *
  * 所以系统返回的口径改成：**退到最近一个"有意义的业务页"；没有就关窗口**（等于系统默认的退窗）。
- * 判据是纯函数（[backDelta]），列表来自 [WebBackForwardList] 的薄适配——前者 JVM 可测。
+ * 判据是纯函数（[backDelta]），列表由调用方从平台的历史里取——前者 JVM 可测。
  *
  * ⚠️ **顶栏左上角那枚箭头不走这里**：用户口径（2026-10-08）是箭头**直接退出窗口**，
  * 逐页回退只归系统返回——本对象只服务后者。
+ *
+ * ## 为什么搬进共享层（iOS 移植 V2，2026-11-25）
+ *
+ * 判据本来就不碰 Android 类型，唯一沾平台的是那个 `WebBackForwardList` 重载。
+ * 搬过来时**把那个重载去掉了**：它只是 `size` / `getItemAtIndex(i)?.url` / `currentIndex`
+ * 三行的薄适配，而 `WKWebView` 的历史是另一套 API（`backForwardList` 也要自己拼 URL 列表）。
+ * 让调用方各拼一份 `List<String?>` 比在共享层立第二套历史抽象便宜——现在只有一个调用方
+ * （`JwImportScreen.backOrClose`，Android 侧唯一一处适配）。
  */
 object JwWebBack {
 
     /**
      * 该后退几步（负值）；**null = 没有有意义的上一页，调用方应关窗口**。
      *
-     * [entries] 与 [currentIndex] 对应 `WebBackForwardList`（下标 0 是最早的条目）。
+     * [entries] 是历史里的 URL（下标 0 是最早的条目，`null` = 该条目还没有 URL），
+     * [currentIndex] 是当前条目下标——与 `WebBackForwardList` / `WKBackForwardList` 同口径。
      */
     fun backDelta(entries: List<String?>, currentIndex: Int): Int? {
         if (currentIndex !in entries.indices) return null
@@ -39,14 +47,6 @@ object JwWebBack {
             return i - currentIndex
         }
         return null
-    }
-
-    /** [WebBackForwardList] 适配（Android 侧唯一一处；逻辑全在上面那个纯函数里）。 */
-    fun backDelta(list: WebBackForwardList): Int? {
-        val size = list.size
-        if (size <= 0) return null
-        val entries = (0 until size).map { list.getItemAtIndex(it)?.url }
-        return backDelta(entries, list.currentIndex)
     }
 
     /**
