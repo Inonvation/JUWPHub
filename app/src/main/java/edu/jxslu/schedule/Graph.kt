@@ -350,7 +350,7 @@ object Graph {
                 juwDatabase(context),
                 displayPrefs(context),
                 appScope,
-                ScheduleBaselineStore(context.applicationContext),
+                ScheduleBaselineStore(),
             ).also { repository = it }
         }
 
@@ -432,10 +432,15 @@ object Graph {
             ).also { curriculumSync = it }
         }
 
-    /** 宿舍报修快照单例（DESIGN §4.49）：今日页卡片、详情页、同步三处共用一份。 */
-    fun dormRepairStore(context: Context): DormRepairStore =
+    /**
+     * 宿舍报修快照单例（DESIGN §4.49）：今日页卡片、详情页、同步三处共用一份。
+     *
+     * iOS 移植 S7（2026-11-24）起 [DormRepairStore] 不再吃 `Context`（落盘目录由共享层的
+     * `appDataDir()` 决定）；[context] 参数保留只为不动调用点，**不参与建实例**。
+     */
+    fun dormRepairStore(@Suppress("UNUSED_PARAMETER") context: Context): DormRepairStore =
         dormRepairStore ?: synchronized(this) {
-            dormRepairStore ?: DormRepairStore(context.applicationContext).also { dormRepairStore = it }
+            dormRepairStore ?: DormRepairStore().also { dormRepairStore = it }
         }
 
     /** 宿舍报修只读同步单例（DESIGN §4.49）：复用 CAS 会话与收件箱。 */
@@ -465,7 +470,7 @@ object Graph {
             examSync ?: ExamSync(
                 cas = casSession(context),
                 prefs = displayPrefs(context),
-                snapshotStore = ExamSnapshotStore(context),
+                snapshotStore = ExamSnapshotStore(),
                 inbox = inboxRepository(context),
                 repo = repository(context),
             ).also { examSync = it }
@@ -511,7 +516,7 @@ object Graph {
         internshipBasesLoader ?: synchronized(this) {
             internshipBasesLoader ?: InternshipBasesLoader(
                 cas = casSession(context),
-                store = InternshipSnapshotStore(context),
+                store = InternshipSnapshotStore(),
             ).also { internshipBasesLoader = it }
         }
 
@@ -529,7 +534,7 @@ object Graph {
                 cas = casSession(context),
                 repo = selectionRepository(context),
                 prefs = displayPrefs(context),
-                roundsStore = SelectionRoundsStore(context),
+                roundsStore = SelectionRoundsStore(),
             ).also { selectionSync = it }
         }
 
@@ -921,10 +926,13 @@ object Graph {
     /**
      * 还车点 / 禁停区图层的落盘缓存单例（DESIGN §3.9，2026-09-28）：地图页读写、
      * 「地图缓存」卡统计与清除（`EbikeMapCache`）共用一份，避免两份实例各写各的。
+     *
+     * iOS 移植 S7（2026-11-24）起 [ZoneCacheStore] 不再吃 `Context`（目录由共享层的
+     * `appDataDir()` 决定）；[context] 保留只为不动调用点，**不参与建实例**。
      */
-    fun zoneCacheStore(context: Context): ZoneCacheStore =
+    fun zoneCacheStore(@Suppress("UNUSED_PARAMETER") context: Context): ZoneCacheStore =
         zoneCacheStore ?: synchronized(this) {
-            zoneCacheStore ?: ZoneCacheStore(context.applicationContext).also { zoneCacheStore = it }
+            zoneCacheStore ?: ZoneCacheStore().also { zoneCacheStore = it }
         }
 
     /**
@@ -947,23 +955,29 @@ object Graph {
         }
 
     /**
-     * AI 调课的应用留痕单例（DESIGN §4.39，2026-10-07）：filesDir 一份 JSON。
+     * AI 调课的应用留痕单例（DESIGN §4.39，2026-10-07）：`appDataDir()` 一份 JSON。
      * 主页面与「调课记录」页共用——两处都要看「这条记录是否已被撤销」，两份实例会分叉。
+     *
+     * iOS 移植 S7（2026-11-24）起 [AiApplyHistoryStore] 不再吃 `Context`；[context] 保留
+     * 只为不动调用点，**不参与建实例**。
      */
-    fun aiApplyHistoryStore(context: Context): AiApplyHistoryStore =
+    fun aiApplyHistoryStore(@Suppress("UNUSED_PARAMETER") context: Context): AiApplyHistoryStore =
         aiApplyHistoryStore ?: synchronized(this) {
-            aiApplyHistoryStore ?: AiApplyHistoryStore(context.applicationContext)
+            aiApplyHistoryStore ?: AiApplyHistoryStore()
                 .also { aiApplyHistoryStore = it }
         }
 
     /**
-     * 免扰时段的推迟队列单例（DESIGN §3.7，quiet hours）：filesDir 一份 JSON。
+     * 免扰时段的推迟队列单例（DESIGN §3.7，quiet hours）：`appDataDir()` 一份 JSON。
      * 拦截（各 Reminder 发送点）与补发（Gate 的 Receiver / 冷启动）必须看同一份，
      * 两份实例会分叉丢通知。
+     *
+     * iOS 移植 S7（2026-11-24）起 [QuietHoursQueue] 不再吃 `Context`；[context] 保留
+     * 只为不动调用点，**不参与建实例**。
      */
-    fun quietHoursQueue(context: Context): QuietHoursQueue =
+    fun quietHoursQueue(@Suppress("UNUSED_PARAMETER") context: Context): QuietHoursQueue =
         quietHoursQueue ?: synchronized(this) {
-            quietHoursQueue ?: QuietHoursQueue(context.applicationContext)
+            quietHoursQueue ?: QuietHoursQueue()
                 .also { quietHoursQueue = it }
         }
 

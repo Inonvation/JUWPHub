@@ -432,7 +432,7 @@ private fun rememberJwHubStats(): JwHubStats {
     LaunchedEffect(resumeTick) {
         term = runCatching { repo.currentTerm() }.getOrNull()
         examSnapshot = withContext(Dispatchers.IO) {
-            runCatching { ExamSnapshotStore(context).load() }.getOrNull()
+            runCatching { ExamSnapshotStore().load() }.getOrNull()
         }
         examSnapshotLoaded = true
     }

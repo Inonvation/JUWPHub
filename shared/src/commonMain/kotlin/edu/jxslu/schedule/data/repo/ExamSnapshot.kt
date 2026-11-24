@@ -7,9 +7,10 @@ import kotlinx.serialization.Serializable
  * 考试基线快照的**读写口**（iOS 移植 S4，2026-11-24）。
  *
  * 与 [ScheduleBaseline] / [SelectionRoundsSource] 同一手法：[ExamSync] 搬进
- * `shared/commonMain` 之后仍要落一份「上次抓到的考试全量」，而真身 `ExamSnapshotStore`
- * 靠 `Context` + `java.io.File`（`JsonFileStore`）留在 `:app`。这里只抽模型 + 读写两个方法，
- * 实现仍只有那一个；「空条目不写」「文件名不变」的口径写在实现类的 KDoc 上。
+ * `shared/commonMain` 之后仍要落一份「上次抓到的考试全量」。[ExamSync] 搬过来时真身
+ * `ExamSnapshotStore` 还在 `:app`（要 `Context` + `java.io.File`），所以先把「模型 + 读写
+ * 两个方法」抽在这里；**S7（2026-11-24）起实现也搬进来了**，接口与实现现在同在
+ * `data/repo`。实现仍只有那一个，「空条目不写」「文件名不变」的口径写在实现类的 KDoc 上。
  */
 interface ExamSnapshot {
 

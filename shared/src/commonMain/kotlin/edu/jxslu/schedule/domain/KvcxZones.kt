@@ -92,8 +92,9 @@ data class KvcxZones(
      * 解析时收一次（[parse]），缓存读回时再收一次（`ZoneCacheStore`）——磁盘上可能留着旧版本
      * 写下的几百个顶点的老数据，它不会因为升级就自己变干净。
      *
-     * 2026-11-24（iOS 移植 P0）：原来是 `internal`，但唯一的外部调用方 `data/kqcx/ZoneCacheStore`
-     * 会留在 `:app` 而本文件搬进 `:shared`，跨模块访问不到 `internal`，所以放开成 public。
+     * 2026-11-24（iOS 移植 P0）：原来是 `internal`，但外部调用方 `data/kqcx/ZoneCacheStore`
+     * 那时还留在 `:app`，跨模块访问不到 `internal`，所以放开成 public（S7 起它也在共享层了，
+     * 但 public 保持不动——收窄回去不会带来任何好处）。
      */
     fun capped(): KvcxZones = copy(
         parkSpots = parkSpots.map { spot ->

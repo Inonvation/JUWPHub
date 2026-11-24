@@ -15,18 +15,24 @@ import java.io.File
  * 停车点缓存文件的往返（DESIGN §3.9）：存进去什么、读出来还得是什么。
  *
  * 缓存文件格式是隐式契约——字段改名/漏默认值造成的"读旧文件读空"是静默回归（页面只是
- * 少一层图层，没人会报错），所以用临时文件往返一遍钉住。影子行类型与本体字段一一对应。
+ * 少一层图层，没人会报错），所以用临时目录往返一遍钉住。影子行类型与本体字段一一对应。
+ *
+ * iOS 移植 S7（2026-11-24）起 [ZoneCacheStore] 收的是目录（不再是 `File`，也不再吃
+ * `Context`）：夹具改成「临时目录 + 固定文件名」，与生产路径同构。
  */
 class ZoneCacheStoreTest {
 
-    private fun tempFile(): File =
-        File.createTempFile("zones", ".json").also { it.delete() }
+    private fun tempDir(): File = File.createTempFile("zones", "").also { it.delete(); it.mkdirs() }
+
+    private fun cacheFileIn(dir: File): File = File(dir, ZoneCacheStore.CACHE_FILE)
+
+    private fun storeOf(dir: File) = ZoneCacheStore(dir.absolutePath)
 
     @Test
     fun `条目往返保留坐标与多边形`() = runBlocking {
-        val file = tempFile()
+        val dir = tempDir()
         try {
-            val store = ZoneCacheStore(file)
+            val store = storeOf(dir)
             val entries = listOf(
                 ZoneCacheEntry(
                     lat = 28.688,
@@ -68,15 +74,16 @@ class ZoneCacheStoreTest {
             // 往返后文件确实在，且占用可统计（「地图缓存」卡要用）
             assertTrue(store.bytes() > 0)
         } finally {
-            file.delete()
+            dir.deleteRecursively()
         }
     }
 
     @Test
     fun `坏文件与不存在的文件都回空表`() = runBlocking {
-        val file = tempFile()
+        val dir = tempDir()
         try {
-            val store = ZoneCacheStore(file)
+            val store = storeOf(dir)
+            val file = cacheFileIn(dir)
             // 不存在
             assertEquals(0, store.load().size)
             // 是坏 JSON
@@ -96,13 +103,13 @@ class ZoneCacheStoreTest {
             assertEquals(1, legacy[0].zones.parkSpots.size)
             assertEquals("还车点", legacy[0].zones.parkSpots[0].displayName)
         } finally {
-            file.delete()
+            dir.deleteRecursively()
         }
     }
 
     @Test
     fun `老缓存里顶点过多的轮廓读回时被抽稀`() = runBlocking {
-        val file = tempFile()
+        val dir = tempDir()
         try {
             // 旧版本写下的文件：一个 120 顶点的还车点轮廓 + 一个 120 顶点的禁停区
             val dense = (0 until 120).joinToString(",") { index ->
@@ -111,12 +118,12 @@ class ZoneCacheStoreTest {
                 val lng = 116.025 + 0.001 * kotlin.math.cos(angle)
                 """{"lat":$lat,"lng":$lng}"""
             }
-            file.writeText(
+            cacheFileIn(dir).writeText(
                 """[{"lat":28.685,"lng":116.025,"fetchedAt":3,""" +
                     """"spots":[{"lat":28.685,"lng":116.025,"outline":[$dense]}],""" +
                     """"nogo":[[$dense]]}]""",
             )
-            val store = ZoneCacheStore(file)
+            val store = storeOf(dir)
 
             val back = store.load()
 
@@ -126,21 +133,21 @@ class ZoneCacheStoreTest {
             assertTrue(outline.size >= 3)
             assertTrue("禁停区 ${back[0].zones.nogoZones[0].size} 个顶点没被收住", back[0].zones.nogoZones[0].size <= 40)
         } finally {
-            file.delete()
+            dir.deleteRecursively()
         }
     }
 
     @Test
     fun `删除后读回空表`() = runBlocking {
-        val file = tempFile()
+        val dir = tempDir()
         try {
-            val store = ZoneCacheStore(file)
+            val store = storeOf(dir)
             store.save(listOf(ZoneCacheEntry(1.0, 2.0, 3L, KvcxZones.EMPTY)))
             assertTrue(store.bytes() > 0)
             store.delete()
             assertEquals(0, store.load().size)
         } finally {
-            file.delete()
+            dir.deleteRecursively()
         }
     }
 }

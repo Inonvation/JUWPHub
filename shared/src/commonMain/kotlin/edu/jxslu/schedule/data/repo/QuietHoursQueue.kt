@@ -1,8 +1,6 @@
 package edu.jxslu.schedule.data.repo
 
-import android.content.Context
 import edu.jxslu.schedule.data.local.MirroredJsonStore
-import java.io.File
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
@@ -43,8 +41,13 @@ data class PendingLaunch(
         const val SUBPAGE = "SUBPAGE"
     }
 
-    /** upsert 键里可比较的形态。 */
-    internal fun key(): String = listOf(
+    /**
+     * upsert 键里可比较的形态。
+     *
+     * 2026-11-24 起是 **public**（原 `internal`）：本文件搬进 `:shared` 后，`:app` 的
+     * `QuietHoursGate` 仍要按它做补发去重（`internal` 跨不了模块）。
+     */
+    fun key(): String = listOf(
         kind, requestCode, route.orEmpty(), screen.orEmpty(),
         focusItemId.orEmpty(), courseName.orEmpty(), itemId.orEmpty(),
         clearTask.toString(),
@@ -85,12 +88,12 @@ data class PendingNotification(
     val vibrate: Boolean = false,
     val launch: PendingLaunch? = null,
 ) {
-    /** upsert 幂等键（tag 为 null 时也要求可比较）。 */
-    internal fun key(): String = "${tag.orEmpty()}|$notificationId"
+    /** upsert 幂等键（tag 为 null 时也要求可比较）。2026-11-24 起 public，理由同 [PendingLaunch.key]。 */
+    fun key(): String = "${tag.orEmpty()}|$notificationId"
 }
 
 /**
- * 免扰时段的通知推迟队列（DESIGN §3.7）：`filesDir` 一份 JSON，上限 [CAP] 条。
+ * 免扰时段的通知推迟队列（DESIGN §3.7）：`appDataDir()` 一份 JSON，上限 [CAP] 条。
  *
  * 选型与 `AiApplyHistoryStore` / `ScheduleBaselineStore` 同口径：这层是通知的
  * 「待办暂存」，与业务表无外键关系，文件坏了按空处理（丢的是待补发通知，不是数据）。
@@ -98,15 +101,16 @@ data class PendingNotification(
  *
  * 骨架（内存 StateFlow 是真值 + 整份落盘镜像）已收进 `data/local/MirroredJsonStore`，
  * 本类只剩队列语义（幂等键、上限、补发计划）。
+ *
+ * iOS 移植 S7（2026-11-24）：本类搬进 `shared/commonMain`，构造器不再吃 `Context`——
+ * 目录来自 `appDataDir()`（Android 侧仍是 `filesDir`，与搬移前同一路径）。
  */
-class QuietHoursQueue(file: File) : MirroredJsonStore<List<PendingNotification>>(
-    file = file,
+class QuietHoursQueue : MirroredJsonStore<List<PendingNotification>>(
+    fileName = QUEUE_FILE,
     serializer = ListSerializer(PendingNotification.serializer()),
     empty = emptyList(),
     tag = TAG,
 ) {
-
-    constructor(context: Context) : this(File(context.filesDir, QUEUE_FILE))
 
     /** 入队 / 替换（同幂等键覆盖，新条目在顶）。写盘落 IO。返回入队后的全表。 */
     suspend fun enqueue(entry: PendingNotification): List<PendingNotification> {

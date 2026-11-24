@@ -1,32 +1,30 @@
 package edu.jxslu.schedule.data.kqcx
 
-import android.content.Context
 import edu.jxslu.schedule.data.local.JsonFileStore
 import edu.jxslu.schedule.domain.GcjPoint
 import edu.jxslu.schedule.domain.KvcxParkSpot
 import edu.jxslu.schedule.domain.KvcxZones
 import edu.jxslu.schedule.domain.ZoneCache
 import edu.jxslu.schedule.domain.ZoneCacheEntry
+import edu.jxslu.schedule.platform.appDataDir
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
-import java.io.File
 
 /**
  * 还车点 / 禁停区图层的落盘缓存（DESIGN §3.9，2026-09-28；策略在 [ZoneCache]）。
  *
- * `filesDir` 下一份 JSON，存「以某点为中心查到的那批图层」（最多 [ZoneCache.MAX_ENTRIES] 条）。
+ * `appDataDir()` 下一份 JSON，存「以某点为中心查到的那批图层」（最多 [ZoneCache.MAX_ENTRIES] 条）。
  * 冷启动进地图、或拖回缓存覆盖的片区时先用它把图层顶起来，命中新鲜缓存连请求都不发
  * （判定全在 domain 层，本类只负责读写）。
  *
  * 读写都在 IO 线程（[JsonFileStore] 自己调度）；读写都不抛——缓存坏了等于没有缓存，不影响主链路。
  * **只存公开的图层数据**：不含 token、不含账号信息（与本地快照类缓存同一纪律）。
  *
- * 文件可注入（主构造收 [File]）：缓存文件格式是隐式契约，用临时文件往返一遍钉在单测里，
- * 改字段名这类"读旧文件读空"的静默回归当场就红。
+ * 目录可注入（[dir]）：缓存文件格式是隐式契约，用临时目录往返一遍钉在单测里，
+ * 改字段名这类"读旧文件读空"的静默回归当场就红。生产调用方用缺省值
+ * （`appDataDir()`，Android 侧就是 `filesDir`，与搬移前同一路径）。
  */
-class ZoneCacheStore(private val file: File) {
-
-    constructor(context: Context) : this(File(context.filesDir, CACHE_FILE))
+class ZoneCacheStore(private val dir: String = appDataDir()) {
 
     /**
      * 落盘交给共享实现（2026-11-06 审计 C2）：读不到/坏了回空、写失败不抛、临时文件原子替换，
@@ -35,7 +33,7 @@ class ZoneCacheStore(private val file: File) {
      * 串行化由它内部的 Mutex 提供（合并前是本类自己那把，语义不变）：地图页只有一个 VM 会写，
      * `EbikeMapCache` 的删除是单向的。**文件名不能改**——改名等于用户丢掉已有的图层缓存。
      */
-    private val store = JsonFileStore(file, ListSerializer(EntryRow.serializer()))
+    private val store = JsonFileStore(CACHE_FILE, ListSerializer(EntryRow.serializer()), dir = dir)
 
     /** 全部缓存条目（读不到/坏了回空表，调用方当"没有缓存"处理）。 */
     suspend fun load(): List<ZoneCacheEntry> = store.read().orEmpty().map(::toDomain)
@@ -116,7 +114,7 @@ class ZoneCacheStore(private val file: File) {
     private data class PointRow(val lat: Double, val lng: Double)
 
     companion object {
-        /** 缓存文件名（`filesDir` 下；「清除地图缓存」就删它）。 */
+        /** 缓存文件名（`appDataDir()` 下；「清除地图缓存」就删它）。 */
         const val CACHE_FILE = "bike_zones_cache.json"
     }
 }

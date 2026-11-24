@@ -1,19 +1,21 @@
 package edu.jxslu.schedule.data.repo
 
-import android.content.Context
 import edu.jxslu.schedule.data.local.JsonFileStore
 import edu.jxslu.schedule.domain.InternshipBase
 import kotlinx.serialization.Serializable
 
 /**
- * 实习基地快照（DESIGN §4.43）：上次成功抓取的清单落盘（`filesDir` 一份 JSON），
+ * 实习基地快照（DESIGN §4.43）：上次成功抓取的清单落盘（`appDataDir()` 一份 JSON），
  * 让「短时间内几乎不变」的参考数据不必每次进页都打教务——12 小时新鲜期内直接用快照
  * （[edu.jxslu.schedule.domain.InternshipCacheRules]），顶栏手动刷新才强刷。
  *
  * 读写都必须在 IO 线程（调用方负责调度）；读写都不抛、坏了等于没有快照（容错在 [JsonFileStore]），
  * 下次按首次抓取重建。**不进备份**（本机缓存，重取即有）。只存基地字段，不存任何凭证。
+ *
+ * iOS 移植 S7（2026-11-24）：本类搬进 `shared/commonMain`，构造器不再吃 `Context`
+ * （目录来自 `appDataDir()`，Android 侧仍是 `filesDir`，与搬移前同一路径）。
  */
-class InternshipSnapshotStore(context: Context) {
+class InternshipSnapshotStore {
 
     @Serializable
     data class Snapshot(
@@ -50,7 +52,7 @@ class InternshipSnapshotStore(context: Context) {
      * 同步版不加锁——本类合并前也没有互斥。**文件名不能改**（`internship_bases.json`）：
      * `AppCacheCleaner` 按这个旧名字统计/清理，改名等于用户那边多出一份谁也管不到的残留。
      */
-    private val store = JsonFileStore(context, SNAPSHOT_FILE, Snapshot.serializer())
+    private val store = JsonFileStore(SNAPSHOT_FILE, Snapshot.serializer())
 
     fun load(): Snapshot = store.readBlocking() ?: Snapshot()
 

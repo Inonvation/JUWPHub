@@ -21,8 +21,8 @@ import kotlinx.coroutines.sync.Mutex
  * 闸门是真正重复的那部分，所以只抽闸门。
  *
  * iOS 移植 S4（2026-11-24）：本文件与八个使用方一起搬进 `shared/commonMain`，但
- * `InternshipBasesLoader` 仍留在 `:app`（它的 JSON 快照仓储离不开 `Context` + `File`），
- * 跨模块看不见 `internal`，所以 `tryLocked` 提 public——全仓只有这一份实现。
+ * `InternshipBasesLoader` 仍留在 `:app`（它的会话与请求链还没搬；快照仓储本身在 S7 已进
+ * 共享层），跨模块看不见 `internal`，所以 `tryLocked` 提 public——全仓只有这一份实现。
  */
 suspend fun <T> Mutex.tryLocked(block: suspend () -> T): T? {
     if (!tryLock()) return null
