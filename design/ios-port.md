@@ -945,3 +945,65 @@ iOS 走 `UIApplication.openURL` + scheme 白名单检查。一卡通、胖乖、
 
 结论：`AppServices` 里**不需要** `qiekjRepository()`，因为它的消费者还都在 `:app`。
 等 iOS 接上 Keychain 版凭证存储再补，那时返回可空（null = 本平台还没接）。
+## 11. 页面层接线约定（2026-11-25 定，页面搬移一律照此）
+
+页面层开始大规模搬移时定的**唯一口径**。在此之前 S10/S13 搬的页面各写了一套（都不带 ViewModel），
+`ui/week` 又是另一套（带 ViewModel 参数）。页面搬移必须先统一，否则每条并行流都会发明一种。
+
+### 11.1 为什么 `commonMain` 里没有 `viewModel()`
+
+`lifecycle-viewmodel-compose` 的 KMP 变体要 **Compose 1.9**，本仓锁 CMP 1.7.3
+（升 1.8+ 会把 Android 侧 androidx.compose 整条抬版，Glance 1.2.0 全要重验）。
+所以共享页面**拿不到** `androidx.lifecycle.viewmodel.compose.viewModel()`。
+
+但 `androidx.lifecycle.ViewModel` 与 `viewModelScope` **能用**——`lifecycle-viewmodel:2.8.7`
+是 commonMain 依赖，`WeekViewModel` 就在共享层跑得好好的。缺的只是那个 Composable 入口。
+
+### 11.2 约定
+
+**① 页面签名：ViewModel 是必填参数，由宿主创建。**
+
+```kotlin
+@Composable
+fun XxxScreen(
+    viewModel: XxxViewModel,        // 必填，宿主建
+    onBack: () -> Unit = {},
+    onOpenFoo: (() -> Unit)? = null, // 平台动作：null = 本平台没这项能力，入口整行不渲染
+)
+```
+
+两端宿主各写一行：
+
+| 平台 | 写法 | 为什么 |
+|---|---|---|
+| Android | `viewModel { XxxViewModel(...) }` | 保留配置变更（旋转）不重建 VM |
+| iOS | `remember { XxxViewModel(...) }` | iOS 没有配置变更重建，`remember` 的生命周期就等于这一屏 |
+
+**② 有 ViewModel 的页面，ViewModel 一起搬。** 判据是机械的：`:app` 那个页面有没有
+`XxxViewModel`？有就一起搬进 `shared/commonMain`，没有就只搬页面。
+
+**③ ViewModel 的构造只吃共享层类型。** 依赖从 `Services.current.xxx()` 取，或在宿主构造时传进去。
+**禁止**让 VM 的构造签名里出现 `Context` / `Uri` / `Activity`。
+
+**④ 平台动作一律可空回调。** `null` = 本平台确实没有这项能力（不是「以后补」的占位），
+对应入口整行不渲染。给个空 lambda 留一个点了没反应的入口，比没有更糟。
+
+**⑤ `collectAsStateWithLifecycle` 用 `edu.jxslu.schedule.platform` 的版本**，不要直接 import
+`androidx.lifecycle.compose` 那个（它在 commonMain 不可见）。
+
+**⑥ `java.time` → `kotlinx.datetime` + `AppClock`；`System.nanoTime()` → `kotlin.time.TimeSource.Monotonic`。**
+
+**⑦ 宿主入口要同步改**：Android 改 `MainActivity` / `SubpageActivity`，iOS 改
+`shared/src/iosMain/.../MainViewController.kt` 的 `IosPage` 枚举与 `when` 分支。
+iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话，别留死入口。
+
+### 11.3 已知的整块阻塞（搬之前先看这里）
+
+| 阻塞 | 挡住的页面 |
+|---|---|
+| `MonthPicker` 用 `java.time.YearMonth` | `PowerBillScreen` 547、`StatementScreen` 557、`CampusCardSettingsScreen` 744 |
+| Markdown 编辑栈 + `AttachmentStore` | `NoteDetailScreen` 457、`HomeworkDetailScreen` 741 |
+| `com.amap` 高德 SDK（15 处） | `ui/ebike` 全部 14,576 行 |
+| `android.bluetooth`（`QzxyGattLink` 643） | 趣智开阀；协议与状态机已搬，只有传输层没搬 |
+| `androidx.glance`（139 处 / 8 文件） | 桌面小组件 |
+| `EncryptedSharedPreferences` | 一卡通 / 胖乖 / 问渠 / U净 / AI 的凭证存储（页面在 null 时整块隐藏） |
