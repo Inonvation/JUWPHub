@@ -16,11 +16,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.GuessPick
 import edu.jxslu.schedule.domain.GuessSource
 import edu.jxslu.schedule.domain.GuessTarget
@@ -33,16 +32,26 @@ import edu.jxslu.schedule.ui.icon.AppIcons
  * 位置：收件箱列表**正上方**（不是收件箱卡内部）——它推荐的是功能入口，不是一条消息。
  * 空态也挂同一张卡，因为它只依赖时间 / 课程信号 / 本机订单，不依赖今天有没有课。
  *
- * 只做渲染：功能名、品牌图标、副文案全部从这里映射；**不读偏好、不算概率**。
+ * 只做渲染：功能名、副文案全部从这里映射；**不读偏好、不算概率**。
  * 触感与点击涟漪由 [AppCard] 统一处理，调用方不要再包 clickable / haptics。
  *
  * 不做「换一个 / 不感兴趣」：多一个动作就多一套交互，设置里的总开关已经是出口。
+ *
+ * ## 品牌位图为什么由宿主传（S16，2026-11-25）
+ *
+ * 五张品牌图是 `app/src/main/res/drawable/ic_brand_*` 的**位图资源**，`R` 只有 Android 有；
+ * 共享层拿不到，也不该为此立一条 `expect/actual`（资源读取不是平台能力，是一份素材）。
+ * 所以收成一个可空参数：**`null` = 本平台还没有这套品牌图，图标位整块不渲染**——
+ * 卡片本体（功能名 + 副文案 + 箭头）照常可点可读。Android 侧在
+ * `ui/today/GuessYouWantCardPlatform.kt` 里用 `painterResource` 提供。
  */
 @Composable
 fun GuessYouWantCard(
     pick: GuessPick,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 品牌位图；`null` = 本平台没有这套素材，不渲染图标位。 */
+    brandIcon: Painter? = null,
 ) {
     val primary = MaterialTheme.colorScheme.primary
     val onSurface = MaterialTheme.colorScheme.onSurface
@@ -57,14 +66,16 @@ fun GuessYouWantCard(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // 品牌位图自带彩色底（与侧栏同一套 ic_brand_*），不要再套色块
-            Image(
-                painter = painterResource(pick.target.brandIcon()),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(30.dp)
-                    .clip(RoundedCornerShape(8.dp)),
-            )
-            Spacer(Modifier.width(12.dp))
+            if (brandIcon != null) {
+                Image(
+                    painter = brandIcon,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(RoundedCornerShape(8.dp)),
+                )
+                Spacer(Modifier.width(12.dp))
+            }
             Column(Modifier.weight(1f)) {
                 Text(
                     text = "猜你想用",
@@ -133,13 +144,4 @@ private fun GuessTarget.defaultReason(): String = when (this) {
     GuessTarget.QZXY -> "回宿舍洗个热水澡"
     GuessTarget.UJING -> "看看洗衣房有没有空机"
     GuessTarget.WENQU -> "看看有没有新的志愿活动"
-}
-
-/** 品牌图标：与侧栏同一套位图（2026-10-21 用户口径）。 */
-private fun GuessTarget.brandIcon(): Int = when (this) {
-    GuessTarget.QIEKJ -> R.drawable.ic_brand_pangguai
-    GuessTarget.KVCX -> R.drawable.ic_brand_kqcx
-    GuessTarget.QZXY -> R.drawable.ic_brand_qzxy
-    GuessTarget.UJING -> R.drawable.ic_brand_ujing
-    GuessTarget.WENQU -> R.drawable.ic_brand_wenqu
 }

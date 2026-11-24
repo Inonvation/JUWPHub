@@ -1060,7 +1060,11 @@ private fun TodayEmptyContent(
         Column {
             // 推荐卡的落点与正常内容一致：收件箱列表正上方；空态也挂，因为它只依赖时间 / 课程 / 订单
             guessPick?.let { pick ->
-                GuessYouWantCard(pick = pick, onClick = { onOpenGuess(pick) })
+                GuessYouWantCard(
+                    pick = pick,
+                    onClick = { onOpenGuess(pick) },
+                    brandIcon = rememberBrandIconPainter(pick.target),
+                )
             }
             InboxTodayCard(
                 repair = repair,
@@ -1281,6 +1285,7 @@ private fun TodayContent(
                         pick = pick,
                         onClick = { onOpenGuess(pick) },
                         modifier = Modifier.animateItem(placementSpec = null),
+                        brandIcon = rememberBrandIconPainter(pick.target),
                     )
                 }
             }
