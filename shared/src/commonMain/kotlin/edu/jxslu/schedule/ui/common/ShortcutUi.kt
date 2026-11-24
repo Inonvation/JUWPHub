@@ -5,9 +5,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.painterResource
-import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.ShortcutItem
 import edu.jxslu.schedule.ui.icon.AppIcons
 
@@ -36,29 +35,33 @@ val shortcutIconChoices: List<Pair<String, ImageVector>> = listOf(
 fun shortcutIconVector(key: String): ImageVector =
     shortcutIconChoices.firstOrNull { it.first == key }?.second ?: AppIcons.Link01
 
-/** 预设条目的品牌图标资源；下标即 [ShortcutItem.presetIndex]（0=拼多多 1=淘宝 2=菜鸟）。 */
-private val presetShortcutIcons = listOf(
-    R.drawable.ic_preset_pinduoduo,
-    R.drawable.ic_preset_taobao,
-    R.drawable.ic_preset_cainiao,
-)
-
-/** 预设的品牌图资源；非预设返回 null。桌面 Pin 也要用（Compose 图标无法离屏渲染成位图）。 */
-fun presetShortcutIconRes(item: ShortcutItem): Int? =
-    presetShortcutIcons.getOrNull(item.presetIndex)
-
 /**
- * 快捷方式图标：预设固定用品牌图（webp/自绘矢量），自定义条目按 [ShortcutItem.icon]
- * 的注册表 key 取图，空/未知 = 链接图标。今日页 chips 与设置页共用；
- * 不按名称哈希取图（同课程配色的教训：撞图比丑更糟）。
- * 调用方经 [modifier] 给尺寸（如 Modifier.size(20.dp)），两种分支同尺寸。
+ * 快捷方式图标：预设条目用宿主给的品牌图，自定义条目按 [ShortcutItem.icon] 的注册表 key 取矢量图，
+ * 空/未知 = 链接图标。今日页 chips、设置页列表与快捷方式弹层共用；不按名称哈希取图
+ * （同课程配色的教训：撞图比丑更糟）。调用方经 [modifier] 给尺寸（如 `Modifier.size(20.dp)`）。
+ *
+ * ## 品牌图为什么是参数（S23，2026-11-25）
+ *
+ * 三张预设品牌图是 `app/src/main/res/drawable/ic_preset_*.webp` 的**位图素材**，`R` 只有 Android 有；
+ * 共享层拿不到，也不该为此立一条 `expect/actual`（资源读取不是平台能力，是一份素材）——
+ * 口径与 `ui/today/GuessYouWantCard` 的 `brandIcon` 一致。Android 侧在
+ * `:app/ui/common/ShortcutUiPlatform.kt` 里用 `painterResource` 装进来。
+ *
+ * [brandIcon] **不给默认值**，与上面两处同一考虑：宿主必须明确回答「本平台有没有这套素材」。
+ * 传 null 不是省略，而是能力声明——本平台没有品牌图，预设条目退回矢量图标
+ * （条目名与目标仍完整可用，不藏条目）。
+ *
+ * @param brandIcon 预设品牌图；null = 本平台没有这套素材，退回矢量图标
  */
 @Composable
-fun ShortcutIcon(item: ShortcutItem, modifier: Modifier = Modifier) {
-    val res = presetShortcutIcons.getOrNull(item.presetIndex)
-    if (res != null) {
+fun ShortcutIcon(
+    item: ShortcutItem,
+    brandIcon: Painter?,
+    modifier: Modifier = Modifier,
+) {
+    if (brandIcon != null) {
         Image(
-            painter = painterResource(res),
+            painter = brandIcon,
             contentDescription = null,
             modifier = modifier,
         )
