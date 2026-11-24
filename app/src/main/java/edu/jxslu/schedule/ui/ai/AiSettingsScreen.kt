@@ -39,7 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.ai.AiScheduleClient
+import edu.jxslu.schedule.data.ai.Effort
 import edu.jxslu.schedule.domain.AiScheduleConfig
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
@@ -172,12 +172,12 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                 title = "思考",
                 subtitle = "档位越高越慢越贵；开启后结构化结果可能降级",
             ) {
-                val efforts = AiScheduleClient.Effort.entries
+                val efforts = Effort.entries
                 SettingChoiceRow(
                     title = "思考档位",
                     options = efforts.map { it.label },
                     selectedIndex = efforts.indexOf(
-                        AiScheduleClient.Effort.fromWire(thinkingEffort),
+                        Effort.fromWire(thinkingEffort),
                     ),
                     onSelect = { index -> viewModel.setThinkingEffort(efforts[index].wire) },
                     icon = AppIcons.AiBrain01,

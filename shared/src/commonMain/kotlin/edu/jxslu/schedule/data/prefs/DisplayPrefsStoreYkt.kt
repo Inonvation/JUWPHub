@@ -18,8 +18,8 @@ private val KEY_YKT_LAST_BALANCE_FEN = longPreferencesKey("ykt_last_balance_fen"
  * 不是展示值、不参与页面渲染——展示口径仍是各页面的余额快照。
  */
 suspend fun DisplayPrefsStore.yktLastBalanceFen(): Long? =
-    context.displayDataStore.data.first()[KEY_YKT_LAST_BALANCE_FEN]?.takeIf { it >= 0 }
+    displayDataStore.data.first()[KEY_YKT_LAST_BALANCE_FEN]?.takeIf { it >= 0 }
 
 suspend fun DisplayPrefsStore.setYktLastBalanceFen(fen: Long) {
-    context.displayDataStore.edit { it[KEY_YKT_LAST_BALANCE_FEN] = fen }
+    displayDataStore.edit { it[KEY_YKT_LAST_BALANCE_FEN] = fen }
 }

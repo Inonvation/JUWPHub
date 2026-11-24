@@ -1,10 +1,9 @@
 package edu.jxslu.schedule.data.prefs
 
-import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import edu.jxslu.schedule.data.ai.AiScheduleClient
+import edu.jxslu.schedule.data.ai.Effort
 import edu.jxslu.schedule.domain.AiScheduleConfig
 import edu.jxslu.schedule.domain.BalanceAlert
 import edu.jxslu.schedule.domain.BalanceAlertSource
@@ -37,13 +36,14 @@ import edu.jxslu.schedule.domain.ThemeMode
 import edu.jxslu.schedule.domain.ThemePalette
 import edu.jxslu.schedule.domain.TimetablePrefs
 import edu.jxslu.schedule.domain.AppClock
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import java.time.LocalDate
-import java.time.ZoneId
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 
 /**
  * 全局偏好存储（DESIGN §4.9）。
@@ -60,17 +60,35 @@ import java.time.ZoneId
 /** 上次已知的用户位置（见 [DisplayPrefsStore.ebikeLastLocation]）。 */
 data class BikeLastLocation(val lat: Double, val lng: Double, val atMillis: Long)
 
-class DisplayPrefsStore(internal val context: Context) {
+/**
+ * 全局偏好的读写门面。
+ *
+ * iOS 移植 P2（2026-11-24）起**不再持有 `Context`**：库里那份 `Context.displayDataStore`
+ * 委托换成了共享层的顶层 [displayDataStore]，文件位置由 [edu.jxslu.schedule.platform.appDataDir]
+ * 注入（见 `DisplayPrefsKeys.kt`）。构造点因此从「传 applicationContext」变成无参。
+ */
+class DisplayPrefsStore {
 
     /**
      * 扩展文件里的 Flow 属性必须走这里：`collectAsState` 每次重组都会读属性，
      * 每次新建 Flow 会不停重订阅。按 key 缓存后与普通成员属性的实例稳定性一致。
+     *
+     * **2026-11-24 换过一次实现**：原写法是 `HashMap` + `synchronized`，而 `synchronized`
+     * 在 commonMain 里不存在（Kotlin/Native 没有对象锁）。改成「不可变 Map + `@Volatile` 引用」
+     * 的写时复制：读永远看到一致的快照，写只有可能在两个线程同时首次取同一个 key 时丢掉一条
+     * 缓存项——代价是多建一个等价的 Flow（与完全不缓存的表现相同），不会出现 `HashMap`
+     * 并发扩容那种结构性损坏。缓存项只在 `DisplayPrefsStore` 实例的生命周期内有效。
      */
-    private val flowCache = HashMap<String, Flow<*>>()
+    @Volatile
+    private var flowCache: Map<String, Flow<*>> = emptyMap()
 
     @Suppress("UNCHECKED_CAST")
-    internal fun <T> cachedFlow(key: String, create: () -> Flow<T>): Flow<T> =
-        synchronized(flowCache) { flowCache.getOrPut(key) { create() } as Flow<T> }
+    internal fun <T> cachedFlow(key: String, create: () -> Flow<T>): Flow<T> {
+        flowCache[key]?.let { return it as Flow<T> }
+        val created = create()
+        flowCache = flowCache + (key to created)
+        return created
+    }
 
     /**
      * **单值写入的唯一口**（2026-11-18 收编 44 份逐字相同的 setter 体）。
@@ -80,14 +98,14 @@ class DisplayPrefsStore(internal val context: Context) {
      * 调用处——别硬套这个壳，那会把「这个值其实被夹紧过」藏起来。
      */
     private suspend fun <T> put(key: Preferences.Key<T>, value: T) {
-        context.displayDataStore.edit { it[key] = value }
+        displayDataStore.edit { it[key] = value }
     }
 
     /**
      * 全局显示偏好（原课表级）。JSON 解码失败退默认值：
      * 这是自己写自己的数据，真坏了也不该让读路径抛异常崩掉课表页。
      */
-    val viewPrefs: Flow<TimetablePrefs> = context.displayDataStore.data.map { p ->
+    val viewPrefs: Flow<TimetablePrefs> = displayDataStore.data.map { p ->
         p[KEY_VIEW_PREFS_JSON]?.let { TimetablePrefs.decode(it) } ?: TimetablePrefs()
     }
 
@@ -96,7 +114,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 都会调一次，停在同吸附格的重复写直接跳过（结果与存储一致，不影响任何观察者）。
      */
     suspend fun updateViewPrefs(transform: (TimetablePrefs) -> TimetablePrefs) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             val current = p[KEY_VIEW_PREFS_JSON]?.let { TimetablePrefs.decode(it) } ?: TimetablePrefs()
             val next = transform(current)
             if (next != current) p[KEY_VIEW_PREFS_JSON] = next.encode()
@@ -105,56 +123,56 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 迁移专用：直接落一份初始值（仅 `globalizeViewPrefs` 一次性调用）。 */
     suspend fun setInitialViewPrefs(value: TimetablePrefs) {
-        context.displayDataStore.edit { it[KEY_VIEW_PREFS_JSON] = value.encode() }
+        displayDataStore.edit { it[KEY_VIEW_PREFS_JSON] = value.encode() }
     }
 
     /** 旧全局值/课表行值是否已搬进 `view_prefs_json`。 */
     suspend fun viewPrefsGlobalized(): Boolean =
-        context.displayDataStore.data.first()[KEY_VIEW_PREFS_GLOBALIZED] ?: false
+        displayDataStore.data.first()[KEY_VIEW_PREFS_GLOBALIZED] ?: false
 
     suspend fun setViewPrefsGlobalized() {
-        context.displayDataStore.edit { it[KEY_VIEW_PREFS_GLOBALIZED] = true }
+        displayDataStore.edit { it[KEY_VIEW_PREFS_GLOBALIZED] = true }
     }
 
     /** 应用主题。全局项：换课表不换深浅色。 */
-    val themeMode: Flow<ThemeMode> = context.displayDataStore.data.map { p ->
+    val themeMode: Flow<ThemeMode> = displayDataStore.data.map { p ->
         themeModeFromName(p[KEY_THEME_MODE])
     }
 
     /** 触感反馈开关。全局项：交互手感属于设备级偏好，不随课表切换。 */
-    val hapticsEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val hapticsEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_HAPTICS_ENABLED] ?: true
     }
 
     /** 字体缩放锁定（「固定字体大小」）。全局项，默认开；见 [DisplayPrefs.fontScaleLocked]。 */
-    val fontScaleLocked: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val fontScaleLocked: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_FONT_SCALE_LOCKED] ?: true
     }
 
     /** 动态取色（Material You）。全局项，默认关；关 = 用回内置配色方案。 */
-    val dynamicColor: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val dynamicColor: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_DYNAMIC_COLOR] ?: false
     }
 
     /** 内置主题配色。全局项，默认晴空蓝；动态取色开着时忽略本项。 */
-    val themePalette: Flow<ThemePalette> = context.displayDataStore.data.map { p ->
+    val themePalette: Flow<ThemePalette> = displayDataStore.data.map { p ->
         ThemePalette.fromId(p[KEY_THEME_PALETTE])
     }
 
     /** 悬浮导航栏（DESIGN §4.22）。默认关：不透明底栏是既有观感，用户显式开启才改。 */
-    val floatingNavBar: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val floatingNavBar: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_FLOATING_NAV_BAR] ?: false
     }
 
     /** 百宝箱开关（DESIGN §4.47）。默认开：今日页「+」下拉里的图片工具入口。 */
-    val toolboxEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val toolboxEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_TOOLBOX_ENABLED] ?: true
     }
 
     /**
      * 启动页（DESIGN §3.3）。默认今日页；认不出的存储值一律退回今日页（[StartPage.fromName]）。
      */
-    val startPage: Flow<StartPage> = context.displayDataStore.data.map { p ->
+    val startPage: Flow<StartPage> = displayDataStore.data.map { p ->
         StartPage.fromName(p[KEY_START_PAGE])
     }
 
@@ -163,21 +181,21 @@ class DisplayPrefsStore(internal val context: Context) {
      *
      * **只认这个键**，不认「有没有课表」——导入过课表又清空过的用户不该被重新引导一遍。
      */
-    val onboardingSeen: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val onboardingSeen: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_ONBOARDING_SEEN] ?: false
     }
 
     suspend fun setOnboardingSeen() {
-        context.displayDataStore.edit { it[KEY_ONBOARDING_SEEN] = true }
+        displayDataStore.edit { it[KEY_ONBOARDING_SEEN] = true }
     }
 
     /** 「我的」账号条：姓名（教务学籍卡导入）。null/空 = 未导入过，退回学号显示。 */
-    val profileName: Flow<String> = context.displayDataStore.data.map { p ->
+    val profileName: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_PROFILE_NAME].orEmpty()
     }
 
     /** 「我的」账号条：班级（教务学籍卡导入）。缺失时账号条副行只剩学号。 */
-    val profileClass: Flow<String> = context.displayDataStore.data.map { p ->
+    val profileClass: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_PROFILE_CLASS].orEmpty()
     }
 
@@ -188,22 +206,22 @@ class DisplayPrefsStore(internal val context: Context) {
      * 有会话却没凭证，卡片只能写「未登录」（2026-09-27 用户报）。学籍卡本来就有学号，
      * 顺手落库，身份区就有真值可用。
      */
-    val profileStudentId: Flow<String> = context.displayDataStore.data.map { p ->
+    val profileStudentId: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_PROFILE_STUDENT_ID].orEmpty()
     }
 
     /** 学籍信息页：院系（教务学籍卡片）。 */
-    val profileCollege: Flow<String> = context.displayDataStore.data.map { p ->
+    val profileCollege: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_PROFILE_COLLEGE].orEmpty()
     }
 
     /** 学籍信息页：专业（教务学籍卡片）。 */
-    val profileMajor: Flow<String> = context.displayDataStore.data.map { p ->
+    val profileMajor: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_PROFILE_MAJOR].orEmpty()
     }
 
     /** 学籍信息页：学制（教务学籍卡片，原始文本如「4」）。 */
-    val profileDuration: Flow<String> = context.displayDataStore.data.map { p ->
+    val profileDuration: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_PROFILE_DURATION].orEmpty()
     }
 
@@ -216,7 +234,7 @@ class DisplayPrefsStore(internal val context: Context) {
         major: String? = null,
         duration: String? = null,
     ) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             if (!name.isNullOrBlank()) p[KEY_PROFILE_NAME] = name.trim()
             if (!className.isNullOrBlank()) p[KEY_PROFILE_CLASS] = className.trim()
             if (!studentId.isNullOrBlank()) p[KEY_PROFILE_STUDENT_ID] = studentId.trim()
@@ -231,7 +249,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 不清的话，凭证已经清空、账号卡还会显示上一个登录者的姓名与班级。
      */
     suspend fun clearProfile() {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             p.remove(KEY_PROFILE_NAME)
             p.remove(KEY_PROFILE_CLASS)
             p.remove(KEY_PROFILE_STUDENT_ID)
@@ -248,12 +266,12 @@ class DisplayPrefsStore(internal val context: Context) {
      * 抓不到时不能每次进页都重试——那是白打教务。与余额提醒的 `balanceAlertCheckMillis`
      * 同款口径（失败不落，下一轮还有机会）。
      */
-    val profileSyncDate: Flow<String> = context.displayDataStore.data.map { p ->
+    val profileSyncDate: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_PROFILE_SYNC_DATE].orEmpty()
     }
 
     suspend fun setProfileSyncDate(dateKey: String) {
-        context.displayDataStore.edit { it[KEY_PROFILE_SYNC_DATE] = dateKey }
+        displayDataStore.edit { it[KEY_PROFILE_SYNC_DATE] = dateKey }
     }
 
     /**
@@ -262,12 +280,12 @@ class DisplayPrefsStore(internal val context: Context) {
      * 只作展示用；解析没拿到时留空，UI 不显示这一行——它不是判断"有没有数据"的依据，
      * 那个看 [ScholarProgressRepository.hasData]。
      */
-    val scholarPlanName: Flow<String> = context.displayDataStore.data.map { p ->
+    val scholarPlanName: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_SCHOLAR_PLAN_NAME].orEmpty()
     }
 
     suspend fun setScholarPlanName(value: String) {
-        context.displayDataStore.edit { it[KEY_SCHOLAR_PLAN_NAME] = value.trim() }
+        displayDataStore.edit { it[KEY_SCHOLAR_PLAN_NAME] = value.trim() }
     }
 
     /**
@@ -276,12 +294,12 @@ class DisplayPrefsStore(internal val context: Context) {
      * 与成绩的 [scoreSyncDate] 共用同一套闸门判定（`AutoSyncRules`）：这类数据一学期
      * 才动一次，每次冷启动都抓是白撞教务风控。
      */
-    val scholarSyncDate: Flow<String> = context.displayDataStore.data.map { p ->
+    val scholarSyncDate: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_SCHOLAR_SYNC_DATE].orEmpty()
     }
 
     suspend fun setScholarSyncDate(dateKey: String) {
-        context.displayDataStore.edit { it[KEY_SCHOLAR_SYNC_DATE] = dateKey }
+        displayDataStore.edit { it[KEY_SCHOLAR_SYNC_DATE] = dateKey }
     }
 
     /**
@@ -290,12 +308,12 @@ class DisplayPrefsStore(internal val context: Context) {
      * 只作展示用；解析没拿到时留空，UI 不显示这一行——它不是判断"有没有数据"的依据，
      * 那个看 `CurriculumRepository.hasData`。
      */
-    val curriculumPlanName: Flow<String> = context.displayDataStore.data.map { p ->
+    val curriculumPlanName: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_CURRICULUM_PLAN_NAME].orEmpty()
     }
 
     suspend fun setCurriculumPlanName(value: String) {
-        context.displayDataStore.edit { it[KEY_CURRICULUM_PLAN_NAME] = value.trim() }
+        displayDataStore.edit { it[KEY_CURRICULUM_PLAN_NAME] = value.trim() }
     }
 
     /**
@@ -304,34 +322,34 @@ class DisplayPrefsStore(internal val context: Context) {
      * 与学业的 [scholarSyncDate] 共用 `AutoSyncRules.shouldAttempt` 的 7 天口径——
      * 培养方案几年才动一次，每次冷启动都抓是白撞教务风控。
      */
-    val curriculumSyncDate: Flow<String> = context.displayDataStore.data.map { p ->
+    val curriculumSyncDate: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_CURRICULUM_SYNC_DATE].orEmpty()
     }
 
     suspend fun setCurriculumSyncDate(dateKey: String) {
-        context.displayDataStore.edit { it[KEY_CURRICULUM_SYNC_DATE] = dateKey }
+        displayDataStore.edit { it[KEY_CURRICULUM_SYNC_DATE] = dateKey }
     }
 
     /** 成绩的上次成功导入日期（ISO）。空 = 从没成功过。口径同 [scholarSyncDate]。 */
-    val scoreSyncDate: Flow<String> = context.displayDataStore.data.map { p ->
+    val scoreSyncDate: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_SCORE_SYNC_DATE].orEmpty()
     }
 
     suspend fun setScoreSyncDate(dateKey: String) {
-        context.displayDataStore.edit { it[KEY_SCORE_SYNC_DATE] = dateKey }
+        displayDataStore.edit { it[KEY_SCORE_SYNC_DATE] = dateKey }
     }
 
     // ---- 成绩/考试变动提醒（DESIGN §4.33）----
 
     /** 成绩变动提醒开关。**默认开**（2026-10-06 用户拍板）；显式关过的用户落盘 false，不受默认值影响。 */
     val scoreAlertEnabled: Flow<Boolean> =
-        context.displayDataStore.data.map { it[KEY_SCORE_ALERT_ENABLED] ?: true }
+        displayDataStore.data.map { it[KEY_SCORE_ALERT_ENABLED] ?: true }
 
     suspend fun setScoreAlertEnabled(value: Boolean) = put(KEY_SCORE_ALERT_ENABLED, value)
 
     /** 考试变动提醒开关。**默认开**（同成绩，2026-10-06）。 */
     val examAlertEnabled: Flow<Boolean> =
-        context.displayDataStore.data.map { it[KEY_EXAM_ALERT_ENABLED] ?: true }
+        displayDataStore.data.map { it[KEY_EXAM_ALERT_ENABLED] ?: true }
 
     suspend fun setExamAlertEnabled(value: Boolean) = put(KEY_EXAM_ALERT_ENABLED, value)
 
@@ -342,7 +360,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 「提醒 || 自动合并」。合并只补/改考试行，不删、不动普通课程（`ScheduleRepository.mergeExamCourses`）。
      */
     val examAutoMergeEnabled: Flow<Boolean> =
-        context.displayDataStore.data.map { it[KEY_EXAM_AUTO_MERGE_ENABLED] ?: true }
+        displayDataStore.data.map { it[KEY_EXAM_AUTO_MERGE_ENABLED] ?: true }
 
     suspend fun setExamAutoMergeEnabled(value: Boolean) = put(KEY_EXAM_AUTO_MERGE_ENABLED, value)
 
@@ -351,55 +369,55 @@ class DisplayPrefsStore(internal val context: Context) {
      * 成绩/考试/选课/调课分开设置），旧共用键 `KEY_ALERT_INTERVAL_HOURS` 只作老用户
      * 读取回退——新键没写过时沿用旧值，写过后永远优先，无需一次性迁移。
      */
-    val scoreAlertIntervalHours: Flow<Int> = context.displayDataStore.data.map { p ->
+    val scoreAlertIntervalHours: Flow<Int> = displayDataStore.data.map { p ->
         p[KEY_SCORE_INTERVAL_HOURS] ?: p[KEY_ALERT_INTERVAL_HOURS] ?: ScoreAlertDefaults.INTERVAL_DEFAULT
     }
 
     suspend fun setScoreAlertIntervalHours(value: Int) {
-        context.displayDataStore.edit { p -> p[KEY_SCORE_INTERVAL_HOURS] = value }
+        displayDataStore.edit { p -> p[KEY_SCORE_INTERVAL_HOURS] = value }
     }
 
     /** 考试变动提醒的检查间隔（小时），独立于成绩（口径见 [scoreAlertIntervalHours]）。 */
-    val examAlertIntervalHours: Flow<Int> = context.displayDataStore.data.map { p ->
+    val examAlertIntervalHours: Flow<Int> = displayDataStore.data.map { p ->
         p[KEY_EXAM_INTERVAL_HOURS] ?: p[KEY_ALERT_INTERVAL_HOURS] ?: ScoreAlertDefaults.INTERVAL_DEFAULT
     }
 
     suspend fun setExamAlertIntervalHours(value: Int) {
-        context.displayDataStore.edit { p -> p[KEY_EXAM_INTERVAL_HOURS] = value }
+        displayDataStore.edit { p -> p[KEY_EXAM_INTERVAL_HOURS] = value }
     }
 
     /** 选课轮次提醒的核对间隔（小时），独立设置；精确闹钟仍由轮次时刻驱动。 */
-    val selectionAlertIntervalHours: Flow<Int> = context.displayDataStore.data.map { p ->
+    val selectionAlertIntervalHours: Flow<Int> = displayDataStore.data.map { p ->
         p[KEY_SELECTION_INTERVAL_HOURS] ?: p[KEY_ALERT_INTERVAL_HOURS] ?: ScoreAlertDefaults.INTERVAL_DEFAULT
     }
 
     suspend fun setSelectionAlertIntervalHours(value: Int) {
-        context.displayDataStore.edit { p -> p[KEY_SELECTION_INTERVAL_HOURS] = value }
+        displayDataStore.edit { p -> p[KEY_SELECTION_INTERVAL_HOURS] = value }
     }
 
     /** 变动检测的检查间隔（小时），独立设置；默认低频档（每次核对抓两张课表页）。 */
-    val scheduleAlertIntervalHours: Flow<Int> = context.displayDataStore.data.map { p ->
+    val scheduleAlertIntervalHours: Flow<Int> = displayDataStore.data.map { p ->
         p[KEY_SCHEDULE_INTERVAL_HOURS] ?: p[KEY_ALERT_INTERVAL_HOURS] ?: ScheduleAlertDefaults.INTERVAL_DEFAULT
     }
 
     suspend fun setScheduleAlertIntervalHours(value: Int) {
-        context.displayDataStore.edit { p -> p[KEY_SCHEDULE_INTERVAL_HOURS] = value }
+        displayDataStore.edit { p -> p[KEY_SCHEDULE_INTERVAL_HOURS] = value }
     }
 
     /** 成绩上次成功检查时刻（epoch millis）。0 = 从没成功过。失败不写。 */
     suspend fun scoreAlertCheckMillis(): Long =
-        context.displayDataStore.data.first()[KEY_SCORE_CHECK_MILLIS] ?: 0L
+        displayDataStore.data.first()[KEY_SCORE_CHECK_MILLIS] ?: 0L
 
     suspend fun setScoreAlertCheckMillis(millis: Long) {
-        context.displayDataStore.edit { it[KEY_SCORE_CHECK_MILLIS] = millis }
+        displayDataStore.edit { it[KEY_SCORE_CHECK_MILLIS] = millis }
     }
 
     /** 考试上次成功检查时刻（epoch millis）。0 = 从没成功过。失败不写。 */
     suspend fun examAlertCheckMillis(): Long =
-        context.displayDataStore.data.first()[KEY_EXAM_CHECK_MILLIS] ?: 0L
+        displayDataStore.data.first()[KEY_EXAM_CHECK_MILLIS] ?: 0L
 
     suspend fun setExamAlertCheckMillis(millis: Long) {
-        context.displayDataStore.edit { it[KEY_EXAM_CHECK_MILLIS] = millis }
+        displayDataStore.edit { it[KEY_EXAM_CHECK_MILLIS] = millis }
     }
 
     /**
@@ -408,14 +426,14 @@ class DisplayPrefsStore(internal val context: Context) {
      * 只在真的抓到壳页之后写盘。
      */
     suspend fun examShellTerm(): String? =
-        context.displayDataStore.data.first()[KEY_EXAM_SHELL_TERM]?.takeIf { it.isNotBlank() }
+        displayDataStore.data.first()[KEY_EXAM_SHELL_TERM]?.takeIf { it.isNotBlank() }
 
     /** 考试壳页学期抓到时刻。0 = 从没抓到过。 */
     suspend fun examShellTermAtMillis(): Long =
-        context.displayDataStore.data.first()[KEY_EXAM_SHELL_AT_MILLIS] ?: 0L
+        displayDataStore.data.first()[KEY_EXAM_SHELL_AT_MILLIS] ?: 0L
 
     suspend fun setExamShellTerm(term: String, millis: Long) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_EXAM_SHELL_TERM] = term
             it[KEY_EXAM_SHELL_AT_MILLIS] = millis
         }
@@ -425,10 +443,10 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 选课记录上次成功同步时刻（epoch millis）。0 = 从没成功过。失败不写（同成绩/考试纪律）。 */
     suspend fun selectionSyncMillis(): Long =
-        context.displayDataStore.data.first()[KEY_SELECTION_SYNC_MILLIS] ?: 0L
+        displayDataStore.data.first()[KEY_SELECTION_SYNC_MILLIS] ?: 0L
 
     suspend fun setSelectionSyncMillis(millis: Long) {
-        context.displayDataStore.edit { it[KEY_SELECTION_SYNC_MILLIS] = millis }
+        displayDataStore.edit { it[KEY_SELECTION_SYNC_MILLIS] = millis }
     }
 
     /**
@@ -436,11 +454,11 @@ class DisplayPrefsStore(internal val context: Context) {
      * 存下来是为了列个学期清单不用再打一次教务。
      */
     suspend fun selectionTerms(): List<String> =
-        context.displayDataStore.data.first()[KEY_SELECTION_TERMS].orEmpty()
+        displayDataStore.data.first()[KEY_SELECTION_TERMS].orEmpty()
             .split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
     suspend fun setSelectionTerms(terms: List<String>) {
-        context.displayDataStore.edit { it[KEY_SELECTION_TERMS] = terms.joinToString(",") }
+        displayDataStore.edit { it[KEY_SELECTION_TERMS] = terms.joinToString(",") }
     }
 
     /**
@@ -448,14 +466,14 @@ class DisplayPrefsStore(internal val context: Context) {
      * TTL 内复用，省一次壳页 GET。学期翻年滞后半个窗口内选课记录本就不变，无实际影响。
      */
     suspend fun selectionShellTerm(): String? =
-        context.displayDataStore.data.first()[KEY_SELECTION_SHELL_TERM]?.takeIf { it.isNotBlank() }
+        displayDataStore.data.first()[KEY_SELECTION_SHELL_TERM]?.takeIf { it.isNotBlank() }
 
     /** 选课壳页学期抓到时刻。0 = 从没抓到过。 */
     suspend fun selectionShellTermAtMillis(): Long =
-        context.displayDataStore.data.first()[KEY_SELECTION_SHELL_AT_MILLIS] ?: 0L
+        displayDataStore.data.first()[KEY_SELECTION_SHELL_AT_MILLIS] ?: 0L
 
     suspend fun setSelectionShellTerm(term: String, millis: Long) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_SELECTION_SHELL_TERM] = term
             it[KEY_SELECTION_SHELL_AT_MILLIS] = millis
         }
@@ -463,15 +481,15 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 选课轮次上次成功检查时刻（epoch millis）。0 = 从没成功过。失败不写。 */
     suspend fun selectionRoundsCheckMillis(): Long =
-        context.displayDataStore.data.first()[KEY_SELECTION_ROUNDS_CHECK_MILLIS] ?: 0L
+        displayDataStore.data.first()[KEY_SELECTION_ROUNDS_CHECK_MILLIS] ?: 0L
 
     suspend fun setSelectionRoundsCheckMillis(millis: Long) {
-        context.displayDataStore.edit { it[KEY_SELECTION_ROUNDS_CHECK_MILLIS] = millis }
+        displayDataStore.edit { it[KEY_SELECTION_ROUNDS_CHECK_MILLIS] = millis }
     }
 
     /** 选课轮次提醒开关。默认关（通知是打扰型能力，与成绩/考试提醒同一口径，用户显式开启）。 */
     val selectionAlertEnabled: Flow<Boolean> =
-        context.displayDataStore.data.map { p -> p[KEY_SELECTION_ALERT_ENABLED] ?: false }
+        displayDataStore.data.map { p -> p[KEY_SELECTION_ALERT_ENABLED] ?: false }
 
     suspend fun setSelectionAlertEnabled(value: Boolean) = put(KEY_SELECTION_ALERT_ENABLED, value)
 
@@ -481,10 +499,10 @@ class DisplayPrefsStore(internal val context: Context) {
      * 不做裁剪：一个学期只有几轮，累计是个位数，没有淘汰的必要。
      */
     suspend fun selectionRemindedKeys(): Set<String> =
-        context.displayDataStore.data.first()[KEY_SELECTION_REMINDED_KEYS] ?: emptySet()
+        displayDataStore.data.first()[KEY_SELECTION_REMINDED_KEYS] ?: emptySet()
 
     suspend fun addSelectionRemindedKey(key: String) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             p[KEY_SELECTION_REMINDED_KEYS] = (p[KEY_SELECTION_REMINDED_KEYS] ?: emptySet()) + key
         }
     }
@@ -495,12 +513,12 @@ class DisplayPrefsStore(internal val context: Context) {
      * 预选清单（选课期进选课中心时按它匹配、命中课程优先显示；选课仍由用户逐次确认）。
      * JSON 存储，口径同快捷方式：坏数据回空表，不崩在读路径上。
      */
-    val selectionWishes: Flow<List<SelectionWish>> = context.displayDataStore.data.map { p ->
+    val selectionWishes: Flow<List<SelectionWish>> = displayDataStore.data.map { p ->
         p[KEY_SELECTION_WISHES_JSON]?.let { SelectionWishes.decode(it) } ?: emptyList()
     }
 
     suspend fun setSelectionWishes(wishes: List<SelectionWish>) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             p[KEY_SELECTION_WISHES_JSON] = SelectionWishes.encode(wishes)
         }
     }
@@ -510,18 +528,18 @@ class DisplayPrefsStore(internal val context: Context) {
     /** 课表变动提醒开关。默认关（通知是打扰型能力，与成绩/考试/选课提醒同一口径）。
      *  只管「差异提醒」；新学期课表探测**不受它控制**（2026-11-19 起恒开）。 */
     val scheduleAlertEnabled: Flow<Boolean> =
-        context.displayDataStore.data.map { p -> p[KEY_SCHEDULE_ALERT_ENABLED] ?: false }
+        displayDataStore.data.map { p -> p[KEY_SCHEDULE_ALERT_ENABLED] ?: false }
 
     suspend fun setScheduleAlertEnabled(value: Boolean) {
-        context.displayDataStore.edit { p -> p[KEY_SCHEDULE_ALERT_ENABLED] = value }
+        displayDataStore.edit { p -> p[KEY_SCHEDULE_ALERT_ENABLED] = value }
     }
 
     /** 调课上次成功检查时刻（epoch millis）。0 = 从没成功过。失败不写（同成绩/考试纪律）。 */
     suspend fun scheduleCheckMillis(): Long =
-        context.displayDataStore.data.first()[KEY_SCHEDULE_CHECK_MILLIS] ?: 0L
+        displayDataStore.data.first()[KEY_SCHEDULE_CHECK_MILLIS] ?: 0L
 
     suspend fun setScheduleCheckMillis(millis: Long) {
-        context.displayDataStore.edit { p -> p[KEY_SCHEDULE_CHECK_MILLIS] = millis }
+        displayDataStore.edit { p -> p[KEY_SCHEDULE_CHECK_MILLIS] = millis }
     }
 
     /**
@@ -530,10 +548,10 @@ class DisplayPrefsStore(internal val context: Context) {
      * 才会变。基线推进（合并/重新导入）时清空（旧指纹失去意义）。
      */
     suspend fun scheduleIgnoredFingerprint(): String =
-        context.displayDataStore.data.first()[KEY_SCHEDULE_IGNORED_FP].orEmpty()
+        displayDataStore.data.first()[KEY_SCHEDULE_IGNORED_FP].orEmpty()
 
     suspend fun setScheduleIgnoredFingerprint(value: String) {
-        context.displayDataStore.edit { p -> p[KEY_SCHEDULE_IGNORED_FP] = value }
+        displayDataStore.edit { p -> p[KEY_SCHEDULE_IGNORED_FP] = value }
     }
 
     /**
@@ -542,14 +560,14 @@ class DisplayPrefsStore(internal val context: Context) {
      * 不再发第二条通知（用户还没处置，重发只是打扰）。
      */
     val schedulePendingChanges: Flow<SchedulePendingChanges?> =
-        context.displayDataStore.data.map { p ->
+        displayDataStore.data.map { p ->
             p[KEY_SCHEDULE_PENDING_JSON]?.takeIf { it.isNotBlank() }?.let(SchedulePendingChanges::decode)
         }
 
     suspend fun schedulePendingChanges(): SchedulePendingChanges? = schedulePendingChanges.first()
 
     suspend fun setSchedulePendingChanges(value: SchedulePendingChanges?) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             p[KEY_SCHEDULE_PENDING_JSON] = value?.encode().orEmpty()
         }
     }
@@ -558,28 +576,28 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 入学学期（大一上）：年级标签的基准，由归档写入；没有时命名退回学期号。 */
     suspend fun scheduleFirstTerm(): String? =
-        context.displayDataStore.data.first()[KEY_SCHEDULE_FIRST_TERM]?.takeIf { it.isNotBlank() }
+        displayDataStore.data.first()[KEY_SCHEDULE_FIRST_TERM]?.takeIf { it.isNotBlank() }
 
     suspend fun setScheduleFirstTerm(term: String?) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             if (term.isNullOrBlank()) p.remove(KEY_SCHEDULE_FIRST_TERM) else p[KEY_SCHEDULE_FIRST_TERM] = term
         }
     }
 
     /** 全量归档上次成功的时刻；0 = 从没成功过（老用户升级后的首次冷启动据此补跑一次）。 */
     suspend fun scheduleArchiveDoneAt(): Long =
-        context.displayDataStore.data.first()[KEY_SCHEDULE_ARCHIVE_DONE_AT] ?: 0L
+        displayDataStore.data.first()[KEY_SCHEDULE_ARCHIVE_DONE_AT] ?: 0L
 
     suspend fun setScheduleArchiveDoneAt(millis: Long) {
-        context.displayDataStore.edit { p -> p[KEY_SCHEDULE_ARCHIVE_DONE_AT] = millis }
+        displayDataStore.edit { p -> p[KEY_SCHEDULE_ARCHIVE_DONE_AT] = millis }
     }
 
     /** 上次归档尝试的时刻（失败也落）——只做退避，不是「已完成」的判据。 */
     suspend fun scheduleArchiveAttemptAt(): Long =
-        context.displayDataStore.data.first()[KEY_SCHEDULE_ARCHIVE_ATTEMPT_AT] ?: 0L
+        displayDataStore.data.first()[KEY_SCHEDULE_ARCHIVE_ATTEMPT_AT] ?: 0L
 
     suspend fun setScheduleArchiveAttemptAt(millis: Long) {
-        context.displayDataStore.edit { p -> p[KEY_SCHEDULE_ARCHIVE_ATTEMPT_AT] = millis }
+        displayDataStore.edit { p -> p[KEY_SCHEDULE_ARCHIVE_ATTEMPT_AT] = millis }
     }
 
     /**
@@ -587,18 +605,18 @@ class DisplayPrefsStore(internal val context: Context) {
      * 手动「导入全部学期」会清掉标记——那是用户明确要回来的动作。
      */
     suspend fun scheduleDismissedTerms(): Set<String> =
-        context.displayDataStore.data.first()[KEY_SCHEDULE_DISMISSED_TERMS] ?: emptySet()
+        displayDataStore.data.first()[KEY_SCHEDULE_DISMISSED_TERMS] ?: emptySet()
 
     suspend fun addScheduleDismissedTerm(term: String) {
         if (term.isBlank()) return
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             p[KEY_SCHEDULE_DISMISSED_TERMS] = (p[KEY_SCHEDULE_DISMISSED_TERMS] ?: emptySet()) + term
         }
     }
 
     suspend fun removeScheduleDismissedTerms(terms: Collection<String>) {
         if (terms.isEmpty()) return
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             val left = (p[KEY_SCHEDULE_DISMISSED_TERMS] ?: emptySet()) - terms.toSet()
             if (left.isEmpty()) p.remove(KEY_SCHEDULE_DISMISSED_TERMS) else p[KEY_SCHEDULE_DISMISSED_TERMS] = left
         }
@@ -606,20 +624,20 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 教务最近一次给出的当前学期（课表页学期下拉选中项）：自动选表的假期兜底。 */
     suspend fun scheduleJwCurrentTerm(): String? =
-        context.displayDataStore.data.first()[KEY_SCHEDULE_JW_CURRENT_TERM]?.takeIf { it.isNotBlank() }
+        displayDataStore.data.first()[KEY_SCHEDULE_JW_CURRENT_TERM]?.takeIf { it.isNotBlank() }
 
     suspend fun setScheduleJwCurrentTerm(term: String?) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             if (term.isNullOrBlank()) p.remove(KEY_SCHEDULE_JW_CURRENT_TERM) else p[KEY_SCHEDULE_JW_CURRENT_TERM] = term
         }
     }
 
     /** 下一学期探测的上次成功时刻（固定 24 小时档，与用户的差异检测间隔无关）。 */
     suspend fun scheduleNewTermProbeAt(): Long =
-        context.displayDataStore.data.first()[KEY_SCHEDULE_NEW_TERM_PROBE_AT] ?: 0L
+        displayDataStore.data.first()[KEY_SCHEDULE_NEW_TERM_PROBE_AT] ?: 0L
 
     suspend fun setScheduleNewTermProbeAt(millis: Long) {
-        context.displayDataStore.edit { p -> p[KEY_SCHEDULE_NEW_TERM_PROBE_AT] = millis }
+        displayDataStore.edit { p -> p[KEY_SCHEDULE_NEW_TERM_PROBE_AT] = millis }
     }
 
     /**
@@ -628,12 +646,12 @@ class DisplayPrefsStore(internal val context: Context) {
      * 弹过即置 consumed。null = 没有未消费的结果（没走过首启 / 已消费 / startAtJw 重进）。
      */
     val onboardingSyncOutcome: Flow<OnboardingSyncOutcome?> =
-        context.displayDataStore.data.map { p ->
+        displayDataStore.data.map { p ->
             p[KEY_ONBOARDING_SYNC_JSON]?.takeIf { it.isNotBlank() }?.let(OnboardingSyncOutcome::decode)
         }
 
     suspend fun setOnboardingSyncOutcome(value: OnboardingSyncOutcome?) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             p[KEY_ONBOARDING_SYNC_JSON] = value?.let(OnboardingSyncOutcome::encode).orEmpty()
         }
     }
@@ -644,7 +662,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 否则 KEEP 保相位——这里记着「上次排的是几小时」。
      */
     suspend fun alertPeriodicInterval(): Int =
-        context.displayDataStore.data.first()[KEY_ALERT_PERIODIC_INTERVAL] ?: 0
+        displayDataStore.data.first()[KEY_ALERT_PERIODIC_INTERVAL] ?: 0
 
     suspend fun setAlertPeriodicInterval(value: Int) = put(KEY_ALERT_PERIODIC_INTERVAL, value)
 
@@ -652,12 +670,12 @@ class DisplayPrefsStore(internal val context: Context) {
      * 教材的上次成功抓取日期（ISO）。空 = 从没成功过。
      * 教材跟着「导入课表」走（一学期一次），这里只做记录与展示，不做时间闸门。
      */
-    val textbookSyncDate: Flow<String> = context.displayDataStore.data.map { p ->
+    val textbookSyncDate: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_TEXTBOOK_SYNC_DATE].orEmpty()
     }
 
     suspend fun setTextbookSyncDate(dateKey: String) {
-        context.displayDataStore.edit { it[KEY_TEXTBOOK_SYNC_DATE] = dateKey }
+        displayDataStore.edit { it[KEY_TEXTBOOK_SYNC_DATE] = dateKey }
     }
 
     /**
@@ -668,10 +686,10 @@ class DisplayPrefsStore(internal val context: Context) {
      * 闸门判据在 `AutoSyncRules.textbookBackfillDue`。
      */
     suspend fun textbookBackfillAttempt(): Long =
-        context.displayDataStore.data.first()[KEY_TEXTBOOK_BACKFILL_MILLIS] ?: 0L
+        displayDataStore.data.first()[KEY_TEXTBOOK_BACKFILL_MILLIS] ?: 0L
 
     suspend fun setTextbookBackfillAttempt(millis: Long) {
-        context.displayDataStore.edit { it[KEY_TEXTBOOK_BACKFILL_MILLIS] = millis }
+        displayDataStore.edit { it[KEY_TEXTBOOK_BACKFILL_MILLIS] = millis }
     }
 
     /**
@@ -683,29 +701,29 @@ class DisplayPrefsStore(internal val context: Context) {
      * 换学期自动重新开闸（学期号不等即可再抓）。
      */
     suspend fun textbookFetchedTerm(): String =
-        context.displayDataStore.data.first()[KEY_TEXTBOOK_FETCHED_TERM].orEmpty()
+        displayDataStore.data.first()[KEY_TEXTBOOK_FETCHED_TERM].orEmpty()
 
     suspend fun setTextbookFetchedTerm(term: String) {
-        context.displayDataStore.edit { it[KEY_TEXTBOOK_FETCHED_TERM] = term }
+        displayDataStore.edit { it[KEY_TEXTBOOK_FETCHED_TERM] = term }
     }
 
     /** 胖乖「打开软件自动签到」。全局项，**默认关**。 */
-    val qiekjAutoSignIn: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val qiekjAutoSignIn: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_QIEKJ_AUTO_SIGN_IN] ?: false
     }.distinctUntilChanged()
 
     /** 上次自动签到的日期（ISO `yyyy-MM-dd`）；空串 = 没跑过。仅供自动签到期闸读。 */
-    val qiekjAutoSignInLastDate: Flow<String> = context.displayDataStore.data.map { p ->
+    val qiekjAutoSignInLastDate: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_QIEKJ_AUTO_SIGN_IN_LAST_DATE].orEmpty()
     }.distinctUntilChanged()
 
     /** 上课提醒开关（DESIGN §3.7）。全局项，默认关：通知是打扰型能力，用户显式开启。 */
-    val reminderEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val reminderEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_REMINDER_ENABLED] ?: false
     }
 
     /** 上课提醒提前量（分钟）。全局项；读路径吸附到候选档，防线脏数据。 */
-    val reminderLeadMinutes: Flow<Int> = context.displayDataStore.data.map { p ->
+    val reminderLeadMinutes: Flow<Int> = displayDataStore.data.map { p ->
         ReminderDefaults.coerceLead(p[KEY_REMINDER_LEAD] ?: ReminderDefaults.DEFAULT_LEAD_MINUTES)
     }
 
@@ -713,12 +731,12 @@ class DisplayPrefsStore(internal val context: Context) {
      * 作业截止提醒开关（DESIGN §3.11 / §3.7 设置表）。全局项，**默认关**：
      * 与 [reminderEnabled] 同口径——通知是打扰型能力，用户显式开启；两个开关互相独立。
      */
-    val homeworkReminderEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val homeworkReminderEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_HOMEWORK_REMINDER_ENABLED] ?: false
     }
 
     /** 共享单车免费时长提醒开关（DESIGN §3.9）。默认关：通知是打扰型能力，用户显式开启。 */
-    val ebikeFreeReminderEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val ebikeFreeReminderEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_FREE_REMINDER_ENABLED] ?: false
     }
 
@@ -733,7 +751,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * **不进 [DisplayPrefs] 合并模型**——`baseDisplayPrefs` 的 combine 已满员
      * （AGENTS.md 口径），消费方各自收这条单流。
      */
-    val strongReminderVibration: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val strongReminderVibration: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_STRONG_REMINDER_VIBRATION] ?: false
     }
 
@@ -745,7 +763,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 默认就该生效；不想要的用户显式关（成绩/考试变动提醒默认开的同一口径）。
      * 关 = 所有通知回到立即发送，时段配置保留不清。
      */
-    val quietHoursEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val quietHoursEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_QUIET_HOURS_ENABLED] ?: true
     }
 
@@ -753,7 +771,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 免扰时段全表（含停用的窗口）。缺键 / 坏 JSON 回 [QuietWindows.DEFAULT]
      * ——预置时段「默认存在」，用户改过才落盘；存储损坏退预置比全放行安全。
      */
-    val quietHoursWindows: Flow<List<QuietWindow>> = context.displayDataStore.data.map { p ->
+    val quietHoursWindows: Flow<List<QuietWindow>> = displayDataStore.data.map { p ->
         QuietWindows.decode(p[KEY_QUIET_HOURS_JSON])
     }
 
@@ -765,7 +783,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * （发现新版本才弹窗，且可「忽略此次更新」）；不想让 App 每次冷启动联网
      * 的用户显式关。关 = 冷启动检查链零网络空跑，手动「检查更新」不受影响。
      */
-    val autoUpdateCheckEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val autoUpdateCheckEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_AUTO_UPDATE_CHECK_ENABLED] ?: true
     }
 
@@ -775,10 +793,10 @@ class DisplayPrefsStore(internal val context: Context) {
      * 「检查更新」永远能弹出。空 = 没有忽略。
      */
     suspend fun ignoredUpdateVersion(): String =
-        context.displayDataStore.data.first()[KEY_IGNORED_UPDATE_VERSION].orEmpty()
+        displayDataStore.data.first()[KEY_IGNORED_UPDATE_VERSION].orEmpty()
 
     suspend fun setIgnoredUpdateVersion(value: String) {
-        context.displayDataStore.edit { p -> p[KEY_IGNORED_UPDATE_VERSION] = value }
+        displayDataStore.edit { p -> p[KEY_IGNORED_UPDATE_VERSION] = value }
     }
 
     // ---- AI 调课（DESIGN §4.39，2026-10-06）：服务地址 / 模型名 / 脱敏 / 隐私确认。
@@ -786,33 +804,33 @@ class DisplayPrefsStore(internal val context: Context) {
     // 四条都单独成流，不进 baseDisplayPrefs 合并模型（combine 已满员）。
 
     /** 服务地址。默认 [AiScheduleConfig.DEFAULT_BASE_URL]；用户清空后读到空串，配置页要求重填。 */
-    val aiBaseUrl: Flow<String> = context.displayDataStore.data.map { p ->
+    val aiBaseUrl: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_AI_BASE_URL] ?: AiScheduleConfig.DEFAULT_BASE_URL
     }
 
     /** 模型名。默认 [AiScheduleConfig.DEFAULT_MODEL]；可手输或从上游 `/models` 选。
      *  legacy 别名（`deepseek-v4-flash` 等已退役名）读取时迁到现行默认。 */
-    val aiModel: Flow<String> = context.displayDataStore.data.map { p ->
+    val aiModel: Flow<String> = displayDataStore.data.map { p ->
         AiScheduleConfig.normalizeModel(p[KEY_AI_MODEL])
     }
 
     /** 教师名脱敏开关，默认**开**：发给第三方前把教师名换成「教师N」。 */
-    val aiMaskTeacher: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val aiMaskTeacher: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_AI_MASK_TEACHER] ?: true
     }
 
     /** 首次隐私确认是否已完成（未确认前不允许发请求）。 */
-    val aiPrivacyAcknowledged: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val aiPrivacyAcknowledged: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_AI_PRIVACY_ACK] ?: false
     }
 
     /** 思考档位（none / low / high / max）。默认 none：非思考模式才能强制命名工具调用。 */
-    val aiThinkingEffort: Flow<String> = context.displayDataStore.data.map { p ->
-        p[KEY_AI_THINKING_EFFORT] ?: AiScheduleClient.Effort.NONE.wire
+    val aiThinkingEffort: Flow<String> = displayDataStore.data.map { p ->
+        p[KEY_AI_THINKING_EFFORT] ?: Effort.NONE.wire
     }
 
     /** 是否在页面上显示模型的思考过程，默认关（思考文本长，默认收起）。 */
-    val aiShowReasoning: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val aiShowReasoning: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_AI_SHOW_REASONING] ?: false
     }
 
@@ -824,7 +842,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * （关键字预判 [AiScheduleConfig.looksVisionModel] 保留在 domain 供测试与未来复用，
      * 配置页的「看着像视觉模型」提示 2026-10-07 已随排版收口移除）。
      */
-    val aiSupportsImage: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val aiSupportsImage: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_AI_SUPPORTS_IMAGE] ?: false
     }
 
@@ -840,17 +858,17 @@ class DisplayPrefsStore(internal val context: Context) {
      * 不想要的用户在窗口顶栏点一下就能切回（选择落盘，重开窗口照旧）。
      * 独立单流（`baseDisplayPrefs` 的 combine 已满员，口径同 [strongReminderVibration]）。
      */
-    val jwDesktopMode: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val jwDesktopMode: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_JW_DESKTOP_MODE] ?: true
     }
 
     /** 共享单车免费时长提醒提前量（分钟）。读路径吸附 1~5。 */
-    val ebikeFreeLeadMinutes: Flow<Int> = context.displayDataStore.data.map { p ->
+    val ebikeFreeLeadMinutes: Flow<Int> = displayDataStore.data.map { p ->
         EbikeFreeRide.coerceLead(p[KEY_EBIKE_FREE_LEAD] ?: EbikeFreeRide.DEFAULT_LEAD_MINUTES)
     }
 
     /** 本次骑行计时起点（epoch 毫秒）；0 = 无进行中计时。 */
-    val ebikeRideStartAt: Flow<Long> = context.displayDataStore.data.map { p ->
+    val ebikeRideStartAt: Flow<Long> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_RIDE_START_AT] ?: 0L
     }
 
@@ -859,7 +877,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 唯一实现在 [EbikeFreeRide.leadDedupKey] / [EbikeFreeRide.endDedupKey]。
      * 闹钟与周期核对共用，保证同一条提醒只发一次；换车重新计时时整集清空。
      */
-    val ebikeFreeNotifiedKeys: Flow<Set<String>> = context.displayDataStore.data.map { p ->
+    val ebikeFreeNotifiedKeys: Flow<Set<String>> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_FREE_NOTIFIED_KEYS] ?: emptySet()
     }
 
@@ -867,7 +885,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 骑行卡券到期提醒的「已提醒键」集合（DESIGN §4.32）：键形如 `card|<endTime 原文>`，
      * 唯一实现在 [EbikeCardExpiry.dedupKey]。同一张卡只提醒一次，换卡自然换键。
      */
-    val ebikeCardExpiryNotifiedKeys: Flow<Set<String>> = context.displayDataStore.data.map { p ->
+    val ebikeCardExpiryNotifiedKeys: Flow<Set<String>> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_CARD_EXPIRY_NOTIFIED] ?: emptySet()
     }
 
@@ -876,7 +894,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 空串 = 今天没勾过；与当天 [EbikeRideCard.dayKey] 相等就跳过提醒，跨天自然失效。
      * 与上面那条「同一张卡只提醒一次」的去重集合互不相干：那条按卡、这条按天。
      */
-    val ebikeNoCardNoticeDate: Flow<String> = context.displayDataStore.data.map { p ->
+    val ebikeNoCardNoticeDate: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_NO_CARD_NOTICE_DATE] ?: ""
     }
 
@@ -885,7 +903,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 点「打开微信扫一扫」各 +1，跨进程持久。读入口只有 [incrementEbikeRemoteRideCount]
      * （原子自增并返回新值），别各写一份读-改-写。
      */
-    val ebikeRemoteRideCount: Flow<Int> = context.displayDataStore.data.map { p ->
+    val ebikeRemoteRideCount: Flow<Int> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_REMOTE_RIDE_COUNT] ?: 0
     }
 
@@ -893,7 +911,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 有远程用车提醒待弹（2026-10-24）：小程序方式达标时**不阻断跳转**，落此标记，
      * 回 App（ON_RESUME）时消费弹出。账号方式当场弹、不经这个标记。
      */
-    val ebikeRemoteRidePending: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val ebikeRemoteRidePending: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_REMOTE_RIDE_PENDING] ?: false
     }
 
@@ -901,19 +919,19 @@ class DisplayPrefsStore(internal val context: Context) {
      * 用车满 15 分钟自动还车开关（DESIGN §3.9，2026-10-10）。**默认关**：
      * 它会替用户执行有计费后果的写动作（自动还车），只能显式开启。
      */
-    val ebikeAutoReturnEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val ebikeAutoReturnEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_AUTO_RETURN_ENABLED] ?: false
     }
 
     /** 自动还车的触发提前量（秒，10~60 步长 5）。读路径吸附，防线脏数据。 */
-    val ebikeAutoReturnLeadSeconds: Flow<Int> = context.displayDataStore.data.map { p ->
+    val ebikeAutoReturnLeadSeconds: Flow<Int> = displayDataStore.data.map { p ->
         EbikeAutoReturn.coerceLeadSeconds(
             p[KEY_EBIKE_AUTO_RETURN_LEAD_SECONDS] ?: EbikeAutoReturn.DEFAULT_LEAD_SECONDS,
         )
     }
 
     /** 自动还车的失败重试次数（1~3）。读路径吸附。 */
-    val ebikeAutoReturnRetries: Flow<Int> = context.displayDataStore.data.map { p ->
+    val ebikeAutoReturnRetries: Flow<Int> = displayDataStore.data.map { p ->
         EbikeAutoReturn.coerceRetries(
             p[KEY_EBIKE_AUTO_RETURN_RETRIES] ?: EbikeAutoReturn.DEFAULT_RETRIES,
         )
@@ -923,7 +941,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 自动还车的「已执行」键（唯一实现 [EbikeAutoReturn.doneKey]）。同一轮骑行只跑一次：
      * 成功、重试用尽、不该重试的失败都落这个键；换车（新起点）自然换键。
      */
-    val ebikeAutoReturnDoneKey: Flow<String> = context.displayDataStore.data.map { p ->
+    val ebikeAutoReturnDoneKey: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_AUTO_RETURN_DONE_KEY] ?: ""
     }
 
@@ -931,7 +949,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 日历同步的提前提醒分钟数（DESIGN §4.12）。全局项，默认 20，0 = 不提醒。
      * 值域 0–120 / 步长 5 的口径单一来源是 [CalendarSyncDefaults]，读路径先夹取防线。
      */
-    val calendarReminderMinutes: Flow<Int> = context.displayDataStore.data.map { p ->
+    val calendarReminderMinutes: Flow<Int> = displayDataStore.data.map { p ->
         CalendarSyncDefaults.coerceReminderMinutes(
             p[KEY_CALENDAR_REMINDER_MINUTES] ?: CalendarSyncDefaults.DEFAULT_REMINDER_MINUTES,
         )
@@ -942,22 +960,22 @@ class DisplayPrefsStore(internal val context: Context) {
     // 与上课/作业提醒同口径（走 repo 的独立流），也免得去动那个已满员的 combine。
 
     /** 寝室电费提醒开关。默认关：通知是打扰型能力，用户显式开启。 */
-    val powerAlertEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val powerAlertEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_POWER_ALERT_ENABLED] ?: false
     }
 
     /** 寝室电费提醒阈值（元）。读路径吸附到候选档，防线脏数据。 */
-    val powerAlertYuan: Flow<Int> = context.displayDataStore.data.map { p ->
+    val powerAlertYuan: Flow<Int> = displayDataStore.data.map { p ->
         BalanceAlert.coercePowerYuan(p[KEY_POWER_ALERT_YUAN] ?: BalanceAlert.DEFAULT_POWER_YUAN)
     }
 
     /** 一卡通余额提醒开关。默认关。 */
-    val yktAlertEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val yktAlertEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_YKT_ALERT_ENABLED] ?: false
     }
 
     /** 一卡通余额提醒阈值（元）。 */
-    val yktAlertYuan: Flow<Int> = context.displayDataStore.data.map { p ->
+    val yktAlertYuan: Flow<Int> = displayDataStore.data.map { p ->
         BalanceAlert.coerceYktYuan(p[KEY_YKT_ALERT_YUAN] ?: BalanceAlert.DEFAULT_YKT_YUAN)
     }
 
@@ -965,20 +983,20 @@ class DisplayPrefsStore(internal val context: Context) {
      * 检查间隔（小时）。**两个来源各自独立**（2026-10-07 用户拍板），读路径吸附到
      * 档位表（同阈值的防线口径）；余额链没有旧共用键的迁移史，默认值直取 [BalanceAlert]。
      */
-    val powerAlertIntervalHours: Flow<Int> = context.displayDataStore.data.map { p ->
+    val powerAlertIntervalHours: Flow<Int> = displayDataStore.data.map { p ->
         BalanceAlert.coerceIntervalHours(
             p[KEY_POWER_ALERT_INTERVAL_HOURS] ?: BalanceAlert.INTERVAL_DEFAULT_HOURS,
         )
     }
 
-    val yktAlertIntervalHours: Flow<Int> = context.displayDataStore.data.map { p ->
+    val yktAlertIntervalHours: Flow<Int> = displayDataStore.data.map { p ->
         BalanceAlert.coerceIntervalHours(
             p[KEY_YKT_ALERT_INTERVAL_HOURS] ?: BalanceAlert.INTERVAL_DEFAULT_HOURS,
         )
     }
 
     /** 今日页快捷方式开关（DESIGN §3.8）。全局项，默认开：这是展示型入口，不打扰人。 */
-    val shortcutsEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val shortcutsEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_SHORTCUTS_ENABLED] ?: true
     }.distinctUntilChanged()
 
@@ -986,7 +1004,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 今日页顶栏天气提示开关（DESIGN §3.29）。全局项，**默认关**：
      * 关着时一次网络请求都不发（取数调用点先判这个开关）。
      */
-    val weatherEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val weatherEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_WEATHER_ENABLED] ?: false
     }.distinctUntilChanged()
 
@@ -995,17 +1013,17 @@ class DisplayPrefsStore(internal val context: Context) {
      * 账号登录方式要凭证、有计费后果，只能由用户显式选择。
      * 认不出的存储值一律退回默认档（口径在 [EbikeUseMode.fromId]）。
      */
-    val ebikeUseMode: Flow<EbikeUseMode> = context.displayDataStore.data.map { p ->
+    val ebikeUseMode: Flow<EbikeUseMode> = displayDataStore.data.map { p ->
         EbikeUseMode.fromId(p[KEY_EBIKE_USE_MODE])
     }.distinctUntilChanged()
 
     /** 共享单车出码后自动存相册（DESIGN §3.9）。全局项，默认关（用户拍板）。 */
-    val ebikeAutoSave: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val ebikeAutoSave: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_AUTO_SAVE] ?: false
     }.distinctUntilChanged()
 
     /** 扫完即焚开关（DESIGN §3.9）。全局项，默认开。 */
-    val ebikeBurnAfterScan: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val ebikeBurnAfterScan: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_BURN_AFTER_SCAN] ?: true
     }.distinctUntilChanged()
 
@@ -1013,7 +1031,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 开锁前是否弹二次确认（DESIGN §3.9 / §4.32）。全局项，默认开；关掉后点「开锁」
      * 直接发指令。出口两个：开锁弹窗的「不再提醒」勾选、快趣出行设置 → 开锁与还车。
      */
-    val ebikeUnlockConfirm: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val ebikeUnlockConfirm: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_UNLOCK_CONFIRM] ?: true
     }.distinctUntilChanged()
 
@@ -1024,7 +1042,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 系统在用户拒绝两次后就静默拒绝，不看标记的话每次进页面都会白申请一次、
      * 再弹一句"已拒绝"，那就成了骚扰。之后要走定位只能靠用户主动点按钮。
      */
-    val ebikeLocationAsked: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val ebikeLocationAsked: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_LOCATION_ASKED] ?: false
     }.distinctUntilChanged()
 
@@ -1032,7 +1050,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * U净 使用须知的最近确认时刻（DESIGN §4.37）。0 = 从未确认（首次进入要弹），
      * 距上次确认超过一周也会再弹一次（窗口口径在 `UjingViewModel`）。
      */
-    val ujingNoticeSeenAt: Flow<Long> = context.displayDataStore.data.map { p ->
+    val ujingNoticeSeenAt: Flow<Long> = displayDataStore.data.map { p ->
         p[KEY_UJING_NOTICE_SEEN_AT] ?: 0L
     }.distinctUntilChanged()
 
@@ -1042,7 +1060,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 默认开（2026-09-24 用户拍板）：这个筛选本身就是想找能骑的车，列表与地图标记
      * 都按它过滤；关掉 = 看到离线与电量低的车。用户改过后落 DataStore，下次进页保持。
      */
-    val ebikeMapOnlyAvailable: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val ebikeMapOnlyAvailable: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_MAP_ONLY_AVAILABLE] ?: true
     }.distinctUntilChanged()
 
@@ -1053,7 +1071,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 坐标只隔一条马路，不筛的话师大校园的车会成片出现在地图上。
      * 筛选口径（车队归属 + 地理围栏双条件）在 [edu.jxslu.schedule.domain.BikeNearby.isOurCampusBike]。
      */
-    val ebikeMapOnlyOurCampus: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val ebikeMapOnlyOurCampus: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_MAP_ONLY_OUR_CAMPUS] ?: true
     }.distinctUntilChanged()
 
@@ -1065,7 +1083,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 「按车辆」给"就想看某一辆在哪"的场景，切过去后点图标直接出详情。
      * 用户改过后落 DataStore，下次进页保持。
      */
-    val ebikeMapByBike: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val ebikeMapByBike: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_MAP_BY_BIKE] ?: false
     }.distinctUntilChanged()
 
@@ -1079,7 +1097,7 @@ class DisplayPrefsStore(internal val context: Context) {
      *
      * 三个取值之外的一律按默认处理。
      */
-    val ebikeAmapChoice: Flow<String> = context.displayDataStore.data.map { p ->
+    val ebikeAmapChoice: Flow<String> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_AMAP_CHOICE]?.takeIf { it in AMAP_CHOICE_VALUES } ?: AMAP_CHOICE_AGREED
     }.distinctUntilChanged()
 
@@ -1090,7 +1108,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 都能第一帧就落在人身上，不必等一次定位回来（用户报的「进页面有时不跟到我的位置」
      * 就是定位慢或失败时没有可用中心）。脏值（越界 / 非有限）当没存过。
      */
-    val ebikeLastLocation: Flow<BikeLastLocation?> = context.displayDataStore.data.map { p ->
+    val ebikeLastLocation: Flow<BikeLastLocation?> = displayDataStore.data.map { p ->
         val lat = p[KEY_EBIKE_LAST_LAT]?.toDouble() ?: return@map null
         val lng = p[KEY_EBIKE_LAST_LNG]?.toDouble() ?: return@map null
         val at = p[KEY_EBIKE_LAST_AT] ?: 0L
@@ -1104,7 +1122,7 @@ class DisplayPrefsStore(internal val context: Context) {
      *
      * 只做范围校验，窗口缩放导致的"放不下"由渲染时再夹一道，不覆写用户拖出来的值。
      */
-    val ebikePanelHeightDp: Flow<Float?> = context.displayDataStore.data.map { p ->
+    val ebikePanelHeightDp: Flow<Float?> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_PANEL_HEIGHT_DP]?.takeIf { it.isFinite() && it > 0f }
     }.distinctUntilChanged()
 
@@ -1115,7 +1133,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 不用每次都回到校园中心重拖一遍。脏值（越界、非有限）当没存过，
      * 免得一个坏偏好把地图甩到地图外的某处。
      */
-    val ebikeMapViewport: Flow<BikeMapViewport?> = context.displayDataStore.data.map { p ->
+    val ebikeMapViewport: Flow<BikeMapViewport?> = displayDataStore.data.map { p ->
         val lat = p[KEY_EBIKE_VIEW_LAT]?.toDouble() ?: return@map null
         val lng = p[KEY_EBIKE_VIEW_LNG]?.toDouble() ?: return@map null
         val zoom = p[KEY_EBIKE_VIEW_ZOOM]?.toDouble() ?: return@map null
@@ -1126,7 +1144,7 @@ class DisplayPrefsStore(internal val context: Context) {
     }.distinctUntilChanged()
 
     /** 扫完即焚的待删记录（本功能保存的二维码 key 集合，DESIGN §3.9）。 */
-    val ebikePendingDelete: Flow<Set<String>> = context.displayDataStore.data.map { p ->
+    val ebikePendingDelete: Flow<Set<String>> = displayDataStore.data.map { p ->
         p[KEY_EBIKE_PENDING_DELETE] ?: emptySet()
     }
 
@@ -1134,7 +1152,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 最近共享单车车号（DESIGN §3.9）。键缺失/脏 JSON 回空列表——
      * 历史只是回填入口，坏了不该打扰任何下游。
      */
-    val ebikeRecentIds: Flow<List<String>> = context.displayDataStore.data.map { p ->
+    val ebikeRecentIds: Flow<List<String>> = displayDataStore.data.map { p ->
         EbikeQr.decodeRecent(p[KEY_EBIKE_RECENT_IDS])
     }.distinctUntilChanged()
 
@@ -1142,12 +1160,12 @@ class DisplayPrefsStore(internal val context: Context) {
      * 菜鸟批量查的最近提交（DESIGN §4.47）。键缺失/脏 JSON 回空列表——
      * 历史只是回填入口，坏了不该打扰页面。
      */
-    val cainiaoQueryHistory: Flow<List<String>> = context.displayDataStore.data.map { p ->
+    val cainiaoQueryHistory: Flow<List<String>> = displayDataStore.data.map { p ->
         CainiaoQuery.decodeHistory(p[KEY_CAINIAO_QUERY_HISTORY])
     }.distinctUntilChanged()
 
     /** 今日页校园卡付款码卡开关（DESIGN §3.10）。全局项，**默认关**（涉及凭证与资金）。 */
-    val campusCardEnabled: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val campusCardEnabled: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_CAMPUS_CARD_ENABLED] ?: false
     }.distinctUntilChanged()
 
@@ -1157,7 +1175,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 勾选「一周内不再提醒」才写；不勾不写（过期值留着无害，[edu.jxslu.schedule.domain.RechargeDisclaimer.isSuppressed]
      * 判 false 照样弹）。电费与一卡通充值共用这一个键。
      */
-    val rechargeDisclaimerSuppressUntil: Flow<Long> = context.displayDataStore.data.map { p ->
+    val rechargeDisclaimerSuppressUntil: Flow<Long> = displayDataStore.data.map { p ->
         p[KEY_RECHARGE_DISCLAIMER_SUPPRESS_UNTIL] ?: 0L
     }.distinctUntilChanged()
 
@@ -1168,12 +1186,12 @@ class DisplayPrefsStore(internal val context: Context) {
      * 5 秒才能关（`domain/RechargeDisclaimer.closeLockMs`），确认过（点「继续充值」
      * 或「取消」都算）之后任何一次弹出都立即可关。与静默键分开：确认≠勾选静默。
      */
-    val rechargeDisclaimerSeenAt: Flow<Long> = context.displayDataStore.data.map { p ->
+    val rechargeDisclaimerSeenAt: Flow<Long> = displayDataStore.data.map { p ->
         p[KEY_RECHARGE_DISCLAIMER_SEEN_AT] ?: 0L
     }.distinctUntilChanged()
 
     suspend fun markRechargeDisclaimerSeen(atMs: Long = AppClock.nowMillis()) {
-        context.displayDataStore.edit { it[KEY_RECHARGE_DISCLAIMER_SEEN_AT] = atMs }
+        displayDataStore.edit { it[KEY_RECHARGE_DISCLAIMER_SEEN_AT] = atMs }
     }
 
     /**
@@ -1183,7 +1201,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 以及「我的 → 关于」显示"已确认/未确认"。写路径只有 [markNoticeConsented]。
      */
     fun noticeConsent(notice: FirstRunNotice): Flow<NoticeConsentRecord> =
-        context.displayDataStore.data.map { p ->
+        displayDataStore.data.map { p ->
             when (notice) {
                 FirstRunNotice.UserNotice -> NoticeConsentRecord(
                     version = p[KEY_USER_NOTICE_VERSION] ?: 0,
@@ -1209,7 +1227,7 @@ class DisplayPrefsStore(internal val context: Context) {
         version: Int,
         atMs: Long = AppClock.nowMillis(),
     ) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             when (notice) {
                 FirstRunNotice.UserNotice -> {
                     p[KEY_USER_NOTICE_VERSION] = version
@@ -1228,7 +1246,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 未确认充值（DESIGN §4.19「充值」）：见 [PendingRecharge]。
      * 到账/超时/取消时清除；金额与卡号后四位之外的信息都非敏感数据。
      */
-    val pendingRecharge: Flow<PendingRecharge?> = context.displayDataStore.data.map { p ->
+    val pendingRecharge: Flow<PendingRecharge?> = displayDataStore.data.map { p ->
         val fen = p[KEY_PENDING_RECHARGE_FEN]
         val at = p[KEY_PENDING_RECHARGE_AT]
         if (fen == null || at == null) {
@@ -1258,7 +1276,7 @@ class DisplayPrefsStore(internal val context: Context) {
         /** 充电子账户时：付款前目标钱包余额（分）；取不到传 null（退流水口径）。 */
         walletBalanceBeforeFen: Long?,
     ) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_PENDING_RECHARGE_FEN] = fen
             it[KEY_PENDING_RECHARGE_AT] = at
             if (balanceBeforeFen != null) {
@@ -1290,11 +1308,11 @@ class DisplayPrefsStore(internal val context: Context) {
      * 校园卡页面不该反复被同一个弹窗拦住（2026-09-22 用户反馈）。
      */
     suspend fun markPendingRechargeConfirmShown() {
-        context.displayDataStore.edit { it[KEY_PENDING_RECHARGE_CONFIRM_SHOWN] = true }
+        displayDataStore.edit { it[KEY_PENDING_RECHARGE_CONFIRM_SHOWN] = true }
     }
 
     suspend fun clearPendingRecharge() {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it.remove(KEY_PENDING_RECHARGE_FEN)
             it.remove(KEY_PENDING_RECHARGE_AT)
             it.remove(KEY_PENDING_RECHARGE_BASE_FEN)
@@ -1310,7 +1328,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 读路径顺带做预设目标迁移（DESIGN §4.16：历史原值 → 当前预设，自定义不动）。
      * distinctUntilChanged：DataStore 任何键的写入都会重发这里，值没变就不该打扰下游。
      */
-    val shortcuts: Flow<List<ShortcutItem>> = context.displayDataStore.data.map { p ->
+    val shortcuts: Flow<List<ShortcutItem>> = displayDataStore.data.map { p ->
         Shortcuts.migratePresets(
             p[KEY_SHORTCUTS_JSON]?.let { Shortcuts.decode(it) } ?: Shortcuts.PRESET_SHORTCUTS,
         )
@@ -1324,7 +1342,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 「取快递」弹窗里「其他」分类的展开态（2026-11-01）。全局项，**默认折叠**：
      * 弹窗首屏只铺预设，自定义条目点标题才展开；存的是用户上一次的显式选择。
      */
-    val shortcutOtherExpanded: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val shortcutOtherExpanded: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_SHORTCUTS_OTHER_EXPANDED] ?: false
     }.distinctUntilChanged()
 
@@ -1332,33 +1350,33 @@ class DisplayPrefsStore(internal val context: Context) {
      * 成绩页统计口径：任选课是否计入加权平均分/平均绩点（DESIGN §4.15）。
      * 默认关 = 排除（作者学校综测同样不计任选课）；公开仓库用户可自行打开。
      */
-    val scoreIncludeFreeElectives: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val scoreIncludeFreeElectives: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_SCORE_INCLUDE_FREE_ELECTIVES] ?: false
     }
 
     /** 成绩页分组模式：true = 按学年。全局项，重进页面不重置。 */
-    val scoreGroupByYear: Flow<Boolean> = context.displayDataStore.data.map { p ->
+    val scoreGroupByYear: Flow<Boolean> = displayDataStore.data.map { p ->
         p[KEY_SCORE_GROUP_BY_YEAR] ?: false
     }
 
     /** 成绩页排序档。脏值一律回退默认顺序：宁可回到入库顺序，也不要因脏数据排错。 */
-    val scoreSortMode: Flow<ScoreSortMode> = context.displayDataStore.data.map { p ->
+    val scoreSortMode: Flow<ScoreSortMode> = displayDataStore.data.map { p ->
         ScoreSortMode.entries.firstOrNull { it.name.equals(p[KEY_SCORE_SORT_MODE], ignoreCase = true) }
             ?: ScoreSortMode.Default
     }
 
     /** 当前课表。null = 未设置（用默认课表 1）。 */
-    val currentTimetableId: Flow<Long?> = context.displayDataStore.data.map { p ->
+    val currentTimetableId: Flow<Long?> = displayDataStore.data.map { p ->
         p[KEY_CURRENT_TIMETABLE]
     }
 
     /** 新建课表的默认配置源。null = 用内置默认配置。 */
-    val defaultConfigSourceId: Flow<Long?> = context.displayDataStore.data.map { p ->
+    val defaultConfigSourceId: Flow<Long?> = displayDataStore.data.map { p ->
         p[KEY_DEFAULT_CONFIG_SOURCE]
     }
 
     suspend fun setThemeMode(value: ThemeMode) {
-        context.displayDataStore.edit { it[KEY_THEME_MODE] = value.name }
+        displayDataStore.edit { it[KEY_THEME_MODE] = value.name }
     }
 
     suspend fun setHapticsEnabled(value: Boolean) = put(KEY_HAPTICS_ENABLED, value)
@@ -1368,7 +1386,7 @@ class DisplayPrefsStore(internal val context: Context) {
     suspend fun setDynamicColor(value: Boolean) = put(KEY_DYNAMIC_COLOR, value)
 
     suspend fun setThemePalette(value: ThemePalette) {
-        context.displayDataStore.edit { it[KEY_THEME_PALETTE] = value.id }
+        displayDataStore.edit { it[KEY_THEME_PALETTE] = value.id }
     }
 
     suspend fun setFloatingNavBar(value: Boolean) = put(KEY_FLOATING_NAV_BAR, value)
@@ -1377,13 +1395,13 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 启动页（DESIGN §3.3）。写的是用户的选择本身，不因为生活页此刻关着就改写它。 */
     suspend fun setStartPage(value: StartPage) {
-        context.displayDataStore.edit { it[KEY_START_PAGE] = value.name }
+        displayDataStore.edit { it[KEY_START_PAGE] = value.name }
     }
 
     suspend fun setQiekjAutoSignIn(value: Boolean) = put(KEY_QIEKJ_AUTO_SIGN_IN, value)
 
     suspend fun setQiekjAutoSignInLastDate(value: String) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             if (value.isBlank()) it.remove(KEY_QIEKJ_AUTO_SIGN_IN_LAST_DATE)
             else it[KEY_QIEKJ_AUTO_SIGN_IN_LAST_DATE] = value
         }
@@ -1391,7 +1409,7 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 保存日历提醒分钟数（0 = 不提醒）；夹取到 0–120。 */
     suspend fun setCalendarReminderMinutes(value: Int) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_CALENDAR_REMINDER_MINUTES] = CalendarSyncDefaults.coerceReminderMinutes(value)
         }
     }
@@ -1412,7 +1430,7 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 免扰时段全表（语义见 [quietHoursWindows]）。 */
     suspend fun setQuietHoursWindows(windows: List<QuietWindow>) {
-        context.displayDataStore.edit { it[KEY_QUIET_HOURS_JSON] = QuietWindows.encode(windows) }
+        displayDataStore.edit { it[KEY_QUIET_HOURS_JSON] = QuietWindows.encode(windows) }
     }
 
     /** 启动自动检查更新开关（语义见 [autoUpdateCheckEnabled]）。 */
@@ -1423,12 +1441,12 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** AI 调课服务地址（DESIGN §4.39）。存 trim 后的原文，允许空串（= 用户清空待重填）。 */
     suspend fun setAiBaseUrl(value: String) {
-        context.displayDataStore.edit { it[KEY_AI_BASE_URL] = value.trim() }
+        displayDataStore.edit { it[KEY_AI_BASE_URL] = value.trim() }
     }
 
     /** AI 调课模型名（DESIGN §4.39）。 */
     suspend fun setAiModel(value: String) {
-        context.displayDataStore.edit { it[KEY_AI_MODEL] = value.trim() }
+        displayDataStore.edit { it[KEY_AI_MODEL] = value.trim() }
     }
 
     /** AI 调课教师名脱敏开关（DESIGN §4.39）。 */
@@ -1437,10 +1455,10 @@ class DisplayPrefsStore(internal val context: Context) {
     /** 首次隐私确认（DESIGN §4.39）。确认后不再弹。 */
     suspend fun setAiPrivacyAcknowledged(value: Boolean) = put(KEY_AI_PRIVACY_ACK, value)
 
-    /** AI 调课思考档位（DESIGN §4.39）。传 [AiScheduleClient.Effort.wire]。 */
+    /** AI 调课思考档位（DESIGN §4.39）。传 [Effort.wire]。 */
     suspend fun setAiThinkingEffort(value: String) {
-        context.displayDataStore.edit {
-            it[KEY_AI_THINKING_EFFORT] = AiScheduleClient.Effort.fromWire(value).wire
+        displayDataStore.edit {
+            it[KEY_AI_THINKING_EFFORT] = Effort.fromWire(value).wire
         }
     }
 
@@ -1452,7 +1470,7 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 共享单车免费时长提醒提前量（分钟，1~5）。 */
     suspend fun setEbikeFreeLeadMinutes(value: Int) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_EBIKE_FREE_LEAD] = EbikeFreeRide.coerceLead(value)
         }
     }
@@ -1469,14 +1487,14 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 自动还车触发提前量（秒，10~60 步长 5；语义见 [ebikeAutoReturnLeadSeconds]）。 */
     suspend fun setEbikeAutoReturnLeadSeconds(value: Int) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_EBIKE_AUTO_RETURN_LEAD_SECONDS] = EbikeAutoReturn.coerceLeadSeconds(value)
         }
     }
 
     /** 自动还车失败重试次数（1~3；语义见 [ebikeAutoReturnRetries]）。 */
     suspend fun setEbikeAutoReturnRetries(value: Int) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_EBIKE_AUTO_RETURN_RETRIES] = EbikeAutoReturn.coerceRetries(value)
         }
     }
@@ -1489,7 +1507,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * （口径同 [updateEbikePendingDelete]）。清空用 `{ emptySet() }`。
      */
     suspend fun updateEbikeFreeNotifiedKeys(transform: (Set<String>) -> Set<String>) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             val current = p[KEY_EBIKE_FREE_NOTIFIED_KEYS] ?: emptySet()
             val next = transform(current)
             if (next != current) {
@@ -1507,7 +1525,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * （口径同 [updateEbikeFreeNotifiedKeys]）。
      */
     suspend fun updateEbikeCardExpiryNotifiedKeys(transform: (Set<String>) -> Set<String>) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             val current = p[KEY_EBIKE_CARD_EXPIRY_NOTIFIED] ?: emptySet()
             val next = transform(current)
             if (next != current) {
@@ -1525,7 +1543,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 传空串 = 清除（回到提醒状态）。
      */
     suspend fun setEbikeNoCardNoticeDate(dayKey: String) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             if (dayKey.isBlank()) {
                 p.remove(KEY_EBIKE_NO_CARD_NOTICE_DATE)
             } else {
@@ -1535,7 +1553,7 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     suspend fun setReminderLeadMinutes(value: Int) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_REMINDER_LEAD] = ReminderDefaults.coerceLead(value)
         }
     }
@@ -1545,7 +1563,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 事务返回的快照里读出（调用方拿它判 [EbikeRemoteRide.shouldRemind]，别再读一遍 Flow）。
      */
     suspend fun incrementEbikeRemoteRideCount(): Int {
-        val prefs = context.displayDataStore.edit { p ->
+        val prefs = displayDataStore.edit { p ->
             p[KEY_EBIKE_REMOTE_RIDE_COUNT] = (p[KEY_EBIKE_REMOTE_RIDE_COUNT] ?: 0) + 1
         }
         return prefs[KEY_EBIKE_REMOTE_RIDE_COUNT] ?: 0
@@ -1566,7 +1584,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 读路径用 [EbikeUseMode.fromId] 还原（认不出一律回默认档）。
      */
     suspend fun setEbikeUseMode(value: EbikeUseMode) {
-        context.displayDataStore.edit { it[KEY_EBIKE_USE_MODE] = value.id }
+        displayDataStore.edit { it[KEY_EBIKE_USE_MODE] = value.id }
     }
 
     /** 今日页校园卡付款码卡开关（DESIGN §3.10）。 */
@@ -1577,7 +1595,7 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 寝室电费提醒阈值（元）；夹取到候选表值域。 */
     suspend fun setPowerAlertYuan(value: Int) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_POWER_ALERT_YUAN] = BalanceAlert.coercePowerYuan(value)
         }
     }
@@ -1587,7 +1605,7 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 一卡通余额提醒阈值（元）；夹取到候选表值域。 */
     suspend fun setYktAlertYuan(value: Int) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_YKT_ALERT_YUAN] = BalanceAlert.coerceYktYuan(value)
         }
     }
@@ -1602,22 +1620,25 @@ class DisplayPrefsStore(internal val context: Context) {
      * 只读不写，下次成功检查自然落新键。旧键无一次性迁移、不再写入。
      */
     suspend fun balanceAlertCheckMillis(source: BalanceAlertSource): Long {
-        val snapshot = context.displayDataStore.data.first()
+        val snapshot = displayDataStore.data.first()
         val millis = snapshot[balanceAlertCheckMillisKey(source)] ?: 0L
         if (millis > 0L) return millis
         val legacyDate = snapshot[alertLastCheckKey(source)] ?: return 0L
-        return if (legacyDate == LocalDate.now().toString()) {
-            LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        // 原写法是 java.time 的 LocalDate.now() + atStartOfDay(ZoneId.systemDefault())：
+        // commonMain 里换成 kotlinx-datetime，「今天」仍取本机默认时区（同 AppClock 的口径）。
+        val today = AppClock.today()
+        return if (legacyDate == today.toString()) {
+            today.atStartOfDayIn(TimeZone.currentSystemDefault()).toEpochMilliseconds()
         } else 0L
     }
 
     suspend fun setBalanceAlertCheckMillis(source: BalanceAlertSource, millis: Long) {
-        context.displayDataStore.edit { it[balanceAlertCheckMillisKey(source)] = millis }
+        displayDataStore.edit { it[balanceAlertCheckMillisKey(source)] = millis }
     }
 
     /** 清掉某来源的检查时刻（开关 / 阈值 / 间隔变更时调用）：新规则立即重新评估一次。 */
     suspend fun clearBalanceAlertCheckMillis(source: BalanceAlertSource) {
-        context.displayDataStore.edit { it.remove(balanceAlertCheckMillisKey(source)) }
+        displayDataStore.edit { it.remove(balanceAlertCheckMillisKey(source)) }
     }
 
     /**
@@ -1626,26 +1647,26 @@ class DisplayPrefsStore(internal val context: Context) {
      * 再次下降才会重新提醒。改设置（开关 / 阈值 / 间隔）也会清——改了规则就该重新评估。
      */
     suspend fun balanceAlertNotified(source: BalanceAlertSource): Boolean =
-        context.displayDataStore.data.first()[balanceAlertNotifiedKey(source)] ?: false
+        displayDataStore.data.first()[balanceAlertNotifiedKey(source)] ?: false
 
     suspend fun setBalanceAlertNotified(source: BalanceAlertSource, value: Boolean) {
-        context.displayDataStore.edit { it[balanceAlertNotifiedKey(source)] = value }
+        displayDataStore.edit { it[balanceAlertNotifiedKey(source)] = value }
     }
 
     suspend fun clearBalanceAlertNotified(source: BalanceAlertSource) {
-        context.displayDataStore.edit { it.remove(balanceAlertNotifiedKey(source)) }
+        displayDataStore.edit { it.remove(balanceAlertNotifiedKey(source)) }
     }
 
     // ---- 余额提醒检查间隔（小时，两链各自独立，2026-10-07）----
 
     suspend fun setPowerAlertIntervalHours(value: Int) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_POWER_ALERT_INTERVAL_HOURS] = BalanceAlert.coerceIntervalHours(value)
         }
     }
 
     suspend fun setYktAlertIntervalHours(value: Int) {
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_YKT_ALERT_INTERVAL_HOURS] = BalanceAlert.coerceIntervalHours(value)
         }
     }
@@ -1656,7 +1677,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * UPDATE 策略，只在「间隔档位变了」时 REPLACE，否则 KEEP 保相位。
      */
     suspend fun balancePeriodicInterval(): Int =
-        context.displayDataStore.data.first()[KEY_BALANCE_PERIODIC_INTERVAL] ?: 0
+        displayDataStore.data.first()[KEY_BALANCE_PERIODIC_INTERVAL] ?: 0
 
     suspend fun setBalancePeriodicInterval(value: Int) = put(KEY_BALANCE_PERIODIC_INTERVAL, value)
 
@@ -1689,7 +1710,7 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 记录「已读 U净 使用须知」的时刻（DESIGN §4.37），见 [ujingNoticeSeenAt]。 */
     suspend fun setUjingNoticeSeenAt(millis: Long) {
-        context.displayDataStore.edit { it[KEY_UJING_NOTICE_SEEN_AT] = millis }
+        displayDataStore.edit { it[KEY_UJING_NOTICE_SEEN_AT] = millis }
     }
 
     /** 记住附近单车地图「只看可用」筛选（DESIGN §3.9），见 [ebikeMapOnlyAvailable]。 */
@@ -1709,7 +1730,7 @@ class DisplayPrefsStore(internal val context: Context) {
     suspend fun setEbikeLastLocation(lat: Double, lng: Double, atMillis: Long = AppClock.nowMillis()) {
         if (!lat.isFinite() || !lng.isFinite()) return
         if (lat !in -90.0..90.0 || lng !in -180.0..180.0) return
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_EBIKE_LAST_LAT] = lat.toFloat()
             it[KEY_EBIKE_LAST_LNG] = lng.toFloat()
             it[KEY_EBIKE_LAST_AT] = atMillis
@@ -1718,14 +1739,14 @@ class DisplayPrefsStore(internal val context: Context) {
 
     suspend fun setEbikeAmapChoice(value: String) {
         val normalized = value.takeIf { it in AMAP_CHOICE_VALUES } ?: AMAP_CHOICE_AGREED
-        context.displayDataStore.edit { it[KEY_EBIKE_AMAP_CHOICE] = normalized }
+        displayDataStore.edit { it[KEY_EBIKE_AMAP_CHOICE] = normalized }
     }
 
     /** 记住附近单车地图的最后视野（DESIGN §3.9），见 [ebikeMapViewport]。 */
     suspend fun setEbikeMapViewport(lat: Double, lng: Double, zoom: Double) {
         if (!lat.isFinite() || !lng.isFinite() || !zoom.isFinite()) return
         if (lat !in -90.0..90.0 || lng !in -180.0..180.0) return
-        context.displayDataStore.edit {
+        displayDataStore.edit {
             it[KEY_EBIKE_VIEW_LAT] = lat.toFloat()
             it[KEY_EBIKE_VIEW_LNG] = lng.toFloat()
             it[KEY_EBIKE_VIEW_ZOOM] = zoom.toFloat().coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
@@ -1735,7 +1756,7 @@ class DisplayPrefsStore(internal val context: Context) {
     /** 记住骑行页底部面板高度（DESIGN §3.9），见 [ebikePanelHeightDp]。 */
     suspend fun setEbikePanelHeightDp(value: Float) {
         if (!value.isFinite() || value <= 0f) return
-        context.displayDataStore.edit { it[KEY_EBIKE_PANEL_HEIGHT_DP] = value }
+        displayDataStore.edit { it[KEY_EBIKE_PANEL_HEIGHT_DP] = value }
     }
 
     /**
@@ -1743,7 +1764,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 记录是"承诺焚毁"的凭据，写失败最多留一张孤儿图，不影响出码本身。
      */
     suspend fun updateEbikePendingDelete(transform: (Set<String>) -> Set<String>) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             val current = p[KEY_EBIKE_PENDING_DELETE] ?: emptySet()
             val next = transform(current)
             if (next != current) {
@@ -1757,7 +1778,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * （口径同 [updateShortcuts]）。历史是锦上添花的回填数据，写失败不影响出码本身。
      */
     suspend fun updateEbikeRecentIds(transform: (List<String>) -> List<String>) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             val current = EbikeQr.decodeRecent(p[KEY_EBIKE_RECENT_IDS])
             val next = transform(current)
             if (next != current) p[KEY_EBIKE_RECENT_IDS] = EbikeQr.encodeRecent(next)
@@ -1766,7 +1787,7 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 菜鸟批量查历史统一写入口（DESIGN §4.47）：读-改-写整个 JSON，同值跳写。 */
     suspend fun updateCainiaoQueryHistory(transform: (List<String>) -> List<String>) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             val current = CainiaoQuery.decodeHistory(p[KEY_CAINIAO_QUERY_HISTORY])
             val next = transform(current)
             if (next != current) p[KEY_CAINIAO_QUERY_HISTORY] = CainiaoQuery.encodeHistory(next)
@@ -1779,7 +1800,7 @@ class DisplayPrefsStore(internal val context: Context) {
     suspend fun setScoreGroupByYear(value: Boolean) = put(KEY_SCORE_GROUP_BY_YEAR, value)
 
     suspend fun setScoreSortMode(value: ScoreSortMode) {
-        context.displayDataStore.edit { it[KEY_SCORE_SORT_MODE] = value.name }
+        displayDataStore.edit { it[KEY_SCORE_SORT_MODE] = value.name }
     }
 
     /**
@@ -1788,7 +1809,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 基底走同一套预设迁移：第一次写入就把未升级的预设槽落成当前值。
      */
     suspend fun updateShortcuts(transform: (List<ShortcutItem>) -> List<ShortcutItem>) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             val current = Shortcuts.migratePresets(
                 p[KEY_SHORTCUTS_JSON]?.let { Shortcuts.decode(it) } ?: Shortcuts.PRESET_SHORTCUTS,
             )
@@ -1806,7 +1827,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * null = 该类从未发过。
      */
     suspend fun reminderLastKey(kind: ReminderKeyKind): String? {
-        val raw = context.displayDataStore.data.first()[KEY_REMINDER_LAST] ?: return null
+        val raw = displayDataStore.data.first()[KEY_REMINDER_LAST] ?: return null
         val migrated = if (raw.startsWith(KEY_BEFORE) || raw.startsWith(KEY_START)) {
             raw
         } else {
@@ -1816,7 +1837,7 @@ class DisplayPrefsStore(internal val context: Context) {
     }
 
     suspend fun setReminderLastKey(kind: ReminderKeyKind, key: String) {
-        context.displayDataStore.edit { it[KEY_REMINDER_LAST] = "${kind.prefix}$key" }
+        displayDataStore.edit { it[KEY_REMINDER_LAST] = "${kind.prefix}$key" }
     }
 
     /**
@@ -1826,7 +1847,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 最坏结果是重发一条通知，不该让核对链路抛异常。
      */
     suspend fun homeworkRemindedKeys(): Set<String> =
-        context.displayDataStore.data.first()[KEY_HOMEWORK_REMINDED_KEYS] ?: emptySet()
+        displayDataStore.data.first()[KEY_HOMEWORK_REMINDED_KEYS] ?: emptySet()
 
     /**
      * 记下一个已发键（DESIGN §3.11），并把集合裁剪到最近 [HOMEWORK_REMINDED_LIMIT] 条。
@@ -1837,7 +1858,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 即使被淘汰也不会重复发。
      */
     suspend fun addHomeworkRemindedKey(key: String) {
-        context.displayDataStore.edit { p ->
+        displayDataStore.edit { p ->
             val current = p[KEY_HOMEWORK_REMINDED_KEYS] ?: emptySet()
             val next = trimHomeworkRemindedKeys(current + key)
             if (next != current) p[KEY_HOMEWORK_REMINDED_KEYS] = next
@@ -1855,28 +1876,28 @@ class DisplayPrefsStore(internal val context: Context) {
 
     /** 小组件设置页的「首次进入引导」是否已弹过（DESIGN §3.6）。全局键。 */
     suspend fun widgetSetupSeen(): Boolean =
-        context.displayDataStore.data.first()[KEY_WIDGET_SETUP_SEEN] ?: false
+        displayDataStore.data.first()[KEY_WIDGET_SETUP_SEEN] ?: false
 
     suspend fun setWidgetSetupSeen() {
-        context.displayDataStore.edit { it[KEY_WIDGET_SETUP_SEEN] = true }
+        displayDataStore.edit { it[KEY_WIDGET_SETUP_SEEN] = true }
     }
 
     suspend fun setCurrentTimetable(id: Long) {
-        context.displayDataStore.edit { it[KEY_CURRENT_TIMETABLE] = id }
+        displayDataStore.edit { it[KEY_CURRENT_TIMETABLE] = id }
     }
 
     suspend fun setDefaultConfigSource(id: Long?) {
-        context.displayDataStore.edit { prefs ->
+        displayDataStore.edit { prefs ->
             if (id == null) prefs.remove(KEY_DEFAULT_CONFIG_SOURCE) else prefs[KEY_DEFAULT_CONFIG_SOURCE] = id
         }
     }
 
     /** 作息表结构版本，用于判断是否需要把老的 5 条大节作息升级成 11 条小节。全局键。 */
     suspend fun slotSchemaVersion(): Int =
-        context.displayDataStore.data.first()[KEY_SLOT_SCHEMA] ?: 0
+        displayDataStore.data.first()[KEY_SLOT_SCHEMA] ?: 0
 
     suspend fun setSlotSchemaVersion(version: Int) {
-        context.displayDataStore.edit { it[KEY_SLOT_SCHEMA] = version }
+        displayDataStore.edit { it[KEY_SLOT_SCHEMA] = version }
     }
 
     /**
@@ -1884,11 +1905,11 @@ class DisplayPrefsStore(internal val context: Context) {
      * 仅在 v3 一次性迁移里被读取（映射为课表 1 的 slotsCustomized），此后不再使用。
      */
     suspend fun legacySlotCustomized(): Boolean =
-        context.displayDataStore.data.first()[KEY_SLOT_CUSTOMIZED] ?: false
+        displayDataStore.data.first()[KEY_SLOT_CUSTOMIZED] ?: false
 
     /** 课表级偏好的旧全局值是否已搬迁到课表 1。 */
     suspend fun prefsMigrated(): Boolean =
-        context.displayDataStore.data.first()[KEY_PREFS_MIGRATED] ?: false
+        displayDataStore.data.first()[KEY_PREFS_MIGRATED] ?: false
 
     suspend fun setPrefsMigrated(value: Boolean) = put(KEY_PREFS_MIGRATED, value)
 
@@ -1900,7 +1921,7 @@ class DisplayPrefsStore(internal val context: Context) {
      */
     suspend fun legacyViewPrefs(): TimetablePrefs? {
         if (prefsMigrated()) return null
-        val p = context.displayDataStore.data.first()
+        val p = displayDataStore.data.first()
         val weekend = p[KEY_SHOW_WEEKEND] ?: true
         return TimetablePrefs(
             showWeekend = weekend,

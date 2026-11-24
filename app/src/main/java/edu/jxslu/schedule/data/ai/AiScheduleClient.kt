@@ -74,26 +74,9 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
     /** HTTP 层失败。[code] 为 0 表示响应体不是预期结构；[detail] 是响应原文截断，供 UI 提示。 */
     class AiHttpException(val code: Int, val detail: String) : IOException("HTTP $code")
 
-    /** 思考档位：关闭时不带思考、强制命名工具调用；开启时反过来。 */
-    enum class Effort(val wire: String) {
-        NONE("none"),
-        LOW("low"),
-        HIGH("high"),
-        MAX("max");
-
-        val label: String
-            get() = when (this) {
-                NONE -> "关闭"
-                LOW -> "低"
-                HIGH -> "高"
-                MAX -> "最高"
-            }
-
-        companion object {
-            fun fromWire(value: String?): Effort =
-                entries.firstOrNull { it.wire == value } ?: NONE
-        }
-    }
+    // 思考档位（原 `AiScheduleClient.Effort` 嵌套枚举）2026-11-24 搬到
+    // `:shared` 的 data/ai/Effort.kt：偏好层要读它，而偏好层已经进了共享模块。
+    // 同包所以这里不用 import，`Effort.xxx` 照旧。
 
     /**
      * 发一次调课请求，流式返回增量。[baseUrl] 结尾有无 `/` 都行。
