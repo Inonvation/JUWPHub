@@ -445,6 +445,15 @@ KSP 按 target 加：`kspAndroid` / `kspIosArm64` / `kspIosSimulatorArm64`；sch
 顺带把 4 个 API 接口改成 Ktor）→ `session`（Cookie 与 CAS 重定向，最难，放最后）。
 `data/net/AppHttp.kt` 在全部迁完之后删掉。
 
+**25 个剩余文件的「第二类耦合」实测（2026-11-24）**——换 Ktor 不是只换 HTTP，每个文件还带别的
+JVM/Android 依赖，必须同批处理，否则改完 `:shared` 还是编不过：
+
+| 同时依赖 | 文件数 | 处理 |
+|---|---|---|
+| `Dispatchers.IO` | **13 / 25** | commonMain 里没有 `Dispatchers.IO`。Ktor 的请求本身是挂起、不占线程，多数情况**直接删掉那层 `withContext`**；确实要做 CPU 重活的换 `Dispatchers.Default`。这是占比最高的一项，别低估 |
+| `android.util.Log` | 6 / 25 | 需要先立 `Logger` 缝（P-1 第 7 项，全仓 62 处）。所以网络迁移与日志收口**必须并行**，否则这 6 个文件改到一半会卡住 |
+| `BuildConfig` | 3 / 25 | `BuildConfig` 是 AGP 生成的，`:shared` 没有。要么把这些值搬成构造参数/常量，要么立一条 `expect` 读 debug 标志 |
+
 验收：`.\gradlew.bat :shared:iosSimulatorArm64Test` 跑通解析器与迁移测试；Android 行为零变化。
 
 ### P2 UI 平移（6–10 周）
