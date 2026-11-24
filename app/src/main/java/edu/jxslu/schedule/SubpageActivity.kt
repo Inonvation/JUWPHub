@@ -48,6 +48,7 @@ import edu.jxslu.schedule.ui.jw.StudentInfoScreen
 import edu.jxslu.schedule.ui.jw.JwScheduleListScreen
 import edu.jxslu.schedule.ui.jw.TeachingCalendarScreen
 import edu.jxslu.schedule.ui.jw.TextbookScreen
+import edu.jxslu.schedule.ui.jw.rememberJwScreenPlatformActions
 import edu.jxslu.schedule.ui.notes.NoteCourseScreen
 import edu.jxslu.schedule.ui.notes.NoteDetailScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
@@ -281,10 +282,26 @@ class SubpageActivity : ComponentActivity() {
                 )
             }
             SubpageScreen.TEXTBOOKS -> TextbookScreen(onBack = onBack)
-            SubpageScreen.THEORY_SCHEDULE ->
-                JwScheduleListScreen(kind = CourseKind.Theory, onBack = onBack)
-            SubpageScreen.LAB_SCHEDULE ->
-                JwScheduleListScreen(kind = CourseKind.Lab, onBack = onBack)
+            // 课表清单已搬进 shared/commonMain（iOS 移植 S18）：平台动作（浏览窗口 / 导入窗口）
+            // 由本侧给，共享层只认可空回调。
+            SubpageScreen.THEORY_SCHEDULE -> {
+                val actions = rememberJwScreenPlatformActions()
+                JwScheduleListScreen(
+                    kind = CourseKind.Theory,
+                    onBack = onBack,
+                    onOpenWebPage = actions.openWebPage,
+                    onOpenJwImport = actions.openJwImport,
+                )
+            }
+            SubpageScreen.LAB_SCHEDULE -> {
+                val actions = rememberJwScreenPlatformActions()
+                JwScheduleListScreen(
+                    kind = CourseKind.Lab,
+                    onBack = onBack,
+                    onOpenWebPage = actions.openWebPage,
+                    onOpenJwImport = actions.openJwImport,
+                )
+            }
             SubpageScreen.STUDENT_INFO -> StudentInfoScreen(onBack = onBack)
             SubpageScreen.TEACHING_CALENDAR -> TeachingCalendarScreen(onBack = onBack)
             SubpageScreen.SCHOLAR -> ScholarScreen(onBack = onBack)

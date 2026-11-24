@@ -31,11 +31,13 @@ import edu.jxslu.schedule.data.local.DB_VERSION
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.local.juwDatabasePath
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.DataSelfTestResult
 import edu.jxslu.schedule.ui.DataSelfTestStrip
 import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
 import edu.jxslu.schedule.ui.jw.JwHubScreen
+import edu.jxslu.schedule.ui.jw.JwScheduleListScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.selection.SelectionScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
@@ -85,6 +87,9 @@ private fun IosRoot(services: IosServices) {
     JuwTheme {
         var jwOpen by remember { mutableStateOf(false) }
         var page by remember { mutableStateOf(IosPage.Week) }
+        // 教务 Tab 的一层子页（理论 / 实验课表清单，S18）。iOS 没有 `SubpageActivity` 那套
+        // 栈，这一版只要一层：非 null = 正在看那张表，返回键清回 null。
+        var jwList by remember { mutableStateOf<CourseKind?>(null) }
         // 详情页（笔记 / 作业）还在 :app，iOS 点条目时给一句确定的话，不留「点了没反应」
         var hint by remember { mutableStateOf<String?>(null) }
         if (jwOpen) {
@@ -115,17 +120,28 @@ private fun IosRoot(services: IosServices) {
                         }
                         // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
                         //
-                        // 十二个二级页回调里只接三个——成绩 / 考试 / 选课在 iOS 侧
-                        // **已经是能进的页**（[IosPage] 里各有一项），点进去是真页面；
-                        // 其余九个（理论/实验课表、教材、学业、培养方案、实习基地、教学日历、
-                        // 评教、请假、报修、校历）在 iOS 侧还没有路由，传 null = 整行不渲染
-                        // （`design/ios-port.md` §11.2 ④：给空 lambda 留死入口比没有更糟）。
-                        // 顶栏「校园门户」同理：iOS 还没有通用浏览窗口，传 null 后图标不出现。
-                        IosPage.Jw -> JwHubScreen(
-                            onOpenScores = { page = IosPage.Score },
-                            onOpenExams = { page = IosPage.Exam },
-                            onOpenSelection = { page = IosPage.Selection },
-                        )
+                        // 十二个二级页回调里只接五个：
+                        // - 成绩 / 考试 / 选课在 iOS 侧**已经是能进的页**（[IosPage] 里各有一项）；
+                        // - 理论 / 实验课表是 [JwScheduleListScreen]（本次一起搬进共享层），
+                        //   落到本 Tab 的一层子页（[jwList]）里，返回键回汇总页。
+                        // 其余七个（教材、学业、培养方案、实习基地、教学日历、评教、请假、报修、校历）
+                        // 在 iOS 侧还没有路由，传 null = 整行不渲染（`design/ios-port.md` §11.2 ④：
+                        // 给空 lambda 留死入口比没有更糟）。顶栏「校园门户」同理：iOS 还没有通用
+                        // 浏览窗口，传 null 后图标不出现。
+                        IosPage.Jw -> {
+                            val kind = jwList
+                            if (kind != null) {
+                                JwScheduleListScreen(kind = kind, onBack = { jwList = null })
+                            } else {
+                                JwHubScreen(
+                                    onOpenTheorySchedule = { jwList = CourseKind.Theory },
+                                    onOpenLabSchedule = { jwList = CourseKind.Lab },
+                                    onOpenScores = { page = IosPage.Score },
+                                    onOpenExams = { page = IosPage.Exam },
+                                    onOpenSelection = { page = IosPage.Selection },
+                                )
+                            }
+                        }
                         // 笔记库（S13 搬进共享层）：仓库是本地 Room 表，iOS 直接可读。
                         // `images` 传 null = 本平台还没有附件图解码，缩略图整行不出现；
                         // 详情页仍在 :app，条目点开先给提示（见 [hint]）。
@@ -177,6 +193,8 @@ private fun IosRoot(services: IosServices) {
                         TextButton(
                             onClick = {
                                 hint = null
+                                // 点底栏 = 回到该 Tab 的根页（教务 Tab 正在看课表清单时退回汇总页）
+                                jwList = null
                                 page = entry
                             },
                         ) { Text(entry.label) }
