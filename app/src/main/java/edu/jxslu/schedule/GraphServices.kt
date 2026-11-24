@@ -6,6 +6,8 @@ import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.data.qiekj.QiekjRepository
+import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
@@ -18,12 +20,24 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.session.LoginGateRules
+import edu.jxslu.schedule.data.session.LoginTarget
+import edu.jxslu.schedule.data.session.SessionExpirySink
+import edu.jxslu.schedule.data.session.WebViewCookieBridge
+import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
+import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
+import edu.jxslu.schedule.platform.AccountCredentials
+import edu.jxslu.schedule.platform.AiApiKeyStore
 import edu.jxslu.schedule.platform.AppServices
+import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
+import edu.jxslu.schedule.platform.ThirdPartySession
 import edu.jxslu.schedule.ui.widget.LifeWidgetSync
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Android 侧的共享服务装配（iOS 移植 M1，2026-11-25）。
@@ -125,4 +139,79 @@ class GraphServices(private val context: Context) : AppServices {
 
     /** 版本名来自 `:app` 的 `BuildConfig`——共享层看不见它，只能由装配根给。 */
     override fun appVersion(): String = BuildConfig.VERSION_NAME
+
+    // ---- 账号与登录（账号中心页，S20） ----
+    //
+    // 全部转接 `Graph` 的现有单例：账号中心显示的登录态与各功能页判定的登录态
+    // 必须是同一份事实，各建一份就会出现「这页说已登录、那页说未登录」。
+    // 五个第三方仓库同理——退出登录必须让功能页的流立刻翻成未登录。
+
+    /**
+     * 凭证快照与登录闸门：`CredentialVault` 是 `EncryptedSharedPreferences` + `MasterKey`，
+     * 只能在 Android 侧，这里把它收窄成「读学号 / 清一卡通 / 重置闸门」三件事。
+     *
+     * 密码不出这个适配器——共享层拿到的只是学号。
+     */
+    private val accountCredentials: AccountCredentials by lazy {
+        val vault = Graph.credentialVault(appContext)
+        object : AccountCredentials {
+            override fun readJwUsername(): String? = vault.readCas()?.username
+
+            override fun readYktUsername(): String? = vault.readYkt()?.username
+
+            override fun clearYkt() = vault.clearYkt()
+
+            /** 与搬迁前那两行 `writeGate(target, LoginGateRules.reset())` 逐字等价。 */
+            override fun resetLoginGates() {
+                vault.writeGate(LoginTarget.Ykt, LoginGateRules.reset())
+                vault.writeGate(LoginTarget.Qiekj, LoginGateRules.reset())
+            }
+        }
+    }
+
+    override fun accountCredentials(): AccountCredentials = accountCredentials
+
+    /** 与仓库层写的「已过期」标记是同一份（`Graph.sessionExpirySink` 已缓存单例）。 */
+    override fun sessionExpirySink(): SessionExpirySink = Graph.sessionExpirySink(appContext)
+
+    /** 退出教务 = `CasSession.logout()`（清 OkHttp cookie + 凭证 + WebView 会话）。 */
+    override fun jwSessionLogout(): JwSessionLogout =
+        JwSessionLogout { Graph.casSession(appContext).logout() }
+
+    override fun aiApiKeyStore(): AiApiKeyStore {
+        val store = Graph.aiCredentialStore(appContext)
+        return object : AiApiKeyStore {
+            override fun readApiKey(): String? = store.readApiKey()
+
+            override fun clear() = store.clear()
+        }
+    }
+
+    override fun qiekjRepository(): QiekjRepository = Graph.qiekj(appContext)
+
+    override fun qzxyRepository(): QzxyRepository = Graph.qzxy(appContext)
+
+    override fun ujingRepository(): UjingRepository = Graph.ujing(appContext)
+
+    /**
+     * 快趣会话：`:app` 的 `KqcxSessionRepository` 只对外给登录态与退出
+     * （它的 core 是私有字段，见 `ThirdPartySession` 的 KDoc）。
+     */
+    override fun kqcxSession(): ThirdPartySession = object : ThirdPartySession {
+        override val loggedIn: StateFlow<Boolean> get() = Graph.kqcx(appContext).loggedIn
+
+        override fun logout() = Graph.kqcx(appContext).logout()
+    }
+
+    override fun wenquRepository(): WenquRepository = Graph.wenqu(appContext)
+
+    /** 与崩溃上报共用的应用级作用域（`Graph.appScope`），清凭证要跑完。 */
+    override fun appScope(): CoroutineScope = Graph.appScope
+
+    /**
+     * 只读 `CookieManager`，不发请求（`WebViewCookieBridge.hasAnyCookie` 的原实现）。
+     *
+     * 必须在有 Looper 的线程调用——页面在组合期读它，正是主线程。
+     */
+    override fun hasJwWebSession(): Boolean = WebViewCookieBridge.hasAnyCookie()
 }

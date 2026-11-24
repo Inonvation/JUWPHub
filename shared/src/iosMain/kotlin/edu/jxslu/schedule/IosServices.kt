@@ -6,6 +6,8 @@ import edu.jxslu.schedule.data.power.PowerClient
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.data.qiekj.QiekjRepository
+import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
@@ -22,15 +24,23 @@ import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.session.IosJwReadSession
+import edu.jxslu.schedule.data.session.IosSessionExpirySink
 import edu.jxslu.schedule.data.session.IosWebCookieSource
 import edu.jxslu.schedule.data.session.JwReadSession
+import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.data.session.WebCookies
+import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
+import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
+import edu.jxslu.schedule.platform.AccountCredentials
+import edu.jxslu.schedule.platform.AiApiKeyStore
 import edu.jxslu.schedule.platform.AppServices
+import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
+import edu.jxslu.schedule.platform.ThirdPartySession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -139,6 +149,9 @@ class IosServices : AppServices {
     private val profileSyncImpl: ProfileSync by lazy {
         ProfileSync(cas = session, prefs = prefs)
     }
+
+    /** 「登录状态已过期」留痕（S20）：只存布尔，`NSUserDefaults` 就够。 */
+    private val sessionExpiry: SessionExpirySink = IosSessionExpirySink()
 
     override fun displayPrefs(): DisplayPrefsStore = prefs
 
@@ -261,6 +274,65 @@ class IosServices : AppServices {
     override fun appVersion(): String =
         (NSBundle.mainBundle.objectForInfoDictionaryKey("CFBundleShortVersionString") as? String)
             .orEmpty()
+
+    // ---- 账号与登录（账号中心页，S20，2026-11-25） ----
+    //
+    // 这一组只有「已过期留痕」与「应用级作用域」两端都能给；其余按能力缺口返回 null，
+    // 账号中心页据此整行 / 整块不渲染（`design/ios-port.md` §11.2 ④）。
+
+    /**
+     * 教务 / 一卡通的凭证快照：**iOS 侧返回 null**。
+     *
+     * 升级条件：用 Keychain 实现（`kSecClassGenericPassword`，service 取包名、
+     * account 沿用 Android 的 `username` / `password` 两个键名），与
+     * [yktCredentialStore] 是同一件事——两者要一起做，否则账号中心说「已配置」、
+     * 功能页却说「没登录」。在那之前账号中心的两行按「未配置」显示，那是真实结论。
+     */
+    override fun accountCredentials(): AccountCredentials? = null
+
+    /** 「已过期」留痕：只存布尔，`NSUserDefaults` 够用（见 [IosSessionExpirySink]）。 */
+    override fun sessionExpirySink(): SessionExpirySink = sessionExpiry
+
+    /**
+     * 退出教务原生会话：**iOS 侧返回 null**。
+     *
+     * iOS 的登录只发生在 `WKWebView` 里，没有「OkHttp 会话」可退；退出的正确做法是清
+     * `WKWebsiteDataStore` 的 cookie 与 `localStorage`，而 `WebCookieSource` 现在只有
+     * 读的方向（反向被明确否决，见那个文件）。等那里补上「清本机 WebView 数据」再给实现。
+     * 页面在 null 时跳过这一步，其余凭证照常清。
+     */
+    override fun jwSessionLogout(): JwSessionLogout? = null
+
+    /** AI Key：**iOS 侧返回 null**（升级条件同 [accountCredentials] 的 Keychain）。 */
+    override fun aiApiKeyStore(): AiApiKeyStore? = null
+
+    /** 胖乖：**iOS 侧返回 null**——`QiekjTokenStore` 要 Keychain，暂无实现。 */
+    override fun qiekjRepository(): QiekjRepository? = null
+
+    /** 趣智：**iOS 侧返回 null**——会话里含 token，同样等 Keychain。 */
+    override fun qzxyRepository(): QzxyRepository? = null
+
+    /** U净：**iOS 侧返回 null**，理由同上。 */
+    override fun ujingRepository(): UjingRepository? = null
+
+    /** 快趣：**iOS 侧返回 null**，理由同上。 */
+    override fun kqcxSession(): ThirdPartySession? = null
+
+    /** 问渠：**iOS 侧返回 null**，理由同上。 */
+    override fun wenquRepository(): WenquRepository? = null
+
+    /** 应用级作用域（与 [repository] 的热流共用同一个，不另起一个）。 */
+    override fun appScope(): CoroutineScope = scope
+
+    /**
+     * WebView 里有没有有效教务会话：**iOS 侧返回 null（判断不了）**。
+     *
+     * `WKWebsiteDataStore.getAllCookies` 是异步回调（见 `IosWebCookieSource`），而这里要在
+     * 组合期同步给一个布尔。升级条件：给 `IosWebCookieSource` 加一份进程内缓存
+     * （登录页关闭时刷新），或把本方法改成 suspend 让页面在 `LaunchedEffect` 里读。
+     * 在那之前账号中心的教务行只按「凭证在不在」判——没凭证就显示未登录。
+     */
+    override fun hasJwWebSession(): Boolean? = null
 
     init {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，

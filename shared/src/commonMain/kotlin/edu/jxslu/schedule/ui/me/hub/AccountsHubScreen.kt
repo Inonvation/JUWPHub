@@ -46,19 +46,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.session.LoginGateRules
 import edu.jxslu.schedule.data.session.LoginState
 import edu.jxslu.schedule.data.session.LoginStateRules
 import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.session.SessionStatus
-import edu.jxslu.schedule.data.session.WebViewCookieBridge
+import edu.jxslu.schedule.data.wenqu.WenquSession
 import edu.jxslu.schedule.domain.capabilities
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
@@ -72,6 +70,7 @@ import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -107,35 +106,42 @@ fun AccountsHubScreen(
     onOpenWenqu: () -> Unit,
     onOpenAiSettings: () -> Unit,
 ) {
-    val context = LocalContext.current
+    val services = Services.current
     val haptics = rememberAppHaptics()
-    val vault = remember { Graph.credentialVault(context) }
-    val cas = remember { Graph.casSession(context) }
+    val credentials = remember { services.accountCredentials() }
+    val jwLogout = remember { services.jwSessionLogout() }
     // 从别的窗口（登录页 / 导入页 / 校园卡设置）回来时组合不重建，凭证快照要跟着 tick 重读
     val resumeTick = rememberResumeTick()
     // 本页自己清凭证后要立刻重读（resumeTick 只跟窗口切换走，不会因为清空而变）
     var localTick by remember { mutableIntStateOf(0) }
-    val casUsername = remember(resumeTick, localTick) { vault.readCas()?.username }
-    val yktUsername = remember(resumeTick, localTick) { vault.readYkt()?.username }
+    val casUsername = remember(resumeTick, localTick) { credentials?.readJwUsername() }
+    val yktUsername = remember(resumeTick, localTick) { credentials?.readYktUsername() }
     // 升级用户可能没存凭证、但 WebView 里还有有效会话（与「我的」页同口径）
-    val webSession = remember(resumeTick, localTick) { WebViewCookieBridge.hasAnyCookie() }
+    val webSession = remember(resumeTick, localTick) { services.hasJwWebSession() ?: false }
     val suspendedTargets by SessionStatus.suspended.collectAsStateWithLifecycle()
 
-    val qiekjLoggedIn by remember { Graph.qiekj(context).loggedIn }
-        .collectAsStateWithLifecycle()
-    val qzxyLoggedIn by remember { Graph.qzxy(context).loggedIn }
-        .collectAsStateWithLifecycle()
-    val ujingLoggedIn by remember { Graph.ujing(context).loggedIn }
-        .collectAsStateWithLifecycle()
-    val kqcxLoggedIn by remember { Graph.kqcx(context).loggedIn }
-        .collectAsStateWithLifecycle()
-    val wenquSession by remember { Graph.wenqu(context).session }
-        .collectAsStateWithLifecycle()
-    val aiKey = remember(resumeTick, localTick) { Graph.aiCredentialStore(context).readApiKey() }
+    // 五个第三方会话：null = 本平台还没有它们的凭证存储（iOS 待 Keychain），
+    // 那时该行按「未开启」显示，而不是留一个点了没反应的入口。
+    val qiekj = remember { services.qiekjRepository() }
+    val qzxy = remember { services.qzxyRepository() }
+    val ujing = remember { services.ujingRepository() }
+    val kqcx = remember { services.kqcxSession() }
+    val wenqu = remember { services.wenquRepository() }
+    // 平台没有那个会话时的恒 false / 恒 null 流：**不要**在 elvis 分支里调 remember
+    // （那是有条件的组合调用，槽位会随 null 与否变化）。
+    val noLogin = remember { MutableStateFlow(false) }
+    val noWenquSession = remember { MutableStateFlow<WenquSession?>(null) }
+
+    val qiekjLoggedIn by (qiekj?.loggedIn ?: noLogin).collectAsStateWithLifecycle()
+    val qzxyLoggedIn by (qzxy?.loggedIn ?: noLogin).collectAsStateWithLifecycle()
+    val ujingLoggedIn by (ujing?.loggedIn ?: noLogin).collectAsStateWithLifecycle()
+    val kqcxLoggedIn by (kqcx?.loggedIn ?: noLogin).collectAsStateWithLifecycle()
+    val wenquSession by (wenqu?.session ?: noWenquSession).collectAsStateWithLifecycle()
+    val aiKey = remember(resumeTick, localTick) { services.aiApiKeyStore()?.readApiKey() }
 
     // 快趣账号入口只属于「账号登录」使用方式；小程序方式下仍保留一行（否则用户会以为漏了），
     // 状态显示「无需登录」，点行进骑行页切使用方式。
-    val prefs = remember(context) { Graph.displayPrefs(context) }
+    val prefs = remember { services.displayPrefs() }
     // 可空初值 = 「还没读到」：**不要**在组合期 runBlocking 读 DataStore（2026-11-06 审计 §3.7）。
     // 也不拿 `EbikeUseMode.Default` 当首帧值——那会让「账号登录」用户先看到「无需登录」的
     // 胶囊再跳一次，正是当初加阻塞读要躲的那一下。没读到就让快趣那一行整行不渲染。
@@ -146,12 +152,12 @@ fun AccountsHubScreen(
 
     // 第三方会话「已过期」标记（2026-10-21）：在功能页消费前，这里先显示「已失效」。
     // 与 resumeTick / localTick 挂钩：从功能页回来（标记已被消费）时重读。
-    val expiry = remember { Graph.sessionExpiry(context) }
-    val qiekjExpired = remember(resumeTick, localTick) { expiry.isExpired(SessionService.Qiekj) }
-    val qzxyExpired = remember(resumeTick, localTick) { expiry.isExpired(SessionService.Qzxy) }
-    val ujingExpired = remember(resumeTick, localTick) { expiry.isExpired(SessionService.Ujing) }
-    val kqcxExpired = remember(resumeTick, localTick) { expiry.isExpired(SessionService.Kqcx) }
-    val wenquExpired = remember(resumeTick, localTick) { expiry.isExpired(SessionService.Wenqu) }
+    val expiry = remember { services.sessionExpirySink() }
+    val qiekjExpired = remember(resumeTick, localTick) { expiry?.isExpired(SessionService.Qiekj.id) == true }
+    val qzxyExpired = remember(resumeTick, localTick) { expiry?.isExpired(SessionService.Qzxy.id) == true }
+    val ujingExpired = remember(resumeTick, localTick) { expiry?.isExpired(SessionService.Ujing.id) == true }
+    val kqcxExpired = remember(resumeTick, localTick) { expiry?.isExpired(SessionService.Kqcx.id) == true }
+    val wenquExpired = remember(resumeTick, localTick) { expiry?.isExpired(SessionService.Wenqu.id) == true }
 
     val jwState = LoginStateRules.derive(
         credentialExists = casUsername != null,
@@ -169,7 +175,7 @@ fun AccountsHubScreen(
         suspended = LoginTarget.Qiekj in suspendedTargets || qiekjExpired,
     )
     // 趣智 / U净 / 快趣 / 问渠没有「停用」上报（会话只存在本机，失效只能在页面里撞），
-    // 「失效」来自各仓库写的过期标记（SessionExpiryStore）——进功能页消费后翻回未开启
+    // 「失效」来自各仓库写的过期标记（SessionExpirySink）——进功能页消费后翻回未开启
     val qzxyState = LoginStateRules.derive(qzxyLoggedIn, false, qzxyExpired)
     val ujingState = LoginStateRules.derive(ujingLoggedIn, false, ujingExpired)
     // 小程序方式下快趣没有账号：固定按未开启算，不计入「已开启」，但行仍保留
@@ -204,36 +210,39 @@ fun AccountsHubScreen(
     /**
      * 清除全部凭证（2026-10-20 用户拍板）：只删本机凭证，不动平台账号本身。
      *
-     * 教务走 `CasSession.logout`（连 OkHttp / WebView cookie 一起清），一卡通连 token
-     * 一起清，五个第三方仓库各走自己的 logout；AI Key 与学籍缓存一并清。清完 `localTick++`
-     * 让本页的凭证快照立刻重读（仓库流会自己翻成未登录）。
+     * 教务走平台侧的退出（Android = `CasSession.logout`，连 OkHttp / WebView cookie 一起清），
+     * 一卡通连 token 一起清，五个第三方仓库各走自己的 logout；AI Key 与学籍缓存一并清。
+     * 清完 `localTick++` 让本页的凭证快照立刻重读（仓库流会自己翻成未登录）。
+     *
+     * 每一步都独立 `runCatching`：**能清多少清多少**。某一家平台退出失败不该把
+     * 已经清掉的凭证又「说成没清」。
      */
     fun clearAll() {
-        // 先收弹窗，避免连点。清理由进程级 appScope 跑完——用户中途返回也不留下
+        // 先收弹窗，避免连点。清理由进程级作用域跑完——用户中途返回也不留下
         // 「一半清了一半没清」的状态；UI 状态最后切回 Main 更新。
         confirmClear = false
-        Graph.appScope.launch {
+        services.appScope().launch {
             try {
-                cas.logout()
+                jwLogout?.logout()
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
                 // 教务退出失败不挡其余凭证：能清多少清多少
             }
-            runCatching { vault.clearYkt() }
-            runCatching { Graph.yktRepository(context).clearTokenCache() }
-            runCatching { vault.writeGate(LoginTarget.Ykt, LoginGateRules.reset()) }
-            runCatching { vault.writeGate(LoginTarget.Qiekj, LoginGateRules.reset()) }
+            runCatching { credentials?.clearYkt() }
+            runCatching { services.yktRepository().clearTokenCache() }
+            // 闸门是落盘的：不清掉的话清完凭证再登录一次，可能仍被上一轮的停用标记挡住
+            runCatching { credentials?.resetLoginGates() }
             SessionStatus.clear(LoginTarget.Ykt)
             SessionStatus.clear(LoginTarget.Qiekj)
-            runCatching { Graph.qiekj(context).logout() }
-            runCatching { Graph.qzxy(context).logout() }
-            runCatching { Graph.ujing(context).logout() }
-            runCatching { Graph.kqcx(context).logout() }
-            runCatching { Graph.wenqu(context).logout() }
-            runCatching { Graph.aiCredentialStore(context).clear() }
+            runCatching { qiekj?.logout() }
+            runCatching { qzxy?.logout() }
+            runCatching { ujing?.logout() }
+            runCatching { kqcx?.logout() }
+            runCatching { wenqu?.logout() }
+            runCatching { services.aiApiKeyStore()?.clear() }
             try {
-                Graph.displayPrefs(context).clearProfile()
+                prefs.clearProfile()
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {

@@ -141,8 +141,8 @@ private fun StatusPill(text: String, state: LoginState) {
 /**
  * 登录态 → 颜色。已登录用主色、失效用 error、未登录用灰。
  *
- * `internal` 而非 private：`AccountCard` 自身与「我的」页账号卡的标题兜底（`SettingsScreen`）
- * 用同一份口径，两处各写一个 when 迟早会对不上。
+ * `internal` 而非 private：本文件里的 [AccountCard] 与状态胶囊共用同一份口径。
+ * 调用方在 `:app`（教务账户页 / 一卡通设置页）只传 `LoginState`，不碰这两个映射。
  */
 @Composable
 internal fun LoginState.tint(): Color = when (this) {
