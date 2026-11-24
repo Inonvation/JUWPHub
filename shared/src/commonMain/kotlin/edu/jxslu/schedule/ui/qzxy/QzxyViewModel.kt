@@ -2416,8 +2416,11 @@ class QzxyViewModel(
                 }
                 return@withLock true
             }
-            link.disconnect()
             if (announce) step("连接设备")
+            // **不在这里先 disconnect**：缝的 `ensureConnected` 自己判复用
+            // （连着同一台且服务表还在就直接返回，否则先断开再建链）。
+            // 显式断开会让「另一个窗口刚连上、本实例还不知道」的情况白断一次，
+            // 那正是搬迁前 `link.isConnectedTo` 挡掉的那一段。
             link.ensureConnected(device.address).getOrElse { error ->
                 if (announce) fail("连接设备失败", error.message) else log("重连失败：${error.message}")
                 return@withLock false
