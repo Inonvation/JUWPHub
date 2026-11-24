@@ -916,19 +916,30 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 **`lifecycle-runtime-compose` 不能进 `commonMain`**：它的 KMP 变体要 Compose 1.9，本仓锁 CMP 1.7.3。
 所以只加在 `androidMain`，给 `LifecycleState.android.kt` 转调用；`commonMain` 里那份是 expect。
 
-### 10.2 已搬进 commonMain 的页面
+### 10.2 已搬进 commonMain 的页面（2026-11-25 02:30 盘点）
 
-- `ui/week/WeekViewModel.kt`：只吃 `ScheduleRepository` + `kotlinx.datetime`；导出改为只产出文本
-  （`csvExport()` / `jsonExport()` 返回「文本 + 成功文案」），落盘归调起方；`canQuickCheck`
-  表达「本平台有没有教务直取链」。
-- `ui/week/WeekScreen.kt` + `WeekSheets.kt` + `QuickCheckText.kt`：平台动作收成四个可空回调
-  （`onPickJsonFile` / `onSaveTextFile` / `onSyncCalendar` / `backgroundExists`）与一个
-  `displaySettings` 槽。**null = 本平台没有这项能力，入口整行不渲染**，不是临时缺省。
-- `ui/common/ConfirmDialog.kt` / `ImportConfirmDialog.kt` / `BackupImportText.kt`、
-  `ui/jwvw/JwImportResultBus.kt`。
+共享层 `ui/` 现在有 23 个包，`:app/ui` 剩下的见 §12.2。
 
-跨模块 `internal` 会失效：`TopBarHeight`、`GridTypography`、`quickCheckFeedback`、`OutcomeQueue`
-因此放开成 `public`，KDoc 里各自写了原因。
+| 包 | 已搬的内容 |
+|---|---|
+| `ui/week` | `WeekScreen` + `WeekViewModel` + 网格一族（课表主屏，两端的唯一实现） |
+| `ui/jw` | `JwHubScreen`、`JwScheduleListScreen`、`TextbookScreen`、`TeachingCalendarScreen`、`StudentInfoScreen` |
+| `ui/score` / `ui/exam` | 成绩页 + 成绩设置、考试页 + 考试设置 |
+| `ui/selection` | 选课页 + 选课中心 / 预选清单 / 已选课程 |
+| `ui/notes` / `ui/homework` | 笔记库 + 课程分组、作业库 / 待办 / 课程分组（详情页仍在 `:app`） |
+| `ui/inbox` / `ui/weather` | 收件箱、天气页 |
+| `ui/me` | 设置首页、数据与备份、显示设置面板、账号卡、`UpdateAvailableDialog` |
+| `ui/life` | 电费账单、电费充值弹层、侧边栏内容（`SideDrawerParts` + `SideDrawerGroups`） |
+| `ui/campus` | 消费流水（`StatementScreen`） |
+| `ui/water` | 开水房整包（页 + VM + 流程块 + 入口弹层） |
+| `ui/wenqu` | 问渠整包（主页 / 蹲点 / 记录 / 设置 / 活动弹层 / 卡片） |
+| `ui/ujing` | U净三页（主页 / 下单 / 历史）+ VM |
+| `ui/ai` | AI 调课整包（对话 / 设置 / 历史 / 提议卡 / 预览网格） |
+| `ui/common` | 59 个文件：对话框、卡片、Markdown 栈、附件图槽、快捷方式、账户卡、`KeepScreenOn`、`AppBackHandler` 等 |
+| `ui/today` | **还没搬**（v1 在搬，见 §12.2） |
+
+跨模块 `internal` 会失效：`TopBarHeight`、`GridTypography`、`quickCheckFeedback`、`OutcomeQueue`、
+`SchedulePreviewGrid` 的 `changedCellSet` / `previewWeeksOf` 因此放开成 `public`，KDoc 里各自写了原因。
 
 ### 10.3 还差的（按优先级）
 
