@@ -4,6 +4,7 @@ import edu.jxslu.schedule.data.qiekj.QiekjJson
 import edu.jxslu.schedule.data.session.SessionExpiryStore
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.domain.UjingState
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -316,7 +317,7 @@ class UjingRepository(
         val data = envelope.decodeData<UjingOrderCreateData>()
         val orderId = data?.orderId?.takeIf { it.isNotBlank() && it != "0" }
             ?: throw UjingApiException("下单响应缺少订单号")
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         val snapshot = UjingOrderSnapshot(
             orderId = orderId,
             orderNo = data?.orderNo.orEmpty(),
@@ -386,7 +387,7 @@ class UjingRepository(
             // 服务端文案优先（非空才覆盖，本次没给就沿用旧值，别把已有文案清掉）
             statusRemark = data.statusRemark.orEmpty().ifBlank { current?.statusRemark.orEmpty() },
             remainSeconds = data.remainTime,
-            snapshotAt = System.currentTimeMillis(),
+            snapshotAt = AppClock.nowMillis(),
             paid = data.payFlag == 1,
             // 下单时刻与模式总时长只在下单时产生，刷新原样保留（旧快照没有就是 0）
             createdAt = current?.createdAt ?: 0L,

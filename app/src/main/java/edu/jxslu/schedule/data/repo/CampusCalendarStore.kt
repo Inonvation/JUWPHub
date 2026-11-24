@@ -7,6 +7,7 @@ import edu.jxslu.schedule.data.net.AppHttp
 import edu.jxslu.schedule.domain.CampusCalendarIndex
 import edu.jxslu.schedule.domain.CampusCalendarRules
 import edu.jxslu.schedule.domain.CampusCalendarSchoolRules
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -63,7 +64,7 @@ class CampusCalendarStore(context: Context) {
      * 后台刷新成功与否用户无感，页内手动失败由 UI 层按返回值给行内提示）。
      */
     suspend fun refresh(force: Boolean = false): RefreshResult = mutex.withLock {
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         if (!force && !CampusCalendarRules.shouldRefresh(prefs.getLong(KEY_LAST_SUCCESS, 0L), now)) {
             return RefreshResult.Skipped
         }

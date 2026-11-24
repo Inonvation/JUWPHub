@@ -36,6 +36,7 @@ import edu.jxslu.schedule.domain.StartPage
 import edu.jxslu.schedule.domain.ThemeMode
 import edu.jxslu.schedule.domain.ThemePalette
 import edu.jxslu.schedule.domain.TimetablePrefs
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -1171,7 +1172,7 @@ class DisplayPrefsStore(internal val context: Context) {
         p[KEY_RECHARGE_DISCLAIMER_SEEN_AT] ?: 0L
     }.distinctUntilChanged()
 
-    suspend fun markRechargeDisclaimerSeen(atMs: Long = System.currentTimeMillis()) {
+    suspend fun markRechargeDisclaimerSeen(atMs: Long = AppClock.nowMillis()) {
         context.displayDataStore.edit { it[KEY_RECHARGE_DISCLAIMER_SEEN_AT] = atMs }
     }
 
@@ -1206,7 +1207,7 @@ class DisplayPrefsStore(internal val context: Context) {
     suspend fun markNoticeConsented(
         notice: FirstRunNotice,
         version: Int,
-        atMs: Long = System.currentTimeMillis(),
+        atMs: Long = AppClock.nowMillis(),
     ) {
         context.displayDataStore.edit { p ->
             when (notice) {
@@ -1705,7 +1706,7 @@ class DisplayPrefsStore(internal val context: Context) {
      * 只接受三个取值，别的一律按「还没问过」处理。
      */
     /** 记下上次已知位置（见 [ebikeLastLocation]）。越界坐标直接忽略。 */
-    suspend fun setEbikeLastLocation(lat: Double, lng: Double, atMillis: Long = System.currentTimeMillis()) {
+    suspend fun setEbikeLastLocation(lat: Double, lng: Double, atMillis: Long = AppClock.nowMillis()) {
         if (!lat.isFinite() || !lng.isFinite()) return
         if (lat !in -90.0..90.0 || lng !in -180.0..180.0) return
         context.displayDataStore.edit {

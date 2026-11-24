@@ -58,6 +58,7 @@ import edu.jxslu.schedule.domain.TimetablePrefs
 import edu.jxslu.schedule.domain.TimeSlotRules
 import edu.jxslu.schedule.domain.TweakMode
 import edu.jxslu.schedule.domain.TweakPlan
+import edu.jxslu.schedule.domain.AppClock
 import androidx.room.withTransaction
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -663,7 +664,7 @@ class ScheduleRepository(
         val id = db.timetableDao().upsert(
             TimetableEntity(
                 name = name,
-                createdAt = System.currentTimeMillis(),
+                createdAt = AppClock.nowMillis(),
                 sortOrder = sortOrder,
                 slotsCustomized = source?.slotsCustomized ?: false,
                 // prefs_json 列已退役（显示偏好全局化）：只写内置默认占位，读写都走 DataStore
@@ -1180,7 +1181,7 @@ class ScheduleRepository(
         val courses = getTimetableCourses(timetableId).filter { it.kind != CourseKind.Exam }
         // 写盘失败就**不要**清指纹与待处置差异：基线还停在旧版本，把差异清掉会让下一轮
         // 检查拿旧基线比对、把用户刚处理完的变动重新报一遍（合并时还会按旧指纹套到新课表上）。
-        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, courses, System.currentTimeMillis()))) {
+        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, courses, AppClock.nowMillis()))) {
             return
         }
         prefs.setScheduleIgnoredFingerprint("")
@@ -1192,7 +1193,7 @@ class ScheduleRepository(
     /** 用教务抓取结果直接建基线（检查首跑 / 换学期：此刻课表未动，教务现状即「一致状态」）。 */
     suspend fun saveScheduleBaseline(timetableId: Long, term: String, courses: List<Course>) {
         val store = baselineStore ?: return
-        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, courses, System.currentTimeMillis()))) {
+        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, courses, AppClock.nowMillis()))) {
             return
         }
         prefs.setScheduleIgnoredFingerprint("")
@@ -1243,7 +1244,7 @@ class ScheduleRepository(
             return
         }
         val after = ScheduleDiff.baselineAfter(current.courses.map { it.toCourse() }, entries)
-        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, after, System.currentTimeMillis()))) {
+        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, after, AppClock.nowMillis()))) {
             return
         }
         prefs.setScheduleIgnoredFingerprint("")
@@ -1715,7 +1716,7 @@ class ScheduleRepository(
             if (validated.scores.isNotEmpty()) {
                 db.scoreDao().deleteAll()
                 db.scoreDao().insertAll(
-                    validated.scores.map { ScoreEntity.fromDomain(it, System.currentTimeMillis()) },
+                    validated.scores.map { ScoreEntity.fromDomain(it, AppClock.nowMillis()) },
                 )
                 restoredScores = validated.scores.size
             }

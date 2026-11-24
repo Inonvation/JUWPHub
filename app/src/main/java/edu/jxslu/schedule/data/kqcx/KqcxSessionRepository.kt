@@ -9,6 +9,7 @@ import edu.jxslu.schedule.domain.KvcBusinessError
 import edu.jxslu.schedule.domain.KvcProtocolException
 import edu.jxslu.schedule.domain.KvcxZones
 import edu.jxslu.schedule.domain.MoneyFormat
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -673,7 +674,7 @@ class KqcxSessionRepository(
         provisionalRide(created).copy(locked = true)
 
     /** 官方 `Math.ceil(ts/1e3)` 同口径的秒级时间戳。 */
-    private fun nowSeconds(): Long = (System.currentTimeMillis() + 999) / 1000
+    private fun nowSeconds(): Long = (AppClock.nowMillis() + 999) / 1000
 
     private fun isTokenError(error: Throwable): Boolean = when (error) {
         is KvcBusinessError -> KqcxAuth.looksLikeTokenError(error.message)

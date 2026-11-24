@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.data.power
 
 import edu.jxslu.schedule.domain.CampusPaySign
+import edu.jxslu.schedule.domain.AppClock
 import java.net.URLEncoder
 import kotlin.random.Random
 import kotlinx.serialization.json.Json
@@ -33,7 +34,7 @@ object PowerPaySign {
     fun signOf(params: Map<String, String>): String = CampusPaySign.signOf(params)
 
     /** `yyyyMMddHHmmssSSS`（本地时区；前端 `new Date()` 口径）。 */
-    fun buildTimestamp(now: Long = System.currentTimeMillis()): String =
+    fun buildTimestamp(now: Long = AppClock.nowMillis()): String =
         CampusPaySign.buildTimestamp(now)
 
     /** 11 位小写字母数字（前端 `Math.random().toString(36).substring(2)` 口径）。 */

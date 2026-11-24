@@ -7,6 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import edu.jxslu.schedule.domain.TimetablePrefs
+import edu.jxslu.schedule.domain.AppClock
 
 /**
  * 当前 schema 版本，唯一出处：`@Database(version = …)` 与迁移链测试共用。
@@ -105,7 +106,7 @@ abstract class JuwDatabase : RoomDatabase() {
                 db.execSQL(
                     "INSERT INTO timetables (id, name, createdAt, sortOrder, slotsCustomized, prefsJson) " +
                         "VALUES (1, '我的课表', ?, 0, 0, ?)",
-                    arrayOf(System.currentTimeMillis(), TimetablePrefs().encode()),
+                    arrayOf(AppClock.nowMillis(), TimetablePrefs().encode()),
                 )
 
                 db.execSQL(

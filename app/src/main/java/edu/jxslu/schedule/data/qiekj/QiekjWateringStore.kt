@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import edu.jxslu.schedule.domain.AppClock
 
 /**
  * 一次「正在出水」的本机会话（2026-10-21）。
@@ -103,7 +104,7 @@ class QiekjWateringStore(context: Context) {
             deviceName = prefs.getString(KEY_NAME, "").orEmpty(),
             goodsId = prefs.getString(KEY_GOODS, null),
         )
-        if (session.isStale(System.currentTimeMillis())) {
+        if (session.isStale(AppClock.nowMillis())) {
             // 过期残留：进程死在流程中，服务端早已超时关阀。静默清掉（展示口径，
             // 不涉及金额记录——账单由流程回报，见 QiekjWateringSession KDoc）
             prefs.edit().clear().apply()

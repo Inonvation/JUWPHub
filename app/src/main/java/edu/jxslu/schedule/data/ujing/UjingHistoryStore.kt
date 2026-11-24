@@ -2,6 +2,7 @@ package edu.jxslu.schedule.data.ujing
 
 import android.content.Context
 import edu.jxslu.schedule.domain.UjingState
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -133,7 +134,7 @@ data class UjingHistoryEntry(
         fun fromSnapshot(
             snapshot: UjingOrderSnapshot,
             statusOverride: String? = null,
-            nowMillis: Long = System.currentTimeMillis(),
+            nowMillis: Long = AppClock.nowMillis(),
         ): UjingHistoryEntry = UjingHistoryEntry(
             orderId = snapshot.orderId,
             orderNo = snapshot.orderNo,

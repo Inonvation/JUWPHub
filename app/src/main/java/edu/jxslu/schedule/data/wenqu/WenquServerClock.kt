@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.data.wenqu
 
 import edu.jxslu.schedule.domain.WenquRules
+import edu.jxslu.schedule.domain.AppClock
 import okhttp3.Interceptor
 import okhttp3.Response
 import kotlin.math.abs
@@ -44,9 +45,9 @@ object WenquServerClock {
  */
 class WenquServerClockInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val sentAt = System.currentTimeMillis()
+        val sentAt = AppClock.nowMillis()
         val response = chain.proceed(chain.request())
-        val receivedAt = System.currentTimeMillis()
+        val receivedAt = AppClock.nowMillis()
         val serverAt = WenquRules.parseHttpDate(response.header("Date"))
         if (serverAt != null) {
             WenquServerClock.record(

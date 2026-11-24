@@ -4,6 +4,7 @@ import edu.jxslu.schedule.data.local.HomeworkEntity
 import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.domain.Homework
 import edu.jxslu.schedule.domain.HomeworkCourseGroup
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.time.LocalDate
@@ -35,7 +36,7 @@ class HomeworkRepository(private val db: JuwDatabase) {
 
     /** 新建 / 更新；时间戳口径与 [NoteRepository.save] 一致（创建时间编辑不改）。 */
     suspend fun save(homework: Homework): Long {
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         val stamped = homework.copy(
             createdAt = if (homework.id > 0 && homework.createdAt > 0) homework.createdAt else now,
             updatedAt = now,
@@ -48,18 +49,18 @@ class HomeworkRepository(private val db: JuwDatabase) {
      * 不整行回写——编辑页正开着旧值时不至于把别处的修改覆盖掉。
      */
     suspend fun setDone(id: Long, done: Boolean) {
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         dao.setDone(id, done, doneAt = if (done) now else null, updatedAt = now)
     }
 
     /** 只改截止日期（详情页改截止即落库，不整行回写）。 */
     suspend fun setDueDate(id: Long, due: LocalDate?) {
-        dao.setDueDate(id, due?.toString(), System.currentTimeMillis())
+        dao.setDueDate(id, due?.toString(), AppClock.nowMillis())
     }
 
     /** 只改正文（详情页保存正文用，避免覆盖并发的截止/完成改动）。 */
     suspend fun setDetail(id: Long, detail: String) {
-        dao.setDetail(id, detail, System.currentTimeMillis())
+        dao.setDetail(id, detail, AppClock.nowMillis())
     }
 
     suspend fun delete(id: Long) = dao.deleteById(id)

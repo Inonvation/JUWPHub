@@ -4,6 +4,7 @@ import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.NoteEntity
 import edu.jxslu.schedule.domain.Note
 import edu.jxslu.schedule.domain.NoteCourseGroup
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -33,7 +34,7 @@ class NoteRepository(private val db: JuwDatabase) {
      * **更新**保留首建时间（编辑不改创建日期），updatedAt 一律盖当前时间。
      */
     suspend fun save(note: Note): Long {
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         val stamped = note.copy(
             createdAt = if (note.id > 0 && note.createdAt > 0) note.createdAt else now,
             updatedAt = now,

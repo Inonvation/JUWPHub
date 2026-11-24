@@ -7,6 +7,7 @@ import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.domain.AppClock
 import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -77,7 +78,7 @@ class TextbookSync(
      */
     suspend fun backfillIfMissing(): Result {
         val term = repo.currentTerm() ?: return Result.Skipped
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         val due = AutoSyncRules.textbookBackfillDue(
             hasTextbooks = repo.hasTextbooksFor(term),
             fetchedTerm = prefs.textbookFetchedTerm(),

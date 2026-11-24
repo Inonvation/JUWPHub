@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import edu.jxslu.schedule.data.local.CourseSelectionEntity
 import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.domain.CourseSelection
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -45,7 +46,7 @@ class SelectionRepository(private val db: JuwDatabase) {
      */
     suspend fun replaceTerms(byTerm: List<Pair<String, List<CourseSelection>>>) {
         if (byTerm.isEmpty()) return
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         db.withTransaction {
             byTerm.forEach { (term, rows) ->
                 dao.deleteForTerm(term)

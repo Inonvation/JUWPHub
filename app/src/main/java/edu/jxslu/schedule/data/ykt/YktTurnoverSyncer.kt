@@ -3,6 +3,7 @@ package edu.jxslu.schedule.data.ykt
 import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.YktTurnoverEntity
 import edu.jxslu.schedule.domain.YktTurnoverRow
+import edu.jxslu.schedule.domain.AppClock
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -35,11 +36,11 @@ object YktSyncGate {
 
     /** 这次要不要真的同步。 */
     fun shouldSync(force: Boolean): Boolean =
-        force || System.currentTimeMillis() - lastSyncedAtMs >= MIN_INTERVAL_MS
+        force || AppClock.nowMillis() - lastSyncedAtMs >= MIN_INTERVAL_MS
 
     /** 同步成功后记账（失败不记：下次进页还有机会补上）。 */
     fun markSynced() {
-        lastSyncedAtMs = System.currentTimeMillis()
+        lastSyncedAtMs = AppClock.nowMillis()
     }
 
     /** 清掉闸门（测试用）。 */
@@ -141,7 +142,7 @@ class YktTurnoverSyncer(
         ): List<YktTurnoverRow> = if (hadData) fresh.filter { !it.income } else emptyList()
 
         /** 流水记录 → 实体（jndatetime 解析失败为 0 沉底；orderId 空用合成键）。 */
-        fun YktTurnover.toEntity(now: Long = System.currentTimeMillis()): YktTurnoverEntity {
+        fun YktTurnover.toEntity(now: Long = AppClock.nowMillis()): YktTurnoverEntity {
             val epoch = runCatching {
                 LocalDateTime.parse(jndatetimeStr, SERVER_FORMAT)
                     .atZone(java.time.ZoneId.systemDefault())

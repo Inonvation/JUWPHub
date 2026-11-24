@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.data.ykt
 
 import edu.jxslu.schedule.domain.YktKeyboard
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionStatus
 import edu.jxslu.schedule.data.session.YktTokenCache
@@ -99,7 +100,7 @@ class YktRepository(
             load(fresh) ?: throw YktException.Protocol("登录成功但取余额失败")
         }
         cachedCards = result
-        cachedCardsAtMs = System.currentTimeMillis()
+        cachedCardsAtMs = AppClock.nowMillis()
         return result
     }
 
@@ -124,7 +125,7 @@ class YktRepository(
         if (env.code != 200) return null
         val detail = YktModels.electricAccountFrom(env.data)
         cachedAccountDetail = detail
-        cachedAccountDetailAtMs = System.currentTimeMillis()
+        cachedAccountDetailAtMs = AppClock.nowMillis()
         return detail
     }
 
@@ -525,7 +526,7 @@ class YktRepository(
 
     /** 余额缓存是否还在 TTL 内。 */
     private fun isFresh(cachedAtMs: Long): Boolean =
-        cachedAtMs > 0 && System.currentTimeMillis() - cachedAtMs <= BALANCE_CACHE_TTL_MS
+        cachedAtMs > 0 && AppClock.nowMillis() - cachedAtMs <= BALANCE_CACHE_TTL_MS
 
     /** 用给定 token 试取码；401/失败返回 null（调用方重登），业务异常照抛。 */
     private suspend fun tryLoadBarcodes(token: String): YktBarcodeData? {

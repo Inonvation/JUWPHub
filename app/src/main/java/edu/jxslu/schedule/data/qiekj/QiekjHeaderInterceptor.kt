@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.data.qiekj
 
 import edu.jxslu.schedule.domain.QiekjSign
+import edu.jxslu.schedule.domain.AppClock
 import okhttp3.Interceptor
 import okhttp3.Response
 
@@ -20,7 +21,7 @@ class QiekjHeaderInterceptor(
     private val signPathSeparator: String = "",
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val timestamp = System.currentTimeMillis().toString()
+        val timestamp = AppClock.nowMillis().toString()
         val path = chain.request().url.encodedPath
         val isLoginApi = path.startsWith("/common/") || path.startsWith("/user/reg")
         val channel = if (isLoginApi) QiekjApiConfig.LOGIN_CHANNEL else QiekjApiConfig.API_CHANNEL

@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.ScoreEntity
 import edu.jxslu.schedule.domain.ScoreRecord
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -49,7 +50,7 @@ class ScoreRepository(private val db: JuwDatabase) {
      */
     suspend fun replaceTerms(byTerm: List<Pair<String, List<ScoreRecord>>>) {
         if (byTerm.isEmpty()) return
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         db.withTransaction {
             byTerm.forEach { (term, records) ->
                 dao.deleteForTerm(term)

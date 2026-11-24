@@ -2,6 +2,7 @@ package edu.jxslu.schedule.data.power
 
 import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionStatus
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonPrimitive
@@ -111,7 +112,7 @@ class PowerRepository(
         // 读数落库失败不该影响页面（统计少一条而已，下一次读数会补上）
         runCatching { readingStore.record(fresh.meter, fresh.feeItem.priceYuan, source) }
         cachedSnapshot = fresh
-        cachedSnapshotAtMs = System.currentTimeMillis()
+        cachedSnapshotAtMs = AppClock.nowMillis()
         return fresh
     }
 
@@ -141,7 +142,7 @@ class PowerRepository(
             PowerModels.parseTurnovers(expectOk(raw, "取电费流水"))
         }
         cachedHistory = fresh
-        cachedHistoryAtMs = System.currentTimeMillis()
+        cachedHistoryAtMs = AppClock.nowMillis()
         return fresh
     }
 
@@ -396,7 +397,7 @@ class PowerRepository(
         )
         scene.forEach { form[it.code] = it.id }
         val raw = client.postForm("/charge/feeitem/getThirdData", token, form)
-        return PowerModels.parseMeter(expectOk(raw, "读电表"), System.currentTimeMillis())
+        return PowerModels.parseMeter(expectOk(raw, "读电表"), AppClock.nowMillis())
     }
 
     /** 业务码 401 = token 过期：重登一次再跑（只重试一次，再失败就抛出去）。 */
@@ -429,7 +430,7 @@ class PowerRepository(
 
     /** 缓存是否还在 TTL 内。 */
     private fun isFresh(cachedAtMs: Long): Boolean =
-        cachedAtMs > 0 && System.currentTimeMillis() - cachedAtMs <= CACHE_TTL_MS
+        cachedAtMs > 0 && AppClock.nowMillis() - cachedAtMs <= CACHE_TTL_MS
 
     companion object {
         /** 读数与流水的内存缓存时长（DESIGN §4.24「请求节流」）。 */

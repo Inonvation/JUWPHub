@@ -3,6 +3,7 @@ package edu.jxslu.schedule.data.kqcx
 import edu.jxslu.schedule.data.local.KqcxOrderDao
 import edu.jxslu.schedule.data.local.KqcxOrderEntity
 import edu.jxslu.schedule.domain.KqcxAuth
+import edu.jxslu.schedule.domain.AppClock
 
 /**
  * 快趣服务端订单的本地缓存（2026-11-05 用户要求：统计在本地算、缓存自动更新）。
@@ -19,7 +20,7 @@ class KqcxOrderCache(private val dao: KqcxOrderDao) {
     /** 把一批订单覆盖写入缓存；返回写入的行数（业务键缺失的行会被丢弃）。 */
     suspend fun store(
         orders: List<KqcxAuth.OrderItem>,
-        now: Long = System.currentTimeMillis(),
+        now: Long = AppClock.nowMillis(),
     ): Int {
         if (orders.isEmpty()) return 0
         val rows = orders.mapNotNull { order -> order.toEntity(now) }

@@ -7,6 +7,7 @@ import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.domain.DiagnosisResult
 import edu.jxslu.schedule.domain.PromotionLine
 import edu.jxslu.schedule.domain.UnlockResult
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -384,7 +385,7 @@ class QiekjRepository(
                             false
                         }
                         endWaitStep = if (remoteEndOk) {
-                            remoteEndDeadline = System.currentTimeMillis() + REMOTE_END_WAIT_MS
+                            remoteEndDeadline = AppClock.nowMillis() + REMOTE_END_WAIT_MS
                             "正在结束用水，等待设备回报"
                         } else {
                             "结束请求未被平台受理：请在设备上点击『结束』，等待设备回报"
@@ -394,7 +395,7 @@ class QiekjRepository(
                     }
                 }
                 if (shouldSettleOnManualStop(sync)) break
-                if (remoteEndOk && System.currentTimeMillis() >= remoteEndDeadline) {
+                if (remoteEndOk && AppClock.nowMillis() >= remoteEndDeadline) {
                     throw UnlockStoppedException("已请求结束用水，设备未回报结束，账单以平台为准")
                 }
                 // 平台未受理 / 机型不支持：不再中断等待（旧实现在这里抛错丢单），
@@ -478,7 +479,7 @@ class QiekjRepository(
             ticketCost = ticketCost,
             integralCost = integralCost,
             otherPromotions = otherPromotions,
-            completedAt = System.currentTimeMillis(),
+            completedAt = AppClock.nowMillis(),
             realPrice = tradeItem?.realPrice ?: detail.payPrice,
             payTypeName = detail.payTypeName,
             tokenCoinDiscount = detail.tokenCoinDiscount,
