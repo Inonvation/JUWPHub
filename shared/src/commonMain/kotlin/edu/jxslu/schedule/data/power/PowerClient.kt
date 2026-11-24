@@ -1,24 +1,39 @@
 package edu.jxslu.schedule.data.power
 
-import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
+import edu.jxslu.schedule.data.net.SharedHttp
+import io.ktor.client.HttpClient
+import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.forms.FormDataContent
+import io.ktor.client.request.header
+import io.ktor.client.request.parameter
+import io.ktor.client.request.request
+import io.ktor.client.request.setBody
+import io.ktor.client.request.url
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
+import io.ktor.http.Parameters
+import io.ktor.http.contentType
+import io.ktor.http.encodeURLParameter
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
-import edu.jxslu.schedule.data.net.AppHttp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
- * 缴费平台 HTTP 客户端（DESIGN §4.24）。裸 OkHttp，只做请求与状态码归一。
+ * 缴费平台 HTTP 客户端（DESIGN §4.24）。只做请求与状态码归一。
  *
  * 红线：**无任何日志拦截器**（凭证/token 不进 logcat）；不做自动重试（失败即停，防撞风控）。
  * 登录端点在**根域** `/blade-auth/oauth/token`，业务接口在 `/charge/`——两者都在本类的
  * [BASE] 之下，路径由调用方给全。
+ *
+ * iOS 移植 P1（2026-11-24）：搬进 `:shared`，OkHttp → Ktor。四处必须跟着换：
+ * - 超时搬进 [SharedHttp.create]，Ktor 没有独立的写超时（详见 [create] 的注释）；
+ * - `java.net.URLEncoder` 是 JVM 专有的：表单改由 [FormDataContent] 编码，[pageUrl] 里
+ *   那一处改 [encodeURLParameter]；
+ * - `Dispatchers.IO` / `withContext` 删掉——Ktor 的请求本身就是挂起的，不占线程；
+ * - `catch (java.io.IOException)` 换成先 `catch (CancellationException)` 原样抛出、再
+ *   `catch (Exception)`，统归一成 [PowerException.Network]，与迁移前的对外行为一致。
  */
-class PowerClient private constructor(private val http: OkHttpClient) {
+class PowerClient private constructor(private val http: HttpClient) {
 
     companion object {
         const val BASE = "https://charge.juwp.edu.cn"
@@ -70,15 +85,20 @@ class PowerClient private constructor(private val http: OkHttpClient) {
 
         fun create(): PowerClient = PowerClient(
             // 共享池派生 + 单独放宽超时（2026-11-06）：
-            // 共享 base 的 readTimeout = 20s，但**缴费平台的收银台会话生成会慢到 20s 以上**
+            // 共享 base 的 socket 超时 = 20s，但**缴费平台的收银台会话生成会慢到 20s 以上**
             // ——同一条 `paystep=2` 请求 PC 端 1.5s，手机上连续超时报「网络不给力」；
-            // 平台侧的网关上限本身是 60s（慢到顶时回空响应）。20s 读超时会把这类
-            // 慢响应误报成网络故障，所以这一条链路放宽到读 45s / 写 30s / 总上限 60s。
-            AppHttp.base.newBuilder()
-                .readTimeout(45, TimeUnit.SECONDS)
-                .writeTimeout(30, TimeUnit.SECONDS)
-                .callTimeout(60, TimeUnit.SECONDS)
-                .build(),
+            // 平台侧的网关上限本身是 60s（慢到顶时回空响应）。20s 超时会把这类
+            // 慢响应误报成网络故障，所以这一条链路放宽到读 45s / 总上限 60s。
+            //
+            // **写超时并入 socket**：原 OkHttp 那边是 read 45s / write 30s / call 60s 三道，
+            // Ktor 的 HttpTimeout 只有 request / connect / socket 三个维度，没有独立的写
+            // 闸门——写与读同受 socketTimeoutMillis 管，这里按 45s 一并覆盖。30s 那道写上限
+            // 就此消失，不是漏填（写请求体最大也就几十字节，45s 用不完）。
+            SharedHttp.create(
+                requestTimeoutSeconds = 60,
+                connectTimeoutSeconds = 15,
+                socketTimeoutSeconds = 45,
+            ),
         )
 
         /**
@@ -91,7 +111,11 @@ class PowerClient private constructor(private val http: OkHttpClient) {
          * token 有效期 3599 秒，只在这一跳里出现，不落盘、不进日志。
          */
         fun pageUrl(token: String, route: String): String {
-            val payment = URLEncoder.encode(PAYMENT_URL, "UTF-8")
+            // 原为 `URLEncoder.encode(PAYMENT_URL, "UTF-8")`（JVM 专有，commonMain 没有）。
+            // encodeURLParameter 对 PAYMENT_URL 这个纯 ASCII 常量（无空格、无星号）输出逐字
+            // 一致：`https%3A%2F%2Fyktwx.juwp.edu.cn%2Fplat`。两者只在「空格 → `%20` vs `+`」
+            // 和「`*` 是否保留」上不同，这个常量都碰不到；换成带空格的值时要重新核对。
+            val payment = PAYMENT_URL.encodeURLParameter()
             return "$BASE/?appsourse=$APPSOURSE&paymentUrl=$payment&token=$token#$route"
         }
 
@@ -106,8 +130,11 @@ class PowerClient private constructor(private val http: OkHttpClient) {
     data class Raw(val httpCode: Int, val text: String)
 
     /** 登录：学号 + 查询密码 → access_token（有效期 3599 秒）。 */
-    suspend fun login(username: String, password: String): Raw = withContext(Dispatchers.IO) {
-        val body = formBody(
+    suspend fun login(username: String, password: String): Raw = send {
+        url("$BASE/blade-auth/oauth/token")
+        header("User-Agent", UA)
+        header("Authorization", BASIC)
+        formBody(
             mapOf(
                 "username" to username,
                 "password" to password,
@@ -116,41 +143,32 @@ class PowerClient private constructor(private val http: OkHttpClient) {
                 "logintype" to LOGIN_TYPE,
             ),
         )
-        execute(
-            Request.Builder()
-                .url("$BASE/blade-auth/oauth/token")
-                .header("User-Agent", UA)
-                .header("Authorization", BASIC)
-                .post(body),
-        )
     }
 
-    /** GET（`/charge/` 的业务查询）。 */
-    suspend fun get(path: String, token: String, params: Map<String, String> = emptyMap()): Raw =
-        withContext(Dispatchers.IO) {
-            val query = params.entries.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, "UTF-8")}" }
-            val url = BASE + path + if (query.isEmpty()) "" else "?$query"
-            execute(
-                Request.Builder()
-                    .url(url)
-                    .header("User-Agent", UA)
-                    .header("Authorization", BASIC)
-                    .header("synjones-auth", "bearer $token"),
-            )
-        }
+    /**
+     * GET（`/charge/` 的业务查询）。
+     *
+     * 查询参数交给 Ktor 的 [parameter] 编码：与原先手写 `URLEncoder.encode(值)` 的差别是
+     * **键也会被编码**、且空格走 `%20` 而非 `+`。现有调用方传的全是纯数字与 ASCII 短词
+     * （`feeitemid` / `flag` / `paystatus` / `orderid` / `userAgent`），两种写法输出逐字相同。
+     */
+    suspend fun get(path: String, token: String, params: Map<String, String> = emptyMap()): Raw = send {
+        method = HttpMethod.Get
+        url(BASE + path)
+        params.forEach { (k, v) -> parameter(k, v) }
+        header("User-Agent", UA)
+        header("Authorization", BASIC)
+        header("synjones-auth", "bearer $token")
+    }
 
     /** POST 表单（`/charge/`）。 */
-    suspend fun postForm(path: String, token: String, fields: Map<String, String>): Raw =
-        withContext(Dispatchers.IO) {
-            execute(
-                Request.Builder()
-                    .url(BASE + path)
-                    .header("User-Agent", UA)
-                    .header("Authorization", BASIC)
-                    .header("synjones-auth", "bearer $token")
-                    .post(formBody(fields)),
-            )
-        }
+    suspend fun postForm(path: String, token: String, fields: Map<String, String>): Raw = send {
+        url(BASE + path)
+        header("User-Agent", UA)
+        header("Authorization", BASIC)
+        header("synjones-auth", "bearer $token")
+        formBody(fields)
+    }
 
     /**
      * POST JSON body（`/charge/order/deleteOrder` 与 `/charge/sceneBind/add` 用）。
@@ -161,17 +179,15 @@ class PowerClient private constructor(private val http: OkHttpClient) {
      * （`$api.post` 没带 `"qs"` 参数 → axios 默认应用 `application/json`），
      * 已用同房间重绑实测对齐。别把它改回表单。
      */
-    suspend fun postJson(path: String, token: String, body: JsonObject): Raw =
-        withContext(Dispatchers.IO) {
-            execute(
-                Request.Builder()
-                    .url(BASE + path)
-                    .header("User-Agent", UA)
-                    .header("Authorization", BASIC)
-                    .header("synjones-auth", "bearer $token")
-                    .post(body.toString().toRequestBody("application/json".toMediaType())),
-            )
-        }
+    suspend fun postJson(path: String, token: String, body: JsonObject): Raw = send {
+        url(BASE + path)
+        header("User-Agent", UA)
+        header("Authorization", BASIC)
+        header("synjones-auth", "bearer $token")
+        method = HttpMethod.Post
+        contentType(ContentType.Application.Json)
+        setBody(body.toString())
+    }
 
     /**
      * POST 签名表单（`/blade-pay/pay` 下单与支付）。鉴权走 **header**
@@ -185,29 +201,34 @@ class PowerClient private constructor(private val http: OkHttpClient) {
         token: String,
         fields: Map<String, String>,
         userAgent: String = UA,
-    ): Raw =
-        withContext(Dispatchers.IO) {
-            execute(
-                Request.Builder()
-                    .url(BASE + path)
-                    .header("User-Agent", userAgent)
-                    .header("Authorization", BASIC)
-                    .header("synjones-auth", "bearer $token")
-                    .header("synAccessSource", "h5")
-                    .post(formBody(fields)),
-            )
-        }
+    ): Raw = send {
+        url(BASE + path)
+        header("User-Agent", userAgent)
+        header("Authorization", BASIC)
+        header("synjones-auth", "bearer $token")
+        header("synAccessSource", "h5")
+        formBody(fields)
+    }
 
+    /** 表单体：`x-www-form-urlencoded` 的转义交给 Ktor（原先手写 `URLEncoder.encode`）。 */
+    private fun HttpRequestBuilder.formBody(fields: Map<String, String>) {
+        method = HttpMethod.Post
+        setBody(FormDataContent(Parameters.build { fields.forEach { (k, v) -> append(k, v) } }))
+    }
 
-    private fun formBody(fields: Map<String, String>) = fields.entries
-        .joinToString("&") { (k, v) -> "${URLEncoder.encode(k, "UTF-8")}=${URLEncoder.encode(v, "UTF-8")}" }
-        .toRequestBody("application/x-www-form-urlencoded".toMediaType())
-
-    private fun execute(builder: Request.Builder): Raw = try {
-        http.newCall(builder.build()).execute().use { resp ->
-            Raw(resp.code, resp.body?.string().orEmpty().removePrefix("\uFEFF"))
-        }
-    } catch (e: java.io.IOException) {
+    /**
+     * 发一次请求并归一成 [Raw]。
+     *
+     * 响应体的读取也在 try 里：原先 OkHttp 的 `resp.body?.string()` 抛 IOException 同样
+     * 归成 [PowerException.Network]，这个口径要保住。
+     */
+    private suspend fun send(block: HttpRequestBuilder.() -> Unit): Raw = try {
+        val response = http.request { block() }
+        Raw(response.status.value, response.bodyAsText().removePrefix("\uFEFF"))
+    } catch (e: CancellationException) {
+        // 协程取消不是网络故障，原样抛出去，别被下面的 catch 吞掉
+        throw e
+    } catch (e: Exception) {
         throw PowerException.Network(e)
     }
 }

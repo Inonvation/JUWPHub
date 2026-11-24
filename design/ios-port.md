@@ -477,6 +477,25 @@ JVM/Android 依赖，必须同批处理，否则改完 `:shared` 还是编不过
 什么都不剩，必须连仓库一起改；`ai/AiScheduleClient`(335) 是 SSE 流式（要 `bodyAsChannel`）；
 `jw/JwHttpSession`(324) 是 Cookie + CAS 重定向，`session/*` 全依赖它。这三个都要单独设计，不能批处理。
 
+### 一个没算到的结构性事实：每个客户端都拖着自己的模型与异常
+
+按「20 个 OkHttp 文件」估工期是错的。实际每个客户端都引用同包的 DTO / 异常 / 配置类，
+那些还在 `:app` 里，`:shared` 看不见——所以**搬一个客户端 = 搬一条依赖链**。已实测到的链：
+
+| 客户端 | 必须先搬的前置 | 前置的纯度 |
+|---|---|---|
+| `ykt/YktClient` | `ykt/YktModels`（含 `YktException`） | 纯（只有 serialization），已一起搬 |
+| `power/PowerClient` | `power/PowerException` | 纯，已抽成独立文件搬走；`PowerModels` 还有 `java.time`，暂留 |
+| `ujing/UjingApi` | `ujing/UjingModels` + `ujing/UjingApiConfig` | 都纯，一起搬 |
+| `jw/TranscriptClient` | `jw/PtworkTranscript` → 又依赖 `jw/JwUrls`（声明在 `CourseImporter.kt` 里） | `PtworkTranscript` 有 `URLEncoder` + `java.time`；`JwUrls` 是纯常量但要先从 472 行的 `CourseImporter.kt` 里抽出来 |
+
+**做法**：搬之前先问「它 import 的同包类型在哪」，把那条链列出来；纯的前置可以直接搬
+（package 不变，`:app` 侧零 import 改动），带平台依赖的前置只抽需要的那一半（`PowerException`
+就是这么处理：`PowerModels` 留原地，只把零依赖的异常类拿出来）。
+
+**并行可行性**：前置清掉之后各文件互不相干，可以并行（本轮 `ujing` 与 `power` 两个 agent 同时在做，
+文件集互斥）。但**模型文件是共享前置**，同一轮里不要让两个 agent 同时改同一个 `*Models.kt`。
+
 `WenquServerClock` 那次顺带解决了一类通用问题：**OkHttp 的 `Interceptor` 在 Ktor 里没有等价物**。
 它的实现是「发前取钟 → 收后取钟 → 读 `Date` 头算偏移」，改成在 `send()` 里就地记账即可——
 不必去找 Ktor 的插件机制。下次遇到 `Interceptor` 就先问「它到底做了什么」，多数时候是一段

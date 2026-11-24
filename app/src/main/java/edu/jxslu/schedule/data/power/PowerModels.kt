@@ -23,28 +23,6 @@ import kotlinx.serialization.json.longOrNull
  * （缺字段退默认、错类型当没有），让上层按「字段缺 = 平台改版」处理。
  */
 
-/** 缴费平台异常分类（UI 按类型给文案）。 */
-sealed class PowerException(message: String) : Exception(message) {
-
-    /** 网络不可达 / 超时。 */
-    class Network(cause: Throwable) : PowerException("网络不给力，稍后重试")
-
-    /** 凭证类（登录被拒）：学号或查询密码不对。 */
-    class Credential(message: String) : PowerException(message)
-
-    /** 协议类：平台返回结构与预期不同，或参数被拒。 */
-    class Protocol(message: String) : PowerException(message)
-
-    /**
-     * 未在缴费平台确认寝室（`singleFeeitem.sceneinfo` 为空，DESIGN §4.24，2026-10-08）。
-     *
-     * 这不是故障：官方 H5 同样以 `sceneinfo` 空为「进选择流程」的判据，用户在 App 内
-     * 选好房间确认（`sceneBind/add`）后自然恢复。UI 收到它要给「去设置」的出口，
-     * 别当普通读取失败报错。
-     */
-    class RoomNotBound(message: String = "尚未在缴费平台确认寝室") : PowerException(message)
-}
-
 /** 场景层级里的一项。`code` 同时是请求参数名（campus / building / room）。 */
 data class PowerSceneKey(val code: String, val id: String, val name: String)
 

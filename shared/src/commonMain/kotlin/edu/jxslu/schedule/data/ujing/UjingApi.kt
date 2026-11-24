@@ -1,21 +1,23 @@
 package edu.jxslu.schedule.data.ujing
 
-import edu.jxslu.schedule.data.net.AppHttp
+import edu.jxslu.schedule.data.net.SharedHttp
 import edu.jxslu.schedule.data.qiekj.QiekjJson
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import io.ktor.client.HttpClient
+import io.ktor.client.request.header
+import io.ktor.client.request.request
+import io.ktor.client.request.setBody
+import io.ktor.client.request.url
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
+import io.ktor.http.contentType
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.net.URLEncoder
 
 /**
- * U净 裸 OkHttp 客户端（DESIGN §4.37）。
+ * U净 HTTP 客户端（DESIGN §4.37）。
  *
  * 形态与 [edu.jxslu.schedule.data.kqcx.KqcxAuthClient] 同款：私有构造 + `create()`、
  * 手写指纹头、解析交宽容序列化。**不用 Retrofit**：请求头分三组（鉴权前 ZI / 门店查询
@@ -25,15 +27,27 @@ import java.net.URLEncoder
  * - **无日志拦截器**——token 绝不进 Logcat（对齐一卡通 / 电费 / 快趣）；
  * - 写操作零自动重试由仓库层把关，本类只负责发一次、如实抛错；
  * - token 不驻留本类（持久化归 [UjingSessionStore]，本类只见调用方传入的串）。
+ *
+ * iOS 移植 P1（2026-11-24）：搬进 `:shared`，OkHttp → Ktor（客户端由 [SharedHttp.create]
+ * 出，超时口径不变：connect 15s / socket 20s / 总上限 30s）。两处**可观测差异**：
+ * - 查询串改由 Ktor 的 `URLBuilder.parameters` 按 RFC 3986 编码。原来手写
+ *   `java.net.URLEncoder.encode`（JVM 专有）出的是 form-urlencoded：空格编成 `+`，
+ *   现在编成 `%20`。受影响的是 `stores/near` 的 `keyword`（店名可能带空格）；
+ *   中文两边都编成 `%E6%B4%97…`，一致。`%20` 在 query string 里无歧义，保留 `+`
+ *   反而会让「按 `+` 解空格」与「按字面加号」两种服务端实现分歧。
+ * - 请求体 `Content-Type` 不再带 `charset=utf-8` 参数（现为 `application/json`，
+ *   字节仍是 UTF-8）：`Charsets` 是 JVM 专有的，commonMain 里取不到，
+ *   而 JSON 按 RFC 8259 本就只允许 UTF-8。
+ *
+ * 网络异常（连不上 / 超时）**不换算、原样上抛**——与迁移前的 OkHttp 行为一致；
+ * 这里只有一处 catch，收窄在 [SerializationException] 上。
  */
-class UjingApi private constructor(private val http: OkHttpClient) {
+class UjingApi private constructor(private val http: HttpClient) {
 
     companion object {
-        private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
-
         fun create(): UjingApi = UjingApi(
-            // 共享池派生；下单/支付参数给 callTimeout 总上限（洗衣机的 2 分钟窗口等不起挂死）
-            AppHttp.withCallTimeout(30).newBuilder().build(),
+            // 共享池派生；下单/支付参数给总上限 30s（洗衣机的 2 分钟窗口等不起挂死）。
+            SharedHttp.create(requestTimeoutSeconds = 30),
         )
     }
 
@@ -210,6 +224,16 @@ class UjingApi private constructor(private val http: OkHttpClient) {
 
     private enum class Identity { Account, Query, Business }
 
+    /**
+     * 发一次请求并解析。
+     *
+     * 查询串走 `url.parameters.append`（RFC 3986 编码），不再手拼 URL——原实现的
+     * `URLEncoder` 是 JVM 专有 API，iOS 侧编不过。
+     *
+     * 方法名参数故意先在 lambda 外算成 `verb`：`HttpRequestBuilder.method` 与参数同名，
+     * `method = if (method == "POST") …` 会被解析成读 builder 自己的 method（恒为 GET），
+     * 所以先算再赋 `this.method`。
+     */
     private suspend fun request(
         method: String,
         path: String,
@@ -217,53 +241,51 @@ class UjingApi private constructor(private val http: OkHttpClient) {
         token: String? = null,
         query: Map<String, String> = emptyMap(),
         body: JsonObject? = null,
-    ): UjingEnvelope = withContext(Dispatchers.IO) {
-        val url = buildString {
-            append(UjingApiConfig.BASE_URL).append('/').append(path)
-            if (query.isNotEmpty()) {
-                append('?')
-                query.entries.forEachIndexed { index, (key, value) ->
-                    if (index > 0) append('&')
-                    append(key).append('=').append(URLEncoder.encode(value, "UTF-8"))
+    ): UjingEnvelope {
+        val verb = if (method == "POST") HttpMethod.Post else HttpMethod.Get
+        val response = http.request {
+            url("${UjingApiConfig.BASE_URL}/$path")
+            query.forEach { (key, value) -> url.parameters.append(key, value) }
+            this.method = verb
+            header("Accept", "*/*")
+            header("Accept-Language", "zh-Hans-CN;q=1")
+            header("x-user-geo", UjingApiConfig.USER_GEO_UNKNOWN)
+            header("x-mobile-brand", UjingApiConfig.MOBILE_BRAND)
+            header("x-mobile-model", UjingApiConfig.MOBILE_MODEL)
+            when (identity) {
+                Identity.Account -> {
+                    header("x-app-code", UjingApiConfig.APP_CODE_ACCOUNT)
+                    header("x-app-version", UjingApiConfig.APP_VERSION_ACCOUNT)
+                    header("User-Agent", UjingApiConfig.UA_ACCOUNT)
+                }
+
+                // 门店查询组：只带 code/version（对齐社区实测的可用形态），
+                // 不混入业务组的 weex / UA —— 混着发就是本轮回 401 的那版。
+                Identity.Query -> {
+                    header("x-app-code", UjingApiConfig.APP_CODE_QUERY)
+                    header("x-app-version", UjingApiConfig.APP_VERSION_QUERY)
+                }
+
+                Identity.Business -> {
+                    header("x-app-code", UjingApiConfig.APP_CODE_BUSINESS)
+                    header("x-app-version", UjingApiConfig.APP_VERSION_BUSINESS)
+                    header("weex-version", UjingApiConfig.WEEX_VERSION)
+                    header("User-Agent", UjingApiConfig.UA_BUSINESS)
                 }
             }
+            if (!token.isNullOrBlank()) header("Authorization", "Bearer $token")
+            if (verb == HttpMethod.Post) {
+                contentType(ContentType.Application.Json)
+                // 无 body 的 POST 原来也发 `{}`（`body?.toString() ?: "{}"`），照旧。
+                setBody(body?.toString() ?: "{}")
+            }
         }
-        val builder = Request.Builder()
-            .url(url)
-            .header("Accept", "*/*")
-            .header("Accept-Language", "zh-Hans-CN;q=1")
-            .header("x-user-geo", UjingApiConfig.USER_GEO_UNKNOWN)
-            .header("x-mobile-brand", UjingApiConfig.MOBILE_BRAND)
-            .header("x-mobile-model", UjingApiConfig.MOBILE_MODEL)
-        when (identity) {
-            Identity.Account -> builder
-                .header("x-app-code", UjingApiConfig.APP_CODE_ACCOUNT)
-                .header("x-app-version", UjingApiConfig.APP_VERSION_ACCOUNT)
-                .header("User-Agent", UjingApiConfig.UA_ACCOUNT)
-
-            // 门店查询组：只带 code/version（对齐社区实测的可用形态），
-            // 不混入业务组的 weex / UA —— 混着发就是本轮回 401 的那版。
-            Identity.Query -> builder
-                .header("x-app-code", UjingApiConfig.APP_CODE_QUERY)
-                .header("x-app-version", UjingApiConfig.APP_VERSION_QUERY)
-
-            Identity.Business -> builder
-                .header("x-app-code", UjingApiConfig.APP_CODE_BUSINESS)
-                .header("x-app-version", UjingApiConfig.APP_VERSION_BUSINESS)
-                .header("weex-version", UjingApiConfig.WEEX_VERSION)
-                .header("User-Agent", UjingApiConfig.UA_BUSINESS)
-        }
-        if (!token.isNullOrBlank()) builder.header("Authorization", "Bearer $token")
-        when (method) {
-            "POST" -> builder.post((body?.toString() ?: "{}").toRequestBody(JSON_MEDIA))
-            else -> builder.get()
-        }
-        val (httpCode, text) = http.newCall(builder.build()).execute().use { response ->
-            response.code to response.body?.string().orEmpty()
-        }
-        try {
+        val text = response.bodyAsText()
+        val httpCode = response.status.value
+        return try {
             QiekjJson.json.decodeFromString(UjingEnvelope.serializer(), text)
         } catch (e: SerializationException) {
+            // 业务码与 HTTP 码分开：这里的 -1 是「解析不出壳」的固定标记，不是 HTTP 状态。
             throw UjingApiException("响应格式异常（HTTP $httpCode）", -1, e)
         }
     }
