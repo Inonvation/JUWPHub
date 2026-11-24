@@ -581,8 +581,8 @@ fun XgFormScreen(form: XgForm, onBack: () -> Unit) {
 
     if (showCasLoginDialog) {
         CasLoginDialog(
-            cas = cas,
-            vault = Graph.credentialVault(context),
+            onVerify = { u, p -> cas.tryLogin(u, p) },
+            onSave = { u, p -> Graph.credentialVault(context).saveCas(u, p) },
             title = "登录学校统一认证",
             description = "报修、请假等学工服务需要统一认证账号。保存后 App 会自动登录，" +
                 "不再需要每次输入。密码加密存本机，可随时在「我的 → 学校统一认证」退出并清除。",

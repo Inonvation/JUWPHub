@@ -17,8 +17,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.session.CasEnsureResult
-import edu.jxslu.schedule.data.session.CasSession
-import edu.jxslu.schedule.data.session.CredentialVault
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -38,13 +36,23 @@ import kotlinx.coroutines.launch
  *
  * 三处入口共用（教务导入 / 学工表单 / 成绩单授权）；「先跳过」的处置由调用方定
  * （一般是本窗口不再问，手登成功后的补存弹窗也不再弹）。
+ *
+ * ## 为什么验证与落库是回调，而不是 `CasSession` / `CredentialVault` 参数
+ *
+ * 那两个类还在 `:app`（`data/session/`，介质是 OkHttp 与 `EncryptedSharedPreferences`），
+ * 共享层看不见；而这个弹层本身是纯 UI。收成两个函数参数后，弹层只剩「输入 → 验证 → 落库 →
+ * 回调宿主」四步，iOS 侧届时接自己的传输层与 Keychain 即可，不用改这里一行。
+ *
+ * [onVerify] 必须**原样抛取消异常**（结构化取消纪律）：宿主实现里不要用 `runCatching`。
  */
 @Composable
 fun CasLoginDialog(
-    cas: CasSession,
-    vault: CredentialVault,
     title: String,
     description: String,
+    /** 验证一对凭据；宿主接自己的传输层（Android = `CasSession.tryLogin`）。 */
+    onVerify: suspend (username: String, password: String) -> CasEnsureResult,
+    /** 验证通过后落库；宿主接自己的凭证仓（Android = `CredentialVault.saveCas`）。 */
+    onSave: (username: String, password: String) -> Unit,
     onSaved: () -> Unit,
     onSkip: () -> Unit,
 ) {
@@ -107,7 +115,7 @@ fun CasLoginDialog(
                         // 不用 runCatching：它会连 CancellationException 一起吞（窗口销毁后
                         // 登录链还在后台跑完）。取消必须原样抛（结构化取消纪律）
                         val result = try {
-                            cas.tryLogin(username, password)
+                            onVerify(username, password)
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             throw e
                         } catch (_: Exception) {
@@ -116,7 +124,7 @@ fun CasLoginDialog(
                         busy = false
                         when (result) {
                             is CasEnsureResult.Ready -> {
-                                vault.saveCas(username, password)
+                                onSave(username, password)
                                 onSaved()
                             }
                             // 文案按结果分类（口径对齐引导页 JwStep）：密码错 / 网络不通 /

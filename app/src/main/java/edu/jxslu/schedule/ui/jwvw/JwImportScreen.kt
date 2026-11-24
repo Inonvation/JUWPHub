@@ -1989,8 +1989,8 @@ fun JwImportScreen(
     // 重载后落 CAS 页时自动填表（读新存的凭据）接管提交，全程免手输。
     if (showCasLoginDialog) {
         CasLoginDialog(
-            cas = cas,
-            vault = Graph.credentialVault(context),
+            onVerify = { u, p -> cas.tryLogin(u, p) },
+            onSave = { u, p -> Graph.credentialVault(context).saveCas(u, p) },
             title = "登录学校统一认证",
             description = "保存后，课表导入、报修、成绩单等教务功能会自动登录，" +
                 "不再需要每次输入。密码加密存本机，可随时在「我的 → 学校统一认证」退出并清除。",
@@ -2016,8 +2016,8 @@ fun JwImportScreen(
     // 重载预热入口让下一次会话失效时自动填表立即可用；当前页面不强制打断
     if (showSaveCredentialPrompt) {
         CasLoginDialog(
-            cas = cas,
-            vault = Graph.credentialVault(context),
+            onVerify = { u, p -> cas.tryLogin(u, p) },
+            onSave = { u, p -> Graph.credentialVault(context).saveCas(u, p) },
             title = "保存账号密码？",
             description = "刚刚登录成功。保存后，会话过期时 App 会自动重新登录，" +
                 "不再需要手动输入。密码加密存本机，可随时在「我的 → 学校统一认证」退出并清除。",
