@@ -28,7 +28,7 @@ import kotlinx.coroutines.CancellationException
  * |---|---|---|
  * | [ensureValid] | 看 `WebCookies` 里有没有 `JSESSIONID` | 有 = 登录过；没有 = 让人去登录页 |
  * | [fetchHtml] | 用那串 Cookie 发一次 GET | 拿回 HTML 交给共享层的解析器 |
- * | [hasCookies] | 同一个判据，同步、不发请求 | 报修同步据此决定要不要顺带探一次会话 |
+ * | [hasCookies] | 同一个判据，**不发请求** | 报修同步据此决定要不要顺带探一次会话 |
  * | [postForm] | 用那串 Cookie 发一次表单 POST | 学工报修的「个人提交记录」是 POST 接口 |
  *
  * ## 为什么不做「自动登录填表」
@@ -93,8 +93,12 @@ class IosJwReadSession(
      * 判据与 [ensureValid] 同一条：`WebCookies` 里那个域的 Cookie 头带 `JSESSIONID`。
      * 共享层的报修同步用它决定「要不要顺带走一次 CAS 探测」——iOS 侧没有可自动登录的
      * 凭证，这里回 false 只会让它少一次必然失败的探测。
+     *
+     * **是 suspend**：iOS 读 Cookie 走 `WKWebsiteDataStore.getAllCookies`（异步回调），
+     * 没有 Android `CookieManager` 那种同步读法。接口因此整体声明成 suspend，
+     * Android 那份实现体不用改（只是多一个修饰符）。
      */
-    override fun hasCookies(): Boolean =
+    override suspend fun hasCookies(): Boolean =
         WebCookies.headerFor(JwUrls.SCHEDULE_LIST)?.contains(JSESSIONID, ignoreCase = true) == true
 
     /**

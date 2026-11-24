@@ -108,7 +108,7 @@ interface JwReadSession {
      * 给「可选自动检查」用：拿不到就跳过这次检查，而不是为了它完整登一次统一认证。
      * Android 读 OkHttp 的 cookie jar，iOS 读 `WKWebsiteDataStore`（`WebCookies`）。
      */
-    fun hasCookies(): Boolean
+    suspend fun hasCookies(): Boolean
 
     /**
      * 带会话 **POST 表单**（读语义：查询类接口，重发安全）。

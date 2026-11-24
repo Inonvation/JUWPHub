@@ -60,7 +60,7 @@ class CasSession(
      * 直接走 [ensureValid]，每个冷启动都会完整登一次 CAS（教务侧脚本已经踩过风控）。
      * 调用方可以按「已有 cookie 才顺带用 CAS，否则退 WebView 会话」来避免这次登录。
      */
-    override fun hasCookies(): Boolean = http.hasCookies()
+    override suspend fun hasCookies(): Boolean = http.hasCookies()
 
     /** [ensureValid] 的实现体；调用方必须已经持有 [loginMutex]（Mutex 不可重入）。 */
     private suspend fun ensureValidLocked(): CasEnsureResult {
