@@ -6,7 +6,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.domain.CourseKind
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.me.CalendarSettingsScreen
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
 import edu.jxslu.schedule.ui.me.JwAccountScreen
@@ -78,6 +80,7 @@ import edu.jxslu.schedule.ui.ujing.UjingScreen
 import edu.jxslu.schedule.ui.water.WaterScreen
 import edu.jxslu.schedule.ui.weather.WeatherScreen
 import edu.jxslu.schedule.ui.weather.WeatherSettingsScreen
+import edu.jxslu.schedule.ui.weather.WeatherViewModel
 import edu.jxslu.schedule.ui.toolbox.CainiaoQueryScreen
 import edu.jxslu.schedule.ui.toolbox.StitchScreen
 import edu.jxslu.schedule.ui.toolbox.ToolboxScreen
@@ -341,7 +344,14 @@ class SubpageActivity : ComponentActivity() {
             )
             SubpageScreen.AI_SETTINGS -> AiSettingsScreen(onBack = onBack)
             SubpageScreen.AI_HISTORY -> AiHistoryScreen(onBack = onBack)
-            SubpageScreen.INBOX -> InboxScreen(onBack = onBack)
+            // 收件箱（S19 搬进共享层）：route 解析留在页内，跳页这一件平台事由宿主给。
+            // 参数是「已经解析好的 SubpageScreen」，认不出 route 的消息在页内就被挡掉了。
+            SubpageScreen.INBOX -> InboxScreen(
+                onBack = onBack,
+                onOpenSubpage = { target, focus ->
+                    SubpageActivity.start(this, target, focusItemId = focus)
+                },
+            )
             // focusItemId 对 SCHEDULE_SHARE 复用为「进页时预览哪一周」（课表页分享弹层第 4 行）
             SubpageScreen.SCHEDULE_SHARE ->
                 ScheduleShareScreen(
@@ -351,8 +361,13 @@ class SubpageActivity : ComponentActivity() {
             SubpageScreen.APPEARANCE_SETTINGS -> AppearanceSettingsScreen(
                 onBack = onBack,
             )
-            // 天气（DESIGN §3.29）：详情与设置各自独立窗口，与其它二级页同规格
-            SubpageScreen.WEATHER -> WeatherScreen(onBack = onBack)
+            // 天气（DESIGN §3.29）：详情与设置各自独立窗口，与其它二级页同规格。
+            // 详情页（S19 搬进共享层）的 ViewModel 由宿主建：`viewModel { }` 保留配置变更
+            // （旋转）不重建，仓库从共享层的 Services 取（与今日页顶栏提示同一份单例）。
+            SubpageScreen.WEATHER -> WeatherScreen(
+                viewModel = viewModel { WeatherViewModel(Services.current.weatherRepository()) },
+                onBack = onBack,
+            )
             SubpageScreen.WEATHER_SETTINGS -> WeatherSettingsScreen(
                 onBack = onBack,
                 onOpenWeather = { SubpageActivity.start(this, SubpageScreen.WEATHER) },

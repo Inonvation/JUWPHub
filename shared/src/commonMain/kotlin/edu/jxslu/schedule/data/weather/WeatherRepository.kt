@@ -1,6 +1,8 @@
 package edu.jxslu.schedule.data.weather
 
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.WeatherSnapshot
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -20,13 +22,22 @@ import kotlinx.coroutines.sync.withLock
  * 并发：同一时刻只放一个请求出去（[mutex] + 双检），今日页与详情页同时进也只是
  * 共用一次取数。不做跨进程持久化——缓存是「省请求」的手段，不是数据资产，
  * 冷启动重取一次比落盘对账便宜。
+ *
+ * ## 搬进共享层改了什么（iOS 移植 S19，2026-11-25）
+ *
+ * 本类此前留在 `:app`（`data/weather/`），是天气页搬家的唯一阻碍：`WeatherViewModel`
+ * 的构造签名里就有它，而 `commonMain` 看不见 `:app` 的类型。包名不变，所以
+ * `Graph.weatherRepository` 与 `TodayViewModel` 的调用点一个字没改。
+ *
+ * 两处平台专有写法：`System::currentTimeMillis` → [AppClock.nowMillis]（唯一「现在」来源），
+ * `@Volatile` 显式 `import kotlin.concurrent.Volatile`（JVM 侧靠默认导入，commonMain 不默认导入）。
  */
 class WeatherRepository(
     private val api: WeatherApi = WeatherApi.create(),
     private val lat: Double = WeatherApi.CAMPUS_LAT,
     private val lng: Double = WeatherApi.CAMPUS_LNG,
     private val ttlMillis: Long = DEFAULT_TTL_MILLIS,
-    private val clock: () -> Long = System::currentTimeMillis,
+    private val clock: () -> Long = AppClock::nowMillis,
 ) {
 
     companion object {

@@ -14,6 +14,7 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
 
@@ -101,10 +102,11 @@ interface AppServices {
     fun homeworkRepository(): HomeworkRepository
 
     /**
-     * 收件箱仓库（DESIGN §3.24）。
+     * 收件箱仓库（DESIGN §4.38）。
      *
-     * **非空**：`inbox_messages` 是本地表，两端都能读写；今日页的收件箱卡
-     * （`ui/today/InboxTodayCard`，iOS 移植 S16）直接订阅它，收件箱页同理。
+     * **非空**：`inbox_messages` 是单表 Room，写入方全是各业务 Sync、读取方是收件箱页
+     * 与今日页的收件箱卡，哪一端都建得起来。类型早就在 commonMain
+     * （`data/repo/InboxRepository`），此前缺的只是这个入口。
      */
     fun inboxRepository(): InboxRepository
 
@@ -144,6 +146,17 @@ interface AppServices {
 
     /** 电表读数本机记录（DESIGN §3.13「用电统计」）：本地表，两端都能读写。 */
     fun powerReadingStore(): PowerReadingStore
+
+    // ---- 天气（iOS 移植 S19，2026-11-25） ----
+
+    /**
+     * 天气仓库（DESIGN §3.29）。
+     *
+     * **非空**：纯 Ktor（Open-Meteo）+ 进程内 TTL 缓存，不碰凭证、不落盘，两端都建得起来。
+     * 今日页顶栏那行提示与天气详情页共用这一份——必须是同一个实例，否则两个页面各取一次数，
+     * 30 分钟 TTL 等于白设（免费档按请求数算）。
+     */
+    fun weatherRepository(): WeatherRepository
 }
 
 /**

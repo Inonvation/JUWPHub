@@ -2,7 +2,6 @@ package edu.jxslu.schedule.ui.weather
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,12 +20,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -35,7 +31,6 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,34 +38,35 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.weather.WeatherApi
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.domain.WeatherAdvice
 import edu.jxslu.schedule.domain.WeatherCodes
 import edu.jxslu.schedule.domain.WeatherDay
 import edu.jxslu.schedule.domain.WeatherHour
 import edu.jxslu.schedule.domain.WeatherSnapshot
 import edu.jxslu.schedule.domain.dayLabel
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.DisableStretchOverscroll
 import edu.jxslu.schedule.ui.common.EmptyHint
+import edu.jxslu.schedule.ui.common.PageBackButton
 import edu.jxslu.schedule.ui.common.SkeletonBox
 import edu.jxslu.schedule.ui.common.SkeletonLine
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
-import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.ui.icon.AppIcons
+import kotlin.math.roundToInt
+import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
 import kotlinx.datetime.daysUntil
-import java.time.Instant
-import java.time.ZoneId
-import kotlin.math.roundToInt
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * 天气详情页（DESIGN §3.29）。落点：今日页顶栏那行提示（功能开启时）/ 天气设置页的「查看天气」。
@@ -84,14 +80,21 @@ import kotlin.math.roundToInt
  * 2. **下拉刷新**：阈值与 `PullToRefreshDefaults.Indicator` **必须同值**，
  *    容器吃 Scaffold 的 padding（否则指示器整条轨迹藏在顶栏后面）；
  * 3. 数据来自 Open-Meteo（CC BY 4.0），**署名不能删**。
+ *
+ * ## 搬进共享层改了什么（iOS 移植 S19，2026-11-25）
+ *
+ * [viewModel] 由宿主创建（`commonMain` 没有 `viewModel()` 这个 Composable，
+ * 见 design/ios-port.md §11.1）：Android `viewModel { WeatherViewModel(…) }`、
+ * iOS `remember { WeatherViewModel(…) }`。数据源从 `Graph.weatherRepository(context)`
+ * 换成 `Services.current.weatherRepository()`，本文件不再认识 `Context`。
+ * 另有两处 JVM 专有写法换成共享层等价物：`java.time` → `kotlinx.datetime` + [AppClock]、
+ * `"%02d时".format(…)` → [TextFmt.pad]。
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun WeatherScreen(
+    viewModel: WeatherViewModel,
     onBack: () -> Unit,
-    viewModel: WeatherViewModel = viewModel(
-        factory = WeatherViewModel.Factory(Graph.weatherRepository(LocalContext.current)),
-    ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val haptics = rememberAppHaptics()
@@ -109,11 +112,8 @@ fun WeatherScreen(
                         )
                     }
                 },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
+                // 返回键走 ui/common 的统一形态：共享层不用 material 的 ArrowBack
+                navigationIcon = { PageBackButton(onBack) },
             )
         },
     ) { padding ->
@@ -126,9 +126,12 @@ fun WeatherScreen(
         // 而本页是一条 `Column + verticalScroll` 的长内容（约 4 屏、30 多个 emoji 字形），
         // 拉伸那一帧要整块重栅格化，就是这个卡顿；今日页/问渠那种 LazyColumn 的图层只有
         // 一屏高，所以没这问题。本页是展示型静态页，边到边回弹没有信息量，直接关掉。
-        // `LocalOverscrollConfiguration provides null` 是这套 API 的正规开关（glow 与
-        // stretch 都归它管）；**别删**——删了就回到「触底卡一下」。
-        CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+        // **别删**——删了就回到「触底卡一下」。
+        //
+        // 搬迁前这里是 `CompositionLocalProvider(LocalOverscrollConfiguration provides null)`：
+        // 那个 API 在 CMP 1.7.3 的 commonMain 里不存在（元数据门禁当场报 Unresolved），
+        // 所以收成 `ui/common/DisableStretchOverscroll` 一条缝，Android 侧仍是同一个开关。
+        DisableStretchOverscroll {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -325,7 +328,9 @@ private fun HourCell(hour: WeatherHour, isNow: Boolean) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = if (isNow) "现在" else "%02d时".format(hour.time.hour),
+            // 原来写 `"%02d时".format(hour.time.hour)`：`String.format` 是 JVM 专有，
+            // commonMain 里没有。补零口径与 TextFmt.pad 全项目一致。
+            text = if (isNow) "现在" else TextFmt.pad(hour.time.hour) + "时",
             style = MaterialTheme.typography.labelSmall,
             color = if (isNow) {
                 MaterialTheme.colorScheme.primary
@@ -564,10 +569,15 @@ private fun Attribution(loadedAtMs: Long, stale: Boolean) {
     }
 }
 
+/**
+ * 「更新于」时刻。搬迁前是 `Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())`
+ * 再 `"%02d:%02d".format(…)`——两样都是 JVM 专有。现在走 kotlinx 的
+ * [Instant.toLocalDateTime] + [TextFmt.pad]，时区口径仍是「设备当前时区」。
+ */
 private fun updatedAtText(millis: Long): String? {
     if (millis <= 0L) return null
-    val time = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalTime()
-    return "%02d:%02d 更新".format(time.hour, time.minute)
+    val time = Instant.fromEpochMilliseconds(millis).toLocalDateTime(TimeZone.currentSystemDefault())
+    return TextFmt.pad(time.hour) + ":" + TextFmt.pad(time.minute) + " 更新"
 }
 
 // ---------------------------------------------------------------------------

@@ -7,8 +7,11 @@ import edu.jxslu.schedule.ui.icon.AppIcons
 /**
  * 收件箱各来源的行首图标（图标名全部查过本地 JAR 或项目已在用，勿在此替换成没查过的名字）。
  * 收件箱页与今日页收件箱卡共用——两处各写迟早漂。
+ *
+ * **public 而不是 internal**（iOS 移植 S19）：今日页的收件箱卡（`ui/today/InboxTodayCard`）
+ * 还留在 `:app`，跨模块看不见 `internal`。等今日页搬过来再收窄也不迟。
  */
-internal fun inboxKindIcon(kind: String): ImageVector = when (
+fun inboxKindIcon(kind: String): ImageVector = when (
     runCatching { InboxKind.valueOf(kind) }.getOrDefault(InboxKind.EXAM)
 ) {
     InboxKind.EXAM -> AppIcons.Calendar01

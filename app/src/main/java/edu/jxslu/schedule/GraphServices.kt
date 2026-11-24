@@ -15,6 +15,7 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
 import edu.jxslu.schedule.platform.AppServices
@@ -62,6 +63,8 @@ class GraphServices(private val context: Context) : AppServices {
 
     override fun homeworkRepository(): HomeworkRepository = Graph.homeworkRepository(appContext)
 
+    // 收件箱：页面搬进共享层后要它。转给 `Graph` 的同一份单例——收件箱是旁路留痕，
+    // 页面读的与各 Sync 写的必须是同一个仓库实例，否则今日页角标与收件箱页会对不上。
     override fun inboxRepository(): InboxRepository = Graph.inboxRepository(appContext)
 
     // ---- 一卡通 / 寝室电费（S14） ----
@@ -77,4 +80,9 @@ class GraphServices(private val context: Context) : AppServices {
     override fun powerRepository(): PowerRepository = Graph.powerRepository(appContext)
 
     override fun powerReadingStore(): PowerReadingStore = Graph.powerReadingStore(appContext)
+
+    // ---- 天气（S19） ----
+    //
+    // 转给 `Graph` 的同一份单例：今日页顶栏提示与天气详情页共用它（30 分钟 TTL 才有意义）。
+    override fun weatherRepository(): WeatherRepository = Graph.weatherRepository(appContext)
 }
