@@ -1,18 +1,16 @@
 package edu.jxslu.schedule.domain
 
-import java.util.Locale
 import kotlin.math.abs
 
 /**
- * 定宽文本格式化（iOS 移植 P-1 第 3 批，2026-11-24）。
+ * 定宽文本格式化（iOS 移植 P-1 第 3 批，2026-11-24；P0 起在 `:shared` 的 commonMain）。
  *
  * `String.format` 是 JVM 专有 API，Kotlin/Native 上没有对应物；这类调用原先散在十来个文件里。
  * 纯整数的三种（补零、`HH:mm`、两位十六进制）在这里改成纯 Kotlin 实现，跨平台无差异。
  *
- * [decimals] 仍走 `String.format`：**不要**在这里手写浮点舍入——`%.1f` / `%.2f` 的边界值
- * （12.345 这种）手写实现会和原显示差一分钱，详见 [MoneyFormat.yuanText] 的说明。
- * 它保留在原地的目的是把十来个调用点收成一个；P1 拆模块时这一处改成 `expect/actual`
- * （Android 用 `String.format`，iOS 用 `NSString(format:)`），调用方不用动。
+ * [decimals] 走 [formatFixed]（`expect/actual`）：**不要**在这里手写浮点舍入——
+ * `%.1f` / `%.2f` 的边界值（`1.045` 这种）手写实现会和原显示差一分钱，
+ * 详见 [PlatformFormat] 与 [MoneyFormat.yuanText] 的说明。
  */
 object TextFmt {
 
@@ -31,6 +29,5 @@ object TextFmt {
     fun hex2(value: Int): String = value.toString(16).padStart(2, '0')
 
     /** 定点小数，等价 `String.format(Locale.ROOT, "%.<places>f", value)`。 */
-    fun decimals(value: Double, places: Int): String =
-        String.format(Locale.ROOT, "%.${places}f", value)
+    fun decimals(value: Double, places: Int): String = formatFixed(value, places)
 }

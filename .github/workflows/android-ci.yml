@@ -59,6 +59,13 @@ jobs:
         shell: pwsh
         run: ./scripts/check-domain-portability.ps1
 
+      # 权威门禁（2026-11-24，iOS 移植 P0）：`:shared` 的 commonMain 由真编译器按 Kotlin
+      # **公共**标准库编译，看不见 JDK，任何 java.* / javax.* / okhttp3 / zxing 都当场报
+      # `Unresolved reference`。比上面那条文本扫描硬，而且 `ios*` target 在 linux runner 上
+      # 同样被跳过、只有元数据编译在跑——所以这条 CI 里也验得动。
+      - name: shared commonMain 元数据编译（iOS 纯净性门禁）
+        run: ./gradlew :shared:metadataCommonMainClasses
+
       - name: 单元测试
         run: ./gradlew :app:testDebugUnitTest
 

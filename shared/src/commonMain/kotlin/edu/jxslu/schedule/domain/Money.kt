@@ -1,5 +1,9 @@
 package edu.jxslu.schedule.domain
 
+// commonMain 不默认导入 `kotlin.jvm.*`（JVM 模块才会），所以 `@JvmInline` 必须显式 import。
+// 别把它当成「多余 import」删掉——删掉后 JVM 目标会报「Value classes without '@JvmInline'」。
+import kotlin.jvm.JvmInline
+
 /**
  * 金额，内部是整数「分」（iOS 移植 P-1 第 4 批，2026-11-24）。
  *

@@ -1,4 +1,4 @@
-﻿# JUWPHub · Agent 工作规范
+# JUWPHub · Agent 工作规范
 
 本文件给 AI Agent / 结对工具读。人看 `README.md` 与 `DESIGN.md`。
 
@@ -14,7 +14,7 @@
 - 仓库名 JUWPHub；包名不变
 - 学校：江西水利电力大学（**非官方**；对外文案必须免责声明）
 - 包名：`edu.jxslu.schedule`（debug 变体加 `.debug` 后缀，详见「工程实况」）
-- 形态：单模块 `:app` · Kotlin · Compose + Material3 · minSdk 26 / compileSdk 36 / targetSdk 36
+- 形态：两模块 `:app`（Android 宿主）+ `:shared`（KMP 共享逻辑：commonMain / androidMain / iosMain）· Kotlin · Compose + Material3 · minSdk 26 / compileSdk 36 / targetSdk 36
 
 ## 怎么用这份文件
 
@@ -125,6 +125,9 @@ Get-ChildItem -Recurse -Include *.md,*.kt | Select-String -Pattern '<旧说法>'
 # APK: app\build\outputs\apk\debug\app-debug.apk
 # release（R8 压缩 + 签名，约 1.5 分钟）：app\build\outputs\apk\release\app-release.apk
 .\gradlew.bat :app:assembleRelease --offline
+# iOS 纯净性门禁：commonMain 按 Kotlin 公共标准库编译，看不见 JDK。
+# 动过 shared/src/commonMain 必跑（Windows 上就能验，不需要 macOS）。
+.\gradlew.bat :shared:metadataCommonMainClasses --offline
 ```
 
 - 用例数从 `app/build/test-results/testDebugUnitTest/*.xml` 汇总（Gradle 成功时不打印用例数）：
@@ -279,8 +282,12 @@ MainActivity
 └─ 独立窗口：Settings / JwImport（含 Browse 与 TeachingEval）/ Transcript / XgForm /
    PowerBankPay / Onboarding / SubpageActivity（二级页，路由枚举见 SubpageScreen）
 
-domain/       纯 JVM 逻辑：课程/作息/学期/成绩/考试/调课差异/笔记作业/单车/水控/AI prompt/
-              问渠规则/天气/百宝箱/报修/选课（按主题分文件，单测在 app/src/test）
+shared/       KMP 共享逻辑（iOS 移植 P0 起）：commonMain = 两平台共用（目前有 TextFmt / Money /
+              PlatformFormat），androidMain / iosMain 只放 expect/actual 的平台实现。
+              **commonMain 必须零 JVM 专有 API**，判据是 `:shared:metadataCommonMainClasses`
+data/         Android 平台实现（Room / Retrofit / DataStore / 通知 / 蓝牙 …）
+domain/       纯 JVM 逻辑（**正在搬进 shared/commonMain**）：课程/作息/学期/成绩/考试/调课差异/
+              笔记作业/单车/水控/AI prompt/问渠规则/天气/百宝箱/报修/选课（单测在 app/src/test）
 data/local    Room v21（表清单见「工程实况」；迁移只加不删，实体索引必须与迁移对齐）
 data/repo     ScheduleRepository（备份模型在 ScheduleBackup）+ 各业务 Repository / Sync
 data/prefs    DataStore 显示偏好（DisplayPrefsStore + 按功能拆出的扩展文件）

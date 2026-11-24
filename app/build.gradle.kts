@@ -148,6 +148,10 @@ ksp {
 }
 
 dependencies {
+    // iOS 移植 P0（2026-11-24）：`:shared` 放两个平台都要用的纯逻辑，`:app` 只留平台实现。
+    // `api` 出去的 kotlinx-datetime / kotlinx-serialization 会经它传递过来，版本以 shared 为准。
+    implementation(project(":shared"))
+
     val composeBom = platform("androidx.compose:compose-bom:2024.10.00")
     implementation(composeBom)
 

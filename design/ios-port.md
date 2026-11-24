@@ -273,18 +273,39 @@ iosApp/            薄壳：Xcode 工程、SwiftUI 入口、WidgetKit 扩展、I
 224 行 / 15 处 java.time、`ScheduleOverrides`、`SemesterConfig`），调用方一律
 `toKotlinLocalDate()` 桥接；核心干净之后，剩下的 20 多个文件才是纯机械替换。
 
-**`domain/` 剩余 JVM 专有面（2026-11-24 复核）**：
+**`domain/` 剩余 JVM 专有面（2026-11-24 P0 起复核，已从 6 类降到 2 类）**：
 
 | API | 处数 | 卡点 |
 |---|---|---|
-| `java.time` | 1 处 | 只剩 `Homework.dueDate`（Room 实体字段，按约定保留；转换都在 domain 边界做） |
-| `java.text.SimpleDateFormat` / `java.util.Date` | 各 1 处 | `QzxyWatering` 的开阀时刻文案，随 java.time 一起换 |
-| `java.util.Locale` | 2 处 | `TextFmt.decimals` 的 `Locale.ROOT`（P1 随 `String.format` 一起变 expect/actual）与另一处 |
-| `com.google.zxing` | 17 | iOS 无对应，需换 KMP 条码库或只保留生成侧 |
-| `javax.crypto` | 3 | `QzxyClData` 的 AES，要 CommonCrypto expect/actual |
-| `okhttp3` | 1 | `HttpUrl`，随网络层一起换 |
+| `java.time` | 1 处 | 只剩 `Homework.dueDate`（Room 实体字段）。**已查明不痛**：`homework.dueDate` 在 schema v21 里是 `TEXT`，Room 内置转换器存的是 ISO-8601 文本，而 `kotlinx.datetime.LocalDate.toString()` 出的是同一个格式——P1 加一个 `LocalDate ↔ String` 的 `TypeConverter` 就能换类型，**旧数据不需要迁移** |
+| `com.google.zxing` | 17 | iOS 无对应，换成中性 `BarcodeMatrix` + `expect/actual`（Android 用 zxing，iOS 用 CoreImage）。这是 P0 之后第一批要做的 |
+
+已清零的 4 类，做法记在这里供后续同类问题照抄：
+
+| 原欠账 | 怎么清的 |
+|---|---|
+| `javax.crypto`（3 处，`QzxyClData` 的 AES-128） | 自己写纯 Kotlin AES（`domain/AesBlock.kt`），加密面只保留解密 + `NoPadding`。理由是这段只用**硬编码常量密钥**解服务端下发的一张凭据，风险等级低；纯实现让两个平台逐字节一致、可单测，还省掉一套 CommonCrypto 绑定。正确性用 FIPS-197 / SP 800-38A 标准向量钉死，并与 `javax.crypto`（只在测试侧用）交叉核对 |
+| `okhttp3`（1 处，`HttpUrl.resolve`） | 自己写 RFC 3986 §5.2 相对引用解析（`domain/UrlRef.kt`），照 §5.4 全套用例 + 本项目 5 类真实形态做测试。只覆盖「解析相对链接」这一件事，不是通用 URI 库 |
+| `java.text.SimpleDateFormat` / `java.util.Date`（各 1 处） | 换 `AppClock.dateTimeOf(epochMillis)` + `TextFmt.pad`。注意旧实现用的是 `SimpleDateFormat` 的**默认时区**（`Locale.CHINA` 只管语言不管时区），所以新实现走 `TimeZone.currentSystemDefault()`，不写死 `Asia/Shanghai` |
+| `java.util.Locale`（2 处，`TextFmt.decimals`） | `TextFmt` 搬进 `:shared/commonMain` 后，`decimals` 改成 `internal expect fun formatFixed(value, places)`：Android 用 `String.format`，iOS 用 `NSString(format:)`。**没有**手写浮点舍入——`1.045` 这类值「乘 100 再 round」会偏差一分（double 里 `1.045 * 100` 正好落在 `104.5`），金额显示扛不住，只能交给各平台的 printf |
 
 > `String.format` 已在第 3 批清零；`domain/` 里剩下的 `.format(…)` 全是日期格式化，随 `java.time` 一起处理。
+
+**P0 已完成的部分（2026-11-24）**：`shared/` 模块已建（`androidTarget` + `iosX64`/`iosArm64`/
+`iosSimulatorArm64`，后者在 Windows 上被 KGP 自动禁用、只留声明），`TextFmt` 与 `Money` 已搬进
+`shared/src/commonMain`，`:app` 用 `implementation(project(":shared"))` 依赖它。
+
+**这道门禁是可以本地验证的**（这是 P0 最关键的一条工程事实）：`.\gradlew
+:shared:metadataCommonMainClasses` 用 Kotlin **公共**标准库编译 `commonMain`，看不见 JDK——
+负向测试验过（往 commonMain 塞一行 `import java.util.Locale` → `Unresolved reference 'java'`，
+退出码 1）。所以「域层真纯净」这件事**不需要 macOS**，Windows 上就能验，已接进 CI。
+
+两个踩过的坑：
+- `commonMain` **不默认导入 `kotlin.jvm.*`**（只有 JVM 模块才默认导入），所以 `@JvmInline`
+  必须显式 `import kotlin.jvm.JvmInline`；少了它元数据编译报 `Unresolved reference 'JvmInline'`，
+  而只删注解又会在 Android 编译报 `Value classes without '@JvmInline'`——两头都要对。
+- 加 `org.jetbrains.kotlin.multiplatform` 插件后，第一次 `--offline` 构建会失败
+  （plugin marker 没进离线缓存），联网解析一次即可，之后恢复 `--offline`。
 
 **下一步的前提：已解除**（第 6 批）。`org.jetbrains.kotlinx:kotlinx-datetime:0.8.0` 已加进
 `app/build.gradle.kts`，一次联网构建把依赖拉进了本地缓存，之后照旧 `--offline` 构建。
