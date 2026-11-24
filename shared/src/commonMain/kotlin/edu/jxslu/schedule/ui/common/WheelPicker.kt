@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.domain.TextFmt
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -178,8 +179,8 @@ fun WheelPicker(
 }
 
 /** 「时：分」滚轮的常量表：每次重组新建 60 个格式化字符串纯属浪费，提到文件级。 */
-private val HOURS = (0..23).map { "%02d".format(it) }
-private val MINUTES = (0..59).map { "%02d".format(it) }
+private val HOURS = (0..23).map { TextFmt.pad(it) }
+private val MINUTES = (0..59).map { TextFmt.pad(it) }
 
 /**
  * 「时：分」双滚轮弹窗。initial 形如 "HH:mm"（解析失败回退 08:00），
@@ -202,6 +203,7 @@ fun TimeWheelDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+            // 窗口淡入必须放内容槽第一行（见 [DialogWindowFadeEffect]），放外面拿不到 dialog window
             DialogWindowFadeEffect()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) {
@@ -224,7 +226,7 @@ fun TimeWheelDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm("%02d:%02d".format(hour, minute)) }) { Text("确定") }
+            TextButton(onClick = { onConfirm(TextFmt.clock(hour * 60 + minute)) }) { Text("确定") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
@@ -246,6 +248,7 @@ fun WheelValueDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+            // 同 [TimeWheelDialog]，窗口淡入必须放内容槽第一行
             DialogWindowFadeEffect()
             Box(Modifier.fillMaxWidth()) {
                 WheelPicker(

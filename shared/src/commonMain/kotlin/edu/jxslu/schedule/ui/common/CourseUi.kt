@@ -45,6 +45,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.time.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.domain.monthDayText
@@ -609,6 +612,8 @@ fun courseTint(courses: List<Course>, courseName: String): Color =
 
 /** 时间戳 → `9月21日`（课程库「最近更新」文案口径）。 */
 fun epochMonthDay(millis: Long): String {
-    val date = java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault())
-    return monthDayText(date.monthValue, date.dayOfMonth)
+    // 走 kotlinx-datetime（0.8.0 起 Instant 由 kotlin.time 提供）：原实现用 java.time 的
+    // Instant + ZoneId.systemDefault，commonMain 里表达不出来；时区口径不变，仍是本机默认时区。
+    val date = Instant.fromEpochMilliseconds(millis).toLocalDateTime(TimeZone.currentSystemDefault())
+    return monthDayText(date.monthNumber, date.dayOfMonth)
 }

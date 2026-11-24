@@ -387,7 +387,14 @@ fun WeekScreen(
     // 换算口径收敛在 rememberGridTypeSpec（与「导出为图片」共用同一份，避免两处漂移）；
     // 上提到函数级是因为「表头高度」的动态下限 headerMinDp 要同时喂给两处：
     // 布局（渲染兜底防日期文字截断）与显示设置弹层（滑块 valueRange 从有效下限起步）。
-    val typeSpec = rememberGridTypeSpec(state, days)
+    val typeSpec = rememberGridTypeSpec(
+        gridFontDp = state.gridFontDp,
+        gridRoomDp = state.gridRoomDp,
+        gridTeacherDp = state.gridTeacherDp,
+        gridRailDp = state.gridRailDp,
+        gridDateDp = state.gridDateDp,
+        days = days,
+    )
     val gridScale = typeSpec.gridScale
     val roomFontSp = typeSpec.roomFontSp
     val teacherFontSp = typeSpec.teacherFontSp
@@ -407,7 +414,7 @@ fun WeekScreen(
     // 学期、偏好等任意数据变化而换新对象，而这些字段大多没动。`weekDate` 每次都要解析一遍
     // 开学日；`GridCellStyle` 是 `WeekPage` 的入参，每次 new 一个实例会让它的跳过判断失效。
     val monthLabel = remember(state.semester, displayWeek) {
-        weekDate(state.semester, displayWeek, 1)?.let { "${it.monthValue}月" }
+        weekDate(state.semester, displayWeek, 1)?.let { "${it.monthNumber}月" }
     }
     val cellStyle = remember(
         state.cellRadiusDp,

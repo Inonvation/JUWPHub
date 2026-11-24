@@ -11,6 +11,7 @@ import edu.jxslu.schedule.data.repo.UpdateCheckResult
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.UpdateCheck
 import edu.jxslu.schedule.ui.ai.clearAiImageCache
+import edu.jxslu.schedule.ui.common.HapticsSettings
 import edu.jxslu.schedule.ui.common.clearAttachmentImageCache
 import edu.jxslu.schedule.ui.ebike.EbikeAutoReturnReminder
 import edu.jxslu.schedule.ui.ebike.EbikeFreeRideReminder
@@ -65,6 +66,15 @@ class JuwApplication : Application() {
         // 「闪退了」时手上什么都没有。必须在任何 appScope.launch 之前装。
         CrashReporter.installUncaughtHandler(this)
         val repo = Graph.repository(this)
+        // 触感总开关（iOS 移植，2026-11-24）：触感实现已搬进 `:shared` 的 commonMain，
+        // 那一侧只认识 HapticsSettings 这个注入点、不认识 Graph / DataStore；这里把显示偏好
+        // 里的「触感」流接进去。收集的是「读最新值」的 lambda，**不触发重组**——开关只在手指
+        // 按下那一刻读一次，切换开关后也不需要重建任何 AppHaptics 实例（为什么不走
+        // CompositionLocal，见 HapticsSettings 的 KDoc）。默认 `{ true }`，与旧实现的
+        // `initialValue = true` 首帧口径一致。
+        appScope.launch {
+            repo.hapticsEnabled.collect { HapticsSettings.isEnabled = { it } }
+        }
         appScope.launch {
             // 仅保证节次与学期默认值；课表默认空，由教务导入。
             // runCatching 兜底：DataStore 损坏 / Room 异常不兜住就是每次冷启动必崩

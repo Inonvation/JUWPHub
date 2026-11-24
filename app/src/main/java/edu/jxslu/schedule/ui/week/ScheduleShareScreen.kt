@@ -165,7 +165,14 @@ fun ScheduleShareScreen(
     val sectionCount = maxOf(11, state.slots.maxOfOrNull { it.number } ?: 11)
     val visibleDays = state.visibleDays
     val days = visibleDays.size
-    val typeSpec = rememberGridTypeSpec(state, days)
+    val typeSpec = rememberGridTypeSpec(
+        gridFontDp = state.gridFontDp,
+        gridRoomDp = state.gridRoomDp,
+        gridTeacherDp = state.gridTeacherDp,
+        gridRailDp = state.gridRailDp,
+        gridDateDp = state.gridDateDp,
+        days = days,
+    )
 
     // 0 = 还没定：initialWeek 给了就用它，否则等数据就绪后落到本周
     var week by remember { mutableStateOf(initialWeek?.takeIf { it > 0 } ?: 0) }
@@ -304,8 +311,8 @@ fun ScheduleShareScreen(
                     week = previewWeek,
                     totalWeeks = totalWeeks,
                     rangeText = ScheduleShare.weekRangeText(
-                        weekDate(state.semester, previewWeek, visibleDays.firstOrNull() ?: 1)?.toKotlinLocalDate(),
-                        weekDate(state.semester, previewWeek, visibleDays.lastOrNull() ?: 7)?.toKotlinLocalDate(),
+                        weekDate(state.semester, previewWeek, visibleDays.firstOrNull() ?: 1),
+                        weekDate(state.semester, previewWeek, visibleDays.lastOrNull() ?: 7),
                     ),
                     enabled = !busy,
                     onChange = { week = it },
@@ -569,8 +576,8 @@ private fun ShareBoard(
                 timetableName = state.timetableName,
                 week = week,
                 rangeText = ScheduleShare.weekRangeText(
-                    weekDate(state.semester, week, visibleDays.firstOrNull() ?: 1)?.toKotlinLocalDate(),
-                    weekDate(state.semester, week, visibleDays.lastOrNull() ?: 7)?.toKotlinLocalDate(),
+                    weekDate(state.semester, week, visibleDays.firstOrNull() ?: 1),
+                    weekDate(state.semester, week, visibleDays.lastOrNull() ?: 7),
                 ),
             )
             Spacer(Modifier.height(BoardHeaderGap))
@@ -583,7 +590,7 @@ private fun ShareBoard(
                         layout = layout,
                         slots = state.slots,
                         monthLabel = weekDate(state.semester, week, visibleDays.firstOrNull() ?: 1)
-                            ?.let { "${it.monthValue}月" },
+                            ?.let { "${it.monthNumber}月" },
                         railFontSp = typeSpec.railFontSp,
                         dateFontSp = typeSpec.dateFontSp,
                     )

@@ -16,8 +16,8 @@ import edu.jxslu.schedule.domain.TimetablePrefs
 internal val IntraGap = 3.dp
 internal val InterGap = 6.dp
 
-/** 再挤不能低于这个高度，否则课程名放不下；不足时整表竖滑。 */
-internal val MinRowHeight = 40.dp
+/** 再挤不能低于这个高度，否则课程名放不下；不足时整表竖滑。`WeekGridLayoutTest` 在 :app 侧断言，故 public。 */
+val MinRowHeight = 40.dp
 
 /**
  * 课表右缘与屏幕右边的留白。
@@ -25,8 +25,10 @@ internal val MinRowHeight = 40.dp
  * 根因：此前列宽 =（总宽 − 时间轴宽度）/ 列数，网格精确贴满到屏幕右缘——
  * 静态看右侧顶死边界，翻周滑动时本周周日列与次周周一列之间零间隔、几乎连成一片。
  * 收进 16dp 后：网格右端离屏 16dp，滑动途中相邻两周的课也由它隔开。
+ *
+ * 公开：`WeekGridLayoutTest`（:app 侧）逐条断言这个留白，跨模块看不见 internal。
  */
-internal val GridEndGap = 16.dp
+val GridEndGap = 16.dp
 
 /**
  * 网格几何：行号 = 小节号（1–11）。
@@ -34,8 +36,11 @@ internal val GridEndGap = 16.dp
  * 根因：旧实现只有 5 行（大节），却拿小节号当行号用，
  * 于是 7-8 节的课落到第 7 行、9-10 节落到第 9 行，直接被画到网格外。
  * 现在行数与 `TimeSlot.number` 一一对应，不会再错位。
+ *
+ * 公开：[buildGridLayout] 的返回类型，`WeekScreen` / `ScheduleShareScreen` 与
+ * `WeekGridLayoutTest` 都在 :app 侧用它，跨模块看不见 internal。
  */
-internal data class GridLayout(
+data class GridLayout(
     val rowHeight: Dp,
     /** 下标 0 是第 1 节的顶部 */
     val rowTops: List<Dp>,
@@ -63,15 +68,21 @@ internal data class GridLayout(
  * [bottomChrome] = 悬浮底栏那一圈（胶囊 + 底距）**加**手势条，由调用方现读 inset 后传入；
  * 普通底栏形态差几 dp，落成行高零点几 dp，不分模式。
  * 下限 0：窗口小到减没了也不会把下游的除式带成负数。
+ *
+ * 公开：`:app` 的 `ScheduleShareScreen` / `WeekScreen` 与 `WeekGridLayoutTest` 都调用它。
  */
-internal fun shareBoardGridHeightDp(
+fun shareBoardGridHeightDp(
     windowHeight: Dp,
     statusBarHeight: Dp,
     topBarHeight: Dp,
     bottomChrome: Dp,
 ): Dp = (windowHeight - statusBarHeight - topBarHeight - bottomChrome).coerceAtLeast(0.dp)
 
-internal fun buildGridLayout(
+/**
+ * 网格几何的唯一构造入口（行高 / 每日列宽 / 表头高 / 时间轴宽）。
+ * 公开：`:app` 的 `WeekScreen` / `ScheduleShareScreen` 都用它建同一个几何。
+ */
+fun buildGridLayout(
     maxHeight: Dp,
     maxWidth: Dp,
     sectionCount: Int,
@@ -122,10 +133,13 @@ internal fun buildGridLayout(
  * 只会落在 17:10 下方 2.8dp，看起来像「卡住/偏了」；而它其实是准确的，
  * 是「把 110 分钟压进 12dp」这件事让它没法同时表示准确与直观。
  * 改成吸附后：下课边界与上课边界二选一，位置稳定且语义清楚（已上完 / 即将开始）。
+ *
+ * 公开：[nowMarker] 的返回类型，`:app` 的 `WidgetModel` 与 `WeekGridLayoutTest` 都在用。
  */
-internal data class NowMarker(val offsetY: Dp, val inBreak: Boolean)
+data class NowMarker(val offsetY: Dp, val inBreak: Boolean)
 
-internal fun nowMarker(
+/** 当前时刻在网格里的位置（见 [NowMarker]）；公开：`:app` 的 `WidgetModel` 与 `WeekGridLayoutTest` 调用。 */
+fun nowMarker(
     slots: List<TimeSlot>,
     layout: GridLayout,
     now: LocalTimeLike,
@@ -177,7 +191,10 @@ internal fun nowMarker(
  * 只是渲染时抬高，保证文字永远完整可见。
  *
  * 两行文字：主行 [dateFontSp] + 副行 0.92×，行高按 1.3 倍估，加上下呼吸空间 10dp。
+ *
+ * 公开：`:app` 的 `DisplaySettingsContent` / `DisplaySettingsOverlay`（滑块动态下限）与
+ * `WeekGridLayoutTest` 都调用它。
  */
-internal fun minHeaderHeightForDateFont(dateFontSp: Float): Float =
+fun minHeaderHeightForDateFont(dateFontSp: Float): Float =
     (dateFontSp * (1f + 0.92f) * 1.3f + 10f)
         .coerceIn(TimetablePrefs.MinDayHeaderHeightDp, TimetablePrefs.MaxDayHeaderHeightDp)

@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.week
 
 import androidx.compose.foundation.background
-import kotlinx.datetime.toJavaLocalDate
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.datetime.LocalDate
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseFilter
 import edu.jxslu.schedule.domain.LocalTimeLike
@@ -50,15 +50,19 @@ import edu.jxslu.schedule.ui.common.GridCourseCard
 import edu.jxslu.schedule.ui.common.SingleSectionCard
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.domain.shortDayText
-import java.time.LocalDate
 
 /** 色块在格子里的内缩。只留 1dp：WakeUp 风格的紧凑感来自「块几乎填满格子」，此前 3dp×2 加上行距显得松散。 */
 internal val CellGap = 1.dp
 
-internal val dayLabels = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+/** 表头单字来源（下标 = 星期 - 1）；`:app` 的 WeekScreen 也直接用，故 public。 */
+val dayLabels = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
+/**
+ * 左侧时间轴（节次号 + 起止时间 + 月份角标）。
+ * 与 [WeekPage] 一起被 `:app` 的 WeekScreen / ScheduleShareScreen 组合，故 public。
+ */
 @Composable
-internal fun TimeRail(
+fun TimeRail(
     layout: GridLayout,
     slots: List<TimeSlot>,
     monthLabel: String?,
@@ -139,8 +143,9 @@ internal fun TimeRail(
     }
 }
 
+/** 一周的网格主体（表头 + 课块 + 时刻线）；`:app` 的 WeekScreen / ScheduleShareScreen 组合，故 public。 */
 @Composable
-internal fun WeekPage(
+fun WeekPage(
     week: Int,
     layout: GridLayout,
     visibleDays: List<Int>,
@@ -265,7 +270,7 @@ internal fun WeekPage(
                     Text(
                         // 日期恒在；放假 / 补课降级成不占位的单字标记（详情在点开的弹窗里）
                         text = buildString {
-                            append(date?.let { shortDayText(it.monthValue, it.dayOfMonth) } ?: "—")
+                            append(date?.let { shortDayText(it.monthNumber, it.dayOfMonth) } ?: "—")
                             when {
                                 suspended -> append("假")
                                 followed -> append("补")
@@ -492,8 +497,9 @@ private fun NowLine(
     )
 }
 
+/** 空课表提示（含「从教务导入」入口）；`:app` 的 WeekScreen 使用，故 public。 */
 @Composable
-internal fun EmptyScheduleHint(
+fun EmptyScheduleHint(
     filter: CourseFilter,
     onOpenJwImport: () -> Unit,
     tapBlankToAdd: Boolean = true,
@@ -529,5 +535,14 @@ internal fun EmptyScheduleHint(
     }
 }
 
-internal fun weekDate(semester: SemesterConfig?, week: Int, day: Int): LocalDate? =
-    ScheduleCalculator.dateOf(semester, week, day)?.toJavaLocalDate()
+/**
+ * 某周某天对应的日期（`SemesterConfig.startDate` + 周次 + 星期推出来的）；学期未配置或越界返回 null。
+ *
+ * 公开的原因：课表页的月份角标（`WeekScreen`）与「导出为图片」的前后界限（`ScheduleShareScreen`）
+ * 都在 `:app` 里读它，跨模块看不见 `internal`。
+ *
+ * 返回 `kotlinx.datetime.LocalDate`：`:shared` 的 domain 层本来就返回这个类型，这里不再往
+ * `java.time` 转一手——转手过的值在 commonMain 里根本表达不出来。
+ */
+fun weekDate(semester: SemesterConfig?, week: Int, day: Int): LocalDate? =
+    ScheduleCalculator.dateOf(semester, week, day)
