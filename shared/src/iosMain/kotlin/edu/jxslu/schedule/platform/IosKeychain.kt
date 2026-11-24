@@ -2,8 +2,8 @@ package edu.jxslu.schedule.platform
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.COpaquePointerVar
 import kotlinx.cinterop.alloc
-import kotlinx.cinterop.cstr
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.readBytes
@@ -18,7 +18,6 @@ import platform.CoreFoundation.CFDictionaryCreateMutable
 import platform.CoreFoundation.CFRelease
 import platform.CoreFoundation.CFStringCreateWithCString
 import platform.CoreFoundation.CFStringRef
-import platform.CoreFoundation.CFTypeRefVar
 import platform.CoreFoundation.kCFBooleanTrue
 import platform.CoreFoundation.kCFStringEncodingUTF8
 import platform.Security.SecItemAdd
@@ -85,9 +84,12 @@ internal object IosKeychain {
             CFDictionaryAddValue(dict, kSecReturnData, kCFBooleanTrue)
             CFDictionaryAddValue(dict, kSecMatchLimit, kSecMatchLimitOne)
 
-            val holder = alloc<CFTypeRefVar>()
-            if (SecItemCopyMatching(dict, holder.ptr) != errSecSuccess) return null
-            val data: CFDataRef? = holder.value?.reinterpret()
+            // `SecItemCopyMatching` 的出参在 Kotlin/Native 里声明成 `CFTypeRefVar`，
+            // 但那个类型没有暴露 `.value`；用 `COpaquePointerVar` 接再 reinterpret，
+            // 语义相同（两者都是「一个指针变量的地址」）。
+            val out = alloc<COpaquePointerVar>()
+            if (SecItemCopyMatching(dict, out.ptr.reinterpret()) != errSecSuccess) return null
+            val data: CFDataRef? = out.value?.reinterpret()
             if (data == null) return null
             val length = CFDataGetLength(data).toInt()
             val bytes = CFDataGetBytePtr(data)
@@ -173,8 +175,10 @@ internal object IosKeychain {
     }
 
     private fun newCFString(value: String): CFStringRef? = memScoped {
-        // CFStringCreateWithCString 会把字节拷进去，memScoped 结束后 CFString 仍然有效
-        CFStringCreateWithCString(null, value.cstr.ptr, kCFStringEncodingUTF8)
+        // CFStringCreateWithCString 会把字节拷进去，memScoped 结束后 CFString 仍然有效。
+        // 第二参在 Kotlin/Native 的绑定里是 `String?`（cinterop 把 `const char *` 映射成
+        // Kotlin String 并自己转 cstr），所以直接传 value，不要手动取 `.cstr.ptr`。
+        CFStringCreateWithCString(null, value, kCFStringEncodingUTF8)
     }
 
     private fun newCFData(bytes: ByteArray): CFDataRef? {
