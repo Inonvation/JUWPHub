@@ -94,16 +94,24 @@ jobs:
           xcodebuild -version
           ls -la iosApp
 
-      # CODE_SIGNING_ALLOWED=NO：不签名也能 build 出 .app，本步骤只要产物
-      - name: xcodebuild（不签名）
+      # Release 而不是 Debug：Xcode 15+ 的 Debug 构建会把代码放进 `JUWPHub.debug.dylib`
+      # （实测 59MB，主二进制只剩 71KB 的壳，还带一个 `__preview.dylib`）。那种包侧载后容易
+      # 装不上/起不来。Release 把 Kotlin 的静态 framework 直接链进主二进制，产物干净。
+      #
+      # 注意：Kotlin 侧仍链 **debug** framework（`linkDebugFrameworkIosArm64`）——它与 Xcode 的
+      # 优化级别无关，功能等价且 CI 快。
+      # shortcut: 出正式分发包时改成 linkReleaseFrameworkIosArm64 并同步 FRAMEWORK_SEARCH_PATHS
+      # 到 releaseFramework；现在不动，是为了少一个变量、先把链路跑通。
+      - name: xcodebuild（Release，不签名）
         run: |
           xcodebuild \
             -project iosApp/JUWPHub.xcodeproj \
             -scheme JUWPHub \
             -sdk iphoneos \
             -arch arm64 \
-            -configuration Debug \
+            -configuration Release \
             -derivedDataPath iosApp/build \
+            ENABLE_DEBUG_DYLIB=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -111,13 +119,20 @@ jobs:
 
       - name: 打包成 unsigned IPA
         run: |
-          APP="iosApp/build/Build/Products/Debug-iphoneos/JUWPHub.app"
+          APP="iosApp/build/Build/Products/Release-iphoneos/JUWPHub.app"
           test -d "$APP" || { echo "::error::找不到 $APP"; find iosApp/build -name "*.app" -maxdepth 6; exit 1; }
+          # Release 包里不该再有 debug dylib；有就说明没走 Release，直接失败而不是交付坏包
+          if ls "$APP"/*.debug.dylib >/dev/null 2>&1; then
+            echo "::error::产物里还有 debug dylib，说明配置没生效"
+            ls -la "$APP"
+            exit 1
+          fi
           rm -rf out && mkdir -p out/Payload
           cp -R "$APP" out/Payload/
           cd out && zip -qry JUWPHub-unsigned.ipa Payload
           ls -lh JUWPHub-unsigned.ipa
-          # 把大小与 bundle id 打出来，方便核对打的是不是这个 App
+          echo "--- Payload 内容 ---"
+          unzip -l JUWPHub-unsigned.ipa | head -20
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" Payload/JUWPHub.app/Info.plist || true
 
       - uses: actions/upload-artifact@v4
