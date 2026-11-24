@@ -367,7 +367,7 @@ iosApp/            薄壳：Xcode 工程、SwiftUI 入口、WidgetKit 扩展、I
 | 3 | 网络客户端收口 | ✅ **2026-10-02 的 `AppHttp` 已经做完了**：全仓只有 `AppHttp.base` 一处 `OkHttpClient.Builder()`，其余 20 处引用都是类型声明 | 无需再动 | 连接池、线程池、DNS 缓存已全进程共享 |
 | 4 | 会话逻辑纯函数化 | `data/session` 18 文件 1475 行 | 「请求描述」纯函数 + 执行器接口（Android 用 OkHttp 执行） | 教务改版时能单测，不必真机抓包 |
 | 5 | 平台能力收口 | `LocalContext` 285、`Intent(` 169、`rememberLauncherForActivityResult` 69 | `PlatformServices` 接口 + Android 实现 | 权限与 Intent 散点归零 |
-| 6 | 图标收口 | HugeIcons 456 处直接引用 | `AppIcon` 枚举 + 一个 `icon()` 渲染器 | 换图标只改映射表一行 |
+| 6 | 图标收口 | ✅ **2026-11-24 已完成，但换了做法**：实测不是 456 处而是 424 处 / 167 个不同图标 / 85 个文件。原计划的「`AppIcon` 枚举 + `icon()` 渲染器」不成立——枚举解决的是「换图标只改一处」，而真问题是 **HugeIcons 只有 Android 变体**。改成：生成器反射提取成 CMP 原生 `ImageVector`，落到 `shared/commonMain/.../ui/icon/AppIcons.kt`（167 个 / 519 条 path），调用点 `HugeIcons.Xxx` → `AppIcons.Xxx`，AAR 从 `implementation` 降为 `testImplementation` | iOS 可用；运行时不再打包这个 AAR |
 | 7 | 日志收口 | `android.util.Log` 62 处 | `Logger` 接口 | release 可整体静音 |
 | 8 | 小组件数据快照 | Glance 组件内直接查库 | `WidgetSnapshot` 纯数据 + JSON | 刷新逻辑可单测；iOS WidgetKit 吃同一份 JSON |
 | 9 | 视图边界 | `AndroidView` 20 处内联 | `AppWebView` / `AppMapView` 可复用组件 | 状态管理与复用清晰 |
@@ -436,7 +436,7 @@ KSP 按 target 加：`kspAndroid` / `kspIosArm64` / `kspIosSimulatorArm64`；sch
 
 | 项 | 实测处数 | 处理 |
 |---|---|---|
-| HugeIcons（`HugeIcons.Xxx` 直接引用） | **424 处 / 167 个不同图标 / 85 个文件** | 图标**数据**，不适合 expect/actual。做法：一次性生成器把用到的子集从 AAR 里反射提取成 CMP 原生 `ImageVector`（纯 `compose.ui.graphics.vector`，iOS 可用），落到 `shared/src/commonMain/.../ui/icon/AppIcons.kt`，再把 424 处 `HugeIcons.` 换成 `AppIcons.` |
+| HugeIcons（`HugeIcons.Xxx` 直接引用） | **424 处 / 167 个不同图标 / 85 个文件** → ✅ **已完成**（2026-11-24） | 图标**数据**，不适合 expect/actual。做法：一次性生成器把用到的子集从 AAR 里反射提取成 CMP 原生 `ImageVector`（纯 `compose.ui.graphics.vector`，iOS 可用），落到 `shared/src/commonMain/.../ui/icon/AppIcons.kt`，424 处已全部换成 `AppIcons.`，AAR 降为 `testImplementation` |
 | `LocalContext` / `Context` / `ContentResolver` | 见下表（`ui/common` 19 个文件、`ui/ebike` 27 个……） | 按「它拿 Context 做什么」分：剪贴板 / 分享 / 权限 / MediaStore / 资源读取，每类一条 expect/actual |
 | `Bitmap` / `Intent` / `Activity` 启动 | 同上 | `Bitmap` 走「像素 + 尺寸」中性类型（P0 条码那次已立先例）；`Intent` 与 Activity 启动属平台外壳，留在 `:app` |
 | `AppWebView` / `AppMapView` | 2 个组件 | `UIKitView` 实现 |

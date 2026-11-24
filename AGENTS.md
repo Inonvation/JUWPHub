@@ -104,8 +104,8 @@ Get-ChildItem -Recurse -Include *.md,*.kt | Select-String -Pattern '<旧说法>'
 | Room DB | **v21**。表：`courses`（含 `kind` / `remark` / `timetableId`）、`time_slots`、`semester_config`、`timetables`（v14 起 `term` 列记数据学期，是详情查教材的钥匙）、`scores`、`scholar_groups` / `scholar_courses`（学业完成情况，v13）、`ykt_turnovers`（v15 起 `fromAccount` / `accType` 记交易账户，消费流水「充值到哪」的钥匙）、`notes`、`homework`、`power_readings`（含 `roomId` 数字 id 与 `roomName` 房号显示名，两者别混用）、`textbooks`（教材，v14，挂 courseName 带 term）、`ride_records`（本机骑行记录，v16，只记本机用车那条链路；2026-11-05 起账号页不再展示，自动还车对账仍在用）、`course_selections`（选课记录，v17，按学期替换，DESIGN §4.35）、`inbox_messages`（收件箱，v18，§4.38）、`date_overrides`（日期覆盖：调休 / 停课，v19，§4.40）、`curriculum_courses`（培养方案课程设置，v20，§4.41）、`kqcx_orders`（快趣服务端订单缓存，v21，主键是业务键、不是自增 id，§4.32）。迁移逐级 `ALTER TABLE` / `CREATE TABLE`，**禁止**改 destructive；实体 `@Index` 必须与迁移 `CREATE INDEX` 对齐，漏声明会迁移校验崩溃；**实体带 Kotlin 默认值的列，迁移建表必须写 `DEFAULT`**（v7→v8 remark、v11→v12 roomName、v13→v14 教材展示列同坑；v19 的 `note` 特意不给 Kotlin 默认值来绕开这条） |
 | 作息表 | **11 小节**（每节 40 分钟，大节内 5 分钟、大节之间 20 分钟换教室），见 DESIGN §3.5 |
 | 课表网格 | 行号 = **小节号 1–11**（不是大节号）；`Course.startSection/endSection` 也是小节号 |
-| HugeIcons | `com.github.rikkahub:hugeicons-compose:1.4`（**JitPack**，**`isTransitive = false`**）。**不要**写 `me.rerere:hugeicons-compose:1.0.0`（Maven Central 不存在）；不要打开传递依赖（只用它的图标 AAR，打开会把它那一套 compose / core 版本带进来，与项目的版本边界打架） |
-| 图标用法 | `import me.rerere.hugeicons.stroke.*` + `HugeIcons.Calendar01` 等；查名用本地 JAR，勿猜 |
+| 图标 | **`edu.jxslu.schedule.ui.icon.AppIcons`**（`shared/src/commonMain/.../ui/icon/AppIcons.kt`，生成物）。167 个图标、519 条 path，是**源码里的 `ImageVector`**，iOS 可用。用法 `Icon(AppIcons.Settings01, null)`；**图标名不许猜**，在 AppIcons.kt 里查（见 `.agents/skills/find-hugeicons/SKILL.md`）。`.agents/rules/` 里历史文本写的 `HugeIcons.Xxx` 一律读作 `AppIcons.Xxx` |
+| HugeIcons（仅生成器） | `com.github.rikkahub:hugeicons-compose:1.4`（**JitPack**，**`isTransitive = false`**）现在是 **`testImplementation`**，只服务于 `IconExportTool` 重新导出图标，**不进运行时**（已实测不在 `debugRuntimeClasspath`）。别改回 `implementation`：它只发 Android 变体，加回去 iOS 侧编不过。**不要**写 `me.rerere:hugeicons-compose:1.0.0`（Maven Central 不存在）。新增图标流程见 skill |
 | 高德地图 SDK | `com.amap.api:3dmap:10.0.600`（Maven Central，jar 里是 `lib/<abi>/*.so` 老布局，AGP 会解包）。**主底图**（2026-11-17）。两个 .so 合计 32MB：`jniLibs.useLegacyPackaging = true` 压缩，`ndk.abiFilters` 只留 `arm64-v8a`，release 16.1MB（CI 有体积护栏）。R8 必须 keep `com.amap.api.**`，否则 release 地图空白 |
 | Glance | `androidx.glance:glance-appwidget:1.2.0`（桌面小组件）；传递抬 compose runtime 至 1.7.8 |
 | Compose Multiplatform | **`org.jetbrains.compose.*:1.7.3`，只在 `:shared`**（iOS 移植 P2 起；`:app` 仍用 androidx BOM 2024.10.00）。**别升到 1.8.x**：那会把 Android 侧的 androidx.compose 整条抬一个大版本，Glance 1.2.0 与全部既有 UI 都得重验。实测解析结果（2026-11-24）：`androidx.compose.ui` 1.7.6、`runtime` 1.7.8（Glance 抬的）、`material3` 1.3.1——都在 1.7/1.3 线上。CMP 的 Android 变体会重定向到同名 `androidx.compose.*` 产物，所以**不会出现两份类**，也没有 import 改动 |
@@ -284,7 +284,7 @@ MainActivity
    PowerBankPay / Onboarding / SubpageActivity（二级页，路由枚举见 SubpageScreen）
 
 shared/       KMP 共享逻辑（iOS 移植 P0/P2 起）：commonMain 已装 **domain 层全部** + qzxy/wenqu/qiekj
-              的 wire model + **`ui/theme` 整包**（142 个文件；包名保留原样，
+              的 wire model + **`ui/theme` 整包** + **`ui/icon/AppIcons.kt`**（143 个文件；包名保留原样，
               所以 `data.qzxy.*` 也会出现在这里，是有意的）。已接 Compose Multiplatform 1.7.3。
               androidMain / iosMain 只放 expect/actual 的平台实现（条码、定点小数）。
               **commonMain 必须零 JVM 专有 API**，判据是 `:shared:metadataCommonMainClasses`。
@@ -326,7 +326,8 @@ JuwApplication ensureDefaults（节次/学期；课表不预置）+ 小组件冷
 - **提交信息精简**：标题一行说清改了什么，正文只写必要的理由与影响面。细则见 `.agents/rules/build-release.md`
 - 禁止改导航或课表领域模型时不同步 `DESIGN.md`（同步排在编译/装机之后，见「怎么用这份文件」的收尾顺序）
 - 禁止 emoji 当功能图标（**文案行内允许**，如今日页天气提示那行的 ☀️🌧️；按钮 / 卡片 /
-  标签这类承载操作的图标仍一律用 HugeIcons）；HugeIcons 查名用本地 JAR，勿猜
+  标签这类承载操作的图标仍一律用 `AppIcons`）；**图标名不许猜**，在 `AppIcons.kt` 里查
+  （`.agents/skills/find-hugeicons/SKILL.md`）
 - 禁止把「能编译」当完成；禁止故意压制编译错误
 - **批量写文件前必须校验落点**（2026-10-21 教训：解包脚本把 178 项写到 `F:\` 根）：
   归档 / 解包 / 批量导出的条目名先 `lstrip('/\\')` 再 join，并断言解析出的绝对路径位于目标目录
