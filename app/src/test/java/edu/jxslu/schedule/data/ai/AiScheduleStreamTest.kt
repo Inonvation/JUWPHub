@@ -1,13 +1,13 @@
 package edu.jxslu.schedule.data.ai
 
 import edu.jxslu.schedule.data.ai.AiScheduleClient.StreamEvent
+import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,8 +17,11 @@ import org.junit.Test
  *
  * 背景：`readStream` 曾在「delta 里没有 tool_calls」时 `return` 把整个流提前掐断——
  * V4.1-Flash 的输出顺序一变（先吐正文/思考/finish 块再吐工具参数），工具参数就只收到
- * 零个分片，上层解析出空结果，用户看到「发了任何消息都返回无效」。这里用 okio 的
- * `Buffer` 直接喂 SSE 文本，把「不认识的 delta 一律 continue」钉住。
+ * 零个分片，上层解析出空结果，用户看到「发了任何消息都返回无效」。这里用 Ktor 的
+ * `ByteReadChannel(sse)` 直接喂 SSE 文本，把「不认识的 delta 一律 continue」钉住。
+ *
+ * 2026-11-24（iOS 移植 S15）：客户端搬进 `:shared` 并换 Ktor 后，喂数据从 okio 的
+ * `Buffer` 换成 `ByteReadChannel`——读流侧同一个函数、同样的行切分，用例一条没改。
  */
 class AiScheduleStreamTest {
 
@@ -27,7 +30,7 @@ class AiScheduleStreamTest {
         val channel = Channel<StreamEvent>(Channel.UNLIMITED)
         val client = AiScheduleClient.create()
         withTimeout(5_000) {
-            client.readStreamForTest(Buffer().apply { writeUtf8(sse) }, channel)
+            client.readStreamForTest(ByteReadChannel(sse), channel)
         }
         val events = mutableListOf<StreamEvent>()
         while (true) {
@@ -118,7 +121,7 @@ class AiScheduleStreamTest {
      * 工具参数变成半截 JSON，用户看到「已整理 0 处改动」，真实原因是客户端截断。
      *
      * 这条用例故意把容量压到 1（远小于 40 个分片）、消费端每收一条等一下：
-     * 读流侧必须**背压**（`trySendBlocking`），不能丢。上面的 `read()` 用的是
+     * 读流侧必须**背压**（挂起的 `send`），不能丢。上面的 `read()` 用的是
      * UNLIMITED 通道，永远照不出这个 bug。
      */
     @Test
@@ -128,7 +131,7 @@ class AiScheduleStreamTest {
             val sse = sseOf(*Array(40) { """{"choices":[{"delta":{"content":"c$it"}}]}""" })
             val channel = Channel<StreamEvent>(capacity = 1)
             val producer = launch(Dispatchers.IO) {
-                AiScheduleClient.create().readStreamForTest(Buffer().apply { writeUtf8(sse) }, channel)
+                AiScheduleClient.create().readStreamForTest(ByteReadChannel(sse), channel)
                 channel.close()
             }
             val got = mutableListOf<String>()

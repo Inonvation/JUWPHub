@@ -1,17 +1,25 @@
 package edu.jxslu.schedule.data.ujing
 
-import android.content.Context
+import edu.jxslu.schedule.data.local.KeyValuePrefs
+import edu.jxslu.schedule.data.qiekj.QiekjJson
 import edu.jxslu.schedule.domain.UjingState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 
 /**
  * 进行中的 U净 订单快照（DESIGN §4.37 P2）。
  *
  * 选型与 `QzxyWateringStore` 同一理由：读它的有两处独立 ViewModel 实例（页面与本页
- * 未来的今日页卡片 / 通知落点），普通 SharedPreferences 的读时快照无法推送变化；
+ * 未来的今日页卡片 / 通知落点），普通键值存储的读时快照无法推送变化；
  * 落盘之外再挂一条进程内可订阅的流，`Graph` 保证同一进程一份实例。
  *
  * **为什么必须落盘**（社区实测教训）：App 进程重启后内存态 `orderId` 丢失 → 上报 /
@@ -20,12 +28,19 @@ import org.json.JSONObject
  *
  * 不加密：订单号 / 状态 / 机器名不是凭证（凭证在 `secure_ujing`）。
  *
- * 与 `data/local/JsonFileStore` 的差异（2026-11-06 审计 C2 收尾）：介质是
- * **SharedPreferences + `org.json` 手写编解码**（`UjingOrderSnapshot` 也不是
- * `@Serializable`），换过去等于换介质 + 换格式，在案订单会丢，所以保留原实现。
+ * ## iOS 移植 S15（2026-11-24）：搬进 `:shared`
+ *
+ * 换掉的只有两样，**介质与键名都没动**（老用户的在案订单原地可读，不需要迁移）：
+ * - `Context.getSharedPreferences` → [KeyValuePrefs]（Android 侧仍是同名 `SharedPreferences`
+ *   文件 `ujing_order`，见 `AndroidPrefs`；iOS 侧换 `NSUserDefaults`）；
+ * - `org.json` 手写编解码 → kotlinx-serialization 的 `JsonObject`。**JSON 字段名一个没改**
+ *   （`orderId` / `orderNo` / …），所以老文件照样解得出来。
+ *
+ * 为什么不换到 `data/local/JsonFileStore`（换介质到 `filesDir` 下的 JSON 文件）：
+ * 那等于把用户的在案订单丢掉一次（文件位置与格式都变）。这条缝只换「怎么读写」，
+ * 不换「读写哪个文件」。
  */
-class UjingOrderStore(context: Context) {
-    private val prefs = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
+class UjingOrderStore(private val prefs: KeyValuePrefs) {
 
     private val _state = MutableStateFlow(read())
     val state: StateFlow<UjingOrderSnapshot?> = _state.asStateFlow()
@@ -34,22 +49,22 @@ class UjingOrderStore(context: Context) {
     fun current(): UjingOrderSnapshot? = _state.value
 
     fun save(snapshot: UjingOrderSnapshot) {
-        prefs.edit().putString(KEY_ORDER, encode(snapshot)).apply()
+        prefs.putString(KEY_ORDER, encode(snapshot))
         _state.value = snapshot
     }
 
     /** 订单终结（完成 / 取消 / 失败）或用户主动放弃时清掉。 */
     fun clear() {
-        prefs.edit().remove(KEY_ORDER).apply()
+        prefs.remove(KEY_ORDER)
         _state.value = null
     }
 
     private fun read(): UjingOrderSnapshot? {
-        val raw = prefs.getString(KEY_ORDER, null) ?: return null
+        val raw = prefs.getString(KEY_ORDER) ?: return null
         return runCatching { decode(raw) }.getOrNull()
     }
 
-    private fun encode(s: UjingOrderSnapshot): String = JSONObject().apply {
+    private fun encode(s: UjingOrderSnapshot): String = buildJsonObject {
         put("orderId", s.orderId)
         put("orderNo", s.orderNo)
         put("deviceId", s.deviceId)
@@ -67,29 +82,43 @@ class UjingOrderStore(context: Context) {
         put("durationSeconds", s.durationSeconds)
     }.toString()
 
-    private fun decode(raw: String): UjingOrderSnapshot {
-        val obj = JSONObject(raw)
+    /** 解不出来（老数据被截断 / 不是对象 / 缺 orderId）回 null：与 `JSONObject` 抛异常后吞掉同口径。 */
+    private fun decode(raw: String): UjingOrderSnapshot? {
+        val obj = QiekjJson.json.parseToJsonElement(raw) as? JsonObject ?: return null
+        val orderId = obj.text("orderId") ?: return null
         return UjingOrderSnapshot(
-            orderId = obj.getString("orderId"),
-            orderNo = obj.optString("orderNo"),
-            deviceId = obj.optString("deviceId"),
-            deviceName = obj.optString("deviceName"),
-            modelId = obj.optInt("modelId"),
-            modelName = obj.optString("modelName"),
-            dryer = obj.optBoolean("dryer"),
-            priceFen = obj.optInt("priceFen"),
-            status = obj.optString("status"),
-            statusRemark = obj.optString("statusRemark"),
-            remainSeconds = obj.optInt("remainSeconds"),
-            snapshotAt = obj.optLong("snapshotAt"),
-            paid = obj.optBoolean("paid"),
-            createdAt = obj.optLong("createdAt"),
-            durationSeconds = obj.optInt("durationSeconds"),
+            orderId = orderId,
+            orderNo = obj.textOrEmpty("orderNo"),
+            deviceId = obj.textOrEmpty("deviceId"),
+            deviceName = obj.textOrEmpty("deviceName"),
+            modelId = obj.intOrZero("modelId"),
+            modelName = obj.textOrEmpty("modelName"),
+            dryer = obj.boolOrFalse("dryer"),
+            priceFen = obj.intOrZero("priceFen"),
+            status = obj.textOrEmpty("status"),
+            statusRemark = obj.textOrEmpty("statusRemark"),
+            remainSeconds = obj.intOrZero("remainSeconds"),
+            snapshotAt = obj.longOrZero("snapshotAt"),
+            paid = obj.boolOrFalse("paid"),
+            createdAt = obj.longOrZero("createdAt"),
+            durationSeconds = obj.intOrZero("durationSeconds"),
         )
     }
 
+    private fun JsonObject.text(key: String): String? =
+        (this[key] as? JsonPrimitive)?.contentOrNull
+
+    private fun JsonObject.textOrEmpty(key: String): String = text(key).orEmpty()
+
+    private fun JsonObject.intOrZero(key: String): Int = (this[key] as? JsonPrimitive)?.intOrNull ?: 0
+
+    private fun JsonObject.longOrZero(key: String): Long = (this[key] as? JsonPrimitive)?.longOrNull ?: 0L
+
+    private fun JsonObject.boolOrFalse(key: String): Boolean =
+        (this[key] as? JsonPrimitive)?.booleanOrNull ?: false
+
     private companion object {
-        const val FILE_NAME = "ujing_order"
+        /** 键名与搬移前逐字一致（老文件里就是这个键）。 */
         const val KEY_ORDER = "order"
     }
 }

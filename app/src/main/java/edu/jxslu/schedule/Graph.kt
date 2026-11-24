@@ -6,6 +6,7 @@ import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.ai.AiCredentialStore
 import edu.jxslu.schedule.data.ai.AiScheduleClient
+import edu.jxslu.schedule.data.ai.createAiScheduleClient
 import edu.jxslu.schedule.data.kqcx.KqcxAuthClient
 import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
 import edu.jxslu.schedule.data.kqcx.KqxCredentialStore
@@ -36,12 +37,15 @@ import edu.jxslu.schedule.data.qzxy.QzxyClearStore
 import edu.jxslu.schedule.data.qzxy.QzxyWateringStore
 import edu.jxslu.schedule.data.qzxy.QzxyGattLink
 import edu.jxslu.schedule.data.qzxy.QzxySecureSessionStore
+import edu.jxslu.schedule.data.ujing.UjingCredentialStore
 import edu.jxslu.schedule.data.ujing.UjingHouseStore
 import edu.jxslu.schedule.data.ujing.UjingOrderStore
 import edu.jxslu.schedule.data.ujing.UjingRepository
-import edu.jxslu.schedule.data.ujing.UjingSessionStore
 import edu.jxslu.schedule.data.ujing.UjingDraftStore
 import edu.jxslu.schedule.data.ujing.UjingHistoryStore
+import edu.jxslu.schedule.data.ujing.androidUjingHistoryStore
+import edu.jxslu.schedule.data.ujing.androidUjingHouseStore
+import edu.jxslu.schedule.data.ujing.androidUjingOrderStore
 import edu.jxslu.schedule.data.wenqu.WenquCredentialStore
 import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
@@ -86,8 +90,10 @@ import edu.jxslu.schedule.data.repo.TextbookSync
 import edu.jxslu.schedule.data.jw.TranscriptClient
 import edu.jxslu.schedule.data.jw.JwVpnDetector
 import edu.jxslu.schedule.data.repo.TranscriptStore
+import edu.jxslu.schedule.data.AndroidSessionExpirySink
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.data.session.CredentialVault
+import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.data.session.SessionExpiryStore
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.ykt.YktClient
@@ -141,6 +147,9 @@ object Graph {
 
     @Volatile
     private var sessionExpiryStore: SessionExpiryStore? = null
+
+    /** [sessionExpirySink] 的单例（同一份 [sessionExpiryStore] 的共享层视图）。 */
+    private var sessionExpirySink: SessionExpirySink? = null
 
     @Volatile
     private var qzxyRepository: QzxyRepository? = null
@@ -655,6 +664,18 @@ object Graph {
         }
 
     /**
+     * 上面那条留痕的**共享层视图**（iOS 移植 S15，2026-11-24）：问渠 / U净 的仓库已搬进
+     * `:shared`，它们只认 `SessionExpirySink`（见其 KDoc），这里给同一条标记套一层适配器。
+     * 仍与 [sessionExpiry] 共用同一个 [SessionExpiryStore] 实例——页面侧的 `consume` 与
+     * 仓库侧的 `mark` 必须是同一份标记，否则「已过期」提示永远不会出现。
+     */
+    fun sessionExpirySink(context: Context): SessionExpirySink =
+        sessionExpirySink ?: synchronized(this) {
+            sessionExpirySink ?: AndroidSessionExpirySink(sessionExpiry(context.applicationContext))
+                .also { sessionExpirySink = it }
+        }
+
+    /**
      * 胖乖仓库单例（DESIGN §4.10）：两条链路各一个 Ktor client，token 存加密 prefs。
      *
      * 仓库已搬进 `:shared`（iOS 移植 S11，2026-11-24），构造只吃三条存储接口的 Android 实现：
@@ -708,13 +729,14 @@ object Graph {
     fun ujing(context: Context): UjingRepository =
         ujingRepository ?: synchronized(this) {
             ujingRepository ?: UjingRepository(
-                UjingSessionStore(context.applicationContext),
-                UjingOrderStore(context.applicationContext),
+                UjingCredentialStore(context.applicationContext),
+                androidUjingOrderStore(context.applicationContext),
                 ujingHistory(context.applicationContext),
                 // debug 专用：扫码后把 program/info 原始响应落盘，供补投放加购的协议样本
+                // （共享层只认绝对路径字符串：commonMain 里没有 java.io.File）
                 debugDumpDir = File(context.applicationContext.filesDir, "ujing_debug")
-                    .takeIf { BuildConfig.DEBUG },
-                expiry = sessionExpiry(context.applicationContext),
+                    .absolutePath.takeIf { BuildConfig.DEBUG },
+                expiry = sessionExpirySink(context.applicationContext),
                 onWashDone = { snapshot ->
                     inboxRepository(context).post(
                         kind = InboxKind.UJING_ORDER,
@@ -732,7 +754,7 @@ object Graph {
     /** U净 收藏的洗衣房（DESIGN §4.37）。纯本地偏好（普通 prefs），与登录会话分开存。 */
     fun ujingHouses(context: Context): UjingHouseStore =
         ujingHouseStore ?: synchronized(this) {
-            ujingHouseStore ?: UjingHouseStore(context.applicationContext)
+            ujingHouseStore ?: androidUjingHouseStore(context.applicationContext)
                 .also { ujingHouseStore = it }
         }
 
@@ -748,7 +770,7 @@ object Graph {
     /** U净 历史账单（DESIGN §4.37）：本 App 发起的订单留痕，主页入口行与账单页共用。 */
     fun ujingHistory(context: Context): UjingHistoryStore =
         ujingHistoryStore ?: synchronized(this) {
-            ujingHistoryStore ?: UjingHistoryStore(context.applicationContext)
+            ujingHistoryStore ?: androidUjingHistoryStore(context.applicationContext)
                 .also { ujingHistoryStore = it }
         }
 
@@ -778,7 +800,7 @@ object Graph {
         wenquRepository ?: synchronized(this) {
             wenquRepository ?: WenquRepository(
                 WenquCredentialStore(context.applicationContext),
-                expiry = sessionExpiry(context.applicationContext),
+                expiry = sessionExpirySink(context.applicationContext),
                 // 「猜你想用」：报名成功记一次真实订单（含预报名自动提交成功）
                 onApplied = { recordGuessOrder(GuessTarget.WENQU) },
             ).also { wenquRepository = it }
@@ -973,7 +995,7 @@ object Graph {
     /** AI 调课服务客户端单例（DESIGN §4.39）：OkHttp 连接池只建一次；无日志拦截器。 */
     fun aiScheduleClient(context: Context): AiScheduleClient =
         aiScheduleClient ?: synchronized(this) {
-            aiScheduleClient ?: AiScheduleClient.create().also { aiScheduleClient = it }
+            aiScheduleClient ?: createAiScheduleClient().also { aiScheduleClient = it }
         }
 
     /**

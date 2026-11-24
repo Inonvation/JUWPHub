@@ -5,47 +5,23 @@ import android.content.SharedPreferences
 import edu.jxslu.schedule.data.local.EncryptedPrefs
 
 /**
- * 问渠登录凭证（DESIGN §4.45）。**密码可选**——「记住登录」默认开；关掉时只落 token，
- * 存了密码才能在 JWT 到期前自动续期（见 [WenquSession.canRefresh]）。
- *
- * [expiresAt] 从 JWT 的 `exp` 解析；[hours] / [starLevel] 是**上次成功取到的展示影子**，
- * 用于「我的」页账号卡一行与问渠页首屏，进页后会再刷一次。
- * 平台响应里的学号 / 姓名 / 负责人姓名电话**一律不落盘**（负责人只在详情弹层展示，见 WenquModels）。
- */
-data class WenquSession(
-    val phone: String,
-    val password: String,
-    val token: String,
-    val expiresAt: Long,
-    val starLevel: Int = 0,
-    /** 上次取到的总工时；[hoursFetchedAt] 为 0 表示还没取过。 */
-    val hours: Double = 0.0,
-    val hoursFetchedAt: Long = 0L,
-) {
-    /**
-     * 会话可用的判据：手机号 + token。**密码不是必要条件**——「记住登录」关掉时只存 token
-     * （默认开，2026-10-21），JWT 有效期内照常可用。
-     */
-    val isComplete: Boolean get() = phone.isNotBlank() && token.isNotBlank()
-
-    /** 存了密码才能自动续期；没存密码的会话在 JWT 到期后要求重新登录。 */
-    val canRefresh: Boolean get() = password.isNotBlank()
-}
-
-/**
- * 问渠凭证加密存储（DESIGN §4.45）。
+ * 问渠凭证加密存储（DESIGN §4.45）：[WenquSessionStore] 的 Android 实现。
  *
  * 与 [edu.jxslu.schedule.data.qzxy.QzxySecureSessionStore] 同方案、**不同文件**（`secure_wenqu`）：
  * 各第三方会话互不相干，混在一个文件里退登录会互相牵连。创建与自愈口径见
  * [EncryptedPrefs.open]。新文件同样要在 `backup_rules.xml` / `data_extraction_rules.xml`
  * 里排除（正式件 + `.fallback` 两份），免得跟着云备份或设备迁移跑到别的机子上。
+ *
+ * iOS 移植 S15（2026-11-24）：仓库与模型都进了 `:shared`，**只有这个文件留在 `:app`**——
+ * 介质是 `EncryptedSharedPreferences` + Android Keystore，commonMain 拿不到；
+ * iOS 侧要接的是 Keychain，不是同一套 API。契约在共享层的 [WenquSessionStore]。
  */
-class WenquCredentialStore(context: Context) {
+class WenquCredentialStore(context: Context) : WenquSessionStore {
     private val prefs: SharedPreferences by lazy {
         EncryptedPrefs.open(context, FILE_NAME, TAG)
     }
 
-    fun read(): WenquSession? {
+    override fun read(): WenquSession? {
         val phone = prefs.getString(KEY_PHONE, null)?.takeIf { it.isNotBlank() } ?: return null
         val password = prefs.getString(KEY_PASSWORD, "").orEmpty()
         val token = prefs.getString(KEY_TOKEN, "").orEmpty()
@@ -60,7 +36,7 @@ class WenquCredentialStore(context: Context) {
         )
     }
 
-    fun save(session: WenquSession) {
+    override fun save(session: WenquSession) {
         prefs.edit()
             .putString(KEY_PHONE, session.phone)
             .putString(KEY_PASSWORD, session.password)
@@ -72,7 +48,7 @@ class WenquCredentialStore(context: Context) {
             .apply()
     }
 
-    fun clear() {
+    override fun clear() {
         prefs.edit().clear().apply()
     }
 

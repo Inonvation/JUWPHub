@@ -1,21 +1,27 @@
 package edu.jxslu.schedule.data.ai
 
-import android.util.Base64
-import android.util.Log
-import edu.jxslu.schedule.data.net.AppHttp
+import edu.jxslu.schedule.data.net.SharedHttp
 import edu.jxslu.schedule.domain.AiScheduleTool
-import java.io.File
-import java.io.IOException
-import java.io.InterruptedIOException
-import java.util.concurrent.TimeUnit
+import edu.jxslu.schedule.platform.Logger
+import io.ktor.client.HttpClient
+import io.ktor.client.request.header
+import io.ktor.client.request.request
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.readUTF8Line
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -29,14 +35,6 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
-import okhttp3.Call
-import okhttp3.Callback
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
-import okio.BufferedSource
 
 /**
  * AI 调课的 OpenAI 兼容客户端（DESIGN §4.39，2026-10-06）。
@@ -56,8 +54,48 @@ import okio.BufferedSource
  * 兼容服务不认识，发了可能被判非法参数。
  *
  * **无任何日志拦截器**：API Key 绝不进 Logcat（对齐一卡通 / 电费 / 快趣 / U净）。
+ *
+ * ## iOS 移植 S15（2026-11-24）：搬进 `:shared`，OkHttp → Ktor
+ *
+ * 这是本轮唯一有技术风险的一块（流式），口径写在这里：
+ *
+ * 1. **不再用 `enqueue + Callback`**：OkHttp 那条路要的是「协程取消打断不了
+ *    `readUtf8Line()`，只有 `call.cancel()` 能立刻关 socket」。Ktor 没有这个问题——
+ *    读流是**挂起**的（[ByteReadChannel.readUTF8Line]），collector 一取消，
+ *    `channelFlow` 的块随之取消，Ktor 关闭响应体与底层连接，socket 当场断。
+ *    用户点「停止」的意图（**别再烧额度**）照样成立，且不需要任何回调。
+ * 2. **背压取代 `trySendBlocking`**：读流侧现在在协程里，直接 `send`（挂起）即可。
+ *    原来 `callbackFlow` 默认容量 64、`trySend` 不看返回值会把分片静默丢掉
+ *    （2026-11-06 审计 A1：工具参数变成半截 JSON）；改成挂起发送后**结构上不可能丢**，
+ *    外面那条 `buffer(UNLIMITED)` 保留——它挡的是「消费端慢 → 读流被反压 → socket 读停」，
+ *    与原来那条注释同一个理由。
+ * 3. **`Dispatchers.IO` → `Dispatchers.Default`**：commonMain 取不到 IO 调度器。
+ *    流式读取本身是挂起等待，占不住线程；Default 池足够。
+ * 4. **超时口径**：`readTimeout(90s)`（两次读的间隔）→ socket 超时；
+ *    `callTimeout(600s)`（总时长）→ request 超时；`connectTimeout(15s)` 原样。
+ *    见 [create]。
+ * 5. **异常类型**：`AiHttpException` 不再继承 `java.io.IOException`（commonMain 没有它），
+ *    改成 `Exception`。上层全部按 `is AiHttpException` 判，所以 `:app` 的 `AiErrorText`
+ *    不用改。**已知文案差异**：总时长（600s）触发时 Ktor 抛 `HttpRequestTimeoutException`，
+ *    它不在 `AiErrorText` 认的那几类里，用户会看到「请求失败：HttpRequestTimeoutException」；
+ *    socket 超时（90s 不吐字节）仍是 `java.net.SocketTimeoutException`，文案照旧。
+ *    等 `ui/ai` 搬进共享层时给 `AiErrorText` 补一条分支即可。
+ * 6. **图片入参的类型**：`images: List<Any>` + 构造时注入的 [imageEncoder]。
+ *    唯一调用点 `ui/ai/AiChatViewModel` 传的是 `List<File>`，而那条页面本轮不许动——
+ *    `List<File>` 按协变可以直接塞进 `List<Any>`，读文件与 base64 编码留在 `:app`
+ *    （见 `:app` 的 `AiScheduleClientImages.kt`），commonMain 只认「元素 → data URI」这一步。
+ *    iOS 侧接的时候传自己的图片类型、编码器在装配根里给。
  */
-class AiScheduleClient private constructor(private val http: OkHttpClient) {
+class AiScheduleClient private constructor(
+    private val http: HttpClient,
+    /**
+     * 「图片元素 → `data:image/jpeg;base64,…`」；返回 null = 这张跳过（不整批失败）。
+     *
+     * 缺省是恒 null：不注入就等于「这个平台不发图片」，纯文本链路照常可用。
+     * 见类注释第 6 条（为什么不是强类型）。
+     */
+    private val imageEncoder: (Any) -> String? = { null },
+) {
 
     /** 流式增量。上层累积成三段文本，结束时解析工具参数。 */
     sealed interface StreamEvent {
@@ -72,7 +110,7 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
     }
 
     /** HTTP 层失败。[code] 为 0 表示响应体不是预期结构；[detail] 是响应原文截断，供 UI 提示。 */
-    class AiHttpException(val code: Int, val detail: String) : IOException("HTTP $code")
+    class AiHttpException(val code: Int, val detail: String) : Exception("HTTP $code")
 
     // 思考档位（原 `AiScheduleClient.Effort` 嵌套枚举）2026-11-24 搬到
     // `:shared` 的 data/ai/Effort.kt：偏好层要读它，而偏好层已经进了共享模块。
@@ -80,11 +118,11 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
 
     /**
      * 发一次调课请求，流式返回增量。[baseUrl] 结尾有无 `/` 都行。
-     * 网络异常与 HTTP 错误都抛 [AiHttpException] / IOException，由上层分类提示，不自动重试。
+     * 网络异常与 HTTP 错误都抛 [AiHttpException] / 平台网络异常，由上层分类提示，不自动重试。
      *
-     * [images] 是随本轮发出的图片文件（已由 `AiImageStore` 落盘：转正、转 JPEG、压到 1600）。
-     * **空列表时 content 仍是字符串**，与非视觉模型、老网关保持兼容；非空才升成
-     * `[{text}, {image_url}…]` 的多模态数组，**文本在前、图片在后**（顺序影响模型理解）。
+     * [images] 是随本轮发出的图片（字节）。**空列表时 content 仍是字符串**，
+     * 与非视觉模型、老网关保持兼容；非空才升成 `[{text}, {image_url}…]` 的多模态数组，
+     * **文本在前、图片在后**（顺序影响模型理解）。
      */
     fun chatStream(
         baseUrl: String,
@@ -93,11 +131,44 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
         system: String,
         user: String,
         effort: Effort,
-        images: List<File> = emptyList(),
-    ): Flow<StreamEvent> = callbackFlow {
+        images: List<Any> = emptyList(),
+    ): Flow<StreamEvent> = channelFlow {
+        val body = buildChatBody(baseUrl, model, system, user, effort, images)
+        try {
+            val response = http.request(endpoint(baseUrl, "chat/completions")) {
+                method = HttpMethod.Post
+                header("Authorization", "Bearer $apiKey")
+                contentType(ContentType.Application.Json)
+                setBody(body)
+            }
+            if (!response.status.isSuccess()) {
+                // 错误响应体整段读（不是流），与迁移前 `resp.code + body.take(500)` 同口径
+                val text = runCatching { response.bodyAsText() }.getOrDefault("")
+                throw AiHttpException(response.status.value, text.take(500))
+            }
+            readStream(response.bodyAsChannel(), this)
+            close()
+        } catch (e: CancellationException) {
+            // 用户点「停止」：原样抛出，别当成失败气泡
+            throw e
+        } catch (e: Throwable) {
+            close(e)
+        }
+    }.buffer(Channel.UNLIMITED)
+        .flowOn(Dispatchers.Default)
+
+    /** 请求体（与迁移前逐字一致的 JSON 形状，便于与抓包样本对照）。 */
+    private fun buildChatBody(
+        baseUrl: String,
+        model: String,
+        system: String,
+        user: String,
+        effort: Effort,
+        images: List<Any>,
+    ): String {
         val thinking = effort != Effort.NONE
         val isDeepSeek = baseUrl.contains("deepseek", ignoreCase = true)
-        val body = buildJsonObject {
+        return buildJsonObject {
             put("model", model)
             put("stream", true)
             if (isDeepSeek) {
@@ -130,7 +201,7 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
                 }
                 addJsonObject {
                     put("role", "user")
-                    val dataUris = images.mapNotNull(::dataUri)
+                    val dataUris = images.mapNotNull(imageEncoder)
                     if (dataUris.isEmpty()) {
                         put("content", user)
                     } else {
@@ -150,46 +221,7 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
                 }
             }
         }.toString()
-
-        val request = Request.Builder()
-            .url(endpoint(baseUrl, "chat/completions"))
-            .header("Authorization", "Bearer $apiKey")
-            .post(body.toRequestBody(JSON_MEDIA))
-            .build()
-
-        // 用 enqueue + callbackFlow，而不是阻塞式 execute：
-        // 协程取消打断不了 `readUtf8Line()`，只有 `call.cancel()` 能立刻关 socket。
-        // 用户点「停止」的意图是**别再烧额度**，停在协程层是不够的。
-        val call = http.newCall(request)
-        call.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                close(e)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                response.use { resp ->
-                    val responseBody = resp.body
-                    if (!resp.isSuccessful || responseBody == null) {
-                        close(AiHttpException(resp.code, responseBody?.string()?.take(500).orEmpty()))
-                        return
-                    }
-                    try {
-                        readStream(responseBody.source(), this@callbackFlow)
-                        close()
-                    } catch (t: Throwable) {
-                        close(t)
-                    }
-                }
-            }
-        })
-        awaitClose { call.cancel() }
-        // **必须无界**（2026-11-06 审计 A1）：`readStream` 在 OkHttp 的线程上 `trySend`，
-        // 消费端在 Main。`callbackFlow` 默认容量 64，长输出时缓冲一满 `trySend` 就返回失败，
-        // 分片被静默丢掉 —— 表现是工具参数 JSON 半截、用户看到「已整理 0 处改动」，
-        // 真实原因是客户端截断，比服务端限流更难查。每轮输出只有几 KB，无内存风险。
-        // 不能改成「trySend 失败就重试/挂起」：读流是同步循环，挂起会阻塞 socket 读取。
-    }.buffer(Channel.UNLIMITED)
-        .flowOn(Dispatchers.IO)
+    }
 
     /**
      * 逐行读 SSE。三种增量分开吐；同时兜住三类「静默成功」的坑：
@@ -200,14 +232,17 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
      * 3. **`finish_reason` 是 length / content_filter**：输出被截断，工具参数必然是半截 JSON，
      *    早点报错比让解析层全拒更好。
      *
-     * **本方法吃 [BufferedSource] 而不是 ResponseBody**：source 是 okio 纯 JVM 类型，
-     * 单测可以用 `Buffer` 直接喂 SSE 文本，钉住「某种 delta 不掐断流」的行为。
+     * **本方法吃 [ByteReadChannel]**（Ktor 的响应体流）而不是 OkHttp 的 `BufferedSource`：
+     * 单测用 `ByteReadChannel(sse)` 直接喂 SSE 文本，钉住「某种 delta 不掐断流」的行为。
+     *
+     * 发送用**挂起的 [SendChannel.send]**：消费端慢时读流自然被反压，分片一个都不会丢
+     * （见类注释第 2 条）。
      */
-    private fun readStream(body: BufferedSource, channel: SendChannel<StreamEvent>) {
+    private suspend fun readStream(body: ByteReadChannel, out: SendChannel<StreamEvent>) {
         val snippet = StringBuilder()
         var sawEvent = false
         while (true) {
-            val line = body.readUtf8Line() ?: break
+            val line = body.readUTF8Line() ?: break
             if (snippet.length < SNIPPET_MAX) {
                 snippet.append(line.take(120)).append('\n')
             }
@@ -232,10 +267,10 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
             val delta = choice["delta"] as? JsonObject ?: continue
             (delta["reasoning_content"] as? JsonPrimitive)?.contentOrNull
                 ?.takeIf { it.isNotEmpty() }
-                ?.let { if (!emit(channel, StreamEvent.Reasoning(it))) return }
+                ?.let { out.send(StreamEvent.Reasoning(it)) }
             (delta["content"] as? JsonPrimitive)?.contentOrNull
                 ?.takeIf { it.isNotEmpty() }
-                ?.let { if (!emit(channel, StreamEvent.Content(it))) return }
+                ?.let { out.send(StreamEvent.Content(it)) }
             // **本函数最要紧的一行纪律**：不认识的 delta 一律 `continue`，绝不 `return`。
             // 2026-10-06 修复：此前「delta 里没有 tool_calls → return」会把整个流在第一条
             // 正文 / 思考 / finish 块就掐断——工具参数只收到零个分片，上层解析出空结果，
@@ -252,7 +287,7 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
                 if (functionName != null && functionName != AiScheduleTool.FUNCTION_NAME) continue
                 (function?.get("arguments") as? JsonPrimitive)?.contentOrNull
                     ?.takeIf { it.isNotEmpty() }
-                    ?.let { if (!emit(channel, StreamEvent.ToolArgs(it))) return }
+                    ?.let { out.send(StreamEvent.ToolArgs(it)) }
             }
         }
         if (!sawEvent) {
@@ -263,67 +298,39 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
         }
     }
 
-    /**
-     * 发一个增量。**不允许静默丢弃**（2026-11-06 审计 A1）。
-     *
-     * 背景：本函数在 OkHttp 的线程上跑，消费端在 Main。`callbackFlow` 默认容量 64，
-     * 长输出时缓冲一满 `trySend` 就返回失败且**没人看返回值**——分片被丢掉，工具参数
-     * 变成半截 JSON，用户看到「已整理 0 处改动 + 1 条提议已略过」，比服务端限流更难查。
-     *
-     * 两层防护：
-     * 1. [chatStream] 那条流带 `buffer(UNLIMITED)` —— 生产环境这里永远走非阻塞快路径；
-     * 2. 用 `trySendBlocking` 而不是 `trySend` —— 万一将来谁把缓冲调小，缓冲满时是**背压**
-     *    （读 socket 的线程等一等）而不是丢数据。
-     *
-     * 返回 false = 通道已关闭（用户点了「停止」，或上层取消），调用方应立即结束读流：
-     * 再往下读只是白烧额度。
-     */
-    private fun emit(channel: SendChannel<StreamEvent>, event: StreamEvent): Boolean =
-        channel.trySendBlocking(event).isSuccess
-
-    /** 单测入口：与 [readStream] 同一实现，用 okio `Buffer` 直接喂 SSE 文本（JVM 可跑）。 */
-    internal suspend fun readStreamForTest(source: BufferedSource, channel: SendChannel<StreamEvent>) {
-        readStream(source, channel)
+    /** 单测入口：与 [readStream] 同一实现，用 `ByteReadChannel(sse)` 直接喂 SSE 文本。 */
+    suspend fun readStreamForTest(body: ByteReadChannel, out: SendChannel<StreamEvent>) {
+        readStream(body, out)
     }
 
     /** 拉上游模型列表（设置页「获取模型列表」用）。解析失败返回空列表而不是抛错。 */
-    suspend fun listModels(baseUrl: String, apiKey: String): List<String> = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url(endpoint(baseUrl, "models"))
-            .header("Authorization", "Bearer $apiKey")
-            .get()
-            .build()
-        val text = execute(request, "models")
-        val root = runCatching { format.parseToJsonElement(text) }.getOrNull() as? JsonObject
-            ?: return@withContext emptyList()
-        (root["data"] as? JsonArray).orEmpty()
-            .mapNotNull { ((it as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull }
-            .filter { it.isNotBlank() }
-    }
-
-    private fun execute(request: Request, what: String): String = runCatching {
-        http.newCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw AiHttpException(response.code, body.take(500))
-            body
+    suspend fun listModels(baseUrl: String, apiKey: String): List<String> =
+        withContext(Dispatchers.Default) {
+            val text = runCatching {
+                val response = http.request(endpoint(baseUrl, "models")) {
+                    method = HttpMethod.Get
+                    header("Authorization", "Bearer $apiKey")
+                }
+                val body = runCatching { response.bodyAsText() }.getOrDefault("")
+                if (!response.status.isSuccess()) {
+                    throw AiHttpException(response.status.value, body.take(500))
+                }
+                body
+            }.onFailure {
+                Logger.w(TAG, "models failed: ${it::class.simpleName}")
+            }.getOrThrow()
+            val root = runCatching { format.parseToJsonElement(text) }.getOrNull() as? JsonObject
+                ?: return@withContext emptyList()
+            (root["data"] as? JsonArray).orEmpty()
+                .mapNotNull { ((it as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull }
+                .filter { it.isNotBlank() }
         }
-    }.onFailure { Log.w(TAG, "$what failed: ${it.javaClass.simpleName}") }.getOrThrow()
-
-    /**
-     * 文件 → `data:image/jpeg;base64,…`。落盘时已强制转 JPEG（`AiImageStore` 走
-     * `ImageImport(forceJpeg = true)`），所以 mime 固定 `image/jpeg`，不需要再嗅探。
-     * 单张读不到就跳过这一张（不整批失败），但会记一条 warn。
-     */
-    private fun dataUri(file: File): String? = runCatching {
-        "data:image/jpeg;base64," + Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
-    }.onFailure { Log.w(TAG, "encode image failed: ${it.javaClass.simpleName}") }.getOrNull()
 
     companion object {
         private const val TAG = "AiScheduleClient"
         private const val TOOL_DESCRIPTION =
             "把调课通知翻译成对当前课表的改动。课程必须引用课表清单里的编号（existingIndex），" +
                 "不要臆造课程；按具体日期发布的放假 / 调休补课安排走 overrides。"
-        private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         private val format = Json { ignoreUnknownKeys = true; isLenient = true }
 
         /** 非 SSE 响应体截取多少字给用户看。 */
@@ -349,18 +356,23 @@ class AiScheduleClient private constructor(private val http: OkHttpClient) {
                 IMAGE_REJECT_HINTS.any { detail.contains(it, ignoreCase = true) }
 
         /**
-         * 派生纪律（见 [AppHttp] 注释）：只覆盖超时，不动连接池。
-         * readTimeout 只管两次读的间隔——流式响应会持续吐字节，不会触发它；
-         * callTimeout 放到 180s 兜住「模型长时间不吐字」的总时长。
+         * 派生纪律（见 `AppHttp` 注释）：只覆盖超时，不动连接池。
+         *
+         * 三个数字的来历（与 OkHttp 那三档一一对应）：
+         * - socket 90s：只管**两次读的间隔**——流式响应会持续吐字节，不会触发它；
+         * - request 600s：兜「模型长时间不吐字」的总时长（原先 callTimeout）；
+         * - connect 15s：与其余模块一致。
+         *
+         * 注意 request 超时在 Ktor 里是 `HttpRequestTimeoutException`（它继承 `IOException`，
+         * **不是** `CancellationException`），所以不会被「用户点停止」那条分支吞掉。
          */
-        fun create(): AiScheduleClient = AiScheduleClient(
-            AppHttp.base.newBuilder()
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(90, TimeUnit.SECONDS)
-                // readTimeout(90s) 兜「长时间不吐字」，callTimeout 只需兜「总时长」。
-                // 180s 会把 max 档的长思考 + 长输出硬切（实测抛的是 InterruptedIOException）
-                .callTimeout(600, TimeUnit.SECONDS)
-                .build(),
+        fun create(imageEncoder: (Any) -> String? = { null }): AiScheduleClient = AiScheduleClient(
+            http = SharedHttp.create(
+                requestTimeoutSeconds = 600,
+                connectTimeoutSeconds = 15,
+                socketTimeoutSeconds = 90,
+            ),
+            imageEncoder = imageEncoder,
         )
     }
 }
