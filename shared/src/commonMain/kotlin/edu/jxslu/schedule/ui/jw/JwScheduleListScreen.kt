@@ -2,8 +2,6 @@ package edu.jxslu.schedule.ui.jw
 
 import androidx.compose.foundation.background
 import edu.jxslu.schedule.ui.icon.AppIcons
-import kotlinx.datetime.toJavaLocalDate
-import kotlinx.datetime.toKotlinLocalDate
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,31 +40,29 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.JwImportActivity
 import edu.jxslu.schedule.data.jw.JwUrls
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.ScheduleOverrides
 import edu.jxslu.schedule.domain.SemesterConfig
+import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.compactPosition
 import edu.jxslu.schedule.domain.dayLabel
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.PageEmpty
 import edu.jxslu.schedule.ui.common.courseColor
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
-import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.datetime.LocalDate
 
 /**
  * 教务 → 理论课表 / 实验课表（2026-10-21 二版：日程流）。
@@ -80,12 +76,30 @@ import kotlinx.coroutines.launch
  * [ScheduleOverrides.dateOf]（domain 版本，不再抄 ui/week 的第三份）。
  *
  * 网页核对仍留给顶栏外链（带当前学期参数）。
+ *
+ * ## 平台动作在参数里（iOS 移植 S18，2026-11-25）
+ *
+ * 本文件在共享层，拿不到 `Context` / `Activity`。原来两处
+ * `JwImportActivity.startBrowse(...)` / `JwImportActivity.start(...)` 收成可空回调，
+ * **null = 这个平台没有这项能力，入口整条不渲染**（口径同 `WeekScreen`）：
+ *
+ * | 参数 | null 的含义 |
+ * |---|---|
+ * | [onOpenWebPage] | 平台没有内置浏览窗口 → 顶栏外链图标消失，空态的「在教务网页核对」也消失 |
+ * | [onOpenJwImport] | 平台没有导入窗口 → 理论课表空态的「去导入课表」消失 |
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun JwScheduleListScreen(kind: CourseKind, onBack: () -> Unit) {
-    val context = LocalContext.current
-    val repo = remember(context) { Graph.repository(context) }
+fun JwScheduleListScreen(
+    kind: CourseKind,
+    onBack: () -> Unit,
+    /** 在教务网页核对（Android 走 `JwImportActivity.startBrowse`）。 */
+    onOpenWebPage: ((title: String, url: String) -> Unit)? = null,
+    /** 去导入课表（Android 走 `JwImportActivity.start`）。 */
+    onOpenJwImport: (() -> Unit)? = null,
+) {
+    // 仓库由装配根提供（Android `GraphServices` / iOS `IosServices`），本页不再摸 `Context`。
+    val repo = remember { Services.current.scheduleRepository() }
     // 初值留 null：空列表与「还没读到」是两回事，直接给 emptyList 会先闪一下空态
     val courses by repo.courses.collectAsStateWithLifecycle(initialValue = null)
     val slots by repo.timeSlots.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -105,7 +119,7 @@ fun JwScheduleListScreen(kind: CourseKind, onBack: () -> Unit) {
     // 「本周」只认学期内的周次：学期外给 null（没有可回的周次）。
     // 用裸 weekNumberOf 的话，切到上学期课表后「回到本周」会永远挂着点不掉（同课表页，2026-11-05）
     val todayWeek = remember(semester) {
-        ScheduleCalculator.todayWeekOf(semester, LocalDate.now().toKotlinLocalDate())
+        ScheduleCalculator.todayWeekOf(semester, AppClock.today())
     }
 
     // 周次状态：数据就绪前不定值（否则 Pager 先渲染第 1 周再跳本周，与课表页同一坑）。
@@ -147,7 +161,10 @@ fun JwScheduleListScreen(kind: CourseKind, onBack: () -> Unit) {
                         Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
-                actions = { JwWebActionButton(title, webUrl) },
+                actions = {
+                    // 宿主不给浏览窗口就不渲染这一格，不留点了没反应的图标
+                    JwWebActionButton(title, webUrl, onOpenWebPage)
+                },
             )
         },
     ) { padding ->
@@ -179,6 +196,12 @@ fun JwScheduleListScreen(kind: CourseKind, onBack: () -> Unit) {
                 }
                 mine.isEmpty() -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        // 空态的按钮跟着平台能力走：宿主没给对应动作时不给按钮（不给死入口）
+                        val emptyAction: Pair<String, () -> Unit>? = if (isLab) {
+                            onOpenWebPage?.let { open -> "在教务网页核对" to { open(title, webUrl) } }
+                        } else {
+                            onOpenJwImport?.let { run -> "去导入课表" to { run() } }
+                        }
                         PageEmpty(
                             title = if (isLab) "这张课表还没有实验课" else "课表里还没有理论课",
                             body = if (isLab) {
@@ -186,14 +209,8 @@ fun JwScheduleListScreen(kind: CourseKind, onBack: () -> Unit) {
                             } else {
                                 "课表默认为空，从教务导入后这里按周列出本学期的理论课。"
                             },
-                            actionLabel = if (isLab) "在教务网页核对" else "去导入课表",
-                            onAction = {
-                                if (isLab) {
-                                    JwImportActivity.startBrowse(context, title, webUrl)
-                                } else {
-                                    JwImportActivity.start(context)
-                                }
-                            },
+                            actionLabel = emptyAction?.first,
+                            onAction = emptyAction?.second,
                         )
                     }
                 }
@@ -315,9 +332,10 @@ private fun WeekDayList(
     plan: Map<ScheduleOverrides.Slot, ScheduleOverrides.Directive>,
     todayWeek: Int?,
 ) {
-    val today = LocalDate.now()
+    val today = AppClock.today()
     val todayIsHere = todayWeek != null && week == todayWeek
-    val todayDay = today.dayOfWeek.value
+    // kotlinx-datetime 的 DayOfWeek 以周一为 0，+1 回到「1=周一 … 7=周日」口径（与 domain 同源）
+    val todayDay = today.dayOfWeek.ordinal + 1
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
@@ -332,7 +350,7 @@ private fun WeekDayList(
             item(key = "d$day") {
                 DayHeader(
                     day = day,
-                    date = date?.toJavaLocalDate(),
+                    date = date,
                     isToday = isToday,
                     count = dayCourses.size,
                     suspended = suspended,
@@ -343,7 +361,7 @@ private fun WeekDayList(
                 dayCourses.isNotEmpty() -> items(dayCourses, key = { "d${day}c${it.id}" }) { course ->
                     ScheduleDayCard(course = course, slots = slots)
                 }
-                suspended -> item(key = "d${day}s") { SuspendedCard(date?.toJavaLocalDate()) }
+                suspended -> item(key = "d${day}s") { SuspendedCard(date) }
                 else -> item(key = "d${day}e") { FreeCard() }
             }
         }
@@ -376,7 +394,7 @@ private fun DayHeader(
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            text = date?.format(MD_FMT) ?: "—",
+            text = date?.let(::monthDay) ?: "—",
             style = MaterialTheme.typography.labelMedium,
             color = onSurface.copy(alpha = 0.45f),
         )
@@ -439,7 +457,7 @@ private fun ScheduleDayCard(course: Course, slots: List<TimeSlot>) {
                     .padding(start = 10.dp, top = 11.dp, bottom = 11.dp),
             ) {
                 Text(
-                    text = start?.let { clock(it) } ?: "--:--",
+                    text = start?.let(TextFmt::clock) ?: "--:--",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -453,7 +471,7 @@ private fun ScheduleDayCard(course: Course, slots: List<TimeSlot>) {
                 if (end != null) {
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = clock(end),
+                        text = TextFmt.clock(end),
                         style = MaterialTheme.typography.labelSmall,
                         color = onSurface.copy(alpha = 0.5f),
                     )
@@ -509,10 +527,13 @@ private fun sectionLabel(course: Course): String =
         "${course.startSection}节"
     }
 
-/** 分钟 → `HH:mm`。 */
-private fun clock(minutes: Int): String = "%02d:%02d".format(minutes / 60, minutes % 60)
-
-private val MD_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("M/d")
+/**
+ * 日期 → `M/d`（月/日都不补零）。
+ *
+ * 搬迁前是 `DateTimeFormatter.ofPattern("M/d")`；kotlinx-datetime 没有格式化器，
+ * 这里拼两个整数——与 `WeekScreen` 顶部大号日期的口径一致（都不补零）。
+ */
+private fun monthDay(date: LocalDate): String = "${date.monthNumber}/${date.dayOfMonth}"
 
 /** 无课日期的占位行（保留日期节奏，比整段消失好读）。 */
 @Composable
@@ -532,7 +553,7 @@ private fun FreeCard() {
 /** 停课 / 放假日的占位行。 */
 @Composable
 private fun SuspendedCard(date: LocalDate?) {
-    val d = date?.format(MD_FMT).orEmpty()
+    val d = date?.let(::monthDay).orEmpty()
     Text(
         text = if (d.isBlank()) "放假 / 停课" else "$d 放假 / 停课，当天不按课表上课",
         style = MaterialTheme.typography.labelMedium,

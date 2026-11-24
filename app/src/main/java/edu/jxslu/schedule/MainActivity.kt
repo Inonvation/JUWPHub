@@ -99,6 +99,7 @@ import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberQuickScan
 import edu.jxslu.schedule.ui.campus.CampusPayResultDialogHost
 import edu.jxslu.schedule.ui.jw.JwHubScreen
+import edu.jxslu.schedule.ui.jw.rememberJwScreenPlatformActions
 import edu.jxslu.schedule.ui.jwvw.JwImportMode
 import edu.jxslu.schedule.ui.jwvw.SCHEDULE_IMPORT_CAVEAT
 import edu.jxslu.schedule.ui.me.hub.UpdateAvailableDialogHost
@@ -1685,7 +1686,10 @@ internal fun JuwApp(
                     // 教务 Tab（2026-10-20）：入口汇总；每个入口落到原生二级页。
                     // 顶栏只留校园门户的网页图标（2026-11-08 起指向 portal）；网页核对按钮收在各业务页顶栏。
                     composable(Routes.JW) {
+                        // 平台动作（浏览窗口 / 导入窗口）由本侧给：共享层只认可空回调。
+                        val jwActions = rememberJwScreenPlatformActions()
                         JwHubScreen(
+                            onOpenWebPage = jwActions.openWebPage,
                             onOpenTheorySchedule = {
                                 openSubpage(context, SubpageRequest(screen = SubpageScreen.THEORY_SCHEDULE))
                             },

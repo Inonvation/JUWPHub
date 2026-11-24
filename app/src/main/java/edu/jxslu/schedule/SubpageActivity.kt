@@ -56,6 +56,7 @@ import edu.jxslu.schedule.ui.jw.StudentInfoScreen
 import edu.jxslu.schedule.ui.jw.JwScheduleListScreen
 import edu.jxslu.schedule.ui.jw.TeachingCalendarScreen
 import edu.jxslu.schedule.ui.jw.TextbookScreen
+import edu.jxslu.schedule.ui.jw.rememberJwScreenPlatformActions
 import edu.jxslu.schedule.ui.notes.NoteCourseScreen
 import edu.jxslu.schedule.ui.notes.NoteDetailScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
@@ -289,13 +290,49 @@ class SubpageActivity : ComponentActivity() {
                     onOpenImport = actions.openImport,
                 )
             }
-            SubpageScreen.TEXTBOOKS -> TextbookScreen(onBack = onBack)
-            SubpageScreen.THEORY_SCHEDULE ->
-                JwScheduleListScreen(kind = CourseKind.Theory, onBack = onBack)
-            SubpageScreen.LAB_SCHEDULE ->
-                JwScheduleListScreen(kind = CourseKind.Lab, onBack = onBack)
-            SubpageScreen.STUDENT_INFO -> StudentInfoScreen(onBack = onBack)
-            SubpageScreen.TEACHING_CALENDAR -> TeachingCalendarScreen(onBack = onBack)
+            // 教材 / 教学日历已搬进 shared/commonMain（iOS 移植 S18）：平台动作（浏览窗口 /
+            // 导入窗口）由本侧给，共享层只认可空回调。
+            SubpageScreen.TEXTBOOKS -> {
+                val actions = rememberJwScreenPlatformActions()
+                TextbookScreen(
+                    onBack = onBack,
+                    onOpenWebPage = actions.openWebPage,
+                    onOpenJwImport = actions.openJwImport,
+                )
+            }
+            // 课表清单已搬进 shared/commonMain（iOS 移植 S18）：平台动作（浏览窗口 / 导入窗口）
+            // 由本侧给，共享层只认可空回调。
+            SubpageScreen.THEORY_SCHEDULE -> {
+                val actions = rememberJwScreenPlatformActions()
+                JwScheduleListScreen(
+                    kind = CourseKind.Theory,
+                    onBack = onBack,
+                    onOpenWebPage = actions.openWebPage,
+                    onOpenJwImport = actions.openJwImport,
+                )
+            }
+            SubpageScreen.LAB_SCHEDULE -> {
+                val actions = rememberJwScreenPlatformActions()
+                JwScheduleListScreen(
+                    kind = CourseKind.Lab,
+                    onBack = onBack,
+                    onOpenWebPage = actions.openWebPage,
+                    onOpenJwImport = actions.openJwImport,
+                )
+            }
+            // 学籍信息已搬进 shared/commonMain（iOS 移植 S18）：只有浏览窗口一件平台事。
+            SubpageScreen.STUDENT_INFO -> {
+                val actions = rememberJwScreenPlatformActions()
+                StudentInfoScreen(onBack = onBack, onOpenWebPage = actions.openWebPage)
+            }
+            SubpageScreen.TEACHING_CALENDAR -> {
+                val actions = rememberJwScreenPlatformActions()
+                TeachingCalendarScreen(
+                    onBack = onBack,
+                    onOpenWebPage = actions.openWebPage,
+                    onOpenJwImport = actions.openJwImport,
+                )
+            }
             SubpageScreen.SCHOLAR -> ScholarScreen(onBack = onBack)
             SubpageScreen.CURRICULUM -> CurriculumScreen(onBack = onBack)
             SubpageScreen.INTERNSHIP_BASES -> InternshipBasesScreen(onBack = onBack)

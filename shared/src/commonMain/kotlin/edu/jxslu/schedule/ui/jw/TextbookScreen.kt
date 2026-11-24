@@ -20,30 +20,40 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.JwImportActivity
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.domain.Textbook
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.PageEmpty
 import edu.jxslu.schedule.ui.common.PageScaffold
-import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
 import kotlinx.coroutines.flow.collect
 
 /**
  * 教务 → 教材（2026-10-20）。
  *
  * 数据已经在 Room 的 `textbooks` 表里，按当前课表学期整批展示；不再用网页占位。
- * 顶栏外链图标打开教务「学生教材确认」壳页，走统一的 [JwImportActivity] 浏览窗口。
+ * 顶栏外链图标打开教务「学生教材确认」壳页，走宿主的浏览窗口。
+ *
+ * ## 平台动作在参数里（iOS 移植 S18，2026-11-25）
+ *
+ * | 参数 | null 的含义 |
+ * |---|---|
+ * | [onOpenWebPage] | 平台没有内置浏览窗口 → 顶栏外链图标消失 |
+ * | [onOpenJwImport] | 平台没有导入窗口 → 空态「去导入课表」消失 |
  */
 @Composable
-fun TextbookScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val repo = remember(context) { Graph.repository(context) }
+fun TextbookScreen(
+    onBack: () -> Unit,
+    /** 在教务网页核对（Android 走 `JwImportActivity.startBrowse`）。 */
+    onOpenWebPage: ((title: String, url: String) -> Unit)? = null,
+    /** 去导入课表（Android 走 `JwImportActivity.start`）。 */
+    onOpenJwImport: (() -> Unit)? = null,
+) {
+    // 仓库由装配根提供（Android `GraphServices` / iOS `IosServices`），本页不再摸 `Context`。
+    val repo = remember { Services.current.scheduleRepository() }
     val snackbar = remember { SnackbarHostState() }
     var term by remember { mutableStateOf<String?>(null) }
     var termLoaded by remember { mutableStateOf(false) }
@@ -56,8 +66,13 @@ fun TextbookScreen(onBack: () -> Unit) {
         termLoaded = true
     }
 
+    // 按课程名分组、组内保持原顺序；组间按课程名升序（原实现用 `toSortedMap`，
+    // 那是 JVM 专有的 `SortedMap`，commonMain 取不到——改成「分组后排序」等价实现）。
     val groups = remember(books) {
-        books.orEmpty().groupBy { it.courseName }.toSortedMap()
+        books.orEmpty()
+            .groupBy { it.courseName }
+            .toList()
+            .sortedBy { it.first }
     }
     val empty = books?.isEmpty() == true
     val noTerm = termLoaded && term.isNullOrBlank()
@@ -66,10 +81,17 @@ fun TextbookScreen(onBack: () -> Unit) {
         title = "教材",
         onBack = onBack,
         snackbar = snackbar,
-        actions = { JwWebActionButton("教材", JwUrls.TEXTBOOK_QUERY) },
+        actions = { JwWebActionButton("教材", JwUrls.TEXTBOOK_QUERY, onOpenWebPage) },
         loading = books == null,
         loadingText = "正在读取教材",
         empty = if (empty) {
+            // 两种空态的出口不同：没有学期号要去导入，有学期号则去网页核对。
+            // 宿主没给对应动作时不给按钮（不给死入口）。
+            val action: Pair<String, () -> Unit>? = if (noTerm) {
+                onOpenJwImport?.let { run -> "去导入课表" to { run() } }
+            } else {
+                onOpenWebPage?.let { open -> "在教务网页核对" to { open("教材", JwUrls.TEXTBOOK_QUERY) } }
+            }
             PageEmpty(
                 title = "还没有教材数据",
                 body = if (noTerm) {
@@ -77,14 +99,8 @@ fun TextbookScreen(onBack: () -> Unit) {
                 } else {
                     "导入课表后会自动抓取本学期教材；也可以先去教务网页核对。"
                 },
-                actionLabel = if (noTerm) "去导入课表" else "在教务网页核对",
-                onAction = {
-                    if (noTerm) {
-                        JwImportActivity.start(context)
-                    } else {
-                        JwImportActivity.startBrowse(context, "教材", JwUrls.TEXTBOOK_QUERY)
-                    }
-                },
+                actionLabel = action?.first,
+                onAction = action?.second,
             )
         } else null,
     ) {
@@ -97,7 +113,7 @@ fun TextbookScreen(onBack: () -> Unit) {
                 )
             }
         }
-        items(groups.entries.toList(), key = { it.key }) { (course, list) ->
+        items(groups, key = { it.first }) { (course, list) ->
             // 切学期后整份清单会被替换，逐门卡平滑进出（key 是课程名，见上）
             AppCard(modifier = Modifier.animateItem(), contentPadding = PaddingValues(0.dp)) {
                 Column(

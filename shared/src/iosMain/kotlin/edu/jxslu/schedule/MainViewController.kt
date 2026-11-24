@@ -31,6 +31,7 @@ import edu.jxslu.schedule.data.local.DB_VERSION
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.local.juwDatabasePath
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.DataSelfTestResult
 import edu.jxslu.schedule.ui.DataSelfTestStrip
@@ -38,6 +39,10 @@ import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.inbox.InboxScreen
+import edu.jxslu.schedule.ui.jw.JwHubScreen
+import edu.jxslu.schedule.ui.jw.JwScheduleListScreen
+import edu.jxslu.schedule.ui.jw.TeachingCalendarScreen
+import edu.jxslu.schedule.ui.jw.TextbookScreen
 import edu.jxslu.schedule.ui.life.PowerBillScreen
 import edu.jxslu.schedule.ui.life.PowerBillViewModel
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
@@ -91,6 +96,10 @@ private fun IosRoot(services: IosServices) {
     JuwTheme {
         var jwOpen by remember { mutableStateOf(false) }
         var page by remember { mutableStateOf(IosPage.Week) }
+        // 教务 Tab 的一层子页（S18）：理论 / 实验课表、教材、教学日历都已经在共享层，
+        // iOS 侧没有 `SubpageActivity` 那套栈，这一版只要一层——非 null = 正在看那一页，
+        // 返回键清回 null。
+        var jwSub by remember { mutableStateOf<IosJwSubPage?>(null) }
         // 详情页（笔记 / 作业）还在 :app，iOS 点条目时给一句确定的话，不留「点了没反应」
         var hint by remember { mutableStateOf<String?>(null) }
         if (jwOpen) {
@@ -118,6 +127,49 @@ private fun IosRoot(services: IosServices) {
                                 // 其余平台动作在 iOS 侧都还没有实现，留空即可——
                                 // 传 null / 空 lambda 的入口本来就不渲染（见 WeekScreen 头部参数表）。
                             )
+                        }
+                        // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
+                        //
+                        // 十四个二级页回调里接了七个，落点都是**真页面**：
+                        // - 成绩 / 考试 / 选课：`IosPage` 里本来就有；
+                        // - 理论 / 实验课表、教材、教学日历：本次一起搬进共享层，
+                        //   落到本 Tab 的一层子页（[jwSub]）里，返回键回汇总页。
+                        // 其余七个（学业、培养方案、实习基地、评教、请假、报修、校历）的页面
+                        // 还在 `:app`，传 null = 整行不渲染（`design/ios-port.md` §11.2 ④：
+                        // 给空 lambda 留死入口比没有更糟）。顶栏「校园门户」同理：iOS 还没有
+                        // 通用浏览窗口，传 null 后图标不出现。
+                        IosPage.Jw -> {
+                            val sub = jwSub
+                            if (sub != null) {
+                                when (sub) {
+                                    IosJwSubPage.TheorySchedule -> JwScheduleListScreen(
+                                        kind = CourseKind.Theory,
+                                        onBack = { jwSub = null },
+                                    )
+                                    IosJwSubPage.LabSchedule -> JwScheduleListScreen(
+                                        kind = CourseKind.Lab,
+                                        onBack = { jwSub = null },
+                                    )
+                                    IosJwSubPage.Textbooks -> TextbookScreen(
+                                        onBack = { jwSub = null },
+                                    )
+                                    IosJwSubPage.TeachingCalendar -> TeachingCalendarScreen(
+                                        onBack = { jwSub = null },
+                                    )
+                                }
+                            } else {
+                                JwHubScreen(
+                                    onOpenTheorySchedule = { jwSub = IosJwSubPage.TheorySchedule },
+                                    onOpenLabSchedule = { jwSub = IosJwSubPage.LabSchedule },
+                                    onOpenTextbooks = { jwSub = IosJwSubPage.Textbooks },
+                                    onOpenTeachingCalendar = {
+                                        jwSub = IosJwSubPage.TeachingCalendar
+                                    },
+                                    onOpenScores = { page = IosPage.Score },
+                                    onOpenExams = { page = IosPage.Exam },
+                                    onOpenSelection = { page = IosPage.Selection },
+                                )
+                            }
                         }
                         // 笔记库（S13 搬进共享层）：仓库是本地 Room 表，iOS 直接可读。
                         // `images` 传 null = 本平台还没有附件图解码，缩略图整行不出现；
@@ -210,6 +262,8 @@ private fun IosRoot(services: IosServices) {
                         TextButton(
                             onClick = {
                                 hint = null
+                                // 点底栏 = 回到该 Tab 的根页（教务 Tab 正在看子页时退回汇总页）
+                                jwSub = null
                                 page = entry
                             },
                         ) { Text(entry.label) }
@@ -222,13 +276,16 @@ private fun IosRoot(services: IosServices) {
 }
 
 /**
- * iOS 侧目前能进的一级页面（S13 起有笔记 / 作业 / 选课；S19 起有收件箱与天气）。
+ * iOS 侧目前能进的一级页面（S13 起有笔记 / 作业 / 选课；S18 起有教务；
+ * S19 起有收件箱与天气；S20 起有电费与流水）。
  *
  * 为什么用枚举而不是导航库：iOS 侧还没有二级页栈（`SubpageActivity` 那一套是 Android 的），
  * 这一版只要能切页就够验证「共享页面在 iOS 上真的画得出来」。等详情页搬完再换真正的路由。
  */
 private enum class IosPage(val label: String) {
     Week("课表"),
+    // 教务 Tab 的入口汇总页；与 Android 底栏同序（课表之后就是教务）。
+    Jw("教务"),
     Notes("笔记"),
     Homework("作业"),
     Selection("选课"),
@@ -238,6 +295,17 @@ private enum class IosPage(val label: String) {
     Weather("天气"),
     PowerBill("电费"),
     Statement("流水"),
+}
+
+/**
+ * 教务 Tab 下的一层子页（S18）。这些页面都已搬进 `shared/commonMain`，iOS 直接画得出来；
+ * 它们的平台动作（浏览窗口 / 导入窗口）iOS 侧还没有，传 null 后对应入口不渲染。
+ */
+private enum class IosJwSubPage {
+    TheorySchedule,
+    LabSchedule,
+    Textbooks,
+    TeachingCalendar,
 }
 
 /**
