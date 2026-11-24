@@ -1,6 +1,6 @@
 package edu.jxslu.schedule.data.repo
 
-import android.util.Log
+import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.jw.ExamScheduleParser
 import edu.jxslu.schedule.data.jw.JwHtml
@@ -8,13 +8,15 @@ import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.ExamChangeDetector
 import edu.jxslu.schedule.domain.ExamChangeText
 import edu.jxslu.schedule.domain.ExamMapper.ExamEntry
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
+import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
@@ -23,7 +25,7 @@ import kotlinx.coroutines.sync.Mutex
 /**
  * 考试安排自动检查（DESIGN §4.33）：考试变动提醒的数据链。
  *
- * 走 [CasSession.fetchHtml]（已存凭证 + OkHttp），不开窗口：缺省学期以教务壳页为准（同
+ * 走 [JwReadSession.fetchHtml]（已存凭证 + OkHttp），不开窗口：缺省学期以教务壳页为准（同
  * `scripts/fetch_exams.py` 的做法），再 GET 数据接口 `/jsxsd/xsks/xsksap_list`
  * 翻页抓全量，解析用 [ExamScheduleParser.parseFetchJson]——与教务 WebView 导入
  * **同一份解析口径**，只是传输层换成 OkHttp（同 `ScoreSync` 与成绩页的关系）。
@@ -45,14 +47,14 @@ import kotlinx.coroutines.sync.Mutex
  * - 撤考忽略（[ExamChangeDetector] 的口径），宁可少打扰。
  */
 class ExamSync(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val prefs: DisplayPrefsStore,
-    private val snapshotStore: ExamSnapshotStore,
+    private val snapshotStore: ExamSnapshot,
     /** 收件箱留痕（DESIGN §4.38）：检测出的变更顺手入箱，与发不发系统通知无关。 */
     private val inbox: InboxRepository,
     /** 考试变动自动合并（DESIGN §4.33）：检测到变动后写当前课表的考试行。 */
     private val repo: ScheduleRepository,
-    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val nowMillis: () -> Long = AppClock::nowMillis,
 ) {
 
     /** 抓取互斥（口径同 `ScoreSync`）：撞上了直接让位，不排队重抓一遍。 */
@@ -149,7 +151,7 @@ class ExamSync(
 
         // 写盘失败不推进检查时间：基线没更新却记下「刚查过」，下一轮会拿旧基线比对，
         // 把同一批变动重复报一遍。
-        if (snapshotStore.save(ExamSnapshotStore.Snapshot(term = term, exams = exams))) {
+        if (snapshotStore.save(ExamSnapshot.Snapshot(term = term, exams = exams))) {
             prefs.setExamAlertCheckMillis(nowMillis())
         }
         // 收件箱留痕（DESIGN §4.38）：手动「更新」与周期检查同源，谁先发现都入箱。
@@ -175,7 +177,7 @@ class ExamSync(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "auto merge exams failed", e)
+                Logger.w(TAG, "auto merge exams failed", e)
                 0
             }
         } else {
@@ -200,6 +202,6 @@ class ExamSync(
                 ?: JwHtml.selectedTerm(html, selectId = null)
 
         fun listUrl(term: String, page: Int): String =
-            "${JwUrls.EXAM_LIST_API}?xnxqid=${java.net.URLEncoder.encode(term, "UTF-8")}&xqlb=&pageNum=$page&pageSize=${ExamScheduleParser.PAGE_SIZE}"
+            "${JwUrls.EXAM_LIST_API}?xnxqid=${term.encodeURLParameter()}&xqlb=&pageNum=$page&pageSize=${ExamScheduleParser.PAGE_SIZE}"
     }
 }

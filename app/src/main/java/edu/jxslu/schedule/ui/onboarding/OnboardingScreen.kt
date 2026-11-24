@@ -321,14 +321,17 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
             val currentArchived = archived?.takeIf {
                 it.currentTerm != null && it.createdTerms.contains(it.currentTerm)
             }
-            if (currentArchived?.currentTerm != null) {
+            // 先取到局部变量：`currentTerm` 是跨模块（`:shared`）的公开属性，智能转换到
+            // String 不可用（iOS 移植 S4 搬类之后才暴露的编译错误），这里显式取一次。
+            val currentTerm = currentArchived?.currentTerm
+            if (currentTerm != null) {
                 Graph.appScope.launch {
                     val timetableId = runCatching {
-                        Graph.repository(appContext).timetableByTerm(currentArchived.currentTerm)?.id
+                        Graph.repository(appContext).timetableByTerm(currentTerm)?.id
                     }.getOrNull() ?: return@launch
                     val result = runCatching {
                         Graph.teachingCalendarSync(appContext)
-                            .applyAfterImport(currentArchived.currentTerm, timetableId)
+                            .applyAfterImport(currentTerm, timetableId)
                     }.getOrNull()
                     if (result is TeachingCalendarSync.Result.Applied && result.changed) {
                         JwImportResultBus.publish("开学日已按教务教学日历设为 ${result.startDate}")

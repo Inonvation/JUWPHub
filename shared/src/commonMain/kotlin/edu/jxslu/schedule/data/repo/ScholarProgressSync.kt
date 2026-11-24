@@ -5,7 +5,7 @@ import edu.jxslu.schedule.data.jw.ScholarProgressParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.data.session.notReadyReason
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.ScholarCourse
@@ -34,7 +34,7 @@ import kotlinx.coroutines.sync.Mutex
  * 5. **串行抓**：教务对并发请求的态度未知，四个页面串行也就几秒，不值得冒险。
  */
 class ScholarProgressSync(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val repo: ScholarProgressRepository,
     private val prefs: DisplayPrefsStore,
     private val today: () -> LocalDate = AppClock::today,

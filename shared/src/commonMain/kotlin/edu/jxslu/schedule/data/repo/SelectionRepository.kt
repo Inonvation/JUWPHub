@@ -1,8 +1,8 @@
 package edu.jxslu.schedule.data.repo
 
-import androidx.room.withTransaction
 import edu.jxslu.schedule.data.local.CourseSelectionEntity
 import edu.jxslu.schedule.data.local.JuwDatabase
+import edu.jxslu.schedule.data.local.inTransaction
 import edu.jxslu.schedule.domain.CourseSelection
 import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.flow.Flow
@@ -47,7 +47,7 @@ class SelectionRepository(private val db: JuwDatabase) {
     suspend fun replaceTerms(byTerm: List<Pair<String, List<CourseSelection>>>) {
         if (byTerm.isEmpty()) return
         val now = AppClock.nowMillis()
-        db.withTransaction {
+        db.inTransaction {
             byTerm.forEach { (term, rows) ->
                 dao.deleteForTerm(term)
                 if (rows.isNotEmpty()) {

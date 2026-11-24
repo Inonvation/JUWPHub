@@ -5,8 +5,9 @@ import edu.jxslu.schedule.data.DefaultData
 import edu.jxslu.schedule.data.jw.JwHtml
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.session.CasFetchResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.ExamMapper
 import edu.jxslu.schedule.domain.InboxKind
@@ -16,9 +17,8 @@ import edu.jxslu.schedule.domain.TermNaming
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.plus
-import kotlinx.datetime.toJavaLocalDate
-import java.time.LocalDate
 
 /**
  * 学期归档与新学期探测（DESIGN §4.17，2026-11-19）。
@@ -39,13 +39,13 @@ import java.time.LocalDate
  * [AutoSyncRules.interRequestDelayMs] 间隔，撞上在跑的那次直接让位（[syncLocked]）。
  */
 class ScheduleTermImport(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val repo: ScheduleRepository,
     private val prefs: DisplayPrefsStore,
     private val inbox: InboxRepository,
     private val sync: ScheduleSync,
-    private val nowMillis: () -> Long = System::currentTimeMillis,
-    private val today: () -> LocalDate = LocalDate::now,
+    private val nowMillis: () -> Long = AppClock::nowMillis,
+    private val today: () -> LocalDate = AppClock::today,
 ) {
 
     /** 归档冷启动补跑的退避窗口：失败也记时刻，6 小时内不再打一轮教务。 */
@@ -304,9 +304,10 @@ class ScheduleTermImport(
         }
         // 毕业 / 长期休学：最后一个学期结束 180 天后不再探测，免得永久每 24 小时打两次教务。
         // 手动导入新学期会把 max term 推上去，探测自动恢复。
+        // iOS 移植 S4：`LocalDate` 换成 kotlinx-datetime 之后没有 `isAfter`，用 `>`（Comparable）。
         val latestStart = ExamMapper.estimatedTermStart(latest.term)
         if (latestStart != null &&
-            today().isAfter(latestStart.plus(DatePeriod(days = 20 * 7 + 180)).toJavaLocalDate())
+            today() > latestStart.plus(DatePeriod(days = 20 * 7 + 180))
         ) {
             return ProbeResult.Skipped("最后一个学期已结束超过 180 天")
         }

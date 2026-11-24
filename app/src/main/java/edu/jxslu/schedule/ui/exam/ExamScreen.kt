@@ -36,6 +36,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.SubpageActivity
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.jw.JwUrls
+import edu.jxslu.schedule.data.repo.ExamSnapshot
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.domain.ExamChangeDetector
@@ -82,7 +83,7 @@ fun ExamScreen(onBack: () -> Unit) {
     val snapshotStore = remember { ExamSnapshotStore(context) }
 
     // null = 还没读完盘：首帧不渲染空态，免得「还没有考试安排」闪一下再跳真实列表
-    var snapshot by remember { mutableStateOf<ExamSnapshotStore.Snapshot?>(null) }
+    var snapshot by remember { mutableStateOf<ExamSnapshot.Snapshot?>(null) }
     var checkedAtMillis by remember { mutableStateOf(0L) }
     var busy by remember { mutableStateOf(false) }
 
@@ -204,7 +205,7 @@ private class Dated(val entry: ExamEntry, val date: LocalDate?)
  * 内部按日期倒序（刚考完的在最前），两块之间插一行「已结束」标签。
  */
 private fun buildRows(
-    snapshot: ExamSnapshotStore.Snapshot,
+    snapshot: ExamSnapshot.Snapshot,
     checkedAtMillis: Long,
     changes: Map<String, ExamChangeDetector.Kind>,
 ): List<ExamRow> {

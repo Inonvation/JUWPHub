@@ -5,7 +5,7 @@ import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.CurriculumRules
 import edu.jxslu.schedule.domain.AppClock
@@ -27,7 +27,7 @@ import kotlinx.coroutines.sync.Mutex
  * 4. **mutex 让位**：撞上正在跑的同步直接回 [Result.InProgress]，不排队白打一轮。
  */
 class CurriculumSync(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val repo: CurriculumRepository,
     private val prefs: DisplayPrefsStore,
     private val today: () -> LocalDate = AppClock::today,

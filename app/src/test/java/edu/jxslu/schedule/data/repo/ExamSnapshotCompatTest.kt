@@ -20,7 +20,7 @@ class ExamSnapshotCompatTest {
                "endTime":"09:55","seatNo":"1","sessionNo":"S"}
             ]}
         """.trimIndent()
-        val snapshot = json.decodeFromString<ExamSnapshotStore.Snapshot>(old)
+        val snapshot = json.decodeFromString<ExamSnapshot.Snapshot>(old)
         val entry = snapshot.exams.single()
         assertEquals("高等数学", entry.name)
         assertEquals("2026-05-18", entry.date)
@@ -29,7 +29,7 @@ class ExamSnapshotCompatTest {
 
     @Test
     fun snapshotRoundTrips() {
-        val snapshot = ExamSnapshotStore.Snapshot(
+        val snapshot = ExamSnapshot.Snapshot(
             term = "2026-2027-1",
             exams = listOf(
                 edu.jxslu.schedule.domain.ExamMapper.ExamEntry(
@@ -41,6 +41,6 @@ class ExamSnapshotCompatTest {
             ),
         )
         val text = json.encodeToString(snapshot)
-        assertEquals(snapshot, json.decodeFromString<ExamSnapshotStore.Snapshot>(text))
+        assertEquals(snapshot, json.decodeFromString<ExamSnapshot.Snapshot>(text))
     }
 }

@@ -6,77 +6,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** `CasSession.ensureValid` 的结果。UI 按它分支——三种引导的去处完全不同。 */
-sealed interface CasEnsureResult {
-
-    /**
-     * 会话可用。
-     *
-     * [loggedInNow] 区分两种来源：`true` = 本次真的走了一遍登录（cookie 是刚拿到的）；
-     * `false` = 复用已有会话，或落在 10 分钟可信期内。它只用于文案与日志区分——
-     * **没有「刚登录所以要注入 WebView」这一步了**：注入已被真机证伪，WebView 的会话
-     * 由 `JwAutoLogin` 填表提交自己拿（DESIGN §4.27）。
-     */
-    data class Ready(val loggedInNow: Boolean = false) : CasEnsureResult
-
-    /** 没存过统一认证密码，只能走 WebView 手登。 */
-    data object NoCredential : CasEnsureResult
-
-    /** 凭证连续出错、已停用：等用户更新密码，别再自动尝试（防锁号）。 */
-    data object Suspended : CasEnsureResult
-
-    /** 需要人工在网页里登一次（验证码页 / 认不出的页面）。 */
-    data class NeedsManualLogin(val message: String) : CasEnsureResult
-
-    /** 网络或平台侧问题，稍后还能再试。 */
-    data class Failed(val message: String) : CasEnsureResult
-}
-
-/**
- * 带会话取一页数据的结果（DESIGN §4.27，2026-11-19）。
- *
- * **[Failed.reason] 必须能区分「网络不通 / 5xx / 会话被顶」**：这一层原先只回 `null`，
- * 于是十几个取数调用点只能统一写「没取到 XX（会话可能已失效）」——网络断一次就把用户
- * 往「重新登录」上带（2026-11-19 与「刚刚登录失败过」同批修）。
- */
-sealed interface CasFetchResult {
-
-    data class Ok(val body: String) : CasFetchResult
-
-    /** 取数失败的一句话原因（调用方再加「没取到 XX」前缀，不要在这里拼场景）。 */
-    data class Failed(val reason: String) : CasFetchResult
-}
-
-/**
- * 只关心「拿到没拿到」的静默降级路径用（`bodyOrNull() ?: return false`）。
- *
- * 要给用户解释原因的调用方**不要**用它——用 `when` 取 [CasFetchResult.Failed.reason]，
- * 否则又回到「所有失败一个笼统说法」的老问题。
- */
-fun CasFetchResult.bodyOrNull(): String? = (this as? CasFetchResult.Ok)?.body
-
-/**
- * 会话不可用时给用户的一句话（**唯一口径**，DESIGN §4.27 / §3.16）。
- *
- * 与 `ScholarProgressSync.describe` 是同一份文案（那里委托到这里）：取数层也要拼这句话
- * （[CasSession.fetchHtml] 拿不到会话时），而 `data.session` 不该反向依赖 `data.repo`。
- * 唯一的例外是学工报修：它没有「自动导入」这回事，NoCredential 自己写了一句
- * （`DormRepairSync.describeCas`），其余分支仍走这里。
- */
-fun CasEnsureResult.notReadyReason(): String = when (this) {
-    is CasEnsureResult.Ready -> ""
-    CasEnsureResult.NoCredential ->
-        "还没保存统一认证账号，去「我的 → 教务账户」登录一次即可自动导入"
-    CasEnsureResult.Suspended -> "密码连续错误，已暂停自动登录，请更新密码后重试"
-    is CasEnsureResult.NeedsManualLogin -> message
-    is CasEnsureResult.Failed -> message
-}
-
 /**
  * 学校统一认证（CAS）会话的唯一持有者（DESIGN §4.27）。
  *
  * 覆盖教务、学工、签章三个系统——它们共用一套 CAS，但**各自的业务会话要各自建立**
  * （教务 `JSESSIONID`、学工 localStorage、签章 `sid`）。本类只负责 CAS 那一层。
+ *
+ * iOS 移植 S4（2026-11-24）：`CasEnsureResult` / `CasFetchResult` / `bodyOrNull` /
+ * `notReadyReason` 与 [JwReadSession] 已搬到 `shared/commonMain`（同包），仓库层的
+ * `*Sync` 只认那个接口；本类仍是**唯一**的实现，传输与凭证闸门一字未改。
  *
  * 三条策略：
  * 1. **可信期**：最近一次成功在 `LoginGateRules.SESSION_TRUST_MS` 内直接放行，不发请求；
@@ -102,7 +40,7 @@ class CasSession(
      */
     private val isProxyActive: () -> Boolean = { false },
     private val clock: () -> Long = System::currentTimeMillis,
-) {
+) : JwReadSession {
 
     private val loginMutex = Mutex()
 
@@ -112,7 +50,7 @@ class CasSession(
      * 返回 [CasEnsureResult.Ready] 即可以放心发业务请求；其余分支由调用方决定
      * 是转 WebView、提示更新密码，还是稍后重试。
      */
-    suspend fun ensureValid(): CasEnsureResult = loginMutex.withLock { ensureValidLocked() }
+    override suspend fun ensureValid(): CasEnsureResult = loginMutex.withLock { ensureValidLocked() }
 
     /**
      * 进程内是否已经有 CAS / 教务 cookie（只读，不发请求）。
@@ -286,7 +224,7 @@ class CasSession(
      * 重试也**只做一次**（失败不重试的纪律不变）。作废的是会话不是凭证，
      * 所以不动闸门里的失败计数（那是「防锁号」的计数器）。
      */
-    suspend fun fetchHtml(url: String): CasFetchResult {
+    override suspend fun fetchHtml(url: String): CasFetchResult {
         val ensured = ensureValid()
         if (ensured !is CasEnsureResult.Ready) return CasFetchResult.Failed(ensured.notReadyReason())
         val first = runCatchingCancellable { http.fetchHtml(url) }
