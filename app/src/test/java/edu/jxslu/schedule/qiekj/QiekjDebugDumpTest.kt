@@ -4,6 +4,7 @@ import edu.jxslu.schedule.data.qiekj.dumpQiekjResponse
 import edu.jxslu.schedule.data.qiekj.isQiekjDumpTarget
 import edu.jxslu.schedule.data.qiekj.pruneQiekjDumps
 import edu.jxslu.schedule.data.qiekj.redactQiekjDump
+import okio.Path.Companion.toPath
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -14,12 +15,18 @@ import java.io.File
 
 /**
  * 采样落盘的三处判据（2026-10-05）：白名单、凭证脱敏、按端点裁剪。
- * 拦截器本身要 okhttp Chain 才能跑，不在这里造；纯逻辑出问题才是真会翻车的地方。
+ * 插件本身要跑一次真请求才能触发，不在这里造；纯逻辑出问题才是真会翻车的地方。
+ *
+ * iOS 移植 S11（2026-11-24）：落盘实现换成 okio（commonMain 没有 `java.io`），
+ * 所以这里的目录也换成 `okio.Path`；判据与断言一条没改。
  */
 class QiekjDebugDumpTest {
 
     @get:Rule
     val temp = TemporaryFolder()
+
+    /** 临时目录的 okio 形态（`TemporaryFolder` 只给 `java.io.File`，落盘实现要 `okio.Path`）。 */
+    private fun okioPath(dir: File) = dir.absolutePath.toPath()
 
     @Test
     fun 白名单只收只读与开水链路() {
@@ -67,7 +74,7 @@ class QiekjDebugDumpTest {
         repeat(45) { index ->
             File(dir, "goods_water_sync-20261005-1200%02d-000.json".format(index)).writeText("{}")
         }
-        pruneQiekjDumps(dir, "goods_water_sync", keep = 40)
+        pruneQiekjDumps(okioPath(dir), "goods_water_sync", keep = 40)
         val left = dir.listFiles()!!.map { it.name }.sorted()
         assertEquals(40, left.size)
         // 删的是最旧的五份
@@ -79,7 +86,7 @@ class QiekjDebugDumpTest {
     fun 落盘文件名去掉路径分隔符且内容含端点与脱敏正文() {
         val dir = temp.newFolder("dump")
         dumpQiekjResponse(
-            dir = dir,
+            dir = okioPath(dir),
             path = "goods/water/sync",
             httpStatus = 200,
             body = """{"code":0,"data":{"workStatus":2,"token":"leak"}}""",
@@ -95,7 +102,7 @@ class QiekjDebugDumpTest {
     fun 非JSON正文按字符串落盘不丢内容() {
         // 网关返回 html 错误页时不能因为解析失败把样本丢掉
         val dir = temp.newFolder("dump_html")
-        dumpQiekjResponse(dir, "goods/water/sync", httpStatus = 502, body = "<html>bad gateway</html>")
+        dumpQiekjResponse(okioPath(dir), "goods/water/sync", httpStatus = 502, body = "<html>bad gateway</html>")
         val text = dir.listFiles()!!.single().readText()
         assertTrue(text.contains("bad gateway"))
         assertTrue(text.contains(""""httpStatus":502"""))
