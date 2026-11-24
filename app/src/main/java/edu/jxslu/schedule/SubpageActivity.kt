@@ -7,7 +7,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import edu.jxslu.schedule.domain.CourseKind
+import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.ui.me.CalendarSettingsScreen
+import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
 import edu.jxslu.schedule.ui.me.JwAccountScreen
 import edu.jxslu.schedule.ui.me.ReminderSettingsScreen
@@ -350,6 +352,8 @@ class SubpageActivity : ComponentActivity() {
                 )
             SubpageScreen.APPEARANCE_SETTINGS -> AppearanceSettingsScreen(
                 onBack = onBack,
+                // ViewModel 由宿主创建（design/ios-port.md §11.2 ①）
+                viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
             )
             // 天气（DESIGN §3.29）：详情与设置各自独立窗口，与其它二级页同规格
             SubpageScreen.WEATHER -> WeatherScreen(onBack = onBack)

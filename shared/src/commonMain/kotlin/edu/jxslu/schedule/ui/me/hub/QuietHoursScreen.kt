@@ -31,14 +31,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.QuietWindow
 import edu.jxslu.schedule.domain.QuietWindows
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
@@ -61,8 +60,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuietHoursScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val repo = remember { Graph.repository(context) }
+    val repo = remember { Services.current.scheduleRepository() }
     val scope = rememberCoroutineScope()
 
     // null = DataStore 首帧未到（先渲染占位，避免「预置时段闪一下又消失」）

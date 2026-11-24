@@ -38,13 +38,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.StartPage
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.domain.ThemeMode
 import edu.jxslu.schedule.domain.ThemePalette
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
@@ -68,14 +65,20 @@ import kotlinx.coroutines.launch
  * 原「通用设置」的观感与布局、页面与导航两节；功能开关已上提到设置根页
  * （天气 / 快捷方式 / 百宝箱），本页只留外观与导航。主题读写仍走 [MeViewModel]，
  * 改完立即生效。
+ *
+ * iOS 移植 S17（2026-11-25）搬进 `commonMain`：唯一的平台物是「谁来建 [MeViewModel]」，
+ * 改成宿主传入；其余控件与文案一字未改。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppearanceSettingsScreen(
     onBack: () -> Unit,
-    viewModel: MeViewModel = viewModel(
-        factory = MeViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
+    /**
+     * 「我的」与显示设置的共享 ViewModel，**由宿主创建**（Android `viewModel {}`、
+     * iOS `remember {}`）：`commonMain` 里没有 `viewModel()` 这个 Composable，
+     * 见 `design/ios-port.md` §11.1。
+     */
+    viewModel: MeViewModel,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     // 「猜你想用」开关（DESIGN §4.51）：单独一条流，不掺进 displayPrefs 合并模型
