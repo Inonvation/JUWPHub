@@ -1029,11 +1029,62 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 
 ### 11.3 已知的整块阻塞（搬之前先看这里）
 
+> 2026-11-25 复核：`MonthPicker`（已改 `YearMonthKey`）与 Markdown 编辑栈（已搬）两条阻塞
+> 已解除，下表只剩真正没解决的。整块搬不动的原因与工作量见 §12。
+
 | 阻塞 | 挡住的页面 |
 |---|---|
-| `MonthPicker` 用 `java.time.YearMonth` | `PowerBillScreen` 547、`StatementScreen` 557、`CampusCardSettingsScreen` 744 |
-| Markdown 编辑栈 + `AttachmentStore` | `NoteDetailScreen` 457、`HomeworkDetailScreen` 741 |
-| `com.amap` 高德 SDK（15 处） | `ui/ebike` 全部 14,576 行 |
-| `android.bluetooth`（`QzxyGattLink` 643） | 趣智开阀；协议与状态机已搬，只有传输层没搬 |
-| `androidx.glance`（139 处 / 8 文件） | 桌面小组件 |
-| `EncryptedSharedPreferences` | 一卡通 / 胖乖 / 问渠 / U净 / AI 的凭证存储（页面在 null 时整块隐藏） |
+| `com.amap` 高德 SDK | `ui/ebike` 全部 30 文件 / 17,879 行 |
+| `android.bluetooth`（`QzxyGattLink`） | 趣智开阀的传输层；协议与状态机已在共享层 |
+| `androidx.glance` | `ui/widget` 12 文件 / 3,112 行（桌面小组件） |
+| 通知 + `WorkManager` | `ui/reminder` 15 文件 / 4,107 行 |
+
+## 12. iOS 上做不到 / 今晚没做的（2026-11-25 盘点）
+
+这一节是**承诺边界**：哪些功能在 iOS 上不会出现、为什么、要补需要什么。
+分两类：**结构性做不到**（iOS 没有对应机制，或必须换一套原生实现）与**没做完**（能做，时间不够）。
+
+### 12.1 结构性做不到（必须有原生实现才能有）
+
+| 功能 | 代码量 | 为什么做不到 | 要补什么 |
+|---|---|---|---|
+| 共享单车地图（`ui/ebike`） | 30 文件 / 17,879 行 | 底图是**高德 Android SDK**（`com.amap.api:3dmap`，含 32MB `.so`）。iOS 是另一套 SDK（`AMap3DMap`，CocoaPods/SPM），API 形状完全不同，且要单独申请 iOS key（绑 `edu.jxslu.schedule.ios`） | 接 iOS 高德 SDK + 重写 17,879 行里的地图宿主、覆盖物、路径动画；账号/订单/卡券那部分（HTTP）可以先搬 |
+| 趣智校园蓝牙开阀 | `QzxyGattLink` 643 行 + 状态机（已在共享层） | `android.bluetooth` 的 GATT API 与 CoreBluetooth 是两套模型：前者回调在主线程、后者要自己建 `CBCentralManager` 串行队列 | 用 CoreBluetooth 重写传输层，**必须有真水控设备**才能验证；协议帧已在共享层，可复用 |
+| 桌面小组件 | `ui/widget` 12 文件 / 3,112 行 | Glance 是 Android 的 Compose-for-appwidget；iOS 对应物 WidgetKit + SwiftUI，是另一套渲染与数据共享模型（要 App Group + Timeline Provider） | 用 SwiftUI 重写，数据通过 App Group 共享（共享层已有 JSON 落盘，可复用） |
+| 快捷设置磁贴 | `ui/widget` 内 | Android 的 `TileService`；iOS 控制中心不支持第三方磁贴 | 无替代。iOS 侧只保留 App 内入口 |
+| 免费骑行倒计时「灵动岛」 | `ui/reminder` 内 | 用的是 Android 16 的标准 Live Updates（`setRequestPromotedOngoing` + chronometer） | iOS 对应物是 Live Activity（ActivityKit），要写 SwiftUI 布局 + 推送更新；**能做，是另一份实现** |
+| 后台定时任务（`WorkManager`） | `ui/reminder` 6 处 | iOS 的 `BGTaskScheduler` 由系统决定何时跑，不保证周期；Android 的 WorkManager 有最小时延语义 | 改成「进前台时补跑 + BGAppRefreshTask 尽力而为」，**行为必然弱于 Android** |
+| 通知（洗好提醒 / 问渠提醒 / 成绩提醒） | `ui/reminder` 15 文件 | `NotificationManager` + 渠道 + 前台服务 | 用 `UNUserNotificationCenter` 重写，权限模型不同（iOS 要显式请求）；**能做，是另一份实现** |
+
+### 12.2 今晚没做完（能搬，时间不够）
+
+按 `:app` 里剩下的行数排（2026-11-25 01:50 实测）：
+
+| 包 | 文件 | 行数 | 卡在哪 |
+|---|---|---|---|
+| `ui/qzxy` | 11 | 6,121 | 开阀要 BLE 传输层（见 12.1）；UI 本身可搬，靠 `IosQzxyBluetoothLink` 存根落在「本平台不支持蓝牙」态 |
+| `ui/me` | 10 | 4,584 | 设置子页 + 账户中心；依赖 `data/session`（正在搬） |
+| `ui/campus` | 13 | 4,561 | 请假 / 宿舍报修 / 学工表单；含 `WebView` 与 `Bitmap` |
+| `ui/today` | 4 | 3,629 | 今日页是**所有能力的汇合点**：依赖 water / ujing / qzxy / ebike / homework / inbox / jwvw / reminder 八个包，得等它们先搬完 |
+| `ui/life` | 6 | 3,114 | 侧边栏 + 电费充值；依赖 `SubpageActivity` 路由 |
+| `ui/jwvw` | 5 | 2,895 | 教务 WebView 外壳 + 自动填表注入 |
+| `ui/toolbox` | 7 | 1,745 | 图片水印 / 拼接 / 菜鸟批量查，重度 `Bitmap` |
+| `ui/score` | 4 | 1,215 | 成绩页设置 + 盖章成绩单（`WebView` + PDF） |
+| `ui/scholar` | 1 | 780 | 学业完成情况 |
+| `ui/homework` | 1 | 768 | 今日页的作业卡（详情页已搬） |
+| `ui/curriculum` | 1 | 486 | 培养方案 |
+| `ui/notes` | 1 | 470 | 课程备注 |
+| `ui/internship` | 1 | 352 | 实习基地 |
+| `ui/selection` | 1 | 89 | 选课页的平台槽 |
+| `ui/weather` | 1 | 97 | 天气设置页 |
+| `ui/jw` | 1 | 44 | 教务页的平台槽 |
+
+### 12.3 iOS 壳本身还差的（不是「搬不动」，是没写）
+
+| 差什么 | 现状 | 影响 |
+|---|---|---|
+| **导航与 Android 不一致** | Android 是「3 底栏 Tab + 左侧抽屉（身份/钱包/生活/江水生活/学习/设置/付款码）+ `SubpageActivity` 二级页栈」；iOS 现在是一条 12 格的底栏 | **界面不统一**，这是 §12 里最该先补的一条 |
+| 教务登录后的自动填表 | iOS 用 `WKWebView` 让用户手点登录，登录成功落地后自动 `archive` | Android 有自动填表；iOS 需要注入 JS，能做 |
+| 凭证存储 | 六个第三方存储刚接上 Keychain（`IosSessionStores`），**未编译验证** | 一卡通 / 教务（CAS）那两套仍返回 `null`，因为 `data/session` 还在 `:app` |
+| 支付调起 | 一卡通走「收银台 URL 进 `WKWebView`」；胖乖 / 趣智走 `alipays://` 深链 | `Info.plist` 还没有 `LSApplicationQueriesSchemes`（`alipays` / `weixin`），深链会被系统拦 |
+| App 图标与启动屏 | `Info.plist` 有意不给（链路验证包） | 侧载后桌面是默认灰图标 |
