@@ -425,6 +425,25 @@ KSP 按 target 加：`kspAndroid` / `kspIosArm64` / `kspIosSimulatorArm64`；sch
 - 结论：**Ktor 替换是多文件工程，不是单点开关**。顺序上应该先「把 24 个文件收成一条
   `HttpCall` 抽象」（纯重构、Android 行为不变、可全量单测保），再换 Ktor 引擎——
   反过来做等于把「重构」和「换实现」两件事耦在一起查错。
+- **2026-11-24 修正上面的顺序判断**：不必先造一层 `HttpCall` 再换引擎——那会造出一个
+  只为过渡存在的抽象，最后还得删。**Ktor 就是终点，直接换**，一个模块一个模块地换，
+  每换一个跑全量单测。
+
+**试点已完成（2026-11-24，`WeatherApi`）**——选择它是因为单端点、无鉴权、无 Cookie、
+手解析 JSON、自带 DTO，是 24 个文件里最小的一块：
+
+| 事项 | 结论 |
+|---|---|
+| 依赖 | `:shared` commonMain `io.ktor:ktor-client-core:3.0.3`；androidMain `ktor-client-okhttp`；iosMain `ktor-client-darwin`。**版本锁 3.0.3**：3.1+ 要 coroutines 1.10.x，为一处试点抬全仓协程不划算 |
+| 引擎 | **不写进 commonMain**：`HttpClient { … }` 在运行期按平台注册的引擎解析，公共代码里没有任何平台类型 |
+| client 复用 | 新增 `shared/.../data/net/SharedHttp.kt`，惰性单例 + 三档超时（connect 15s / socket 20s / request 120s），对应 `AppHttp` 的原有口径。一个 client 一份连接池，别在请求路径上反复 `create()` |
+| 必须改的三处 | `Dispatchers.IO` 在 commonMain 不存在（Ktor 的 `get` 本就挂起，那层 `withContext` 直接删）；`String.format` 是 JVM 专有（改 `TextFmt.pad`）；`expectSuccess = false` 必须显式关，否则各模块自己的状态码判断与错误文案全变 |
+| 实测 | `:app` 的 `debugRuntimeClasspath` 解析出 `ktor-client-core-jvm` + `ktor-client-okhttp-jvm` 3.0.3；`commonMain` 元数据门禁通过；2418 个单测全绿 |
+
+剩下的 23 个 OkHttp 文件按这个模式逐个搬，建议顺序：`weather`（已完成）→ `repo/UpdateCheck`
+→ `repo/CampusCalendarStore` → `wenqu` → `ykt` → `power` → `qiejk` / `qzxy`（这两个是 Retrofit，
+顺带把 4 个 API 接口改成 Ktor）→ `session`（Cookie 与 CAS 重定向，最难，放最后）。
+`data/net/AppHttp.kt` 在全部迁完之后删掉。
 
 验收：`.\gradlew.bat :shared:iosSimulatorArm64Test` 跑通解析器与迁移测试；Android 行为零变化。
 
