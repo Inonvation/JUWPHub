@@ -51,18 +51,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.ujing.UjingDraftStore
 import edu.jxslu.schedule.data.ujing.UjingProgramData
 import edu.jxslu.schedule.data.ujing.UjingScanResult
 import edu.jxslu.schedule.data.ujing.UjingWashModel
 import edu.jxslu.schedule.domain.UjingState
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.SettingsNote
@@ -80,12 +78,18 @@ import edu.jxslu.schedule.ui.theme.Motion
  *
  * 草稿是进程内状态（[UjingDraftStore] 故意不落盘）：进程被回收后重进本页拿不到草稿，
  * 给一句话引导返回，不渲染半屏空壳。
+ *
+ * iOS 移植 S21（2026-11-25）：搬进 `shared/commonMain`。本页没有 ViewModel（§11.2 ②），
+ * 唯一的外部依赖是草稿仓，改成**必填构造参数**由宿主从 `Services.current` 取好传进来——
+ * 必须是主页 ViewModel 持有的**同一份**实例（各造一个等于「扫了码、下单页拿到 null」）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UjingOrderScreen(onBack: () -> Unit = {}) {
-    val context = LocalContext.current
-    val draftStore = remember { Graph.ujingDraft(context) }
+fun UjingOrderScreen(
+    /** 草稿仓：必须与主页 ViewModel 持有的那份是同一实例。 */
+    draftStore: UjingDraftStore,
+    onBack: () -> Unit = {},
+) {
     val draft by draftStore.draft.collectAsStateWithLifecycle()
     Scaffold(
         topBar = {

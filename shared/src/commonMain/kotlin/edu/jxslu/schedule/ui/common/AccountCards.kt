@@ -56,8 +56,15 @@ import edu.jxslu.schedule.ui.theme.Motion
  */
 @Composable
 fun AccountHeroCard(
-    /** 品牌位图 id（宿主的 `R.drawable.ic_brand_*`）。 */
-    brandIcon: Int,
+    /**
+     * 品牌位图 id（宿主的 `R.drawable.ic_brand_*`）；**null = 本平台没有这套素材**。
+     *
+     * 为什么可空（iOS 移植 S21）：`R` 在 `:app`，搬进共享层的页面看不见它，只能由宿主
+     * 把 id 传进来；iOS 侧根本没有 `ic_brand_*` 位图，硬塞一个 0 会让 Android 的
+     * `painterResource(0)` 在真机上崩。null 时头像位**整块不占位**（连 12dp 间距一起省），
+     * 与 `BrandMark` 的 iOS 空实现同一口径。
+     */
+    brandIcon: Int?,
     title: String,
     subtitle: String,
     modifier: Modifier = Modifier,
@@ -70,8 +77,10 @@ fun AccountHeroCard(
 ) {
     AppCard(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            BrandMark(brandIcon, 44.dp)
-            Spacer(Modifier.width(12.dp))
+            if (brandIcon != null) {
+                BrandMark(brandIcon, 44.dp)
+                Spacer(Modifier.width(12.dp))
+            }
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
