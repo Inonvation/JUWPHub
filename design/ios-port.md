@@ -455,8 +455,20 @@ JVM/Android 依赖，必须同批处理，否则改完 `:shared` 还是编不过
 | `BuildConfig` | 3 / 25 | AGP 生成的，`:shared` 没有。做法：改成构造参数/常量，由 `:app` 侧调用点传进来（`UpdateCheckClient` 就是这么改的：无参构造删掉，`JuwApplication` 与 `AboutScreens` 传 `BuildConfig.VERSION_NAME`） |
 
 **已迁移清单（2026-11-24）**：`data/weather/WeatherApi`、`data/repo/UpdateCheckClient`、
-`data/wenqu/WenquApi`、`data/wenqu/WenquServerClock`。四个都验证过 `commonMain` 元数据门禁 +
-2418 个单测全绿。剩余 OkHttp/Retrofit 文件 **26 → 22**。
+`data/wenqu/WenquApi`、`data/wenqu/WenquServerClock`、`data/kqcx/KqcxBikeClient`。
+五个都验证过 `commonMain` 元数据门禁 + 2418 个单测全绿。剩余 OkHttp/Retrofit 文件 **26 → 21**。
+
+`KqcxBikeClient` 那次是这条线上**第一次真正删代码**：它用 `suspendCancellableCoroutine` +
+`okhttp3.Callback` 手工桥接「可取消的请求」（因为 OkHttp 的阻塞 `execute()` 中断不了，
+拖动地图时前一批撒点还占着连接），Ktor 的请求本身可取消，那层桥接连同 `Call`/`Callback`/
+`resume`/`invokeOnCancellation` 一起删掉。**判断一个文件该不该换，先看它有多少代码是在补偿
+旧库的缺陷**——那种才是净收益。
+
+**下一批已侦察清楚**：`ykt/YktClient` 137 + `ykt/YktModels` 347。`YktModels` 是纯的
+（只有 kotlinx.serialization，且 `YktException` 定义在里面），所以两个可以一起搬；
+`YktClient` 里唯一要改的是 `catch (java.io.IOException)` → 抹平成 Ktor 的异常，
+与 `KqcxBikeClient` 同一套做法。`YktRepository`（450 行）与 `YktTurnoverSyncer`（134 行）
+依赖 Context/DataStore，留到最后。
 
 `WenquServerClock` 那次顺带解决了一类通用问题：**OkHttp 的 `Interceptor` 在 Ktor 里没有等价物**。
 它的实现是「发前取钟 → 收后取钟 → 读 `Date` 头算偏移」，改成在 `send()` 里就地记账即可——
