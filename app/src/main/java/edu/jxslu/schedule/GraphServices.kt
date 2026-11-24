@@ -1,6 +1,8 @@
 package edu.jxslu.schedule
 
 import android.content.Context
+import edu.jxslu.schedule.data.power.PowerReadingStore
+import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
@@ -12,6 +14,8 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.ykt.YktCredentialStore
+import edu.jxslu.schedule.data.ykt.YktRepository
 import edu.jxslu.schedule.platform.AppServices
 
 /**
@@ -56,4 +60,18 @@ class GraphServices(private val context: Context) : AppServices {
     override fun noteRepository(): NoteRepository = Graph.noteRepository(appContext)
 
     override fun homeworkRepository(): HomeworkRepository = Graph.homeworkRepository(appContext)
+
+    // ---- 一卡通 / 寝室电费（S14） ----
+    //
+    // 两个仓库非空（纯 HTTP + 本地表），凭证存储非空（Android 有 EncryptedSharedPreferences）。
+    // 全部转给 `Graph` 的现有单例——`yktRepository` / `powerRepository` 必须是同一份，
+    // 否则「取码」与「流水」两条链会各持一个 token、各登一次。
+
+    override fun yktRepository(): YktRepository = Graph.yktRepository(appContext)
+
+    override fun yktCredentialStore(): YktCredentialStore = Graph.yktCredentialStore(appContext)
+
+    override fun powerRepository(): PowerRepository = Graph.powerRepository(appContext)
+
+    override fun powerReadingStore(): PowerReadingStore = Graph.powerReadingStore(appContext)
 }
