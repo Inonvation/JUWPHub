@@ -20,12 +20,15 @@ import edu.jxslu.schedule.data.qzxy.QzxyDeviceRegistry
 import edu.jxslu.schedule.data.qzxy.QzxyBluetoothLink
 import edu.jxslu.schedule.data.qzxy.IosQzxyBluetoothLink
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
+import edu.jxslu.schedule.data.repo.CampusCalendarStore
 import edu.jxslu.schedule.data.repo.CurriculumRepository
 import edu.jxslu.schedule.data.repo.CurriculumSync
 import edu.jxslu.schedule.data.repo.DormRepairStore
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
+import edu.jxslu.schedule.data.repo.InternshipBasesLoader
+import edu.jxslu.schedule.data.repo.InternshipSnapshotStore
 import edu.jxslu.schedule.data.repo.NoteRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
 import edu.jxslu.schedule.data.repo.ProfileSync
@@ -479,10 +482,10 @@ class IosServices : AppServices {
      * `DormRepairStore` 是 `MirroredJsonStore`（`appDataDir()` 下一份 JSON），
      * S7 起已在 commonMain，构造器不吃 `Context`，iOS 侧建得起来。
      *
-     * 注意只有**快照**能读：拉取那条链（`DormRepairSync` + 学工 WebView 登录态）还在
-     * `:app`，所以 iOS 侧今日页的报修行只会显示「已经落在这个 JSON 里的记录」，
-     * 永远不会有新记录——等于那行不出现。升级条件：把 `DormRepairSync` 搬到共享层
-     * （它要的是 WebView cookie，iOS 侧 `IosWebCookieSource` 已经能读）。
+     * 注意只有**快照**能读：拉取那条链（`DormRepairSync`）W2 起已在 `commonMain`，
+     * 但它还没有共享层的调用方，而 iOS 侧今日页的报修行本身还没移植——所以这里仍只给快照。
+     * 接上之后由 `DormRepairSync(cas = session, store = dormRepair, webSession = null)`
+     * 构造即可（iOS 没有 `CookieManager`，WebView 那一档恒为 null，直接落 CAS 分支）。
      */
     private val dormRepair: DormRepairStore by lazy { DormRepairStore() }
 
@@ -579,4 +582,28 @@ class IosServices : AppServices {
     override fun curriculumRepository(): CurriculumRepository = curriculumRepo
 
     override fun curriculumSync(): CurriculumSync = curriculumSyncImpl
+
+    // ---- 校历 / 实习基地（iOS 移植 W2，2026-11-25） ----
+    //
+    // 两个都**非空**，与 Android 侧一一对应（`GraphServices` 转接 `Graph` 的同名单例）：
+    //
+    // - 校历：Ktor（`SharedHttp`）+ `appDataDir()` 下的一份状态 JSON 与一个图片目录，
+    //   抓取 / 7 天闸门 / 原子落盘与 Android 是同一份代码。**画不出来**的部分不在这一层
+    //   ——`UIImage` 解码还没接，所以宿主给 `CampusCalendarScreen` 的 `images` 传 null，
+    //   图片块整块不渲染（文案与刷新按钮照常）。
+    // - 实习基地：走 [session]（`IosJwReadSession`，Cookie 来自 `WKWebView`）+ 本机快照。
+    //   在导入页登录一次之后，这一页的「刷新」是真的能抓，不是空壳。
+    //
+    // 单例的理由与 Android 侧一致：校历页读 `state` 流、`refresh` 改同一份状态；
+    // 实习基地装载器内部的 Mutex 是「单飞」的全部依据。
+
+    private val campusCalendarStoreImpl: CampusCalendarStore by lazy { CampusCalendarStore() }
+
+    private val internshipBasesLoaderImpl: InternshipBasesLoader by lazy {
+        InternshipBasesLoader(cas = session, store = InternshipSnapshotStore())
+    }
+
+    override fun campusCalendarStore(): CampusCalendarStore = campusCalendarStoreImpl
+
+    override fun internshipBasesLoader(): InternshipBasesLoader = internshipBasesLoaderImpl
 }

@@ -17,8 +17,10 @@ import edu.jxslu.schedule.data.qzxy.QzxyPrefs
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.qzxy.QzxyWateringRegistry
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
+import edu.jxslu.schedule.data.repo.CampusCalendarStore
 import edu.jxslu.schedule.data.repo.CurriculumRepository
 import edu.jxslu.schedule.data.repo.CurriculumSync
+import edu.jxslu.schedule.data.repo.InternshipBasesLoader
 import edu.jxslu.schedule.data.repo.ScholarProgressRepository
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.session.SessionExpirySink
@@ -496,8 +498,9 @@ interface AppServices {
     // ---- 宿舍报修（DESIGN §4.49，iOS 移植 V1/V2，2026-11-25） ----
     //
     // 今日页的报修状态行与报修详情页都要它。**只给本机快照存储**：真正去学工拉数据的
-    // 那条链（`DormRepairSync`）还在 `:app` 的 `data/repo`，类型也还不在共享层，
-    // 所以它由宿主直接作为页面参数注入（`DormRepairScreen(onRefresh = …)`），不在这里占位。
+    // 那条链（`DormRepairSync`）W2 起已在 `commonMain`，但它还没有共享层的调用方——
+    // 报修详情页的刷新由宿主作为页面参数注入（`DormRepairScreen(onRefresh = …)`），
+    // 今日页与提醒也都在 `:app`，所以这里**不**给它占一个成员（没有调用方就不许加）。
 
     /**
      * 宿舍报修本机快照（解析结果 + 最近 20 条记录，JSON 落盘）。
@@ -572,6 +575,24 @@ interface AppServices {
      * **默认空实现**：理由同 [refreshQzxyWaterWidget]。
      */
     suspend fun pushQzxyAccount(balance: QzxyBalance) {}
+
+    // ---- 校历 / 实习基地（iOS 移植 W2，2026-11-25） ----
+    //
+    // 两页搬进共享层带出来的两个成员。**全部非空**：校历只要一个 Ktor client 与
+    // `appDataDir()`，实习基地只要 `JwReadSession` + 本机快照——两端都建得起来，
+    // 没有「本平台没有这个能力」的分支。给 null 会让页面的图 / 列表整块消失，而它们确实能用
+    // （与 [profileSync] / [scholarProgressSync] 同一档）。
+
+    /**
+     * 校历的落盘缓存与远程刷新（DESIGN §4.34）。
+     *
+     * **必须是同一份实例**：校历页读它的 `state` 流、`refresh` 改同一份状态；各建一个
+     * 等于「刷新写进 A、页面看 B」——刷新按钮会永远显示旧图。
+     */
+    fun campusCalendarStore(): CampusCalendarStore
+
+    /** 实习基地装载（DESIGN §4.43）：`JwReadSession` + 12 小时快照，进页默认零网络。 */
+    fun internshipBasesLoader(): InternshipBasesLoader
 }
 
 /**

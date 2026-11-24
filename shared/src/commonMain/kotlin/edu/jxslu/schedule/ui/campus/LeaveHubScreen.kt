@@ -18,11 +18,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.XgFormActivity
 import edu.jxslu.schedule.data.xg.XgForm
 import edu.jxslu.schedule.data.xg.XgUrls
 import edu.jxslu.schedule.ui.common.AppCard
@@ -35,12 +33,18 @@ import edu.jxslu.schedule.ui.icon.AppIcons
  * 请假系统（2026-11-08 用户口径）：学工「新版请销假」分组的三个入口页。
  *
  * 学校把它配成三张**各自独立**的审批表单（不是同一个流程的三步），所以这里只做
- * 分发：每行直接开对应的学工表单 WebView（[XgFormActivity]），表单标识在
- * [XgUrls.FORMS]（2026-11-08 从工作台应用列表实测取得）。App 不代填表。
+ * 分发：每行直接开对应的学工表单 WebView，表单标识在 [XgUrls.FORMS]
+ * （2026-11-08 从工作台应用列表实测取得）。App 不代填表。
+ *
+ * iOS 移植 W2（2026-11-25）：本页搬进共享层，开表单是平台动作（Android 走
+ * `XgFormActivity`），收成 [onOpenForm] 可空回调——**null = 本平台没有学工表单窗口**，
+ * 三行入口整块不渲染，只留下面那句说明（口径同 `design/ios-port.md` §11.2 ④）。
  */
 @Composable
-fun LeaveHubScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
+fun LeaveHubScreen(
+    onBack: () -> Unit,
+    onOpenForm: ((XgForm) -> Unit)? = null,
+) {
     val snackbar = remember { SnackbarHostState() }
 
     PageScaffoldColumn(
@@ -48,24 +52,26 @@ fun LeaveHubScreen(onBack: () -> Unit) {
         onBack = onBack,
         snackbar = snackbar,
     ) {
-        AppCard(contentPadding = PaddingValues(0.dp)) {
-            LeaveEntry(
-                icon = AppIcons.CalendarCheckIn01,
-                form = XgUrls.LEAVE,
-                onClick = { XgFormActivity.start(context, XgUrls.LEAVE) },
-            )
-            AppCardDivider(Modifier.padding(start = 48.dp))
-            LeaveEntry(
-                icon = AppIcons.CalendarCheckOut01,
-                form = XgUrls.LEAVE_CANCEL,
-                onClick = { XgFormActivity.start(context, XgUrls.LEAVE_CANCEL) },
-            )
-            AppCardDivider(Modifier.padding(start = 48.dp))
-            LeaveEntry(
-                icon = AppIcons.CalendarPlus01,
-                form = XgUrls.LEAVE_EXTEND,
-                onClick = { XgFormActivity.start(context, XgUrls.LEAVE_EXTEND) },
-            )
+        if (onOpenForm != null) {
+            AppCard(contentPadding = PaddingValues(0.dp)) {
+                LeaveEntry(
+                    icon = AppIcons.CalendarCheckIn01,
+                    form = XgUrls.LEAVE,
+                    onClick = { onOpenForm(XgUrls.LEAVE) },
+                )
+                AppCardDivider(Modifier.padding(start = 48.dp))
+                LeaveEntry(
+                    icon = AppIcons.CalendarCheckOut01,
+                    form = XgUrls.LEAVE_CANCEL,
+                    onClick = { onOpenForm(XgUrls.LEAVE_CANCEL) },
+                )
+                AppCardDivider(Modifier.padding(start = 48.dp))
+                LeaveEntry(
+                    icon = AppIcons.CalendarPlus01,
+                    form = XgUrls.LEAVE_EXTEND,
+                    onClick = { onOpenForm(XgUrls.LEAVE_EXTEND) },
+                )
+            }
         }
         Text(
             text = "三个入口都是学工系统的官方页面，需学校统一认证账号（与教务同一个）；" +

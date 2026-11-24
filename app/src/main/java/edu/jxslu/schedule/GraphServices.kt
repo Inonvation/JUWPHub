@@ -21,12 +21,14 @@ import edu.jxslu.schedule.data.qzxy.QzxyDeviceRegistry
 import edu.jxslu.schedule.data.qzxy.QzxyBluetoothLink
 import edu.jxslu.schedule.data.qzxy.QzxyBalance
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
+import edu.jxslu.schedule.data.repo.CampusCalendarStore
 import edu.jxslu.schedule.data.repo.CurriculumRepository
 import edu.jxslu.schedule.data.repo.CurriculumSync
 import edu.jxslu.schedule.data.repo.DormRepairStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
+import edu.jxslu.schedule.data.repo.InternshipBasesLoader
 import edu.jxslu.schedule.data.repo.NoteRepository
 import edu.jxslu.schedule.data.repo.ProfileSync
 import edu.jxslu.schedule.data.repo.ScheduleRepository
@@ -421,4 +423,14 @@ class GraphServices(private val context: Context) : AppServices {
     override suspend fun pushQzxyAccount(balance: QzxyBalance) {
         runCatching { WaterWidgetSync.pushQzxyAccount(appContext, balance) }
     }
+
+    // ---- 校历 / 实习基地（iOS 移植 W2，2026-11-25） ----
+    //
+    // 两个都转给 `Graph` 的现有单例。**必须同一份**：校历页读 `state` 流、`refresh` 改同一份
+    // 状态；实习基地装载器内部的 Mutex 是「单飞」的全部依据，各 new 一个等于两个入口同时各抓一轮。
+
+    override fun campusCalendarStore(): CampusCalendarStore = Graph.campusCalendar(appContext)
+
+    override fun internshipBasesLoader(): InternshipBasesLoader =
+        Graph.internshipBasesLoader(appContext)
 }

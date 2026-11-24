@@ -47,6 +47,7 @@ import edu.jxslu.schedule.ui.me.hub.SupportDevScreen
 import edu.jxslu.schedule.ui.me.hub.TermsDeclarationsScreen
 import edu.jxslu.schedule.ui.me.hub.TimetableHubScreen
 import edu.jxslu.schedule.ui.campus.CampusCalendarScreen
+import edu.jxslu.schedule.ui.campus.campusCalendarImageUi
 import edu.jxslu.schedule.ui.campus.CampusCardSettingsScreen
 import edu.jxslu.schedule.ui.campus.DormRepairScreen
 import edu.jxslu.schedule.ui.campus.DormRepairRefresh
@@ -273,7 +274,12 @@ class SubpageActivity : ComponentActivity() {
             )
             SubpageScreen.KVCX -> KvcxScreen(onBack = onBack)
             SubpageScreen.KVCX_ORDERS -> KvcxOrdersScreen(onBack = onBack)
-            SubpageScreen.CAMPUS_CALENDAR -> CampusCalendarScreen(onBack = onBack)
+            // 校历（DESIGN §4.34）：页在共享层（iOS 移植 W2），画图与全屏查看器由这里注入
+            // （BitmapFactory 降采样 + `ImageViewerDialog` 都是 Android 专有）。
+            SubpageScreen.CAMPUS_CALENDAR -> CampusCalendarScreen(
+                onBack = onBack,
+                images = remember { campusCalendarImageUi(this) },
+            )
             // 宿舍报修进度（DESIGN §4.49）：focusItemId = 学工记录 id；收件箱通知按下标定位。
             // 页面已在共享层（iOS 移植 V2），两个平台动作从这里注入：
             // 学工网页（`XgFormActivity`）与增量同步（`DormRepairSync`，类型还在 `:app` 的 data/repo）。
@@ -290,8 +296,12 @@ class SubpageActivity : ComponentActivity() {
                     }
                 },
             )
-            // 请假系统（2026-11-08）：三张学工表单的入口页，各自行里直接开 XgFormActivity
-            SubpageScreen.LEAVE_HUB -> LeaveHubScreen(onBack = onBack)
+            // 请假系统（2026-11-08）：三张学工表单的入口页，各自行里直接开 XgFormActivity。
+            // 页在共享层（iOS 移植 W2），开表单是平台动作，从这里注入。
+            SubpageScreen.LEAVE_HUB -> LeaveHubScreen(
+                onBack = onBack,
+                onOpenForm = { form -> XgFormActivity.start(this, form) },
+            )
             // U净 三页链（DESIGN §3.23）：主页（看板 / 扫码）→ 下单页（档位 / 投放）→ 历史账单。
             // 下单页与主页间的大对象交接不走 extra，走 `UjingDraftStore`（进程内草稿）。
             // iOS 移植 S21 起三页都在共享层：ViewModel 与平台动作由这里注入（§11.2 ①⑦）。
@@ -544,7 +554,12 @@ class SubpageActivity : ComponentActivity() {
                 val actions = rememberJwScreenPlatformActions()
                 CurriculumScreen(onBack = onBack, onOpenWebPage = actions.openWebPage)
             }
-            SubpageScreen.INTERNSHIP_BASES -> InternshipBasesScreen(onBack = onBack)
+            // 实习基地（DESIGN §4.43）：页在共享层（iOS 移植 W2），顶栏「在教务网页核对」
+            // 走与学业 / 培养方案同一份平台动作（`JwImportActivity.startBrowse`）。
+            SubpageScreen.INTERNSHIP_BASES -> {
+                val actions = rememberJwScreenPlatformActions()
+                InternshipBasesScreen(onBack = onBack, onOpenWebPage = actions.openWebPage)
+            }
             // 选课四页已在 shared/commonMain（iOS 移植 S13），平台动作用
             // `rememberSelectionScreenActions` 补齐；`client` 是选课接口（真身仍在 :app）。
             SubpageScreen.SELECTIONS -> {
