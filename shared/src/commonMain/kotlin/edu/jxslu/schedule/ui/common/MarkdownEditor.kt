@@ -5,19 +5,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -42,8 +35,6 @@ import edu.jxslu.schedule.domain.MdAction
 import edu.jxslu.schedule.domain.applyMarkdownAction
 import edu.jxslu.schedule.domain.autoPairDollar
 import edu.jxslu.schedule.domain.continueOnEnter
-import edu.jxslu.schedule.domain.imageRefs
-import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
@@ -54,6 +45,11 @@ import edu.jxslu.schedule.ui.icon.AppIcons
  *
  * 自动补全的判断**全部在 `domain/MarkdownEdit.kt`**（纯 JVM 可测），这里只是把
  * `TextFieldValue` 的差分喂进去、把结果写回——不要在 Composable 里另写续行/配对逻辑。
+ *
+ * 2026-11-25 搬进 `shared/commonMain`（iOS 移植 S21）：输入框、标题框、格式工具条都只依赖
+ * Compose 与 `domain`。同文件的**编辑底栏**没跟过来，它要画 `AttachmentStrip`
+ * （64dp 缩略图 + 「移除」写操作，靠 `BitmapFactory` 解码），留在 `:app` 的
+ * `MarkdownUiPlatform.kt`。
  */
 @Composable
 fun MarkdownEditorField(
@@ -145,7 +141,7 @@ fun TitleTextField(
     }
 }
 
-/** 工具条按钮（图标名均取自 HugeIcons 本地 JAR，勿猜）。 */
+/** 工具条按钮（图标名一律在 `AppIcons.kt` 里查，勿猜）。 */
 private class ToolbarAction(
     val icon: ImageVector,
     val label: String,
@@ -221,44 +217,6 @@ fun MarkdownToolbar(
                     modifier = Modifier.size(19.dp),
                 )
             }
-        }
-    }
-}
-
-/**
- * 编辑器底栏（2026-10-21）：附件条 + 格式工具条，固定在键盘上缘。
- *
- * 放在 `Scaffold(bottomBar = …)` 里，底部取 `safeDrawing`（键盘 + 手势条并集）；
- * 不要再塞回正文的 `verticalScroll`，否则长文写到下半段时工具条在键盘后面（旧版就是这个毛病）。
- */
-@Composable
-fun MarkdownEditorBottomBar(
-    value: TextFieldValue,
-    onValueChange: (TextFieldValue) -> Unit,
-    onPickImages: (() -> Unit)?,
-    onRemoveImage: (String) -> Unit,
-    onOpenImage: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            // 键盘 + 手势导航条取并集：imePadding + navigationBarsPadding 会叠出双份空白
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
-            .background(MaterialTheme.colorScheme.background),
-    ) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
-            AttachmentStrip(
-                fileNames = imageRefs(value.text).toList(),
-                onRemove = onRemoveImage,
-                onOpen = onOpenImage,
-            )
-            MarkdownToolbar(
-                value = value,
-                onValueChange = onValueChange,
-                onPickImages = onPickImages,
-            )
         }
     }
 }
