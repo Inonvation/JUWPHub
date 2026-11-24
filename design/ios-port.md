@@ -455,9 +455,32 @@ JVM/Android 依赖，必须同批处理，否则改完 `:shared` 还是编不过
 | `BuildConfig` | 3 / 25 | AGP 生成的，`:shared` 没有。做法：改成构造参数/常量，由 `:app` 侧调用点传进来（`UpdateCheckClient` 就是这么改的：无参构造删掉，`JuwApplication` 与 `AboutScreens` 传 `BuildConfig.VERSION_NAME`） |
 
 **已迁移清单（2026-11-24）**：`data/weather/WeatherApi`、`data/repo/UpdateCheckClient`、
-`data/wenqu/WenquApi`、`data/wenqu/WenquServerClock`、`data/kqcx/KqcxBikeClient`、
-`data/ykt/YktClient` + `data/ykt/YktModels`。
-七个都验证过 `commonMain` 元数据门禁 + 2418 个单测全绿。剩余 OkHttp/Retrofit 文件 **26 → 20**。
+`data/wenqu/WenquApi` + `WenquServerClock`、`data/kqcx/KqcxBikeClient`、
+`data/ykt/YktClient` + `YktModels`、`data/ujing/UjingApi` + `UjingModels` + `UjingApiConfig`、
+`data/power/PowerClient`（+ 抽出的 `PowerException`）。
+十一个文件，都验证过 `commonMain` 元数据门禁 + 2418 个单测全绿。剩余 OkHttp/Retrofit 文件 **26 → 18**。
+
+### 迁移中丢掉的两项「共享 base」附带能力（必须在最后一批前补回来）
+
+`AppHttp.base` 除了超时还挂了两个东西，换成 `SharedHttp.create` 后**所有已迁移模块都不再有**：
+
+| 丢掉的能力 | 原作用 | 怎么补 |
+|---|---|---|
+| `Ipv4FirstDns` | 校园域名同时有 A 与 AAAA 记录，而校园 IPv6 在移动网络下是黑洞（等 TCP 超时多花 10–30s） | Ktor 的 OkHttp 引擎支持 `preconfigured` client，在 `:shared` 的 **androidMain** 里给 `Barcode`/`SharedHttp` 那个引擎挂上同一个 IPv4 优先的 `Dns`。iOS 侧用 Darwin，不需要 |
+| `DebugRequestCounter`（debug 才挂的 `EventListener`） | 按 host 统计请求数，冷启动/进页体检用 | 同上，在 androidMain 的引擎配置里挂；或改写成 Ktor 的 `Logging` / 自定义 plugin |
+
+**当前影响有限**：已迁移的六个模块打的是公网域名（open-meteo / ujing.online / china-qzxy 等），
+校园 IPv6 黑洞主要影响 `jiaowu.juwp.edu.cn`、`jw.jwxyxx` 这类链路——那些还留在 `:app`、
+仍走 `AppHttp`。**但 `jw/JwHttpSession` 一旦迁移，这一项就从「可选优化」变成「必须补」**，
+否则教务登录会慢十几到三十秒。补的位置已定（androidMain 的引擎 `preconfigured`），别丢。
+
+### 一处已知的显示回归
+
+`UjingViewModel` 把失败的 `message` 直接显示在洗衣房看板上。OkHttp 的超时异常 message 是
+`"timeout"`，Ktor 的是 `Request timeout has expired [url=…, request_timeout=30000 ms]`——
+**从短英文变成一长串英文**（迁移前就不是中文，所以不算口吻变化，但更难看了）。
+修法是在 `UjingApi` 或 VM 边界把超时归一成中文文案；这一轮没做（不想在网络迁移里顺手改 UI），
+记在这里别忘。
 
 `KqcxBikeClient` 那次是这条线上**第一次真正删代码**：它用 `suspendCancellableCoroutine` +
 `okhttp3.Callback` 手工桥接「可取消的请求」（因为 OkHttp 的阻塞 `execute()` 中断不了，
