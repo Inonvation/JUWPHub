@@ -6,7 +6,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,8 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,13 +48,15 @@ import edu.jxslu.schedule.ui.theme.Motion
  *
  * 头像用该服务的**官方图标位图**（`R.drawable.ic_brand_*`，与侧栏「江水生活」各行同一份），
  * 不再叠圆形底座：位图自带底色与轮廓，套一层 tonal 圆底会变成「底里套底」。
- * **必须用 `Image`**——`Icon(painter)` 会把位图整体染成 `LocalContentColor`（真机上呈黑色块）。
+ * 位图经 [BrandMark] 渲染——`R` 只有 Android 有，iOS 侧没有这套素材，头像位不出现
+ * （本页其余部分照常，见 `BrandMark` 的 KDoc）。
  *
  * 标题给账号标识（手机号掩码 / 学校名），说明给凭证口径（「Token 仅存本机」）；
  * [trailing] 放在说明行尾，用来挂「眼睛」这类就地切换显示的小按钮。
  */
 @Composable
 fun AccountHeroCard(
+    /** 品牌位图 id（宿主的 `R.drawable.ic_brand_*`）。 */
     brandIcon: Int,
     title: String,
     subtitle: String,
@@ -71,12 +70,7 @@ fun AccountHeroCard(
 ) {
     AppCard(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Image(
-                painter = painterResource(brandIcon),
-                contentDescription = null,
-                modifier = Modifier.size(44.dp),
-                contentScale = ContentScale.Fit,
-            )
+            BrandMark(brandIcon, 44.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
