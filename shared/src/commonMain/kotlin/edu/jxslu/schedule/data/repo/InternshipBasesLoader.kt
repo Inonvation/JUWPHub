@@ -1,21 +1,26 @@
 package edu.jxslu.schedule.data.repo
 
-import android.util.Log
 import edu.jxslu.schedule.data.jw.InternshipBaseParser
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.InternshipBase
 import edu.jxslu.schedule.domain.InternshipCacheRules
+import edu.jxslu.schedule.platform.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 
 /**
- * 实习基地装载（DESIGN §4.43）：OkHttp 直取 + **12 小时快照缓存**，**不落 Room**——
+ * 实习基地装载（DESIGN §4.43）：直取 + **12 小时快照缓存**，**不落 Room**——
  * 低频参考数据（学校级清单，短时间几乎不变），进页默认零网络：新鲜期内直接用
  * [InternshipSnapshotStore] 的快照，过期才抓一次；顶栏「刷新」手动强刷。
+ *
+ * 传输走共享层的 [JwReadSession]（Android `CasSession` = OkHttp，iOS `IosJwReadSession` =
+ * Ktor + `WKWebView` 的 Cookie）：iOS 移植 W2（2026-11-25）搬进 `commonMain` 时只换了这一处
+ * 依赖，抓取 / 缓存 / 宁旧勿空的编排一行未改。
  *
  * **单次抓取、不做翻页**：教务该接口实测忽略一切分页参数（记录见
  * [InternshipBaseParser.listUrl]），固定只回前 10 条而 `count` 声明更多——多翻只会拿回
@@ -25,13 +30,15 @@ import kotlinx.coroutines.withContext
  *
  * 与其它 Sync 同一套纪律：互斥让位、失败静默（返回值不抛）、更新失败时**宁旧勿空**
  * （抓过就有旧快照带 `updateFailed` 标记展示，从没抓到才报错）、日志只记条数不记字段。
- * **整个读写收口在 [Dispatchers.IO]**：页面从 `LaunchedEffect`（主线程）直接调这里，
+ * **整个读写收口在 [Dispatchers.Default]**：页面从 `LaunchedEffect`（主线程）直接调这里，
  * 快照文件与凭证闸门都是阻塞 IO，不能压在主线程上（2026-10-07 复查修）。
+ * 搬进 `commonMain` 后 `Dispatchers.IO` 不可见（它只声明在各平台源集），按 `JsonFileStore`
+ * 同一口径换成 `Default`——这是与 Android 版唯一的行为差异（落盘跑在 Default 池）。
  */
 class InternshipBasesLoader(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val store: InternshipSnapshotStore,
-    private val now: () -> Long = System::currentTimeMillis,
+    private val now: () -> Long = AppClock::nowMillis,
 ) {
 
     private val mutex = Mutex()
@@ -56,8 +63,8 @@ class InternshipBasesLoader(
     }
 
     suspend fun load(force: Boolean = false): Result =
-        mutex.tryLocked { withContext(Dispatchers.IO) { loadLocked(force) } }?.also { result ->
-            Log.i(
+        mutex.tryLocked { withContext(Dispatchers.Default) { loadLocked(force) } }?.also { result ->
+            Logger.i(
                 TAG,
                 "internship bases -> " + when (result) {
                     is Result.Loaded ->

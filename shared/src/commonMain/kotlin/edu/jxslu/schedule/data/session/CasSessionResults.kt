@@ -75,14 +75,24 @@ fun CasEnsureResult.notReadyReason(): String = when (this) {
 }
 
 /**
- * 仓库层真正需要的那两条会话能力（DESIGN §4.27）。
+ * 仓库层真正需要的会话能力（DESIGN §4.27）。
  *
- * **唯一的实现是 `:app` 的 `CasSession`**——它继续管 OkHttp 传输、cookie 回灌、凭证闸门；
- * `shared/commonMain` 里那批 `*Sync` 只依赖这两个方法，于是编排（闸门 / 解析 / 写库）
- * 可以整段共享，而传输留在能拿到平台的模块。
+ * **Android 的实现是 `:app` 的 `CasSession`**——它继续管 OkHttp 传输、cookie 回灌、凭证闸门；
+ * **iOS 的实现是 `IosJwReadSession`**（Cookie 来自 `WKWebView`）。`shared/commonMain` 里那批
+ * `*Sync` 只依赖这几个方法，于是编排（闸门 / 解析 / 写库）可以整段共享，而传输留在能拿到
+ * 平台的模块。
  *
- * 刻意只放两条：写语义的 `fetchForAction`（选课提交）与 `hasCookies`（报修前置探测）
- * 目前没有任何共享层调用方，等它们真的搬过来再加，不提前铺。
+ * ## 为什么从两条涨到四条（iOS 移植 W2，2026-11-25）
+ *
+ * 学工报修（`DormRepairSync`）搬进共享层时把它要的两条也带过来了，正是原先写着
+ * 「等它们真的搬过来再加，不提前铺」的那两条：
+ *
+ * | 方法 | 谁在用 | 为什么不能由调用方绕开 |
+ * |---|---|---|
+ * | [hasCookies] | 报修的前置探测 | 「进程里已有 CAS cookie 才顺带走 CAS」是**不登录**的前提；绕开就得在每个冷启动完整登一次统一认证（教务侧已踩过风控） |
+ * | [postForm] | 报修列表 | 那个列表是 POST 表单接口；[fetchHtml] 只发 GET，硬拿 GET 打过去只会拿到 405 / 空页 |
+ *
+ * 写语义的 `fetchForAction`（选课提交）**仍然不在**这里：它没有共享层调用方，等搬了再加。
  */
 interface JwReadSession {
 
@@ -91,4 +101,20 @@ interface JwReadSession {
 
     /** 带会话取一个教务页面；失败一定带回原因，不返回 null。 */
     suspend fun fetchHtml(url: String): CasFetchResult
+
+    /**
+     * 进程内是否已经有会话 cookie（**只读，不发请求**）。
+     *
+     * 给「可选自动检查」用：拿不到就跳过这次检查，而不是为了它完整登一次统一认证。
+     * Android 读 OkHttp 的 cookie jar，iOS 读 `WKWebsiteDataStore`（`WebCookies`）。
+     */
+    fun hasCookies(): Boolean
+
+    /**
+     * 带会话 **POST 表单**（读语义：查询类接口，重发安全）。
+     *
+     * 与 [fetchHtml] 同一套失败口径（原因带回、不返回 null）。Android 侧多一层
+     * 「会话被顶就作废重登一次再重试一次」；iOS 侧没有可重登的凭证，失败原样回报。
+     */
+    suspend fun postForm(url: String, form: List<Pair<String, String>>): CasFetchResult
 }

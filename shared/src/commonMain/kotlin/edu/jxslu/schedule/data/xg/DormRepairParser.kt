@@ -13,10 +13,11 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toInstant
 
 /**
  * 学工「个人提交记录」应答解析（DESIGN §4.49）。
@@ -40,15 +41,6 @@ object DormRepairParser {
         "姓名", "学号", "院系", "专业", "班级", "手机号", "电话",
         "提交人", "发起人", "提交人姓名", "学工号",
     )
-
-    private val DATE_TIME_FORMATS = listOf(
-        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
-        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"),
-        DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss"),
-        DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm"),
-    )
-
-    private val DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
     /**
      * 解析列表应答，按提交时间倒序返回（最多 [MAX_RECORDS] 条）。
@@ -207,26 +199,41 @@ object DormRepairParser {
         }
     }
 
-    /** 表单的完成时间可能是 `yyyy-MM-dd HH:mm`，也可能是 epoch millis 字符串。 */
+    /**
+     * 表单的完成时间可能是 `yyyy-MM-dd HH:mm[:ss]` / `yyyy/MM/dd HH:mm[:ss]`，
+     * 也可能直接是 epoch millis 字符串。
+     *
+     * 搬进 `commonMain`（iOS 移植 W2）时 `java.time` 的四个 `DateTimeFormatter` 换成手工拆字段：
+     * kotlinx-datetime 的 `LocalDate.parse` 只认 ISO 口径，而这里的分隔符（`/`）与
+     * 「秒可缺」都不是 ISO；手工拆也不需要 `LocalDateTime.Format`，与
+     * `WenquRules.stampMillis` 同一手法。认不出一律回 null（调用方按「没有完成时间」处理）。
+     */
     private fun parseDateTime(raw: String?): Long? {
         val text = raw?.trim().orEmpty()
         if (text.isEmpty()) return null
         text.toLongOrNull()?.takeIf { it > 0 }?.let { return it }
-        for (format in DATE_TIME_FORMATS) {
-            runCatching {
-                return LocalDateTime.parse(text, format)
-                    .atZone(ZoneId.systemDefault())
-                    .toInstant()
-                    .toEpochMilli()
+        return runCatching {
+            val blocks = text.split(' ')
+            val dateParts = blocks[0].split('-', '/')
+            val timeParts = blocks.getOrNull(1)?.split(':')
+            val zone = TimeZone.currentSystemDefault()
+            if (timeParts == null) {
+                LocalDate(
+                    dateParts[0].toInt(),
+                    dateParts[1].toInt(),
+                    dateParts[2].toInt(),
+                ).atStartOfDayIn(zone).toEpochMilliseconds()
+            } else {
+                LocalDateTime(
+                    dateParts[0].toInt(),
+                    dateParts[1].toInt(),
+                    dateParts[2].toInt(),
+                    timeParts[0].toInt(),
+                    timeParts.getOrNull(1)?.toInt() ?: 0,
+                    timeParts.getOrNull(2)?.toInt() ?: 0,
+                ).toInstant(zone).toEpochMilliseconds()
             }
-        }
-        runCatching {
-            return LocalDate.parse(text, DATE_FORMAT)
-                .atStartOfDay(ZoneId.systemDefault())
-                .toInstant()
-                .toEpochMilli()
-        }
-        return null
+        }.getOrNull()
     }
 
     /** 一次最多保留多少条（列表接口的 `pageSize` 也按这个值取）。 */

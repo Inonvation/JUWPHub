@@ -36,36 +36,41 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.repo.InternshipBasesLoader
 import edu.jxslu.schedule.domain.InternshipBase
 import edu.jxslu.schedule.domain.InternshipBaseRules
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.LabelValueRow
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
-import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
+import edu.jxslu.schedule.ui.jw.JwWebActionButton
 
 /**
  * 实习基地查看（DESIGN §3.27 / §4.43）。
  *
  * 入口「我的 → 学习 → 教务服务 → 实习基地查看」。数据 = 教务「实习基地查看」的
- * layui 接口直取（OkHttp，不经 WebView），**不落库**：低频参考数据，进页现取一次；
+ * layui 接口直取（不经 WebView），**不落库**：低频参考数据，进页现取一次；
  * 失败 / 未登录在页内给出重试与去向指引（文案来自同步层的 `describe`）。
  *
  * 展示口径：按类别（校内 / 校外 / 其他）分小节，行 = 基地名称 + 单位·地址，
  * 行尾容纳人数；整行点开底部弹层看完整字段（负责人 / 电话 / 建成时间 / 简介等）。
+ *
+ * iOS 移植 W2（2026-11-25）：本页搬进共享层，装载器从 `Services.current` 取（iOS 侧
+ * 走 `IosJwReadSession`，抓取链与 Android 同一份）；顶栏「在教务网页核对」是平台动作，
+ * 收成 [onOpenWebPage] 可空回调——**null = 本平台没有内置浏览窗口**，那个图标不渲染。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InternshipBasesScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val loader = remember { Graph.internshipBasesLoader(context) }
+fun InternshipBasesScreen(
+    onBack: () -> Unit,
+    onOpenWebPage: ((title: String, url: String) -> Unit)? = null,
+) {
+    val loader = Services.current.internshipBasesLoader()
 
     var state by remember { mutableStateOf<LoadState>(LoadState.Loading) }
     /** 每次自增 = 一轮新加载（进页 / 重试 / 顶栏刷新）。 */
@@ -96,7 +101,7 @@ fun InternshipBasesScreen(onBack: () -> Unit) {
                     }
                 },
                 actions = {
-                    JwWebActionButton("实习基地", JwUrls.INTERNSHIP_BASES_SHELL)
+                    JwWebActionButton("实习基地", JwUrls.INTERNSHIP_BASES_SHELL, onOpenWebPage)
                     if (state is LoadState.Loading) {
                         CircularProgressIndicator(
                             modifier = Modifier.padding(end = 14.dp).width(20.dp),

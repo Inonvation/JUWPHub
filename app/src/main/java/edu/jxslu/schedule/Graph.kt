@@ -77,6 +77,7 @@ import edu.jxslu.schedule.data.repo.CurriculumRepository
 import edu.jxslu.schedule.data.repo.CurriculumSync
 import edu.jxslu.schedule.data.repo.DormRepairStore
 import edu.jxslu.schedule.data.repo.DormRepairSync
+import edu.jxslu.schedule.data.xg.DormRepairWebClient
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.repo.SelectionRepository
@@ -477,6 +478,8 @@ object Graph {
                 cas = casSession(context),
                 store = dormRepairStore(context),
                 inbox = inboxRepository(context),
+                // WebView 会话那一档（iOS 移植 W2 起由宿主注入；iOS 侧给 null）。
+                webSession = DormRepairWebClient(),
             ).also { dormRepairSync = it }
         }
 
@@ -665,7 +668,7 @@ object Graph {
      */
     fun campusCalendar(context: Context): CampusCalendarStore =
         campusCalendarStore ?: synchronized(this) {
-            campusCalendarStore ?: CampusCalendarStore(context.applicationContext)
+            campusCalendarStore ?: CampusCalendarStore()
                 .also { campusCalendarStore = it }
         }
 
