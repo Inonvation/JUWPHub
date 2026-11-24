@@ -22,6 +22,7 @@ import edu.jxslu.schedule.data.qzxy.IosQzxyBluetoothLink
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.CurriculumRepository
 import edu.jxslu.schedule.data.repo.CurriculumSync
+import edu.jxslu.schedule.data.repo.DormRepairStore
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
