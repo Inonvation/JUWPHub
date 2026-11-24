@@ -451,8 +451,25 @@ JVM/Android 依赖，必须同批处理，否则改完 `:shared` 还是编不过
 | 同时依赖 | 文件数 | 处理 |
 |---|---|---|
 | `Dispatchers.IO` | **13 / 25** | commonMain 里没有 `Dispatchers.IO`。Ktor 的请求本身是挂起、不占线程，多数情况**直接删掉那层 `withContext`**；确实要做 CPU 重活的换 `Dispatchers.Default`。这是占比最高的一项，别低估 |
-| `android.util.Log` | 6 / 25 | 需要先立 `Logger` 缝（P-1 第 7 项，全仓 62 处）。所以网络迁移与日志收口**必须并行**，否则这 6 个文件改到一半会卡住 |
-| `BuildConfig` | 3 / 25 | `BuildConfig` 是 AGP 生成的，`:shared` 没有。要么把这些值搬成构造参数/常量，要么立一条 `expect` 读 debug 标志 |
+| `android.util.Log` | 6 / 25 | ✅ **已解决（2026-11-24）**：`shared/.../platform/Logger.kt` 立好了 expect/actual，Android 落 `android.util.Log`（含 throwable，照旧打完整栈）、iOS 落 `NSLog`。全仓 179 处 `Log.*` 散在 52 个文件里，**按需迁移**（文件搬进 `:shared` 时顺手换），不做一次性全量扫 |
+| `BuildConfig` | 3 / 25 | AGP 生成的，`:shared` 没有。做法：改成构造参数/常量，由 `:app` 侧调用点传进来（`UpdateCheckClient` 就是这么改的：无参构造删掉，`JuwApplication` 与 `AboutScreens` 传 `BuildConfig.VERSION_NAME`） |
+
+**已迁移清单（2026-11-24）**：`data/weather/WeatherApi`、`data/repo/UpdateCheckClient`。
+两个都验证过 `commonMain` 元数据门禁 + 2418 个单测全绿。
+
+**剩余 23 个文件按耦合与行数的实测排序**（`行数 / 额外耦合`，用来定下一批的派活）：
+
+| 易 | 文件 |
+|---|---|
+| 低（≤ 60 行、无额外耦合） | `session/CookieBridge` 15、`session/CasTransport` 35、`session/MemoryCookieJar` 48、`wenqu/WenquServerClock` 53、`qiekj/QiekjHeaderInterceptor` 58 |
+| 中（需处理 Dispatchers.IO / Context） | `qzxy/QzxyApi` 79、`qykcx/KqcxBikeClient` 113、`qiekj/QiekjApi` 146、`ykt/YktClient` 153、`jw/TranscriptClient` 160、`wenqu/WenquApi` 186、`power/PowerClient` 191、`ujing/UjingApi` 258 |
+| 高（三种耦合叠加） | `repo/CampusCalendarStore` 245、`kqcx/KqcxAuthClient` 302、`qzxy/QzxyRepository` 314、`jw/JwHttpSession` 324、`ai/AiScheduleClient` 335（SSE 流式）、`qiekj/QiekjRepository` 469 |
+| 最后处理 | `data/net/AppHttp` 66（全部迁完才能删）、`ui` 侧 7 个（扫码 Activity 等，属平台外壳） |
+
+**下一批可以并行**：Logger 缝立好之后，文件之间不再有共享前置，可以按上表切成互斥文件集分给多个
+agent 同时改（每个 agent 只改自己那几个文件、不跑 Gradle），我统一编译验证。
+两个例外必须串行：`jw/JwHttpSession`（Cookie 与 CAS 重定向，`session/*` 全都依赖它）与
+`ai/AiScheduleClient`（SSE 流式，Ktor 侧要用 `bodyAsChannel`，是另一种写法）。
 
 验收：`.\gradlew.bat :shared:iosSimulatorArm64Test` 跑通解析器与迁移测试；Android 行为零变化。
 

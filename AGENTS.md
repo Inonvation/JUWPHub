@@ -292,6 +292,11 @@ shared/       KMP 共享逻辑（iOS 移植 P0/P2 起）：commonMain 已装 **d
               `app/.../domain` 目录已删除——**新域层代码写进 `shared/src/commonMain/kotlin/
               edu/jxslu/schedule/domain/`**
 data/         Android 平台实现（Room / Retrofit / DataStore / 通知 / 蓝牙 …）；wire model 已部分上移
+platform/     **平台能力缝**（在 `:shared` 里，`edu.jxslu.schedule.platform`）：目前有 `Logger`
+              （expect/actual，Android 落 `android.util.Log`、iOS 落 `NSLog`）。新增平台能力
+              （剪贴板/分享/相册/权限）都往这里放，别塞进 `domain/`
+net/          `:shared` 的 `data/net/SharedHttp`（Ktor client，两端共用）+ `:app` 的 `data/net/AppHttp`
+              （OkHttp 专用，正在被 Ktor 逐个模块替换，全部迁完后删除）
 data/local    Room v21（表清单见「工程实况」；迁移只加不删，实体索引必须与迁移对齐）
 data/repo     ScheduleRepository（备份模型在 ScheduleBackup）+ 各业务 Repository / Sync
 data/prefs    DataStore 显示偏好（DisplayPrefsStore + 按功能拆出的扩展文件）
