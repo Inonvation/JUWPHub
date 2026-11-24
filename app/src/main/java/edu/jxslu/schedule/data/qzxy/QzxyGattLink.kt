@@ -17,6 +17,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
@@ -78,8 +81,31 @@ data class QzxyGattCharacteristicInfo(
  * `KFlowControlCharacteristicUUID`。设备另有一个 `0000ff00` 自定义服务（`ff02` 可写），
  * 上一版取「第一个可写特征值」命中的就是它，写下去毫无反应。
  * 流控特征值目前不写，先看主通道通不通。
+ *
+ * iOS 移植 S12（2026-11-24）：本类直接实现共享层的 [QzxyBluetoothLink] 缝，
+ * 四个成员逐个转调下面已有的 `connect` / `request` / `close`——**超时、重连、分包、
+ * 写回执的语义一行没改**，新增的只有一条 [connectionState]（`linkAlive` 的可见化，
+ * 供将来的页面订阅）。iOS 侧对应 `IosQzxyBluetoothLink`（未实现 → 立刻回失败）。
  */
-class QzxyGattLink(private val context: Context) {
+class QzxyGattLink(private val context: Context) : QzxyBluetoothLink {
+
+    /**
+     * 连接状态（缝要求的那条流）。
+     *
+     * 与 [linkAlive] 同源，但可订阅：原来只有「此刻连没连」的同步 getter，
+     * 页面要轮询才知道状态变了。写入点只有三处（建链开始 / 建链成功 / 断开清理），
+     * 不改变任何判定逻辑。
+     */
+    private val _connectionState = MutableStateFlow(QzxyLinkState.Disconnected)
+    override val connectionState: StateFlow<QzxyLinkState> = _connectionState.asStateFlow()
+
+    override suspend fun ensureConnected(address: String): Result<Unit> =
+        connect(address).map { }
+
+    override suspend fun exchange(frame: ByteArray, timeoutMillis: Int): Result<ByteArray?> =
+        request(frame, timeoutMillis)
+
+    override fun disconnect() = close()
 
     @Volatile
     private var gatt: BluetoothGatt? = null
@@ -169,6 +195,7 @@ class QzxyGattLink(private val context: Context) {
             return@withContext Result.success(cachedServiceTable)
         }
         close()
+        _connectionState.value = QzxyLinkState.Connecting
         val adapter = BluetoothAdapter.getDefaultAdapter()
             ?: return@withContext Result.failure(IllegalStateException("本机没有蓝牙适配器"))
         if (!adapter.isEnabled) {
@@ -312,6 +339,7 @@ class QzxyGattLink(private val context: Context) {
             }
             connectedAddress = address
             cachedServiceTable = table
+            _connectionState.value = QzxyLinkState.Connected
             Result.success(table)
         } catch (error: CancellationException) {
             close()
@@ -538,6 +566,7 @@ class QzxyGattLink(private val context: Context) {
      */
     private fun markDisconnected() {
         linkAlive = false
+        _connectionState.value = QzxyLinkState.Disconnected
         writeCharacteristics = emptyList()
         connectedAddress = null
         cachedServiceTable = emptyList()

@@ -34,7 +34,7 @@ import edu.jxslu.schedule.data.qzxy.QzxyDebugStore
 import edu.jxslu.schedule.data.qzxy.QzxyClearStore
 import edu.jxslu.schedule.data.qzxy.QzxyWateringStore
 import edu.jxslu.schedule.data.qzxy.QzxyGattLink
-import edu.jxslu.schedule.data.qzxy.QzxySessionStore
+import edu.jxslu.schedule.data.qzxy.QzxySecureSessionStore
 import edu.jxslu.schedule.data.ujing.UjingHouseStore
 import edu.jxslu.schedule.data.ujing.UjingOrderStore
 import edu.jxslu.schedule.data.ujing.UjingRepository
@@ -88,6 +88,7 @@ import edu.jxslu.schedule.data.repo.TranscriptStore
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.data.session.CredentialVault
 import edu.jxslu.schedule.data.session.SessionExpiryStore
+import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
@@ -740,10 +741,14 @@ object Graph {
      */
     fun qzxy(context: Context): QzxyRepository =
         qzxyRepository ?: synchronized(this) {
-            qzxyRepository ?: QzxyRepository(
-                QzxySessionStore(context.applicationContext),
-                sessionExpiry(context.applicationContext),
-            ).also { qzxyRepository = it }
+            qzxyRepository ?: run {
+                val expiry = sessionExpiry(context.applicationContext)
+                QzxyRepository(
+                    QzxySecureSessionStore(context.applicationContext),
+                    onSessionExpired = { expiry.mark(SessionService.Qzxy) },
+                    onSessionCleared = { expiry.clear(SessionService.Qzxy) },
+                ).also { qzxyRepository = it }
+            }
         }
 
     /**

@@ -35,7 +35,7 @@ data class WenquSession(
 /**
  * 问渠凭证加密存储（DESIGN §4.45）。
  *
- * 与 [edu.jxslu.schedule.data.qzxy.QzxySessionStore] 同方案、**不同文件**（`secure_wenqu`）：
+ * 与 [edu.jxslu.schedule.data.qzxy.QzxySecureSessionStore] 同方案、**不同文件**（`secure_wenqu`）：
  * 各第三方会话互不相干，混在一个文件里退登录会互相牵连。创建与自愈口径见
  * [EncryptedPrefs.open]。新文件同样要在 `backup_rules.xml` / `data_extraction_rules.xml`
  * 里排除（正式件 + `.fallback` 两份），免得跟着云备份或设备迁移跑到别的机子上。
