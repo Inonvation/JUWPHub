@@ -461,6 +461,54 @@ JVM/Android 依赖，必须同批处理，否则改完 `:shared` 还是编不过
 `data/power/PowerClient`（+ 抽出的 `PowerException`）。
 十一个文件，都验证过 `commonMain` 元数据门禁 + 2418 个单测全绿。剩余 OkHttp/Retrofit 文件 **26 → 18**。
 
+**仓库层 `data/repo` 搬移结果（2026-11-24，S4 批）**：43 个文件 / 6,927 行里搬走 **22 个 /
+4,637 行（51% 文件、67% 行）**，留下 21 个 / 2,245 行。判据仍是「搬过去 + 跑门禁」，
+不是 import 扫描。
+
+搬走的两段：纯数据仓库（`ScheduleRepository` `ScheduleBackup` `InboxRepository` 四个
+`*Repository` 与 `RideRecordStore`）与同步编排（`ScheduleSync` `ScheduleTermImport`
+`SelectionSync` `ExamSync` `ScoreSync` `ScholarProgressSync` `TextbookSync` `CurriculumSync`
+`TeachingCalendarSync` `SelectionCenterClient` `ProfileSync` `SyncGate` `SubpageScreen`
+`ProfileSyncRules`）。过程中立的四条缝（各只有一个实现，没有第二套）：
+
+| 缝 | 为什么非立不可 |
+|---|---|
+| `data/local/RoomTransaction.inTransaction`（expect/actual） | `androidx.room.withTransaction` **只在 Room 的 Android 变体**里（commonMain 元数据编译直接 Unresolved）；`useWriterConnection` 虽在 commonMain 但语义不同（Android 的库是 `databaseBuilder` 打开的），且 `importBackup` 外层事务里还套着内层事务。所以 Android 继续用 `withTransaction`、iOS 用 `useWriterConnection + immediateTransaction`，iOS 侧带嵌套闸门 |
+| `data/session/JwReadSession` + 结果类型 | `CasSession` 是 OkHttp + WebView cookie 桥，留在 `:app`；编排只认 `ensureValid` / `fetchHtml` 两条读语义。结果类型搬过去后 `:app` 二十多个调用点 import 零改动 |
+| `data/repo/ScheduleBaseline` / `SelectionRoundsSource` / `ExamSnapshot` | 三个「filesDir 下一份 JSON」的快照仓储，模型与语义可以上移，`File` 与 `Context` 留在 `:app`（实现类只剩 `JsonFileStore` 一层） |
+| `SubpageScreen` 枚举 | 纯枚举，却卡住五个 Sync（收件箱落点要用 `.name`）。包名不变，`:app` 四十多处引用零改动 |
+
+**留下的 21 个文件与逐个理由**（`data/repo` 下按行数降序）：
+
+| 文件 | 行 | 留下的唯一阻碍 | 谁来解锁 |
+|---|---|---|---|
+| `CampusCalendarStore` | 244 | `okhttp3.OkHttpClient` 直接建实例下载校历图（该模块尚未 Ktor 化） | 走「逐模块换 Ktor」那条线 |
+| `SelectionCenterHttpClient` | 234 | `CasSession` 的**写语义**（`postForm` / `fetchForAction`）+ `SelectionDebugDump`（`File`）+ `java.net.URLEncoder` / `Collections.synchronizedSet` | 先把写语义两条也放进 `JwReadSession`，再给 debug dump 一道口 |
+| `DormRepairSync` | 230 | 同时依赖 `DormRepairStore`（`File`）与 `DormRepairWebClient`（WebView 读 office 会话）+ `cas.hasCookies()` | 报修链路整体（含 WebView 桥）移植时一起搬 |
+| `QuietHoursQueue` | 157 | `File` + `MirroredJsonStore`（免扰队列落盘） | 文件 IO 缝 |
+| `AiApplyHistoryStore` | 154 | `Context` + `MirroredJsonStore` | 同上 |
+| `InternshipBasesLoader` | 130 | `InternshipSnapshotStore`（`Context` + `File`，且快照行→领域的 `rowToBase` 也是它） | 文件 IO 缝 + 快照模型上移（照 `ExamSnapshot` 的办法） |
+| `ImageImport` | 127 | `Bitmap` / `BitmapFactory` / `ExifInterface` / `ContentResolver` / `Matrix` | P2 第 5 批「位图簇」的中性 Bitmap 类型 + 相册 |
+| `AppCacheCleaner` | 118 | `Context` + `WebView` / `WebStorage` + `File` | 缓存清理属于平台外壳，等 P3 的壳侧缝 |
+| `AiImageStore` | 111 | `Context` + `BitmapFactory` 解码缩略图 + `Uri` | 同「位图簇」 |
+| `AttachmentStore` | 98 | `Context`（`filesDir`）+ `Uri` + `SimpleDateFormat` 文件名 | 文件 IO 缝 |
+| `InternshipSnapshotStore` | 95 | `Context` + `File`（实习基地快照） | 文件 IO 缝 |
+| `TranscriptStore` | 91 | `Context` + `File` + `FileProvider`（盖章成绩单 PDF 分享） | 文件 IO 缝 + 分享缝 |
+| `ScheduleBackgroundStore` | 81 | `Context` + `Uri`（相册取图）+ `File` | 相册缝（P2 第 5 批） |
+| `CrashReporter` | 74 | `Context` + `File` + `PrintWriter` / `StringWriter` / `SimpleDateFormat` | 崩溃上报本身该走平台侧（iOS 用 `NSSetUncaughtExceptionHandler`），不硬搬 |
+| `DormRepairStore` | 68 | `Context` + `File` | 文件 IO 缝 |
+| `ScheduleShareStore` | 61 | `Context` + `File` + `androidx.core.content.FileProvider` | 文件 IO 缝 + 分享缝 |
+| `WenquCertStore` | 40 | `Context` + `File` + `FileProvider` | 同上 |
+| `SelectionDebugDump` | 37 | `File` + `java.time.LocalDateTime` / `DateTimeFormatter` | KMP 没有 `DateTimeFormatter` 等价物，格式要手写；debug 专用，不值当 |
+| `ExamSnapshotStore` | 34 | **只剩实现**：模型与接口已上移到 `ExamSnapshot`，`File` + `Context` 留在这里 | 文件 IO 缝 |
+| `SelectionRoundsStore` | 33 | 同上（`SelectionRoundsSource`） | 文件 IO 缝 |
+| `ScheduleBaselineStore` | 28 | 同上（`ScheduleBaseline`） | 文件 IO 缝 |
+
+一条结论：**下一刀应该切在文件 IO 上**。`okio` 已在 `:shared` 里，但 `FileSystem.SYSTEM` 在
+commonMain 不可见（S3 已踩），所以还差一条 `expect fun platformFileSystem(): FileSystem`
+（Android/iOS 各返回各自的 SYSTEM）。补上它，上表里 9 个纯 JSON 快照类（≈900 行）能一次搬完，
+`SelectionCenterHttpClient` 之外还顺手解放 `AttachmentStore` / `TranscriptStore` 一族。
+
 ### 迁移中丢掉的两项「共享 base」附带能力（必须在最后一批前补回来）
 
 `AppHttp.base` 除了超时还挂了两个东西，换成 `SharedHttp.create` 后**所有已迁移模块都不再有**：
