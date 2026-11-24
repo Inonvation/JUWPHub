@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.common
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 
 /**
@@ -30,16 +31,20 @@ class AttachmentImageUi(
 )
 
 /**
- * Markdown 正文的渲染槽（笔记 / 作业详情与列表共用）。
+ * Markdown 正文的渲染槽（笔记 / 作业列表共用）。
  *
  * `MarkdownView` 依赖附件图解码与公式排版（`MathText`），两者都还在 `:app`。
- * **null = 本平台还没有 Markdown 渲染器**：调用点退化成纯文本一行（作业正文仍然读得到），
+ * **null = 本平台还没有 Markdown 渲染器**：调用点退化成纯文本（作业正文仍然读得到），
  * 不把整块正文藏掉。
+ *
+ * 图片档位固定为「列表缩略图」（72dp、240px 解码）：这个槽只服务于列表里的正文，
+ * 详情页仍在 `:app`，直接调 `MarkdownView`。
  */
 class MarkdownUi(
-    /** 渲染一段 Markdown；图片与链接的点击回传由调用点给。 */
+    /** 渲染一段 Markdown；[modifier] 由调用点给（缩进 / 完成态压暗 / 点击区都在它上面）。 */
     val render: @Composable (
         markdown: String,
+        modifier: Modifier,
         onImageClick: (String) -> Unit,
         onLinkClick: (String) -> Unit,
     ) -> Unit,

@@ -28,6 +28,7 @@ import edu.jxslu.schedule.ui.campus.LeaveHubScreen
 import edu.jxslu.schedule.ui.campus.PayCodeScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.common.rememberAttachmentImageUi
+import edu.jxslu.schedule.ui.common.rememberMarkdownUi
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
@@ -40,6 +41,7 @@ import edu.jxslu.schedule.ui.homework.HomeworkCourseScreen
 import edu.jxslu.schedule.ui.homework.HomeworkDetailScreen
 import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
 import edu.jxslu.schedule.ui.homework.HomeworkTodoScreen
+import edu.jxslu.schedule.ui.homework.openLink
 import edu.jxslu.schedule.ui.inbox.InboxScreen
 import edu.jxslu.schedule.ui.internship.InternshipBasesScreen
 import edu.jxslu.schedule.ui.jw.StudentInfoScreen
@@ -49,6 +51,7 @@ import edu.jxslu.schedule.ui.jw.TextbookScreen
 import edu.jxslu.schedule.ui.notes.NoteCourseScreen
 import edu.jxslu.schedule.ui.notes.NoteDetailScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
+import edu.jxslu.schedule.ui.reminder.ClassReminder
 import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.score.rememberScoreScreenActions
 import edu.jxslu.schedule.ui.score.ScoreSettingsScreen
@@ -438,6 +441,8 @@ class SubpageActivity : ComponentActivity() {
                 onBack = onBack,
             )
             // 作业：课程库 → 课程列表 → 详情/编辑 + 作业中心
+            // 库 / 课程列表 / 作业中心已在 shared/commonMain（iOS 移植 S13）；附件图、Markdown
+            // 渲染、开链接、截止提醒排程由这里注入（四件都在 :app）。
             SubpageScreen.HOMEWORK -> HomeworkLibraryScreen(
                 onBack = onBack,
                 onOpenHomework = { name, id, startEditing ->
@@ -449,6 +454,10 @@ class SubpageActivity : ComponentActivity() {
                         startEditing = startEditing,
                     )
                 },
+                images = rememberAttachmentImageUi(),
+                markdown = rememberMarkdownUi(),
+                onOpenLink = { url -> openLink(this, url) },
+                onHomeworkChanged = { ClassReminder.enqueueCheck(this) },
             )
             SubpageScreen.HOMEWORK_COURSE -> HomeworkCourseScreen(
                 courseName = courseName.orEmpty(),
@@ -462,6 +471,10 @@ class SubpageActivity : ComponentActivity() {
                         startEditing = startEditing,
                     )
                 },
+                images = rememberAttachmentImageUi(),
+                markdown = rememberMarkdownUi(),
+                onOpenLink = { url -> openLink(this, url) },
+                onHomeworkChanged = { ClassReminder.enqueueCheck(this) },
             )
             SubpageScreen.HOMEWORK_DETAIL -> HomeworkDetailScreen(
                 courseName = courseName.orEmpty(),
@@ -481,6 +494,10 @@ class SubpageActivity : ComponentActivity() {
                     )
                 },
                 onOpenLibrary = { SubpageActivity.start(this, SubpageScreen.HOMEWORK) },
+                images = rememberAttachmentImageUi(),
+                markdown = rememberMarkdownUi(),
+                onOpenLink = { url -> openLink(this, url) },
+                onHomeworkChanged = { ClassReminder.enqueueCheck(this) },
             )
         }
     }

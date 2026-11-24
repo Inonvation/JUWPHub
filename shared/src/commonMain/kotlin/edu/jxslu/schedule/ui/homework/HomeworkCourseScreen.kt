@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -20,31 +18,28 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Homework
 import edu.jxslu.schedule.domain.courseHomeworkOrder
 import edu.jxslu.schedule.domain.homeworkDisplayTitle
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.AttachmentImageUi
 import edu.jxslu.schedule.ui.common.EmptyHint
-import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.LoadingHint
+import edu.jxslu.schedule.ui.common.MarkdownUi
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.reminder.ClassReminder
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 
@@ -54,6 +49,9 @@ import kotlinx.datetime.LocalDate
  * 排序口径在 domain：未完成在前（逾期 → 今天 → 未来 → 无截止），已完成沉底
  * （最近完成的在前），中间用「已完成 · N」分隔。每条是 [HomeworkItemBlock]
  * （2026-10-21）：标题 + 截止 chip + 完整正文 + 缩略图；点正文进预览，点铅笔直接编辑。
+ *
+ * 平台动作与 [HomeworkLibraryScreen] 同一组可空参数（iOS 移植 S13，2026-11-25）：
+ * `images` / `markdown` / `onOpenLink` / `onHomeworkChanged`，null 的语义见那一页的参数表。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,14 +59,27 @@ fun HomeworkCourseScreen(
     courseName: String,
     onBack: () -> Unit,
     onOpenHomework: (id: Long, startEditing: Boolean) -> Unit,
+    /** 附件图能力；null = 本平台没有。 */
+    images: AttachmentImageUi? = null,
+    /** Markdown 渲染槽；null = 本平台没有。 */
+    markdown: MarkdownUi? = null,
+    /** 打开正文链接，返回是否成功；null = 链接不可点。 */
+    onOpenLink: ((String) -> Boolean)? = null,
+    /** 完成状态改动后重排截止提醒。 */
+    onHomeworkChanged: (() -> Unit)? = null,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val repo = remember { Graph.homeworkRepository(context) }
+    val repo = remember { Services.current.homeworkRepository() }
     val list by repo.observeForCourse(courseName).collectAsStateWithLifecycle(initialValue = null)
     val today = AppClock.today()
     val snackbar = remember { SnackbarHostState() }
-    var viewer by remember { mutableStateOf<String?>(null) }
+
+    /** 打不开链接时的统一提示（与作业库同一句）。 */
+    fun noticeLinkFailed() {
+        scope.launch {
+            snackbar.showNotice(AppNoticeVisuals("打不开这个链接", tone = NoticeTone.Warning))
+        }
+    }
 
     Scaffold(
         snackbarHost = { AppSnackbarHost(snackbar) },
@@ -77,7 +88,7 @@ fun HomeworkCourseScreen(
                 title = { Text(courseName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
                 actions = {
@@ -121,7 +132,7 @@ fun HomeworkCourseScreen(
                             onToggle = { doneState ->
                                 scope.launch {
                                     repo.setDone(homework.id, doneState)
-                                    ClassReminder.enqueueCheck(context)
+                                    onHomeworkChanged?.invoke()
                                     if (doneState) {
                                         val result = snackbar.showNotice(
                                             "已完成「${homeworkDisplayTitle(homework.detail)}」",
@@ -130,20 +141,15 @@ fun HomeworkCourseScreen(
                                         )
                                         if (result == SnackbarResult.ActionPerformed) {
                                             repo.setDone(homework.id, false)
-                                            ClassReminder.enqueueCheck(context)
+                                            onHomeworkChanged?.invoke()
                                         }
                                     }
                                 }
                             },
-                            onImageClick = { viewer = it },
-                            onLinkClick = { url ->
-                                if (!openLink(context, url)) {
-                                    scope.launch {
-                                        snackbar.showNotice(
-                                            AppNoticeVisuals("打不开这个链接", tone = NoticeTone.Warning),
-                                        )
-                                    }
-                                }
+                            images = images,
+                            markdown = markdown,
+                            onOpenLink = onOpenLink?.let { open ->
+                                { url: String -> if (!open(url)) noticeLinkFailed() }
                             },
                         )
                     }
@@ -158,18 +164,13 @@ fun HomeworkCourseScreen(
                                 onToggle = { doneState ->
                                     scope.launch {
                                         repo.setDone(homework.id, doneState)
-                                        ClassReminder.enqueueCheck(context)
+                                        onHomeworkChanged?.invoke()
                                     }
                                 },
-                                onImageClick = { viewer = it },
-                                onLinkClick = { url ->
-                                    if (!openLink(context, url)) {
-                                        scope.launch {
-                                            snackbar.showNotice(
-                                                AppNoticeVisuals("打不开这个链接", tone = NoticeTone.Warning),
-                                            )
-                                        }
-                                    }
+                                images = images,
+                                markdown = markdown,
+                                onOpenLink = onOpenLink?.let { open ->
+                                    { url: String -> if (!open(url)) noticeLinkFailed() }
                                 },
                             )
                         }
@@ -177,10 +178,6 @@ fun HomeworkCourseScreen(
                 }
             }
         }
-    }
-
-    viewer?.let { fileName ->
-        ImageViewerDialog(fileName = fileName, onDismiss = { viewer = null })
     }
 }
 
@@ -192,8 +189,9 @@ private fun HomeworkCard(
     onOpen: () -> Unit,
     onEdit: () -> Unit,
     onToggle: (Boolean) -> Unit,
-    onImageClick: (String) -> Unit,
-    onLinkClick: (String) -> Unit,
+    images: AttachmentImageUi?,
+    markdown: MarkdownUi?,
+    onOpenLink: ((String) -> Unit)?,
 ) {
     AppCard(contentPadding = PaddingValues(0.dp)) {
         HomeworkItemBlock(
@@ -202,8 +200,9 @@ private fun HomeworkCard(
             onClick = onOpen,
             onEdit = onEdit,
             onToggle = onToggle,
-            onImageClick = onImageClick,
-            onLinkClick = onLinkClick,
+            markdown = markdown,
+            images = images,
+            onOpenLink = onOpenLink,
         )
     }
 }
