@@ -1,17 +1,18 @@
 package edu.jxslu.schedule.data.weather
 
-import edu.jxslu.schedule.data.net.AppHttp
+import edu.jxslu.schedule.data.net.SharedHttp
+import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.domain.WeatherDay
 import edu.jxslu.schedule.domain.WeatherHour
 import edu.jxslu.schedule.domain.WeatherNow
 import edu.jxslu.schedule.domain.WeatherSnapshot
+import io.ktor.client.HttpClient
+import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 
@@ -32,7 +33,7 @@ import kotlinx.datetime.LocalDateTime
  * - 请求只发坐标与字段清单，**不带任何设备或账号标识**；
  * - 超时收紧到 20s：详情页转圈可接受，但挂死不行。
  */
-class WeatherApi private constructor(private val http: OkHttpClient) {
+class WeatherApi private constructor(private val http: HttpClient) {
 
     companion object {
 
@@ -87,14 +88,18 @@ class WeatherApi private constructor(private val http: OkHttpClient) {
             explicitNulls = false
         }
 
-        fun create(): WeatherApi = WeatherApi(AppHttp.withCallTimeout(20))
+        fun create(): WeatherApi = WeatherApi(SharedHttp.create(requestTimeoutSeconds = 20))
     }
 
     /**
      * 取一次预报。失败抛异常（网络 / HTTP / 解析），由仓库决定回退策略。
      * 坐标系：WGS84（与接口口径一致，见 [CAMPUS_LAT] 的说明）。
+     *
+     * iOS 移植 P1 起走 Ktor（原先 `withContext(Dispatchers.IO)` + 裸 OkHttp）：
+     * `Dispatchers.IO` 在 commonMain 里不存在，而 Ktor 的 `get` 本身就是挂起、不占线程，
+     * 所以那层 `withContext` 直接去掉，语义只强不弱。
      */
-    suspend fun fetch(lat: Double, lng: Double): WeatherSnapshot = withContext(Dispatchers.IO) {
+    suspend fun fetch(lat: Double, lng: Double): WeatherSnapshot {
         val url = buildString {
             append(BASE)
             append("?latitude=").append(lat)
@@ -106,13 +111,12 @@ class WeatherApi private constructor(private val http: OkHttpClient) {
             append("&forecast_days=").append(FORECAST_DAYS)
             append("&forecast_hours=").append(FORECAST_HOURS)
         }
-        val request = Request.Builder().url(url).get().build()
         try {
-            http.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw WeatherRequestException("HTTP ${response.code}")
-                val body = response.body?.string().orEmpty()
-                parse(body)
+            val response = http.get(url)
+            if (!response.status.isSuccess()) {
+                throw WeatherRequestException("HTTP ${response.status.value}")
             }
+            return parse(response.bodyAsText())
         } catch (e: CancellationException) {
             throw e
         } catch (e: WeatherRequestException) {
@@ -191,10 +195,15 @@ class WeatherApi private constructor(private val http: OkHttpClient) {
         }
     }
 
-    /** "2026-10-11T06:14" → "06:14"；取不到给 null（UI 不占位）。 */
+    /**
+     * "2026-10-11T06:14" → "06:14"；取不到给 null（UI 不占位）。
+     *
+     * 用 [TextFmt.pad] 而不是 `"%02d:%02d".format(…)`：`String.format` 是 JVM 专有，
+     * commonMain 里没有。
+     */
     private fun clockOf(value: String?): String? {
         val time = parseDateTime(value) ?: return null
-        return "%02d:%02d".format(time.hour, time.minute)
+        return TextFmt.pad(time.hour) + ":" + TextFmt.pad(time.minute)
     }
 
     private fun parseDate(value: String?): LocalDate? = try {

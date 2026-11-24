@@ -63,12 +63,25 @@ kotlin {
             api("org.jetbrains.compose.ui:ui:1.7.3")
             api("org.jetbrains.compose.material3:material3:1.7.3")
             api("org.jetbrains.compose.foundation:foundation:1.7.3")
+            // Ktor 3（iOS 移植 P1 第一个试点模块）：OkHttp 与 Retrofit 都是 JVM 库，iOS 上没有；
+            // Ktor 的 core 在 commonMain，引擎按平台各自声明（Android 仍走 OkHttp，iOS 走 Darwin）。
+            // 版本选 3.0.3 是配现有的 kotlinx-coroutines 1.9.0（3.1+ 要 1.10.x），
+            // 避免为了一个试点模块把全仓协程抬一个版本。
+            // 只引 core：WeatherApi 是手解析 JSON 的，不需要 content-negotiation。
+            api("io.ktor:ktor-client-core:3.0.3")
         }
 
         androidMain.dependencies {
             // 条码生成/识别（Barcode.android.kt）。zxing 是纯 Java jar，只有 Android 侧用；
             // 版本与 `:app` 里声明的一致，避免同一个 Matrix 类出现两份。
             implementation("com.google.zxing:core:3.5.3")
+            // Ktor 的 Android 引擎仍走 OkHttp：连接池、IPv4 优先 DNS 这些既有调优继续生效。
+            implementation("io.ktor:ktor-client-okhttp:3.0.3")
+        }
+
+        iosMain.dependencies {
+            // iOS 引擎（Darwin / NSURLSession）。本机无 macOS，这一侧只声明、不编译。
+            implementation("io.ktor:ktor-client-darwin:3.0.3")
         }
     }
 }
