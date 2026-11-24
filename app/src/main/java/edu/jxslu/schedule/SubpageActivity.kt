@@ -311,7 +311,11 @@ class SubpageActivity : ComponentActivity() {
                     onOpenJwImport = actions.openJwImport,
                 )
             }
-            SubpageScreen.STUDENT_INFO -> StudentInfoScreen(onBack = onBack)
+            // 学籍信息已搬进 shared/commonMain（iOS 移植 S18）：只有浏览窗口一件平台事。
+            SubpageScreen.STUDENT_INFO -> {
+                val actions = rememberJwScreenPlatformActions()
+                StudentInfoScreen(onBack = onBack, onOpenWebPage = actions.openWebPage)
+            }
             SubpageScreen.TEACHING_CALENDAR -> {
                 val actions = rememberJwScreenPlatformActions()
                 TeachingCalendarScreen(

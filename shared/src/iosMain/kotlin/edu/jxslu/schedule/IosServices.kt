@@ -10,6 +10,7 @@ import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.NoteRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
+import edu.jxslu.schedule.data.repo.ProfileSync
 import edu.jxslu.schedule.data.repo.ScheduleBaselineStore
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
@@ -130,6 +131,11 @@ class IosServices : AppServices {
         )
     }
 
+    /** 学籍卡补抓（S18）：会话 + 偏好存储，与 Android 的 `Graph.profileSync` 同一构造口径。 */
+    private val profileSyncImpl: ProfileSync by lazy {
+        ProfileSync(cas = session, prefs = prefs)
+    }
+
     override fun displayPrefs(): DisplayPrefsStore = prefs
 
     override fun scheduleRepository(): ScheduleRepository = repository
@@ -143,6 +149,15 @@ class IosServices : AppServices {
     override fun scoreSync(): ScoreSync = scoreSyncImpl
 
     override fun scheduleTermImport(): ScheduleTermImport = termImport
+
+    /**
+     * 学籍卡补抓（S18）：与 [scheduleSync] 同一条会话（[IosJwReadSession]）。
+     *
+     * 没登录过教务时 `syncOnce` 直接返回 false（`ensureValid` 给 `NeedsManualLogin`），
+     * 学籍页据此提示「请先在教务导入里登录一次」——iOS 侧不存密码，登录只由用户
+     * 在导入页的 `WKWebView` 里完成。
+     */
+    override fun profileSync(): ProfileSync = profileSyncImpl
 
     // 下面四个都是本地表仓库，iOS 侧直接可用（Room 已搬过来，构造只要一个 JuwDatabase）。
     override fun selectionRepository(): SelectionRepository = SelectionRepository(juwDatabase())

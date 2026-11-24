@@ -6,6 +6,7 @@ import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.NoteRepository
+import edu.jxslu.schedule.data.repo.ProfileSync
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
@@ -79,6 +80,18 @@ interface AppServices {
 
     /** 学期归档 / 新学期探测；null 的语义同 [scheduleSync]。 */
     fun scheduleTermImport(): ScheduleTermImport?
+
+    /**
+     * 学籍卡补抓（姓名 / 班级 / 院系 / 专业 / 学制，落 [DisplayPrefsStore]）。
+     *
+     * **非空**：它只要「一条教务会话 + 偏好存储」，两端都建得起来——Android 是 `CasSession`
+     * （OkHttp + 凭证保险箱），iOS 是读 `WKWebView` Cookie 的 `IosJwReadSession`。
+     * iOS 侧没登录时 `ensureValid` 返回 `NeedsManualLogin`、`syncOnce` 直接给 false，
+     * 页面据此提示「请先在教务导入里登录一次」——那是真实结论，不是假实现。
+     *
+     * 调用方是学籍信息页（`ui/jw/StudentInfoScreen`）：进页补一次、点刷新强抓一次。
+     */
+    fun profileSync(): ProfileSync
 
     // ---- 本地表仓库：非空 ----
     //
