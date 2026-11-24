@@ -34,10 +34,12 @@ import platform.CoreImage.CIFilter
 import platform.CoreImage.CIImage
 import platform.CoreImage.CIQRCodeFeature
 import platform.CoreImage.createCGImage
+import platform.CoreImage.filterWithName
 import platform.Foundation.NSData
 import platform.Foundation.NSString
 import platform.Foundation.NSUTF8StringEncoding
 import platform.Foundation.dataUsingEncoding
+import platform.Foundation.valueForKey
 
 /**
  * [encodeQrMatrix] / [encodeCode128Matrix] / [decodeQrMatrix] 的 iOS 实现：
@@ -144,7 +146,9 @@ internal actual fun decodeQrMatrix(
  * 图像偏出去。
  */
 private fun generatorImage(filterName: String, content: String): CIImage {
-    val filter = CIFilter(name = filterName) ?: error("CoreImage 没有 $filterName")
+    // `CIFilter(name:)` 在 K/N 里没有对应构造器（只有 `CIFilter()` 与 `CIFilter(coder:)`），
+    // 要用 ObjC 的类工厂方法 `+filterWithName:`，它映射成同名的顶层函数，需单独 import。
+    val filter = CIFilter.filterWithName(filterName) ?: error("CoreImage 没有 $filterName")
     filter.setValue(content.toNSData(), forKey = "inputMessage")
     if (filterName == "CIQRCodeGenerator") {
         // 容错 M（15%）：与 Android 侧 zxing 的 ErrorCorrectionLevel.M 同一档
