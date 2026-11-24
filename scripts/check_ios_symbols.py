@@ -16,15 +16,20 @@
 
 ## 它查什么
 
-1. 扫描 `shared/src/iosMain` 下所有 `.kt`，建立「类 / 对象名 → 所在包」的表；
-2. 对每个文件，收集正文里用到的、以大写 `Ios` 开头的标识符；
+1. 扫描 `shared/src/iosMain` 与 `shared/src/commonMain` 下所有 `.kt`，建立
+   「类 / 对象 / 接口名 → 所在包」的表；**同名出现在多个包里的记为歧义、直接跳过**
+   （那种情况只能靠编译器判）；
+2. 对 `iosMain` 的每个文件，收集正文里用到的、以大写字母开头的标识符；
 3. 逐个核对：该名字要么在同包（不需要 import），要么 import 的包与声明处一致；
 4. 报出「未导入」与「导错包」两类问题。
 
+带上 `commonMain` 是为了抓「用了共享层的类型但忘了 import」——2026-11-25 那三次里
+有一次就是 `DormRepairStore` 漏导入。
+
 ## 它查不到什么
 
-- 跨模块（`commonMain` / `:app`）的符号——那部分靠 `:shared:metadataCommonMainClasses`
-  与 `:app:compileDebugKotlin` 兜；
+- `:app` 与 Foundation/Security 等平台库的符号——前者靠 `:app:compileDebugKotlin` 兜，
+  后者 cinterop 的包名规则不同，纳入只会制造误报；
 - 泛型/重载解析、签名不匹配这类**语义**错误——只有编译器能判。
 
 ## 用法
@@ -42,6 +47,14 @@ import re
 import sys
 
 IOS_MAIN = "shared/src/iosMain"
+DECL_ROOTS = ("shared/src/commonMain", IOS_MAIN)
+
+# 声明关键字前缀（`data class` / `sealed interface` 之类都要认）
+_DECL_RE = re.compile(
+    r"^(?:internal |private |public |protected |abstract |sealed |open |data |enum |"
+    r"annotation |value |inline |expect |actual )*(?:class|object|interface) (\w+)",
+    re.M,
+)
 
 
 def strip_comments(src: str) -> str:
@@ -82,21 +95,30 @@ def main() -> int:
         print(f"找不到 {IOS_MAIN}（请在仓库根目录运行）")
         return 2
 
-    # 1) 声明表
+    # 1) 声明表（commonMain + iosMain；同名多包记为歧义、跳过）
     decl: dict[str, str] = {}
+    ambiguous: set[str] = set()
     files: list[str] = []
-    for root, _dirs, names in os.walk(IOS_MAIN):
-        for name in names:
-            if not name.endswith(".kt"):
-                continue
-            path = os.path.join(root, name)
-            files.append(path)
-            src = io.open(path, encoding="utf-8").read()
-            pkg = re.search(r"^package ([\w.]+)", src, re.M)
-            if not pkg:
-                continue
-            for m in re.finditer(r"^(?:internal |private |public )?(?:class|object) (\w+)", src, re.M):
-                decl[m.group(1)] = pkg.group(1)
+    for root_dir in DECL_ROOTS:
+        if not os.path.isdir(root_dir):
+            print(f"找不到 {root_dir}（请在仓库根目录运行）")
+            return 2
+        for root, _dirs, names in os.walk(root_dir):
+            for name in names:
+                if not name.endswith(".kt"):
+                    continue
+                path = os.path.join(root, name)
+                if root_dir == IOS_MAIN:
+                    files.append(path)
+                src = io.open(path, encoding="utf-8").read()
+                pkg = re.search(r"^package ([\w.]+)", src, re.M)
+                if not pkg:
+                    continue
+                for m in _DECL_RE.finditer(src):
+                    symbol, package = m.group(1), pkg.group(1)
+                    if symbol in decl and decl[symbol] != package:
+                        ambiguous.add(symbol)
+                    decl[symbol] = package
 
     # 2) 逐文件核对
     problems: list[str] = []
@@ -111,9 +133,11 @@ def main() -> int:
         body = "\n".join(l for l in body.split("\n") if not l.startswith("import "))
         used = set(re.findall(r"\b([A-Z]\w+)\b", body))
         for symbol in sorted(used):
+            if symbol in ambiguous:
+                continue  # 同名出现在多个包，只有编译器能判
             actual = decl.get(symbol)
             if actual is None:
-                continue  # 不是 iosMain 里声明的（可能来自 commonMain / Foundation）
+                continue  # 不是共享层声明的（:app 或 Foundation/Security）
             if actual == own_pkg:
                 continue  # 同包，不需要 import
             got = imports.get(symbol)
@@ -124,7 +148,7 @@ def main() -> int:
 
     for line in problems:
         print(line)
-    print(f"checked={len(files)} problems={len(problems)}")
+    print(f"checked={len(files)} problems={len(problems)} ambiguous={len(ambiguous)}")
     return 1 if problems else 0
 
 
