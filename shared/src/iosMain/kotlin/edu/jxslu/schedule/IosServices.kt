@@ -8,8 +8,6 @@ import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.prefs.recordGuessOrder
-import edu.jxslu.schedule.data.qiekj.IosQiekjCredentialStore
-import edu.jxslu.schedule.data.qiekj.IosQiekjExpiryMarker
 import edu.jxslu.schedule.data.qiekj.IosQiekjOrderStore
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
@@ -48,7 +46,11 @@ import edu.jxslu.schedule.data.repo.ScholarProgressRepository
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.session.IosJwReadSession
 import edu.jxslu.schedule.data.session.IosAiApiKeyStore
+import edu.jxslu.schedule.data.session.IosQiekjCredentialStore
+import edu.jxslu.schedule.data.session.IosQiekjExpiryMarker
 import edu.jxslu.schedule.data.session.IosSessionExpirySink
+import edu.jxslu.schedule.data.session.IosUjingSessionStore
+import edu.jxslu.schedule.data.session.IosWenquSessionStore
 import edu.jxslu.schedule.data.session.IosWebCookieSource
 import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.data.session.SessionExpirySink
@@ -56,9 +58,10 @@ import edu.jxslu.schedule.data.session.WebCookies
 import edu.jxslu.schedule.data.ujing.UjingDraftStore
 import edu.jxslu.schedule.data.ujing.UjingHistoryStore
 import edu.jxslu.schedule.data.ujing.UjingHouseStore
+import edu.jxslu.schedule.data.local.IosKeyValuePrefs
+import edu.jxslu.schedule.data.ujing.UjingOrderStore
 import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
-import edu.jxslu.schedule.data.wenqu.IosWenquSessionStore
 import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
@@ -439,8 +442,35 @@ class IosServices : AppServices {
     /** 趣智：**iOS 侧返回 null**——会话里含 token，等 `QzxyRepository` 的构造口。 */
     override fun qzxyRepository(): QzxyRepository? = null
 
-    /** U净：**iOS 侧返回 null**，理由同上。 */
-    override fun ujingRepository(): UjingRepository? = null
+    /**
+     * U净 仓库：**iOS 侧已能建起来**（2026-11-25）。
+     *
+     * 构造要一份凭证存储（[IosUjingSessionStore]，Keychain）+ 订单快照与历史账单
+     * （[IosKeyValuePrefs]，`NSUserDefaults`，与 Android 的三个 prefs 文件一一对应）。
+     * 支付（`UjingPay`）与洗好提醒（`UjingReminder`）不传：iOS 侧还没有支付宝深链
+     * 与通知渠道，页面据此把「支付」「提醒」两处入口整块不渲染。
+     */
+    override fun ujingRepository(): UjingRepository? = ujingRepo
+
+    private val ujingOrders = UjingOrderStore(IosKeyValuePrefs("ujing_order"))
+    private val ujingHistory = UjingHistoryStore(IosKeyValuePrefs("ujing_history"))
+
+    private val ujingRepo: UjingRepository by lazy {
+        UjingRepository(
+            sessionStore = IosUjingSessionStore(),
+            orderStore = ujingOrders,
+            historyStore = ujingHistory,
+            expiry = sessionExpiry,
+        )
+    }
+
+    /** 收藏的洗衣房：与主页看板共用同一份（`NSUserDefaults` 前缀 `ujing_houses`）。 */
+    override fun ujingHouseStore(): UjingHouseStore = ujingHouses
+
+    private val ujingHouses = UjingHouseStore(IosKeyValuePrefs("ujing_houses"))
+
+    /** 历史账单：与主页记录卡共用同一份实例（各建一个会出现「刚洗完看不到」）。 */
+    override fun ujingHistoryStore(): UjingHistoryStore = ujingHistory
 
     /** 快趣：**iOS 侧返回 null**，理由同上。 */
     override fun kqcxSession(): ThirdPartySession? = null
@@ -480,11 +510,7 @@ class IosServices : AppServices {
     // 它们要「凭证存储 + `KeyValuePrefs` 落点」两样介质，这边都还没有。三处返回 null，
     // 口径同 [yktCredentialStore]：入口整块不出现，而不是点进去才崩。
 
-    /** U净 收藏洗衣房：**iOS 侧还没有 `KeyValuePrefs` 落点，返回 null**（见 [ujingRepository]）。 */
-    override fun ujingHouseStore(): UjingHouseStore? = null
 
-    /** U净 历史账单：**iOS 侧还没有 `KeyValuePrefs` 落点，返回 null**（见 [ujingRepository]）。 */
-    override fun ujingHistoryStore(): UjingHistoryStore? = null
 
     /**
      * U净 扫码草稿：纯内存 `StateFlow`，两端同一份实现——**非空**。

@@ -55,6 +55,10 @@ import edu.jxslu.schedule.ui.timetable.ScheduleChangesScreen
 import edu.jxslu.schedule.ui.timetable.TimetableManageScreen
 import edu.jxslu.schedule.ui.timetable.TimetableViewModel
 import edu.jxslu.schedule.ui.toolbox.CainiaoQueryScreen
+import edu.jxslu.schedule.ui.ujing.UjingHistoryScreen
+import edu.jxslu.schedule.ui.ujing.UjingOrderScreen
+import edu.jxslu.schedule.ui.ujing.UjingScreen
+import edu.jxslu.schedule.ui.ujing.UjingViewModel
 import edu.jxslu.schedule.ui.water.WaterScreen
 import edu.jxslu.schedule.ui.wenqu.WenquGrabScreen
 import edu.jxslu.schedule.ui.wenqu.WenquGrabViewModel
@@ -207,6 +211,8 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     // 江水生活（已搬的三块）
     IosDrawerEntry("江水生活", IosRoute(SubpageScreen.WATER), "开水房"),
     IosDrawerEntry("江水生活", IosRoute(SubpageScreen.WENQU), "问渠"),
+    IosDrawerEntry("江水生活", IosRoute(SubpageScreen.UJING), "U净洗衣房"),
+    IosDrawerEntry("江水生活", IosRoute(SubpageScreen.UJING_HISTORY), "洗衣账单"),
     IosDrawerEntry("江水生活", IosRoute(SubpageScreen.WENQU_RECORDS), "问渠工时"),
     IosDrawerEntry("江水生活", IosRoute(SubpageScreen.WENQU_GRAB), "问渠蹲点"),
     IosDrawerEntry("江水生活", IosRoute(SubpageScreen.AI_SCHEDULE), "AI 调课"),
@@ -652,6 +658,47 @@ internal fun IosRouteContent(
                 WenquGrabScreen(onBack = pop, viewModel = vm)
             }
         }
+
+        // ---------------------------------------------------------------- 江水生活 · U净
+        //
+        // 看板（附近洗衣机 + 在用订单状态）与历史账单在 iOS 上都能看：三份本地存储
+        // 2026-11-25 全部到位（Keychain 凭证 + 三个 NSUserDefaults 前缀）。
+        //
+        // **开洗这一条走不通**：扫码要相机（`onScan` 传 null → 扫码卡整块不渲染），
+        // 支付要支付宝深链（`pay` 不传 → 「支付」入口不渲染）。所以 iOS 上 U净 是
+        // 「能看不能下单」，不是「点了没反应」。
+        SubpageScreen.UJING -> {
+            val repo = services.ujingRepository()
+            if (repo == null) {
+                IosNotPortedScreen(screen = route.screen, onBack = pop)
+            } else {
+                val vm = remember {
+                    UjingViewModel(
+                        repo = repo,
+                        houseStore = services.ujingHouseStore(),
+                        historyStore = services.ujingHistoryStore(),
+                        draftStore = services.ujingDraftStore(),
+                        prefs = services.displayPrefs(),
+                    )
+                }
+                UjingScreen(
+                    viewModel = vm,
+                    onBack = pop,
+                    onOpenOrder = { push(IosRoute(SubpageScreen.UJING_ORDER)) },
+                    onOpenHistory = { push(IosRoute(SubpageScreen.UJING_HISTORY)) },
+                )
+            }
+        }
+
+        SubpageScreen.UJING_ORDER -> UjingOrderScreen(
+            draftStore = services.ujingDraftStore(),
+            onBack = pop,
+        )
+
+        SubpageScreen.UJING_HISTORY -> UjingHistoryScreen(
+            store = services.ujingHistoryStore(),
+            onBack = pop,
+        )
 
         else -> IosNotPortedScreen(screen = route.screen, onBack = pop)
     }

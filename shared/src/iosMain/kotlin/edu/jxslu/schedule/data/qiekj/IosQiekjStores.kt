@@ -1,7 +1,7 @@
 package edu.jxslu.schedule.data.qiekj
 
 import edu.jxslu.schedule.data.local.JsonFileStore
-import edu.jxslu.schedule.data.session.IosSessionExpirySink
+import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.data.session.SessionServiceIds
 import kotlinx.serialization.builtins.ListSerializer
 
@@ -23,7 +23,7 @@ import kotlinx.serialization.builtins.ListSerializer
  * | 最多 50 笔、按完成时间倒序、同 `orderNo` 覆盖 | `QiekjOrderStore.MAX_ITEMS` 与 `QiekjOrderHistoryStore` 同一口径 |
  * | 读不出来回空表（不抛） | `JsonFileStore.readBlocking()` 内部 `runCatching`，损坏文件当「没有快照」 |
  * | 落盘失败静默 | `JsonFileStore.writeBlocking()` 回 `false`，不抛 |
- * | 过期标记与问渠 / U净共用一张表 | 复用 [IosSessionExpirySink]（`NSUserDefaults`），键名带 `SessionServiceIds.QIEKJ` |
+ * | 过期标记与问渠 / U净共用一张表 | 复用 `IosSessionExpirySink`（`NSUserDefaults`），键名带 `SessionServiceIds.QIEKJ` |
  *
  * ## 与 Android 的**唯一**差异
  *
@@ -67,7 +67,7 @@ internal class IosQiekjOrderStore : QiekjOrderStore {
  * 「开水页说过期了、账号中心说正常」。
  */
 internal class IosQiekjExpiryMarker(
-    private val sink: IosSessionExpirySink,
+    private val sink: SessionExpirySink,
 ) : QiekjExpiryMarker {
 
     override fun markExpired() {
