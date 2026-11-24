@@ -30,10 +30,14 @@ data class QuickCheckFeedback(
  * 会让这条提示变成噪音。
  *
  * 语气：任一路失败 = Error；发现差异 = Warning（要用户处置）；否则 Info。
+ *
+ * **public 而不是 internal**（iOS 移植 M1）：迁进 `:shared` 之后，钉它的 `QuickCheckTextTest`
+ * 还留在 `:app`（那边 JVM 单测环境齐备），而 `internal` 跨模块不可见。等测试也搬过来再收窄。
  */
-internal fun quickCheckFeedback(
-    schedule: ScheduleSync.CheckResult,
-    exam: ExamSync.Result,
+fun quickCheckFeedback(
+    /** null = 本平台没有这一路（iOS M1 还没有教务直取链）：那一句整条不出现。 */
+    schedule: ScheduleSync.CheckResult?,
+    exam: ExamSync.Result?,
     probe: ScheduleTermImport.ProbeResult? = null,
     firstTerm: String? = null,
 ): QuickCheckFeedback {
@@ -54,6 +58,8 @@ internal fun quickCheckFeedback(
                 add(if (groups > 0) "发现 $groups 处调课差异" else "课表无变动")
             is ScheduleSync.CheckResult.Failed -> add("课表检测失败（${schedule.reason}）")
             ScheduleSync.CheckResult.Skipped -> add("课表未比对（没有带学期号的课表，先从教务导入一次）")
+            // 本平台没有这一路（iOS M1）：不出一句，说「未比对」会让人以为哪里配错了
+            null -> Unit
         }
         when (exam) {
             is ExamSync.Result.Updated -> add(
@@ -67,6 +73,7 @@ internal fun quickCheckFeedback(
             // force 下不会走到这两个分支，留着是因为 Result 是公开类型
             ExamSync.Result.InProgress -> add("考试检查正在进行")
             ExamSync.Result.Skipped -> add("考试未检查")
+            null -> Unit
         }
         newTerm?.let { add(it) }
     }

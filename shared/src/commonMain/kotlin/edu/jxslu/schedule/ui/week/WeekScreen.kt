@@ -1,7 +1,5 @@
 package edu.jxslu.schedule.ui.week
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -56,7 +54,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -64,11 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.SubpageActivity
-import edu.jxslu.schedule.SubpageScreen
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.data.repo.ImportPreview
 import edu.jxslu.schedule.data.repo.ImportResult
 import edu.jxslu.schedule.domain.Course
@@ -87,54 +80,144 @@ import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.LocalBottomBarVisibleRequest
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
-import edu.jxslu.schedule.ui.common.readTextFromUri
 import edu.jxslu.schedule.ui.common.resolveImportTarget
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
-import edu.jxslu.schedule.ui.me.DisplaySettingsContent
-import edu.jxslu.schedule.ui.me.MeViewModel
+import edu.jxslu.schedule.ui.platform.CalendarSyncOutcome
 import edu.jxslu.schedule.ui.theme.Motion
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.CalendarSyncDefaults
+import edu.jxslu.schedule.domain.ScheduleExporter
+import edu.jxslu.schedule.platform.platformLog
+import edu.jxslu.schedule.platform.LogLevel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import android.util.Log
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
+import kotlinx.datetime.LocalDate
 
-// dayLabels / monthDayFmt 在 WeekGrid.kt（表头与顶栏共用）；fullDateFmt 仅顶栏用
-private val fullDateFmt = DateTimeFormatter.ofPattern("yyyy/M/d")
+/**
+ * 顶栏大号日期（`yyyy/M/d`）。搬迁前是 `DateTimeFormatter.ofPattern("yyyy/M/d")`，
+ * 换到 kotlinx 之后只需拼三个整数——月份/日期**不补零**是原有的视觉口径。
+ */
+private fun slashDate(date: LocalDate): String =
+    "${date.year}/${date.monthNumber}/${date.dayOfMonth}"
+
+/** 导出文件名里的日期戳（`yyyyMMdd`，本地日历日）。 */
+private fun compactDate(date: LocalDate): String = buildString {
+    append(date.year)
+    if (date.monthNumber < 10) append('0')
+    append(date.monthNumber)
+    if (date.dayOfMonth < 10) append('0')
+    append(date.dayOfMonth)
+}
+
+/**
+ * 日历同步结果 → 提示卡。
+ *
+ * 成功文案走 `CalendarSyncDefaults.syncSuccessMessage`（唯一出处，与「我的 → 课表数据」同口径）；
+ * 其余几种是**失败的下场**，各自一句、不能合并——用户要据此决定是去改授权、加账户，
+ * 还是干脆换条路导出。
+ */
+private fun calendarSyncFeedback(
+    outcome: CalendarSyncOutcome,
+    reminderMinutes: Int,
+): AppNoticeVisuals = when (outcome) {
+    is CalendarSyncOutcome.Synced -> AppNoticeVisuals(
+        CalendarSyncDefaults.syncSuccessMessage(
+            outcome.count,
+            reminderMinutes,
+            outcome.reminderMissing,
+        ),
+        tone = if (outcome.reminderMissing > 0) NoticeTone.Warning else NoticeTone.Success,
+    )
+    is CalendarSyncOutcome.Deleted -> AppNoticeVisuals(
+        "已删除 ${outcome.count} 条课程日历",
+        tone = NoticeTone.Success,
+    )
+    CalendarSyncOutcome.NoCalendarAccount -> AppNoticeVisuals(
+        "手机上没有可用日历账户，请先在系统日历中登录或添加账户",
+        tone = NoticeTone.Warning,
+    )
+    CalendarSyncOutcome.NoPermission -> AppNoticeVisuals(
+        "日历权限未授予，无法同步",
+        tone = NoticeTone.Warning,
+    )
+    CalendarSyncOutcome.Unsupported -> AppNoticeVisuals(
+        "本平台暂不支持写入系统日历",
+        tone = NoticeTone.Warning,
+    )
+    is CalendarSyncOutcome.Error -> AppNoticeVisuals(
+        "同步失败：${outcome.message}",
+        tone = NoticeTone.Error,
+    )
+}
 
 // 顶栏高度保留本文件定义；时间轴栏宽 / 表头高度已用户可调（显示设置滑块），
 // 默认值与滑块范围统一收敛到 TimetablePrefs companion（单一来源），几何唯一来源是
 // buildGridLayout（WeekGridLayout.kt）产出的 GridLayout（railWidth / dayHeaderHeight 字段）。
-// internal：导出为图片要按「课表页的网格可用高」反推板的行高，顶栏是那笔预算的一段
+// **public 而不是 internal**（iOS 移植 M1）：导出为图片的 `ScheduleShareScreen` 还在 `:app`，
+// 它要按「课表页的网格可用高」反推板的行高，顶栏是那笔预算的一段
 //（见 WeekGridLayout.shareBoardGridHeightDp）——单一来源，别在两处各写一个 56。
-internal val TopBarHeight = 62.dp
+val TopBarHeight = 62.dp
 
 /**
  * 周课表：小节 × 星期网格。
  * 默认周一至周日，可在「显示设置」里关掉周末；整页 HorizontalPager 横滑切周。
+ *
+ * ## 平台动作全在参数里（iOS 移植 M1，2026-11-25）
+ *
+ * 本文件是共享代码，**拿不到** `Context`、`Uri`、`ContentResolver`、`ActivityResultLauncher`。
+ * 原来内联在这页里的四件平台事——选 JSON 文件、另存 CSV/JSON、申请日历权限并同步、
+ * 跳二级页——收成可空回调：
+ *
+ * | 参数 | null 的含义 |
+ * |---|---|
+ * | [onPickJsonFile] | 平台没有文件选择器 → 隐藏「导入 JSON」入口 |
+ * | [onSaveTextFile] | 平台不能另存 → 隐藏 CSV / JSON 导出 |
+ * | [onSyncCalendar] | 平台没有系统日历写入 → 隐藏「同步到日历」 |
+ * | [displaySettings] | 平台没有显示设置面板实现 → 隐藏顶栏「眼睛」 |
+ * | [backgroundExists] | 平台没有背景图功能 → 跳过「文件丢了就清偏好」的校验 |
+ *
+ * 传 null 不等于功能坏掉，而是**这个平台确实没有这项能力**，所以入口直接不出现——
+ * 让用户点一下再告诉他「不支持」比一开始就没有更糟。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WeekScreen(
+    viewModel: WeekViewModel,
     onOpenJwImport: () -> Unit = {},
     onOpenTimetableManage: () -> Unit = {},
     /** 某课程的笔记·课件（课程详情弹窗入口，DESIGN §3.11） */
     onOpenCourseNotes: (Course) -> Unit = {},
     /** 某课程的作业（课程详情弹窗入口，DESIGN §3.11） */
     onOpenCourseHomework: (Course) -> Unit = {},
-    viewModel: WeekViewModel = viewModel(
-        factory = WeekViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
+    /** 调课处置页（「检测」发现差异后的「查看」）。 */
+    onOpenScheduleChanges: () -> Unit = {},
+    /** 分享为图片的二级页；参数是进页时要预览的周次。 */
+    onOpenScheduleShare: (week: Int) -> Unit = {},
+    /** 选一个文本文件；回调给 null = 用户取消或读不出来。 */
+    onPickJsonFile: ((onText: (String?) -> Unit) -> Unit)? = null,
+    /** 另存一段文本；`onSaved` 为 false = 用户取消或写入失败。 */
+    onSaveTextFile:
+        ((fileName: String, mimeType: String, text: String, onSaved: (Boolean) -> Unit) -> Unit)? = null,
+    /** 申请日历权限并写入系统日历；结果通过 `onResult` 回传。 */
+    onSyncCalendar:
+        ((
+            events: List<ScheduleExporter.CourseEvent>,
+            reminderMinutes: Int,
+            onResult: (CalendarSyncOutcome) -> Unit,
+        ) -> Unit)? = null,
+    /** 背景图文件是否还在磁盘上（`ScheduleBackgroundStore.exists`）。 */
+    backgroundExists: ((name: String) -> Boolean)? = null,
+    /** 显示设置覆盖面板；参数为表头高度的动态下限（与网格布局兜底同源）。 */
+    displaySettings: (@Composable (headerMinDp: Float, onDismiss: () -> Unit) -> Unit)? = null,
 ) {
-    val context = LocalContext.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<Course?>(null) }
     var editorOpen by remember { mutableStateOf(false) }
@@ -152,36 +235,36 @@ fun WeekScreen(
     // 点「放假 / 补课」表头弹的覆盖详情（DESIGN §4.40）；(week, day)
     var overrideInfo by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
-    // JSON 文件导入（弹层入口）：读文件 → preview → 目标课表选择弹窗 → importJson，
+    // JSON 文件导入（弹层入口）：宿主选文件 → 读文本 → preview → 目标课表选择弹窗 → importJson，
     // 结果走 Snackbar。目标选择与教务导入共用 ImportTargetDialogHost，语义两处一致。
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    val repo = remember { Graph.repository(context) }
+    val repo = viewModel.repo
     var pendingJsonText by remember { mutableStateOf<String?>(null) }
     var jsonPreview by remember { mutableStateOf<ImportPreview.Ok?>(null) }
 
-    val jsonLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val text = readTextFromUri(context, uri)
-            if (text.isNullOrBlank()) {
-                snackbar.showNotice(
-                    AppNoticeVisuals("读取文件失败", tone = NoticeTone.Error),
-                )
-                return@launch
-            }
-            when (val p = repo.previewImport(text)) {
-                is ImportPreview.Error -> snackbar.showNotice(
-                    AppNoticeVisuals(p.message, tone = NoticeTone.Error),
-                )
-                is ImportPreview.Ok -> {
-                    pendingJsonText = text
-                    jsonPreview = p
-                }
+    suspend fun loadJsonText(text: String?) {
+        if (text.isNullOrBlank()) {
+            snackbar.showNotice(
+                AppNoticeVisuals("读取文件失败", tone = NoticeTone.Error),
+            )
+            return
+        }
+        when (val p = repo.previewImport(text)) {
+            is ImportPreview.Error -> snackbar.showNotice(
+                AppNoticeVisuals(p.message, tone = NoticeTone.Error),
+            )
+            is ImportPreview.Ok -> {
+                pendingJsonText = text
+                jsonPreview = p
             }
         }
+    }
+
+    // 「选文件」本身是平台动作（Android 用 SAF），宿主不给就说明这个平台没有文件选择器，
+    // 导入弹层里的 JSON 入口随之隐藏（见函数头部的参数表）。
+    val pickJsonFile: (() -> Unit)? = onPickJsonFile?.let { pick ->
+        { pick { text -> scope.launch { loadJsonText(text) } } }
     }
 
     suspend fun runJsonImport(text: String, merge: Boolean, targetId: Long) {
@@ -217,60 +300,69 @@ fun WeekScreen(
     }
 
     // ---- 分享（DESIGN §4.12）----
-    // CSV/JSON 走 SAF 另存为（与「我的 → 导出 JSON」同形态）；日历同步先运行时申请
-    // READ/WRITE_CALENDAR，授予后续跑（授予回调里执行同步），拒绝则 Snackbar 提示。
-    val fileDateTag = remember { LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) }
-    val csvLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/csv"),
-    ) { uri -> if (uri != null) viewModel.exportCsv(context, uri) }
-    val jsonExportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json"),
-    ) { uri -> if (uri != null) viewModel.exportJson(context, uri) }
-    var pendingCalendarSync by remember { mutableStateOf(false) }
+    // 三件事都要宿主帮忙：CSV/JSON 是「另存为」（Android 走 SAF），日历同步要先申请运行时
+    // 权限、再写系统日历。本文件只负责**产出文本 / 事件**与**把结果显示出来**——
+    // 这也是把导出从 WeekViewModel 里挪走的理由：那边一旦同时管「生成」和「落盘」，
+    // 失败提示就会分叉成两条会互相覆盖的 Snackbar。
+    val fileDateTag = remember { compactDate(AppClock.today()) }
 
-    val calendarPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { grants ->
-        if (grants.values.all { it }) {
-            pendingCalendarSync = true
-        } else {
-            // 拒绝也要有反馈：弹层已在发起申请时关闭（见 startCalendarSync），
-            // 这里的提示才看得见——此前拒绝分支不关弹层，Snackbar 被分享弹层整个盖住
-            scope.launch {
+    /**
+     * 生成 → 交给宿主另存 → 按结果提示。
+     *
+     * [generate] 返回「文本 + 成功文案」：CSV 的成功文案要带条数，只在生成侧知道。
+     * 生成抛异常时把它的 message 当失败提示（搬迁前 `exportCsv` 就是这么做的）。
+     */
+    fun saveText(
+        fileName: String,
+        mimeType: String,
+        generate: suspend () -> Pair<String, String>,
+    ) {
+        val save = onSaveTextFile ?: return
+        scope.launch {
+            val generated = try {
+                generate()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
                 snackbar.showNotice(
-                    AppNoticeVisuals("未授予日历权限，无法同步", tone = NoticeTone.Warning),
+                    AppNoticeVisuals("导出失败：${e.message}", tone = NoticeTone.Error),
                 )
+                return@launch
             }
-            pendingCalendarSync = false
-        }
-    }
-
-    // 权限授予后的续跑放 LaunchedEffect，避免在 launcher 回调里直接调 VM 引发重组竞态
-    LaunchedEffect(pendingCalendarSync) {
-        if (pendingCalendarSync) {
-            pendingCalendarSync = false
-            viewModel.syncToCalendar(context)
+            save(fileName, mimeType, generated.first) { saved ->
+                scope.launch {
+                    snackbar.showNotice(
+                        if (saved) {
+                            AppNoticeVisuals(generated.second, tone = NoticeTone.Success)
+                        } else {
+                            AppNoticeVisuals("未保存", tone = NoticeTone.Warning)
+                        },
+                    )
+                }
+            }
         }
     }
 
     fun startCalendarSync() {
-        val needed = AppPermissions.missing(context, AppPermissions.calendar)
+        val sync = onSyncCalendar ?: return
         // 先关分享弹层再进任何一条分支：弹层是独立窗口，盖在它下面的提醒一律不可见
-        //（已授权分支此前就在这里关，拒绝分支漏了 → 提示被盖住）
+        //（此前拒绝分支漏了这一步 → 提示被盖住）
         shareOpen = false
-        if (needed.isEmpty()) {
-            viewModel.syncToCalendar(context)
-        } else {
-            calendarPermissionLauncher.launch(needed.toTypedArray())
-        }
-    }
-
-    // VM 分享结果 → 提示卡（一次性，消费后置空）
-    val shareMessage by viewModel.shareMessage.collectAsStateWithLifecycle()
-    LaunchedEffect(shareMessage) {
-        shareMessage?.let {
-            snackbar.showNotice(AppNoticeVisuals(it.text, tone = it.tone))
-            viewModel.consumeShareMessage()
+        scope.launch {
+            val events = viewModel.expandedCalendarEvents()
+            if (events == null) {
+                snackbar.showNotice(
+                    AppNoticeVisuals(
+                        "请先在「我的 → 课表设置」配置学期，并确认课表不为空",
+                        tone = NoticeTone.Warning,
+                    ),
+                )
+                return@launch
+            }
+            val reminder = repo.calendarReminderMinutes.first()
+            sync(events, reminder) { outcome ->
+                scope.launch { snackbar.showNotice(calendarSyncFeedback(outcome, reminder)) }
+            }
         }
     }
 
@@ -299,7 +391,7 @@ fun WeekScreen(
                 ),
             )
             if (result == SnackbarResult.ActionPerformed) {
-                SubpageActivity.start(context, SubpageScreen.SCHEDULE_CHANGES)
+                onOpenScheduleChanges()
             }
             viewModel.consumeQuickCheckMessage()
         }
@@ -309,8 +401,9 @@ fun WeekScreen(
     // 单例转交过来（2026-09-29 用户口径：提醒走下方那条气泡，不弹窗）
     JwImportOutcomeEffect(snackbar)
 
-    val today = LocalDate.now()
-    val todayDay = today.dayOfWeek.value
+    val today = AppClock.today()
+    // kotlinx-datetime 的 DayOfWeek 以周一为 0，+1 回到「1=周一 … 7=周日」口径（与 domain 同源）
+    val todayDay = today.dayOfWeek.ordinal + 1
     val totalWeeks = maxOf(state.semester?.totalWeeks ?: 20, 1)
     val sectionCount = maxOf(11, state.slots.maxOfOrNull { it.number } ?: 11)
     val visibleDays = state.visibleDays
@@ -375,10 +468,13 @@ fun WeekScreen(
 
     // 背景图文件不在磁盘上（清过数据、恢复备份不完整、目录被系统清过）：
     // 偏好里还挂着名字的话，渲染每次都会解一遍空气。校验一次就清掉名字，降级成无背景。
-    LaunchedEffect(state.bgImageName) {
+    // 宿主不提供 backgroundExists 就说明这个平台没有背景图功能，整段跳过。
+    val backgroundExistsNow = backgroundExists
+    LaunchedEffect(state.bgImageName, backgroundExistsNow) {
         val name = state.bgImageName ?: return@LaunchedEffect
-        if (!Graph.scheduleBackground(context).exists(name)) {
-            Log.w("WeekScreen", "background file missing, clearing preference")
+        if (backgroundExistsNow == null) return@LaunchedEffect
+        if (!backgroundExistsNow(name)) {
+            platformLog(LogLevel.Warn, "WeekScreen", "background file missing, clearing preference", null)
             viewModel.clearBackgroundImage()
         }
     }
@@ -455,12 +551,14 @@ fun WeekScreen(
                     today = today,
                     timetableName = state.timetableName,
                     checking = checking,
+                    canQuickCheck = viewModel.canQuickCheck,
+                    canOpenDisplay = displaySettings != null,
                     onOpenPicker = { pickerOpen = true },
                     onOpenDisplay = { displaySheetOpen = true },
                     onOpenTimetables = { switchOpen = true },
                     onOpenImport = { importOpen = true },
                     onOpenShare = { shareOpen = true },
-                    onQuickCheck = { viewModel.quickCheck(context) },
+                    onQuickCheck = { viewModel.quickCheck() },
                 )
             }
         },
@@ -638,12 +736,9 @@ fun WeekScreen(
         onDispose { bottomBarVisibleRequest.value = true }
     }
     if (displaySheetOpen) {
-        DisplaySettingsOverlay(
-            onDismiss = { displaySheetOpen = false },
-            viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(context))),
-            // 表头滑块的动态下限与布局兜底同源（dateFontSp 同一换算），两端不会各说各话
-            headerMinDp = headerMinDp,
-        )
+        // 面板本体由宿主给（`:app` 的 DisplaySettingsOverlay，依赖 MeViewModel 与显示设置 UI）。
+        // 宿主不给就没有顶栏那只眼睛，这里也就不会被打开。
+        displaySettings?.invoke(headerMinDp) { displaySheetOpen = false }
     }
 
     if (pickerOpen) {
@@ -670,11 +765,7 @@ fun WeekScreen(
                 editing = null
                 editorOpen = true
             },
-            onJsonImport = {
-                jsonLauncher.launch(
-                    arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"),
-                )
-            },
+            onJsonImport = pickJsonFile,
             onJwImport = { onOpenJwImport() },
             onDismiss = {
                 importOpen = false
@@ -684,17 +775,23 @@ fun WeekScreen(
 
     if (shareOpen) {
         ShareEntrySheet(
-            onSyncCalendar = { startCalendarSync() },
-            onExportCsv = { csvLauncher.launch("JUWPHub课表_$fileDateTag.csv") },
-            onExportJson = { jsonExportLauncher.launch("JUWPHub课表_$fileDateTag.json") },
+            onSyncCalendar = onSyncCalendar?.let { { startCalendarSync() } },
+            onExportCsv = onSaveTextFile?.let {
+                {
+                    saveText("JUWPHub课表_$fileDateTag.csv", "text/csv") { viewModel.csvExport() }
+                }
+            },
+            onExportJson = onSaveTextFile?.let {
+                {
+                    saveText("JUWPHub课表_$fileDateTag.json", "application/json") {
+                        viewModel.jsonExport()
+                    }
+                }
+            },
             onShareImage = {
                 // 退场动画播完、弹层状态已落之后才开二级页：弹层是独立窗口，盖在二级页之上会挡住它
-                SubpageActivity.start(
-                    context,
-                    SubpageScreen.SCHEDULE_SHARE,
-                    // focusItemId 复用为「进页时预览哪一周」（与 SHORTCUTS / RIDE 同纪律）
-                    focusItemId = state.week.toString(),
-                )
+                // focusItemId 复用为「进页时预览哪一周」（与 SHORTCUTS / RIDE 同纪律）
+                onOpenScheduleShare(state.week)
             },
             onDismiss = { shareOpen = false },
         )
@@ -915,11 +1012,11 @@ private val DAY_NAMES = listOf("一", "二", "三", "四", "五", "六", "日")
  * 只包住网格本身——顶栏、弹层、空态提示按全局的字体缩放渲染（「固定字体大小」
  * 锁定默认开，恒为 0.9×；关掉锁定则跟随系统，见 `domain/FontScalePolicy`）。
  *
- * `internal`（原 private）：导出为图片的预览板（`ScheduleShareDialog`）要用同一份，
- * 两处网格排版必须同源。
+ * **public**（原 private，iOS 移植 M1 起跨模块）：导出为图片的预览板（`ScheduleShareDialog`，
+ * 还在 `:app`）要用同一份，两处网格排版必须同源。别为了收窄可见性再各写一份。
  */
 @Composable
-internal fun GridTypography(fontScale: Float, content: @Composable () -> Unit) {
+fun GridTypography(fontScale: Float, content: @Composable () -> Unit) {
     val density = LocalDensity.current
     CompositionLocalProvider(
         LocalDensity provides Density(density.density, fontScale),
@@ -948,6 +1045,10 @@ private fun WeekTopBar(
     today: LocalDate,
     timetableName: String,
     checking: Boolean,
+    /** 本平台有没有教务直取链；false 时「检测」图标不渲染（点了才知道不支持更糟）。 */
+    canQuickCheck: Boolean,
+    /** 宿主有没有给显示设置面板；false 时「眼睛」不渲染。 */
+    canOpenDisplay: Boolean,
     onOpenPicker: () -> Unit,
     onOpenDisplay: () -> Unit,
     onOpenTimetables: () -> Unit,
@@ -978,7 +1079,7 @@ private fun WeekTopBar(
                 .padding(horizontal = 6.dp, vertical = 2.dp),
         ) {
             Text(
-                text = today.format(fullDateFmt),
+                text = slashDate(today),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = onSurface,
@@ -995,7 +1096,7 @@ private fun WeekTopBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "第 $week 周 ${dayLabels[today.dayOfWeek.value - 1]}",
+                    text = "第 $week 周 ${dayLabels[today.dayOfWeek.ordinal]}",
                     style = MaterialTheme.typography.labelMedium,
                     color = onSurface.copy(alpha = 0.55f),
                 )
@@ -1035,32 +1136,37 @@ private fun WeekTopBar(
                 modifier = Modifier.size(20.dp),
             )
         }
-        IconButton(onClick = { haptics.tap(); onOpenDisplay() }) {
-            Icon(
-                AppIcons.Eye,
-                contentDescription = "显示设置",
-                tint = onSurface.copy(alpha = 0.75f),
-                modifier = Modifier.size(20.dp),
-            )
+        if (canOpenDisplay) {
+            IconButton(onClick = { haptics.tap(); onOpenDisplay() }) {
+                Icon(
+                    AppIcons.Eye,
+                    contentDescription = "显示设置",
+                    tint = onSurface.copy(alpha = 0.75f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
         // 快速检测（DESIGN §4.17，2026-11-18）：一次核对理论 / 实验课表与考试安排。
         // 排在「导入」左侧而不是最右：它与导入同属「从教务取数」，最右仍留给导入
         // （老用户的位置不变）。进行中换 20dp 转圈而不是置灰（同 PageRefreshAction 口径）。
-        if (checking) {
-            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp,
-                )
-            }
-        } else {
-            IconButton(onClick = { haptics.tap(); onQuickCheck() }) {
-                Icon(
-                    AppIcons.Refresh,
-                    contentDescription = "检测课表与考试变动",
-                    tint = onSurface.copy(alpha = 0.75f),
-                    modifier = Modifier.size(20.dp),
-                )
+        // 本平台没有教务直取链时整块不渲染（iOS M1）。
+        if (canQuickCheck) {
+            if (checking) {
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+            } else {
+                IconButton(onClick = { haptics.tap(); onQuickCheck() }) {
+                    Icon(
+                        AppIcons.Refresh,
+                        contentDescription = "检测课表与考试变动",
+                        tint = onSurface.copy(alpha = 0.75f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
         IconButton(onClick = { haptics.tap(); onOpenImport() }) {

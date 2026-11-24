@@ -152,11 +152,12 @@ private val BoardBottomChrome = 76.dp
 fun ScheduleShareScreen(
     onBack: () -> Unit,
     initialWeek: Int? = null,
-    viewModel: WeekViewModel = viewModel(
-        factory = WeekViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
 ) {
     val context = LocalContext.current
+    // 与课表页同一份 ViewModel 口径：shared 里没有 `WeekViewModel.Factory`，
+    // 而 `viewModel { }` 的 initializer 是普通 lambda（不是 @Composable），
+    // 所以 `LocalContext.current` 必须先取到外面来。
+    val viewModel: WeekViewModel = viewModel { WeekViewModel(Graph.repository(context)) }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val state by viewModel.uiState.collectAsStateWithLifecycle()

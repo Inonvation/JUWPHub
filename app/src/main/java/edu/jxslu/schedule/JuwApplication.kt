@@ -65,6 +65,10 @@ class JuwApplication : Application() {
         // 那边拿不到 Context，只在 `appDataDir()` 的 androidMain actual 里读这一个字段。
         // 必须早于任何 DataStore 访问（下面 `Graph.repository(this)` 就会读偏好），所以放在这里。
         initAppDirs(this)
+        // 共享层服务装配（iOS 移植 M1，2026-11-25）：搬进 `:shared` 的 ViewModel 靠
+        // `Services.current` 拿仓库/同步链，这里把 Android 侧的 `Graph` 装进去。
+        // 必须早于任何共享 ViewModel 的构造（下面 `Graph.repository(this)` 就会读偏好）。
+        edu.jxslu.schedule.platform.Services.install(GraphServices(this))
         // 预报名仪表板的前台判定（DESIGN §4.45，2026-10-21）：started 计数，进程内只装一次
         edu.jxslu.schedule.ui.wenqu.WenquAppForeground.install(this)
         // 崩溃留痕（2026-10-02，体检第三批）：JVM 级未捕获异常 + appScope 协程异常都落

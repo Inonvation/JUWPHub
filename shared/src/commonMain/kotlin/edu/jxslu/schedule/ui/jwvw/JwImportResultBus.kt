@@ -1,12 +1,13 @@
 package edu.jxslu.schedule.ui.jwvw
 
-import android.os.SystemClock
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.platform.locked
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.showNotice
@@ -22,7 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * （2026-09-29 用户指出）。这里按 [edu.jxslu.schedule.ui.campus.PayCodeResultBus] 的形态
  * 开一条进程内通道，由课表页 / 今日页**取到即消费**。
  *
- * [JwImportOutcome.publishedAtMs] 用 `SystemClock.elapsedRealtime()`，取值方只在新鲜期内展示：
+ * [JwImportOutcome.publishedAtMs] 用 `AppClock.nowMillis()`，取值方只在新鲜期内展示：
  * 从「我的 → 学校统一认证」进导入的用户回到的是二级页，课表页要等切 Tab 才组合，没有这道闸门，
  * 十分钟前导完的消息会在用户随手切到课表页时凭空冒出来。
  */
@@ -39,7 +40,7 @@ data class JwImportOutcome(
     val duration: SnackbarDuration = SnackbarDuration.Short,
 ) {
     /** 是否还在新鲜期内（[FRESH_WINDOW_MS]）。 */
-    fun isFresh(nowMs: Long = SystemClock.elapsedRealtime()): Boolean =
+    fun isFresh(nowMs: Long = AppClock.nowMillis()): Boolean =
         nowMs - publishedAtMs <= FRESH_WINDOW_MS
 
     companion object {
@@ -67,18 +68,18 @@ object JwImportResultBus {
         text: String,
         tone: NoticeTone = NoticeTone.Success,
         duration: SnackbarDuration = SnackbarDuration.Short,
-    ) = synchronized(lock) {
+    ) = locked(lock) {
         _outcome.value = queue.push(
             JwImportOutcome(
                 text = text,
-                publishedAtMs = SystemClock.elapsedRealtime(),
+                publishedAtMs = AppClock.nowMillis(),
                 tone = tone,
                 duration = duration,
             ),
         )
     }
 
-    fun consume(shown: JwImportOutcome?) = synchronized(lock) {
+    fun consume(shown: JwImportOutcome?) = locked(lock) {
         _outcome.value = queue.consume(shown)
     }
 }
@@ -90,16 +91,20 @@ object JwImportResultBus {
  * 还没消费的消息。2026-10-06 给教材抓取补失败提示时正好踩上——「导入完成」的气泡还在屏上，
  * 教材那条就把它顶掉了，而失败完全可能是即时的（凭证已停用时 `ensureValid` 一个包都不发）。
  *
- * 抽成独立的泛型类是为了能在 JVM 单测里钉住顺序：bus 本身要 `SystemClock`，测不了。
+ * 抽成独立的泛型类是为了能在 JVM 单测里钉住顺序：bus 本身要时钟，测不了。
+ *
+ * **public 而不是 internal**（iOS 移植 M1）：钉它的 `JwImportResultBusTest` 还留在 `:app`
+ * （那边 JVM 单测环境齐备），而 `internal` 跨模块不可见。它不是给页面用的公共 API——
+ * 除了那个测试，外面只该经 [JwImportResultBus] 访问。
  */
-internal class OutcomeQueue<T> {
+class OutcomeQueue<T> {
 
     private val lock = Any()
     private val pending = ArrayDeque<T>()
     private var current: T? = null
 
     /** 入队并返回**当前该在屏上**的那条：空闲时就是刚进来的这条，否则还是原来那条。 */
-    fun push(value: T): T? = synchronized(lock) {
+    fun push(value: T): T? = locked(lock) {
         if (current == null) current = value else pending.addLast(value)
         current
     }
@@ -114,7 +119,7 @@ internal class OutcomeQueue<T> {
      *
      * 首次调用传 null（还没有任何东西在屏上）：此时不推进，原样返回 current。
      */
-    fun consume(shown: T?): T? = synchronized(lock) {
+    fun consume(shown: T?): T? = locked(lock) {
         if (current != null && shown === current) {
             current = pending.removeFirstOrNull()
         }

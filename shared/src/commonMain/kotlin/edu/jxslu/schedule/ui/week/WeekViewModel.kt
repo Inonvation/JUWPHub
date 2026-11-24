@@ -1,19 +1,11 @@
 package edu.jxslu.schedule.ui.week
 
-import android.content.Context
-import kotlinx.datetime.toKotlinLocalDate
-import android.net.Uri
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.calendar.CalendarSyncer
 import edu.jxslu.schedule.data.prefs.DisplayPrefs
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
-import edu.jxslu.schedule.domain.CalendarSyncDefaults
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.BgScale
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseFilter
@@ -25,11 +17,11 @@ import edu.jxslu.schedule.domain.SemesterConfig
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.Timetable
 import edu.jxslu.schedule.domain.TimetablePrefs
-import edu.jxslu.schedule.ui.common.NoticeFeedback
-import edu.jxslu.schedule.ui.common.NoticeTone
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.UndoableMessage
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -41,8 +33,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 data class WeekUiState(
     val loading: Boolean = true,
@@ -157,10 +148,20 @@ private data class WeekConfig(
  * 本类此前还留着一套同名 setter，没有任何调用点（真 UI 早就在「我的」侧），已删除——
  * **不要在这里再加写方法**：两套 setter 会让人以为「课表页的设置写这里、我的页的设置写那里」，
  * 实际两边写的是同一份 DataStore，只是多了一条会漂移的路径。
+ *
+ * ## iOS 移植 M1（2026-11-25）改了什么
+ *
+ * 1. 构造只吃 [ScheduleRepository]，不再吃 `Context`——依赖由 [Services] 提供。
+ * 2. 时间从 `java.time` 换成 `kotlinx.datetime`（`AppClock.today()`）。
+ * 3. **导出与日历同步搬出本类**：它们要 `Uri` / `ContentResolver` / `CalendarContract`，
+ *    全是 Android 专有物。本类现在只产出**文本**（[csvText] / [jsonText]），落盘由调起方
+ *    的平台动作负责。这样「导出失败」这类提示也跟着落盘动作走，不再有两条提示源。
+ * 4. 教务直取链可能为空（iOS 还没接），[canQuickCheck] 据此让顶栏隐藏「检测」。
  */
 class WeekViewModel(
-    private val repo: ScheduleRepository,
-    private val todayProvider: () -> LocalDate = { LocalDate.now() },
+    /** 课表仓库。**公开**：课表页的 JSON 导入预览、教材查询都直接用同一份。 */
+    val repo: ScheduleRepository,
+    private val todayProvider: () -> LocalDate = AppClock::today,
 ) : ViewModel() {
 
     private val weekFlow = MutableStateFlow(1)
@@ -197,6 +198,17 @@ class WeekViewModel(
      */
     private val ready = MutableStateFlow(false)
 
+    /**
+     * 本平台是否接了教务直取链。false 时顶栏不显示「检测」图标——**点下去才发现不支持**
+     * 比「一开始就没有这个入口」更糟。
+     *
+     * 用 `runCatching` 兜住「Services 还没装」：本类的 JVM 单测不需要装装配根。
+     */
+    val canQuickCheck: Boolean = runCatching {
+        val services = Services.current
+        services.scheduleSync() != null || services.examSync() != null
+    }.getOrDefault(false)
+
     /** 五个「配置类」源先合成一个：combine 的类型安全重载最多到 5 个参数。 */
     private val configFlow = combine(
         repo.semester,
@@ -226,7 +238,7 @@ class WeekViewModel(
                 val slots = config.slots
                 val prefs = config.prefs
                 // 学期外给 null：裸周次（学期结束后 30+）不能当「本周」，见 WeekUiState.todayWeek
-                val todayWeek = ScheduleCalculator.todayWeekOf(semester, today.toKotlinLocalDate())
+                val todayWeek = ScheduleCalculator.todayWeekOf(semester, today)
                 val visible = loaded.filter { prefs.courseFilter.matches(it.kind) }
                 WeekUiState(
                     loading = false,
@@ -284,7 +296,7 @@ class WeekViewModel(
             // 周次必须在 ready 置位（对外发第一帧）之前定好，否则首帧仍是第 1 周。
             // 学期外（todayWeekOf 给 null）没有「本周」可落，停在默认的第 1 周。
             val semester = repo.semester.first()
-            ScheduleCalculator.todayWeekOf(semester, todayProvider().toKotlinLocalDate())?.let { weekFlow.value = it }
+            ScheduleCalculator.todayWeekOf(semester, todayProvider())?.let { weekFlow.value = it }
             ready.value = true
         }
     }
@@ -365,7 +377,7 @@ class WeekViewModel(
 
     private val _quickCheckMessage = MutableStateFlow<QuickCheckFeedback?>(null)
 
-    /** 检测结果提示，UI 侧消费后调 [consumeQuickCheckMessage] 置空（同 [shareMessage] 口径）。 */
+    /** 检测结果提示，UI 侧消费后调 [consumeQuickCheckMessage] 置空。 */
     val quickCheckMessage: StateFlow<QuickCheckFeedback?> = _quickCheckMessage
 
     fun consumeQuickCheckMessage() {
@@ -377,48 +389,64 @@ class WeekViewModel(
      * 三条链都带 `force`——手动触发不吃「提醒开关 / 检查间隔 / 24 小时探测」的闸门
      * （自动检查才吃）。
      *
-     * 放在 ViewModel 而不是页面里：页面切 Tab 就会离开组合，`rememberCoroutineScope` 会把这
-     * 半分钟的网络链掐断（课表检查已经落了一半缓存、考试基线却没推进）；VM 的作用域活到
-     * 返回栈条目销毁，切回来还能读到结果。
-     *
-     * 两条链各自落库 / 落待处置缓存 / 入收件箱，这里只负责把结果收成一句话（[quickCheckFeedback]）。
+     * 三条链各自落库 / 落待处置缓存 / 入收件箱，这里只负责把结果收成一句话（[quickCheckFeedback]）。
      * **不自动跳页**：发现差异时由提示条的「查看」把选择权留给用户。
+     *
+     * iOS 移植 M1：三条链从 [Services] 取，**任一为空就跳过那一段**——那边还没有教务直取
+     * （要等 WebView 会话 + Ktor 版 `JwReadSession`）。全部为空时本方法直接返回，
+     * 顶栏也不会显示这个入口（见 [canQuickCheck]）。
      */
-    fun quickCheck(context: Context) {
+    fun quickCheck() {
         if (_checking.value) return
+        val services = Services.current
+        val syncService = services.scheduleSync()
+        val examService = services.examSync()
+        val termImportService = services.scheduleTermImport()
+        if (syncService == null && examService == null && termImportService == null) return
         _checking.value = true
         viewModelScope.launch {
             try {
-                val appContext = context.applicationContext
-                val schedule = try {
-                    Graph.scheduleSync(appContext).check(force = true)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    ScheduleSync.CheckResult.Failed(e.message ?: "未知错误")
+                val schedule = if (syncService == null) {
+                    null
+                } else {
+                    try {
+                        syncService.check(force = true)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        ScheduleSync.CheckResult.Failed(e.message ?: "未知错误")
+                    }
                 }
-                val exam = try {
-                    Graph.examSync(appContext).sync(force = true)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    ExamSync.Result.Failed(e.message ?: "未知错误")
+                val exam = if (examService == null) {
+                    null
+                } else {
+                    try {
+                        examService.sync(force = true)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        ExamSync.Result.Failed(e.message ?: "未知错误")
+                    }
                 }
                 // 第三段：探测下一学期课表是否已出（2026-11-19）。手动触发带 force，
                 // 不吃 24 小时闸门；命中时自动建表并导入，但**不发通知**——提示条已经说了，
                 // 再来一条系统通知就是一次点击两条提醒。
-                val probe = try {
-                    Graph.scheduleTermImport(appContext).probeNextTerm(force = true)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    ScheduleTermImport.ProbeResult.Failed(e.message ?: "未知错误")
+                val probe = if (termImportService == null) {
+                    null
+                } else {
+                    try {
+                        termImportService.probeNextTerm(force = true)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        ScheduleTermImport.ProbeResult.Failed(e.message ?: "未知错误")
+                    }
                 }
                 _quickCheckMessage.value = quickCheckFeedback(
                     schedule = schedule,
                     exam = exam,
                     probe = probe,
-                    firstTerm = Graph.displayPrefs(appContext).scheduleFirstTerm(),
+                    firstTerm = services.displayPrefs().scheduleFirstTerm(),
                 )
             } finally {
                 _checking.value = false
@@ -426,99 +454,33 @@ class WeekViewModel(
         }
     }
 
-    // ---- 分享（DESIGN §4.12）：日历同步 / CSV / JSON ----
+    // ---- 分享（DESIGN §4.12）：只产出文本，落盘交给平台 ----
 
-    // 结果带语气（成功/失败/警告），提示卡据此选图标与强调色；
-    // 只传文案的话 UI 侧就得靠字符串猜哪条是失败，那是把判断塞回展示层
-    private val _shareMessage = MutableStateFlow<NoticeFeedback?>(null)
-
-    /** 分享动作结果，UI 侧消费后置空（提示卡一次性展示）。 */
-    val shareMessage: StateFlow<NoticeFeedback?> = _shareMessage
-
-    fun consumeShareMessage() {
-        _shareMessage.value = null
-    }
-
-    private suspend fun expandedEvents(): List<ScheduleExporter.CourseEvent>? =
+    /** 展开成日历事件；学期没配 / 课表为空时回 null。 */
+    suspend fun expandedCalendarEvents(): List<ScheduleExporter.CourseEvent>? =
         repo.expandedCalendarEvents()
 
-    fun exportCsv(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            val result = runCatching {
-                val events = expandedEvents() ?: error("请先在「我的 → 课表设置」配置学期，并确认课表不为空")
-                val bom = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
-                val bytes = bom + ScheduleExporter.toGoogleCalendarCsv(events).toByteArray(Charsets.UTF_8)
-                withContext(Dispatchers.IO) {
-                    context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
-                        out.write(bytes)
-                    } ?: error("无法打开输出流")
-                }
-                "已导出 ${events.size} 条课程（CSV）"
-            }
-            _shareMessage.value = result.fold(
-                onSuccess = { NoticeFeedback(it, NoticeTone.Success) },
-                onFailure = { NoticeFeedback("导出失败：${it.message}", NoticeTone.Error) },
-            )
-        }
+    /**
+     * 导出 CSV 的**文本与成功文案**（文本含 UTF-8 BOM，Excel 才不把中文读成乱码——
+     * 搬迁前是写字节流时手工拼的 `EF BB BF`，这里等价地放在字符串首位）。
+     *
+     * 成功文案里带条数，只有这一侧知道；把它一起返回是为了让调起方**一次调用**拿到全部信息，
+     * 不必再查一遍事件列表（那等于多读一次库）。
+     *
+     * 学期没配 / 课表为空时抛 [IllegalStateException]；文案就是给用户看的那句。
+     */
+    suspend fun csvExport(): Pair<String, String> {
+        val events = expandedCalendarEvents()
+            ?: error("请先在「我的 → 课表设置」配置学期，并确认课表不为空")
+        return ("\uFEFF" + ScheduleExporter.toGoogleCalendarCsv(events)) to
+            "已导出 ${events.size} 条课程（CSV）"
     }
 
-    fun exportJson(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            val result = runCatching {
-                val json = repo.exportJson()
-                withContext(Dispatchers.IO) {
-                    context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
-                        out.write(json.toByteArray(Charsets.UTF_8))
-                    } ?: error("无法打开输出流")
-                }
-                "已导出课表 JSON"
-            }
-            _shareMessage.value = result.fold(
-                onSuccess = { NoticeFeedback(it, NoticeTone.Success) },
-                onFailure = { NoticeFeedback("导出失败：${it.message}", NoticeTone.Error) },
-            )
-        }
-    }
-
-    fun syncToCalendar(context: Context) {
-        viewModelScope.launch {
-            val events = expandedEvents()
-            if (events == null) {
-                _shareMessage.value = NoticeFeedback(
-                    "请先在「我的 → 课表设置」配置学期，并确认课表不为空",
-                    NoticeTone.Warning,
-                )
-                return@launch
-            }
-            val reminder = repo.calendarReminderMinutes.first()
-            _shareMessage.value = when (val r = CalendarSyncer.sync(context, events, reminder)) {
-                is CalendarSyncer.CalendarSyncResult.Success -> NoticeFeedback(
-                    CalendarSyncDefaults.syncSuccessMessage(r.count, reminder, r.reminderMissing),
-                    if (r.reminderMissing > 0) NoticeTone.Warning else NoticeTone.Success,
-                )
-                is CalendarSyncer.CalendarSyncResult.Deleted -> NoticeFeedback(
-                    "已删除 ${r.count} 条课程日历",
-                    NoticeTone.Success,
-                )
-                is CalendarSyncer.CalendarSyncResult.NoCalendarAccount -> NoticeFeedback(
-                    "手机上没有可用日历账户，请先在系统日历中登录或添加账户",
-                    NoticeTone.Warning,
-                )
-                is CalendarSyncer.CalendarSyncResult.NoPermission -> NoticeFeedback(
-                    "日历权限未授予，无法同步",
-                    NoticeTone.Warning,
-                )
-                is CalendarSyncer.CalendarSyncResult.Error -> NoticeFeedback(
-                    "同步失败：${r.message}",
-                    NoticeTone.Error,
-                )
-            }
-        }
-    }
-
-    class Factory(private val repo: ScheduleRepository) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            WeekViewModel(repo) as T
-    }
+    /**
+     * 导出 JSON 的**文本与成功文案**。
+     *
+     * 失败时抛异常（与 [csvExport] 同口径），不再自己写 Snackbar——落盘动作与提示都由
+     * 调起方一处负责，避免「保存失败」和「生成失败」变成两条互相覆盖的提示。
+     */
+    suspend fun jsonExport(): Pair<String, String> = repo.exportJson() to "已导出课表 JSON"
 }

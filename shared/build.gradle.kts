@@ -115,6 +115,15 @@ kotlin {
             implementation("com.google.zxing:core:3.5.3")
             // Ktor 的 Android 引擎仍走 OkHttp：连接池、IPv4 优先 DNS 这些既有调优继续生效。
             implementation("io.ktor:ktor-client-okhttp:3.0.3")
+            // 只给 `platform/LifecycleState.android.kt` 用：那个 actual 就是转调官方的
+            // `collectAsStateWithLifecycle`，让搬进 commonMain 的页面在 Android 上保持
+            // 「STOPPED 停止收集」的原行为。**不能**写进 commonMain——它的 KMP 变体要
+            // Compose 1.9，与本仓的 CMP 1.7.3 打架（见 commonMain 里 lifecycle-viewmodel 的注释）。
+            // 版本与 `:app` 一致（2.8.7），Android 侧解析结果不变。
+            implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+            // `repeatOnLifecycle` 在那个 actual 里用（`ui/common/ResumedTicker.android.kt`），
+            // 与 `:app` 同版本。iOS 没有等价物，那边的 actual 自己起循环。
+            implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
         }
 
         iosMain.dependencies {

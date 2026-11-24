@@ -229,12 +229,15 @@ private fun WeekChip(
  * 新用户拿到空课表找不到入口。收进一个弹层后，导入路径都在课表页顶栏一眼可见。
  *
  * 出口走 [rememberSheetDismisser]（与 [WeekPickerSheet] 同一口径）：先播退场再落状态。
+ *
+ * [onJsonImport] **为 null 时整行不渲染**：那是「本平台没有文件选择器」的表达方式
+ * （iOS 侧还没有 UIDocumentPicker），不是临时缺省值。给个空实现留一行点了没反应的入口更糟。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImportEntrySheet(
     onManualAdd: () -> Unit,
-    onJsonImport: () -> Unit,
+    onJsonImport: (() -> Unit)? = null,
     onJwImport: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -259,12 +262,14 @@ fun ImportEntrySheet(
                 subtitle = "在网格空白处新增或编辑单门课程",
                 onClick = { dismiss { onManualAdd() } },
             )
-            ImportEntryRow(
-                icon = { Icon(AppIcons.FileImport, contentDescription = null, modifier = Modifier.size(22.dp)) },
-                title = "导入 JSON 文件",
-                subtitle = "从导出的课表 JSON 恢复或合并",
-                onClick = { dismiss { onJsonImport() } },
-            )
+            if (onJsonImport != null) {
+                ImportEntryRow(
+                    icon = { Icon(AppIcons.FileImport, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                    title = "导入 JSON 文件",
+                    subtitle = "从导出的课表 JSON 恢复或合并",
+                    onClick = { dismiss { onJsonImport() } },
+                )
+            }
             ImportEntryRow(
                 icon = { Icon(AppIcons.Import, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "从教务导入",
@@ -280,13 +285,16 @@ fun ImportEntrySheet(
  *
  * 形态与 [ImportEntrySheet] 一致（标题 + 四行入口）；具体动作在 WeekScreen 接线。
  * 出口走 [rememberSheetDismisser]（与 [WeekPickerSheet] 同一口径）：先播退场再落状态。
+ *
+ * 四个回调**都可空**，为 null 的那一行整行不渲染——那是「本平台没有这项能力」的表达
+ * （iOS 侧还没有系统日历写入与文件另存），不是临时缺省值。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShareEntrySheet(
-    onSyncCalendar: () -> Unit,
-    onExportCsv: () -> Unit,
-    onExportJson: () -> Unit,
+    onSyncCalendar: (() -> Unit)? = null,
+    onExportCsv: (() -> Unit)? = null,
+    onExportJson: (() -> Unit)? = null,
     onShareImage: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -305,24 +313,30 @@ fun ShareEntrySheet(
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
-            ImportEntryRow(
-                icon = { Icon(AppIcons.CalendarSync, contentDescription = null, modifier = Modifier.size(22.dp)) },
-                title = "一键同步到手机日历",
-                subtitle = "写入系统日历并按设置提醒；重复同步自动去重",
-                onClick = { dismiss { onSyncCalendar() } },
-            )
-            ImportEntryRow(
-                icon = { Icon(AppIcons.FileExport, contentDescription = null, modifier = Modifier.size(22.dp)) },
-                title = "导出为 CSV（日历格式）",
-                subtitle = "Google 日历可直接导入的通用格式",
-                onClick = { dismiss { onExportCsv() } },
-            )
-            ImportEntryRow(
-                icon = { Icon(AppIcons.File02, contentDescription = null, modifier = Modifier.size(22.dp)) },
-                title = "导出为 JSON",
-                subtitle = "完整课表数据，可在其他设备导入 JUWPHub",
-                onClick = { dismiss { onExportJson() } },
-            )
+            if (onSyncCalendar != null) {
+                ImportEntryRow(
+                    icon = { Icon(AppIcons.CalendarSync, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                    title = "一键同步到手机日历",
+                    subtitle = "写入系统日历并按设置提醒；重复同步自动去重",
+                    onClick = { dismiss { onSyncCalendar() } },
+                )
+            }
+            if (onExportCsv != null) {
+                ImportEntryRow(
+                    icon = { Icon(AppIcons.FileExport, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                    title = "导出为 CSV（日历格式）",
+                    subtitle = "Google 日历可直接导入的通用格式",
+                    onClick = { dismiss { onExportCsv() } },
+                )
+            }
+            if (onExportJson != null) {
+                ImportEntryRow(
+                    icon = { Icon(AppIcons.File02, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                    title = "导出为 JSON",
+                    subtitle = "完整课表数据，可在其他设备导入 JUWPHub",
+                    onClick = { dismiss { onExportJson() } },
+                )
+            }
             ImportEntryRow(
                 icon = { Icon(AppIcons.ImageDownload, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "导出为图片",

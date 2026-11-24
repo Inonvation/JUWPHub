@@ -140,6 +140,10 @@ import edu.jxslu.schedule.data.qzxy.QzxyBluetoothScanner
 import edu.jxslu.schedule.ui.qzxy.QzxyViewModel
 import edu.jxslu.schedule.ui.week.WeekScreen
 import edu.jxslu.schedule.ui.week.ScheduleBackgroundLayer
+import edu.jxslu.schedule.ui.week.WeekViewModel
+import edu.jxslu.schedule.ui.week.DisplaySettingsOverlay
+import edu.jxslu.schedule.ui.week.rememberWeekScreenPlatformActions
+import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.domain.BgScale
 import edu.jxslu.schedule.domain.FontScalePolicy
 import edu.jxslu.schedule.domain.StartPage
@@ -1626,21 +1630,55 @@ internal fun JuwApp(
                         )
                     }
                 composable(Routes.WEEK) {
+                    // 课表页已搬进 :shared（iOS 移植 M1）。平台动作通过一组回调传下去：
+                    // SAF 选文件 / 另存、日历权限与写入、背景图存在性——共享层拿不到这些。
+                    val weekContext = LocalContext.current
+                    val weekVm: WeekViewModel = viewModel {
+                        WeekViewModel(Graph.repository(weekContext))
+                    }
+                    val weekActions = rememberWeekScreenPlatformActions()
                     WeekScreen(
+                            viewModel = weekVm,
                             onOpenJwImport = {
-                                JwImportActivity.start(context)
+                                JwImportActivity.start(weekContext)
                             },
                             // 切换弹层「管理课表」→ 独立窗口；
                             // 眼睛是页内覆盖弹层（不跳页，课表保持可见，见 WeekScreen）
                             onOpenTimetableManage = {
-                                SubpageActivity.start(context, SubpageScreen.TIMETABLE_MANAGE)
+                                SubpageActivity.start(weekContext, SubpageScreen.TIMETABLE_MANAGE)
                             },
                             // 课程详情弹窗的「笔记·课件 / 作业」（DESIGN §3.11）
                             onOpenCourseNotes = { course ->
-                                SubpageActivity.start(context, SubpageScreen.NOTES_COURSE, courseName = course.name)
+                                SubpageActivity.start(weekContext, SubpageScreen.NOTES_COURSE, courseName = course.name)
                             },
                             onOpenCourseHomework = { course ->
-                                SubpageActivity.start(context, SubpageScreen.HOMEWORK_COURSE, courseName = course.name)
+                                SubpageActivity.start(weekContext, SubpageScreen.HOMEWORK_COURSE, courseName = course.name)
+                            },
+                            // 「检测」发现调课差异后的「查看」
+                            onOpenScheduleChanges = {
+                                SubpageActivity.start(weekContext, SubpageScreen.SCHEDULE_CHANGES)
+                            },
+                            // 分享为图片：focusItemId 复用为「进页时预览哪一周」
+                            onOpenScheduleShare = { week ->
+                                SubpageActivity.start(
+                                    weekContext,
+                                    SubpageScreen.SCHEDULE_SHARE,
+                                    focusItemId = week.toString(),
+                                )
+                            },
+                            onPickJsonFile = weekActions.pickJsonFile,
+                            onSaveTextFile = weekActions.saveTextFile,
+                            onSyncCalendar = weekActions.syncCalendar,
+                            backgroundExists = weekActions.backgroundExists,
+                            // 显示设置覆盖面板：真实网格在上层保持不变，面板只盖下半屏
+                            displaySettings = { headerMinDp, dismiss ->
+                                DisplaySettingsOverlay(
+                                    viewModel = viewModel(
+                                        factory = MeViewModel.Factory(Graph.repository(weekContext)),
+                                    ),
+                                    onDismiss = dismiss,
+                                    headerMinDp = headerMinDp,
+                                )
                             },
                         )
                     }
