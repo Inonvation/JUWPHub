@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -71,44 +73,56 @@ fun WeekGridPreview(modifier: Modifier = Modifier) {
                         dayCount = visibleDays.size,
                     )
                 }
-                Row(Modifier.fillMaxSize()) {
-                    TimeRail(
-                        layout = layout,
-                        slots = slots,
-                        monthLabel = monthLabel,
-                        railFontSp = null,
-                        dateFontSp = null,
-                    )
-                    // 宽度按几何算出来（列宽 × 天数），别用 fillMaxWidth：buildGridLayout 已经把
-                    // 时间轴宽度和右缘留白从总宽里扣掉了，再撑满会把最后一列挤出色块位置。
-                    Box(
-                        Modifier
-                            .width(layout.dayWidth * visibleDays.size)
-                            .fillMaxHeight(),
-                    ) {
-                        WeekPage(
-                            week = week,
+                // 竖向滚动是**必需的兜底**，不是注释掉的优化：`buildGridLayout` 的行高有
+                // MinRowHeight（40dp）下限，11 个小节 × 40dp + 段间隙已经 528dp，
+                // 窄屏（iPhone 竖屏 60% 高度）放不下时会直接溢出、第 9–11 节被裁掉。
+                // 2026-11-24 真机第一版就是这么被截的。这里让内容按几何真实高度撑开、放不下就滚。
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    // 高度显式给死：TimeRail 内部的 fillMaxHeight 需要一个有界父约束，
+                    // 而在 verticalScroll 里父约束的 maxHeight 是无穷。
+                    Row(Modifier.height(layout.dayHeaderHeight + layout.gridHeight)) {
+                        TimeRail(
                             layout = layout,
-                            visibleDays = visibleDays,
-                            allCourses = courses,
                             slots = slots,
-                            semester = semester,
-                            overrides = emptyList(),
-                            isTodayWeek = false,
-                            todayDay = 0,
-                            // WeekPage 只要一个 State 包着「现在」；这里给个静态快照，
-                            // 因为 isTodayWeek=false 时它根本不会被读。
-                            now = remember { mutableStateOf(LocalTimeLike.now()) },
-                            showNonCurrentWeek = true,
-                            cellStyle = GridCellStyle(),
-                            showNowLine = false,
-                            showGridLines = true,
+                            monthLabel = monthLabel,
+                            railFontSp = null,
                             dateFontSp = null,
-                            tapBlankToAdd = false,
-                            onAddEmpty = { _, _ -> },
-                            onOpenCourse = {},
-                            onOpenOverrideInfo = { _, _ -> },
                         )
+                        // 宽度按几何算出来（列宽 × 天数），别用 fillMaxWidth：buildGridLayout 已经把
+                        // 时间轴宽度和右缘留白从总宽里扣掉了，再撑满会把最后一列挤出色块位置。
+                        Box(
+                            Modifier
+                                .width(layout.dayWidth * visibleDays.size)
+                                .fillMaxHeight(),
+                        ) {
+                            WeekPage(
+                                week = week,
+                                layout = layout,
+                                visibleDays = visibleDays,
+                                allCourses = courses,
+                                slots = slots,
+                                semester = semester,
+                                overrides = emptyList(),
+                                isTodayWeek = false,
+                                todayDay = 0,
+                                // WeekPage 只要一个 State 包着「现在」；这里给个静态快照，
+                                // 因为 isTodayWeek=false 时它根本不会被读。
+                                now = remember { mutableStateOf(LocalTimeLike.now()) },
+                                showNonCurrentWeek = true,
+                                cellStyle = GridCellStyle(),
+                                showNowLine = false,
+                                showGridLines = true,
+                                dateFontSp = null,
+                                tapBlankToAdd = false,
+                                onAddEmpty = { _, _ -> },
+                                onOpenCourse = {},
+                                onOpenOverrideInfo = { _, _ -> },
+                            )
+                        }
                     }
                 }
             }
