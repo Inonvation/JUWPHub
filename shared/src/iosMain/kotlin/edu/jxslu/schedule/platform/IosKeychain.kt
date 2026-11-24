@@ -6,10 +6,13 @@ import kotlinx.cinterop.alloc
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.ByteVar
+import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import platform.CoreFoundation.CFDataCreate
-import platform.CoreFoundation.CFBridgingRelease
+import platform.CoreFoundation.CFDataGetBytePtr
+import platform.CoreFoundation.CFDataGetLength
 import platform.CoreFoundation.CFDataRef
 import platform.CoreFoundation.CFTypeRefVar
 import platform.CoreFoundation.CFDictionaryAddValue
@@ -19,9 +22,6 @@ import platform.CoreFoundation.CFStringCreateWithCString
 import platform.CoreFoundation.CFStringRef
 import platform.CoreFoundation.kCFBooleanTrue
 import platform.CoreFoundation.kCFStringEncodingUTF8
-import platform.Foundation.NSData
-import platform.Foundation.NSString
-import platform.Foundation.NSUTF8StringEncoding
 import platform.Security.SecItemAdd
 import platform.Security.SecItemCopyMatching
 import platform.Security.SecItemDelete
@@ -70,8 +70,8 @@ import platform.Security.kSecValueData
  * 本文件在 Windows 上编不了（Kotlin/Native 的 Apple 目标需要 macOS），只能靠 CI 验证。
  * 用到的 API 面刻意压到最小：三个 `SecItem*`、`CFDictionaryCreateMutable` /
  * `CFDictionaryAddValue` / `CFStringCreateWithCString` / `CFDataCreate` / `CFRelease`，
- * 读取那一侧用 `CFBridgingRelease` + `NSData` 转字符串（比手动 `CFDataGetBytePtr`
- * 少一层指针运算，也是 Apple 示例的写法）。
+ * 读取那一侧用 `CFDataGetBytePtr` + `readBytes`（不用 `CFBridgingRelease`：
+ * 那个符号在 Kotlin/Native 绑定里不在 `platform.CoreFoundation`）。
  *
  * **踩过的坑**：`CFTypeRefVar.value` 是 `kotlinx.cinterop` 的扩展属性，只 import
  * `alloc` / `ptr` 这类具体符号时它会报 `Unresolved reference 'value'`，必须单独
@@ -92,14 +92,23 @@ internal object IosKeychain {
             CFDictionaryAddValue(dict, kSecReturnData, kCFBooleanTrue)
             CFDictionaryAddValue(dict, kSecMatchLimit, kSecMatchLimitOne)
 
-            // 出参用 `CFTypeRefVar`（Apple 官方示例的写法）。注意 `.value` 是
-            // `kotlinx.cinterop` 的**扩展属性**，必须单独 `import kotlinx.cinterop.value`
-            // ——只 import `alloc` 之类的具体符号时它会报「Unresolved reference 'value'」。
+            // 出参用 `CFTypeRefVar`。`.value` 是 `kotlinx.cinterop` 的**扩展属性**，
+            // 必须单独 `import kotlinx.cinterop.value`——只 import 具体符号时会报
+            // 「Unresolved reference 'value'」（2026-11-25 CI 两轮才定位到）。
             val result = alloc<CFTypeRefVar>()
             if (SecItemCopyMatching(dict, result.ptr) != errSecSuccess) return null
-            // CFBridgingRelease 接管 +1 引用并转成 ObjC 对象，所以这里不需要再 CFRelease
-            val data = CFBridgingRelease(result.value) as? NSData ?: return null
-            NSString.create(data = data, encoding = NSUTF8StringEncoding) as String?
+            // 全程走 CoreFoundation，不用 `CFBridgingRelease`：那个符号在 Kotlin/Native 的
+            // 绑定里不在 `platform.CoreFoundation`（试过，报 Unresolved reference），
+            // 纯 CF 这条路少一个跨框架依赖。
+            val data: CFDataRef? = result.value?.reinterpret() ?: return null
+            val length = CFDataGetLength(data).toInt()
+            val bytes = CFDataGetBytePtr(data)
+            try {
+                if (bytes == null || length <= 0) return null
+                bytes.reinterpret<ByteVar>().readBytes(length).decodeToString()
+            } finally {
+                CFRelease(data)
+            }
         } finally {
             CFRelease(dict)
             CFRelease(svc)
