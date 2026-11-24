@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -36,6 +38,16 @@ import edu.jxslu.schedule.ui.ai.AiSettingsScreen
 import edu.jxslu.schedule.ui.ai.AiSettingsViewModel
 import edu.jxslu.schedule.ui.me.hub.AccountsHubScreen
 import edu.jxslu.schedule.ui.campus.DormRepairScreen
+import edu.jxslu.schedule.ui.me.CalendarSettingsScreen
+import edu.jxslu.schedule.ui.me.CalendarSettingsViewModel
+import edu.jxslu.schedule.ui.me.JwAccountScreen
+import edu.jxslu.schedule.ui.me.ReminderSettingsScreen
+import edu.jxslu.schedule.ui.me.ReminderSettingsViewModel
+import edu.jxslu.schedule.ui.me.ShortcutSettingsScreen
+import edu.jxslu.schedule.ui.me.ShortcutSettingsViewModel
+import edu.jxslu.schedule.ui.me.hub.AboutUpdateScreen
+import edu.jxslu.schedule.ui.me.hub.SupportDevScreen
+import edu.jxslu.schedule.ui.me.hub.TermsDeclarationsScreen
 import edu.jxslu.schedule.ui.toolbox.CainiaoQueryScreen
 import edu.jxslu.schedule.ui.toolbox.ToolboxScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
@@ -70,6 +82,8 @@ import edu.jxslu.schedule.ui.selection.SelectionWishesScreen
 import edu.jxslu.schedule.ui.weather.WeatherScreen
 import edu.jxslu.schedule.ui.weather.WeatherSettingsScreen
 import edu.jxslu.schedule.ui.weather.WeatherViewModel
+import platform.Foundation.NSURL
+import platform.UIKit.UIApplication
 
 /**
  * iOS 的二级页路由（2026-11-25）。
@@ -156,6 +170,13 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     IosDrawerEntry("生活", IosRoute(SubpageScreen.WEATHER_SETTINGS), "天气设置"),
     // 设置
     IosDrawerEntry("设置", IosRoute(SubpageScreen.DATA_SETTINGS), "数据与备份"),
+    IosDrawerEntry("设置", IosRoute(SubpageScreen.CALENDAR_SETTINGS), "校历与日历同步"),
+    IosDrawerEntry("设置", IosRoute(SubpageScreen.REMINDER_SETTINGS), "上课提醒"),
+    IosDrawerEntry("设置", IosRoute(SubpageScreen.SHORTCUTS), "快捷方式"),
+    IosDrawerEntry("设置", IosRoute(SubpageScreen.JW_ACCOUNT), "教务账号"),
+    IosDrawerEntry("设置", IosRoute(SubpageScreen.ABOUT_UPDATE), "关于与更新"),
+    IosDrawerEntry("设置", IosRoute(SubpageScreen.TERMS_DECLARATIONS), "条款与声明"),
+    IosDrawerEntry("设置", IosRoute(SubpageScreen.SUPPORT_DEV), "支持开发"),
     // 账号
     IosDrawerEntry("账号", IosRoute(SubpageScreen.ACCOUNTS), "账号中心"),
     // 江水生活（已搬的三块）
@@ -436,6 +457,56 @@ internal fun IosRouteContent(
 
         SubpageScreen.TOOLBOX_CAINIAO -> CainiaoQueryScreen(onBack = pop)
 
+        // ---------------------------------------------------------------- 我的 · 设置子页
+        //
+        // 六个子页在 iOS 上都能进。平台动作一律传 null（日历同步要系统 Calendar、
+        // 提醒要通知渠道、快捷方式要 PackageManager 查已安装应用、赞赏码要位图），
+        // 对应入口整行不渲染；页面本身（列表 / 开关 / 文案）照常可用。
+        SubpageScreen.CALENDAR_SETTINGS -> {
+            val vm = remember {
+                CalendarSettingsViewModel(
+                    repo = services.scheduleRepository(),
+                    // null = 本平台没有系统日历写入（Android 走 Calendar Provider）
+                    actions = null,
+                )
+            }
+            CalendarSettingsScreen(onBack = pop, viewModel = vm)
+        }
+
+        SubpageScreen.JW_ACCOUNT -> JwAccountScreen(onBack = pop, viewModel = meViewModel)
+
+        SubpageScreen.REMINDER_SETTINGS -> {
+            val vm = remember { ReminderSettingsViewModel(services.scheduleRepository()) }
+            ReminderSettingsScreen(onBack = pop, viewModel = vm)
+        }
+
+        SubpageScreen.SHORTCUTS -> {
+            val vm = remember { ShortcutSettingsViewModel(services.scheduleRepository()) }
+            ShortcutSettingsScreen(
+                onBack = pop,
+                viewModel = vm,
+                // iOS 没有 Android 那套品牌 webp，全部退回矢量图标
+                brandIcon = { null },
+                focusItemId = route.arg,
+            )
+        }
+
+        SubpageScreen.ABOUT_UPDATE -> AboutUpdateScreen(
+            onBack = pop,
+            onOpenUrl = ::iosOpenUrl,
+            // 开源许可全文在 :app 的 assets 里，iOS 还没有；该行不渲染
+            licensesDialog = null,
+        )
+
+        SubpageScreen.TERMS_DECLARATIONS -> TermsDeclarationsScreen(
+            onBack = pop,
+            noticeDialog = { title, intro, items, dismiss ->
+                IosNoticeDialog(title = title, intro = intro, items = items, onDismiss = dismiss)
+            },
+        )
+
+        SubpageScreen.SUPPORT_DEV -> SupportDevScreen(onBack = pop)
+
         else -> IosNotPortedScreen(screen = route.screen, onBack = pop)
     }
 }
@@ -547,4 +618,57 @@ internal fun IosDrawer(
             }
         }
     }
+}
+
+/**
+ * iOS 侧打开外部链接（开源仓库 / 用户协议那几行用）。
+ *
+ * `UIApplication.openURL` 在新系统上被标记 deprecated，但仍然可用，且签名最简单
+ * （`openURL:options:completionHandler:` 要多传两个空参，收益为零）。
+ * 返回 null = 已交给系统；非 null = 失败文案（页面直接显示）。
+ *
+ * **未验**：只在编译期验证过；`canOpenURL` 对未声明 `LSApplicationQueriesSchemes` 的
+ * 自定义 scheme 会返回 false，所以这里**不**做预检，直接 open——http/https 不需要声明。
+ */
+internal fun iosOpenUrl(url: String): String? {
+    val nsUrl = NSURL.URLWithString(url) ?: return "链接无效"
+    return if (UIApplication.sharedApplication.openURL(nsUrl)) null else "打不开这个链接"
+}
+
+/**
+ * iOS 侧的「条款 / 声明」弹窗（`TermsDeclarationsScreen` 的槽位）。
+ *
+ * 与 Android 那份 `LegalDialogs` 是同一份内容的两种壳：标题 + 导语 + 条目 + 一个关闭键。
+ * Android 那份还带「同意 / 拒绝」的勾选与一次性记录，iOS 这一版只做阅读。
+ */
+@Composable
+internal fun IosNoticeDialog(
+    title: String,
+    intro: String,
+    items: List<String>,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, style = MaterialTheme.typography.titleMedium) },
+        text = {
+            LazyColumn {
+                item {
+                    Text(
+                        intro,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
+                items(items) { line ->
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
 }
