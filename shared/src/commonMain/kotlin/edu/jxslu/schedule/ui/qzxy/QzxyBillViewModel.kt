@@ -1,15 +1,13 @@
 package edu.jxslu.schedule.ui.qzxy
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.qzxy.QzxyBill
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.BillRange
+import edu.jxslu.schedule.domain.YearMonthKey
 import edu.jxslu.schedule.domain.filterBills
-import java.time.YearMonth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -84,7 +82,7 @@ class QzxyBillViewModel(
         val state = _ui.value
         if (state.loading || !state.canLoadEarlier) return
         val oldest = state.months.lastOrNull() ?: return
-        val next = runCatching { YearMonth.parse(oldest).minusMonths(1) }.getOrNull() ?: return
+        val next = runCatching { YearMonthKey.parse(oldest)?.plusMonths(-1) }.getOrNull() ?: return
         if (state.months.size >= MAX_MONTHS || next.year < EARLIEST_YEAR) {
             _ui.update { it.copy(canLoadEarlier = false) }
             return
@@ -93,8 +91,10 @@ class QzxyBillViewModel(
     }
 
     private fun initialMonths(): List<String> {
-        val now = YearMonth.now()
-        return (0 until INITIAL_MONTHS).map { now.minusMonths(it.toLong()).toString() }
+        // `java.time.YearMonth.now()` 换成「AppClock 的今天 → 月份键」：仍是 `yyyy-MM`，
+        // 服务端接口参数形态不变（见 YearMonthKey 的 KDoc）
+        val now = YearMonthKey.fromDate(AppClock.today())
+        return (0 until INITIAL_MONTHS).map { now.plusMonths(-it).toString() }
     }
 
     private fun load(months: List<String>, replace: Boolean) {
@@ -136,8 +136,10 @@ class QzxyBillViewModel(
                         canLoadEarlier = state.canLoadEarlier &&
                             orderedMonths.size < MAX_MONTHS &&
                             (orderedMonths.lastOrNull()?.let {
-                                runCatching { YearMonth.parse(it).year }.getOrDefault(EARLIEST_YEAR) >
-                                    EARLIEST_YEAR
+                                // `YearMonthKey.parse` 可空（宽松解析会让脏键通过），
+                                // 与原来的 `runCatching { YearMonth.parse }` 同一语义：
+                                // 解不出就当「还没到最早年份」处理
+                                (YearMonthKey.parse(it)?.year ?: EARLIEST_YEAR) > EARLIEST_YEAR
                             } ?: false),
                     )
                 }
@@ -163,12 +165,5 @@ class QzxyBillViewModel(
 
         /** 平台最早的业务月份（再往前没有数据，别为它发请求）。 */
         private const val EARLIEST_YEAR = 2017
-
-        fun factory(context: Context): ViewModelProvider.Factory =
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    QzxyBillViewModel(repo = Graph.qzxy(context.applicationContext)) as T
-            }
     }
 }

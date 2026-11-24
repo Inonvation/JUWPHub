@@ -1170,18 +1170,15 @@ internal fun JuwApp(
     // 各自持有实例，这份供侧栏入口显示登录态与余额。
     val qzxyViewModel: QzxyViewModel = viewModel(
         viewModelStoreOwner = context as ComponentActivity,
-        factory = QzxyViewModel.Factory(
-            Graph.qzxy(context),
-            QzxyBluetoothScanner(context),
-            Graph.qzxyLink(context),
-            Graph.qzxyFlowLock,
-            Graph.qzxyDevices(context),
-            Graph.qzxyDebug(context),
-            Graph.qzxyClear(context),
-            Graph.qzxyWatering(context),
-            // 侧栏实例不在冷启动取数：展开侧栏 / 打开面板时由宿主显式刷新
-            autoLoad = false,
-        ),
+        // 页面层已搬进 shared/commonMain（iOS 移植 V3）：依赖由 QzxyPlatform.viewModel
+        // 从 Graph 逐个取，与搬迁前 QzxyViewModel.Factory 的九项一一对应。
+        initializer = {
+            QzxyPlatform.viewModel(
+                context,
+                // 侧栏实例不在冷启动取数：展开侧栏 / 打开面板时由宿主显式刷新
+                autoLoad = false,
+            )
+        },
     )
 
     // ── 侧栏里的三个入口弹窗（2026-10-20）──

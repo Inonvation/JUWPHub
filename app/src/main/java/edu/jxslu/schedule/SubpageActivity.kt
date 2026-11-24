@@ -92,6 +92,9 @@ import edu.jxslu.schedule.ui.score.ScoreSettingsScreen
 import edu.jxslu.schedule.ui.score.TranscriptHistoryScreen
 import edu.jxslu.schedule.ui.qzxy.QzxyScreen
 import edu.jxslu.schedule.ui.qzxy.QzxyBillScreen
+import edu.jxslu.schedule.ui.qzxy.rememberQzxyRecharge
+import edu.jxslu.schedule.ui.qzxy.rememberQzxyScanPermission
+import edu.jxslu.schedule.ui.qzxy.QzxyBillViewModel
 import edu.jxslu.schedule.ui.qzxy.QzxyDebugScreen
 import edu.jxslu.schedule.ui.scholar.ScholarScreen
 import edu.jxslu.schedule.ui.selection.SelectionCenterScreen
@@ -399,19 +402,37 @@ class SubpageActivity : ComponentActivity() {
                     onOpenWechat = actions.openWechat,
                 )
             }
-            SubpageScreen.QZXY -> QzxyScreen(
-                onBack = onBack,
-                onOpenDiagnostics = { address ->
-                    SubpageActivity.start(this, SubpageScreen.QZXY_DEBUG, focusItemId = address)
-                },
-                autoStart = autoStart,
-            )
+            // 趣智校园三页已在 shared/commonMain（iOS 移植 V3）：VM 由宿主建，
+            // 平台动作（权限 / 支付宝深链 / 品牌位图 / 二级页跳转）逐项传进去；
+            // 回调里 null 的语义是「本平台没这项能力」，入口整行不渲染。
+            SubpageScreen.QZXY -> {
+                val scanPermission = rememberQzxyScanPermission()
+                val recharge = rememberQzxyRecharge()
+                QzxyScreen(
+                    viewModel = viewModel { QzxyPlatform.viewModel(this@SubpageActivity) },
+                    onBack = onBack,
+                    onOpenDiagnostics = { address ->
+                        SubpageActivity.start(this, SubpageScreen.QZXY_DEBUG, focusItemId = address)
+                    },
+                    autoStart = autoStart,
+                    onRequestScan = scanPermission,
+                    onOpenRecharge = recharge,
+                    onOpenBills = {
+                        SubpageActivity.start(this, SubpageScreen.QZXY_BILLS)
+                    },
+                    brandIcon = R.drawable.ic_brand_qzxy,
+                )
+            }
             SubpageScreen.QZXY_DEBUG -> QzxyDebugScreen(
+                viewModel = viewModel { QzxyPlatform.viewModel(this@SubpageActivity) },
                 focusAddress = focusItemId,
                 onBack = onBack,
             )
             // 趣智消费记录（2026-11-05）：从趣智页入口卡进来，页面自带 VM（按月拉 + 本地按时段筛）
-            SubpageScreen.QZXY_BILLS -> QzxyBillScreen(onBack = onBack)
+            SubpageScreen.QZXY_BILLS -> QzxyBillScreen(
+                viewModel = viewModel { QzxyBillViewModel(repo = Graph.qzxy(this@SubpageActivity)) },
+                onBack = onBack,
+            )
             SubpageScreen.WIDGET_SETTINGS -> WidgetSettingsScreen(onBack = onBack)
             SubpageScreen.CALENDAR_SETTINGS -> CalendarSettingsScreen(onBack = onBack)
             SubpageScreen.REMINDER_SETTINGS -> ReminderSettingsScreen(onBack = onBack)

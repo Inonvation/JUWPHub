@@ -12,6 +12,14 @@ import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSession
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
+import kotlinx.coroutines.sync.Mutex
+import edu.jxslu.schedule.data.qzxy.QzxyWateringRegistry
+import edu.jxslu.schedule.data.qzxy.QzxyPrefs
+import edu.jxslu.schedule.data.qzxy.QzxyLinkDiagnostics
+import edu.jxslu.schedule.data.qzxy.QzxyDeviceScanner
+import edu.jxslu.schedule.data.qzxy.QzxyDeviceRegistry
+import edu.jxslu.schedule.data.qzxy.QzxyBluetoothLink
+import edu.jxslu.schedule.data.qzxy.QzxyBalance
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
@@ -336,4 +344,36 @@ class GraphServices(private val context: Context) : AppServices {
     }
 
     override fun ujingReminder(): UjingReminder = ujingReminderSink
+
+    // ---- 趣智校园页面层（iOS 移植 V3，2026-11-25） ----
+    //
+    // 六条缝的 Android 实现全在 `QzxyPlatform.kt`（同包）：那里只做「转发 + 换类型」，
+    // `SharedPreferences` 的文件名与键一个不改，`QzxyGattLink` 的链路语义一行不动。
+    // 桌面趣智开水卡的两个副作用转接 `ui/widget/WaterWidgetSync`（Glance 是 Android 专有，
+    // 那个文件留在 `:app`）。
+
+    override fun qzxyBluetoothLink(): QzxyBluetoothLink = Graph.qzxyLink(appContext)
+
+    override fun qzxyLinkDiagnostics(): QzxyLinkDiagnostics =
+        AppQzxyLinkDiagnostics(Graph.qzxyLink(appContext))
+
+    override fun qzxyScanner(): QzxyDeviceScanner = QzxyPlatform.scanner(appContext)
+
+    override fun qzxyDeviceRegistry(): QzxyDeviceRegistry = QzxyPlatform.deviceRegistry(appContext)
+
+    override fun qzxyPrefs(): QzxyPrefs = QzxyPlatform.prefs(appContext)
+
+    override fun qzxyWateringRegistry(): QzxyWateringRegistry =
+        QzxyPlatform.wateringRegistry(appContext)
+
+    /** 进程级同一份：今日页面板、趣智页、诊断页共用同一条 GATT 链路，锁必须也共用。 */
+    override fun qzxyFlowLock(): Mutex = Graph.qzxyFlowLock
+
+    override suspend fun refreshQzxyWaterWidget() {
+        runCatching { WaterWidgetSync.refreshQzxyWidget(appContext) }
+    }
+
+    override suspend fun pushQzxyAccount(balance: QzxyBalance) {
+        runCatching { WaterWidgetSync.pushQzxyAccount(appContext, balance) }
+    }
 }

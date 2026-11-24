@@ -11,6 +11,14 @@ import edu.jxslu.schedule.data.prefs.recordGuessOrder
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
+import kotlinx.coroutines.sync.Mutex
+import edu.jxslu.schedule.data.qzxy.QzxyWateringRegistry
+import edu.jxslu.schedule.data.qzxy.QzxyPrefs
+import edu.jxslu.schedule.data.qzxy.QzxyLinkDiagnostics
+import edu.jxslu.schedule.data.qzxy.QzxyDeviceScanner
+import edu.jxslu.schedule.data.qzxy.QzxyDeviceRegistry
+import edu.jxslu.schedule.data.qzxy.QzxyBluetoothLink
+import edu.jxslu.schedule.data.qzxy.IosQzxyBluetoothLink
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
@@ -458,6 +466,56 @@ class IosServices : AppServices {
      * Android 的 cancel / revoke 两个动作。在那之前订单卡与 15 秒轮询照常，只是没有「洗好提醒」。
      */
     override fun ujingReminder(): UjingReminder? = null
+
+    // ---- 趣智校园页面层（iOS 移植 V3，2026-11-25） ----
+    //
+    // 页面层（`ui/qzxy`）已在 commonMain，但**这一端暂时挂不出来**：
+    // `qzxyRepository()` 仍是 null（会话里含 token，要一份加密存储；iOS 还没接 Keychain），
+    // 所以 `QzxyViewModel.fromServices()` 直接回 null，宿主不给路由。下面五个返回 null
+    // 是同一件事的另外几面，不是「先占位」——每一项缺了都对应页面上一块真实的空缺。
+
+    /**
+     * 蓝牙链路：**给出失败桩而不是 null**。
+     *
+     * [IosQzxyBluetoothLink] 的四个成员全部立刻回 `Result.failure`，状态恒为 Disconnected。
+     * 这与「本平台不支持蓝牙」是同一句话，而且比 null 更早暴露问题：接上 CoreBluetooth 之前，
+     * 任何一条走蓝牙的链路都会拿到明确的错误文案，而不是空指针。
+     */
+    override fun qzxyBluetoothLink(): QzxyBluetoothLink = iosQzxyLink
+
+    /**
+     * 链路诊断读数：**null**。
+     *
+     * 服务表与 MTU 是 GATT 服务发现的产物，iOS 侧要等 CoreBluetooth 接上才有，
+     * 而那时也未必按同一形状暴露（`CBService` / `CBCharacteristic` 的属性是另一套位）。
+     * 诊断页的「设备服务表」整块据此不渲染。
+     */
+    override fun qzxyLinkDiagnostics(): QzxyLinkDiagnostics? = null
+
+    /** BLE 扫描：**null**（iOS 侧没有 `CBCentralManager` 扫描实现）。设备弹层里「扫描」整行不渲染。 */
+    override fun qzxyDeviceScanner(): QzxyDeviceScanner? = null
+
+    /**
+     * 已绑定设备：**null**。
+     *
+     * Android 侧是 `SharedPreferences`（`qzxy_devices`），里面装着老用户已绑定的设备；
+     * iOS 没有这份介质，换成 `NSUserDefaults` 是新开一份，与老数据无关——所以这里是 null，
+     * 页面按「一台都没绑」处理，而不是给一份能写但留不住的假存储。
+     */
+    override fun qzxyDeviceRegistry(): QzxyDeviceRegistry? = null
+
+    /** 调试开关 / 记住的手机号 / 清除命令候选：**null**（页面用安全默认值，见 `QzxyPrefs` 的 KDoc）。 */
+    override fun qzxyPrefs(): QzxyPrefs? = null
+
+    /** 进行中的用水记账：**null**（没有介质，页面不会出现「待核对」态）。 */
+    override fun qzxyWateringRegistry(): QzxyWateringRegistry? = null
+
+    /** 趣智的进程级流程锁：纯内存，两端都建得起来；本端一份即可。 */
+    override fun qzxyFlowLock(): Mutex = qzxyFlowLockInstance
+
+    private val iosQzxyLink: QzxyBluetoothLink by lazy { IosQzxyBluetoothLink() }
+
+    private val qzxyFlowLockInstance: Mutex = Mutex()
 
     init {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
