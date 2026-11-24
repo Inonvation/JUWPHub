@@ -37,6 +37,8 @@ import edu.jxslu.schedule.ui.DataSelfTestStrip
 import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.selection.SelectionScreen
+import edu.jxslu.schedule.ui.exam.ExamScreen
+import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.theme.JuwTheme
 import edu.jxslu.schedule.ui.web.WebContentView
 import edu.jxslu.schedule.ui.web.WebViewController
@@ -132,6 +134,13 @@ private fun IosRoot(services: IosServices) {
                         // 二级页（选课中心 / 预选清单 / 已选课程）在 iOS 侧还没有路由，全部传 null，
                         // 对应入口整行不渲染。
                         IosPage.Selection -> SelectionScreen(onBack = { page = IosPage.Week })
+                        // 成绩（S10 搬进共享层）：读的是本地 Room 表，iOS 直接可用。
+                        // 四个平台动作全传 null——「从教务导入」「成绩设置」「盖章成绩单」
+                        // 三个入口在 iOS 侧还没有对应实现，对应行整行不渲染。
+                        IosPage.Score -> ScoreScreen(onBack = { page = IosPage.Week })
+                        // 考试（S10）：同上。考试数据来自教务同步，iOS 已有 IosJwReadSession，
+                        // 顶栏的「刷新」走 ExamSync，导入页登录后即可拉到。
+                        IosPage.Exam -> ExamScreen(onBack = { page = IosPage.Week })
                     }
                 }
                 hint?.let { text ->
@@ -176,6 +185,8 @@ private enum class IosPage(val label: String) {
     Notes("笔记"),
     Homework("作业"),
     Selection("选课"),
+    Score("成绩"),
+    Exam("考试"),
 }
 
 /**

@@ -15,6 +15,7 @@ import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.data.repo.SelectionRepository
+import edu.jxslu.schedule.data.repo.SelectionRoundsStore
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
@@ -119,6 +120,16 @@ class IosServices : AppServices {
         )
     }
 
+    /** 选课同步：同一条教务会话，轮次快照落 `appDataDir()`。 */
+    private val selectionSyncImpl: SelectionSync by lazy {
+        SelectionSync(
+            cas = session,
+            repo = SelectionRepository(juwDatabase()),
+            prefs = prefs,
+            roundsStore = SelectionRoundsStore(),
+        )
+    }
+
     override fun displayPrefs(): DisplayPrefsStore = prefs
 
     override fun scheduleRepository(): ScheduleRepository = repository
@@ -136,7 +147,13 @@ class IosServices : AppServices {
     // 下面四个都是本地表仓库，iOS 侧直接可用（Room 已搬过来，构造只要一个 JuwDatabase）。
     override fun selectionRepository(): SelectionRepository = SelectionRepository(juwDatabase())
 
-    override fun selectionSync(): SelectionSync? = null
+    /**
+     * 选课轮次与记录抓取。
+     *
+     * 与 [scheduleSync] 同一条会话（[IosJwReadSession]），所以**教务登录一次之后这里就能用**——
+     * 不必等额外的接入。轮次快照落 `SelectionRoundsStore`（文件在 `appDataDir()`）。
+     */
+    override fun selectionSync(): SelectionSync = selectionSyncImpl
 
     override fun noteRepository(): NoteRepository = NoteRepository(juwDatabase())
 
