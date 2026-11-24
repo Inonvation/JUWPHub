@@ -190,7 +190,11 @@ class SubpageActivity : ComponentActivity() {
     ) {
         when (screen) {
             SubpageScreen.TIMETABLE_MANAGE -> TimetableManageScreen(onBack = onBack)
-            SubpageScreen.DATA_SETTINGS -> DataSettingsScreen(onBack = onBack)
+            SubpageScreen.DATA_SETTINGS -> DataSettingsScreen(
+                onBack = onBack,
+                // ViewModel 由宿主创建（design/ios-port.md §11.2 ①）
+                viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
+            )
             SubpageScreen.COURSE_TWEAK -> CourseTweakScreen(onBack = onBack)
             SubpageScreen.WATER -> WaterScreen(onBack = onBack, autoStart = autoStart)
             SubpageScreen.KVCX -> KvcxScreen(onBack = onBack)

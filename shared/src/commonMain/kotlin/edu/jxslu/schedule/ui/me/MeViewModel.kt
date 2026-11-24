@@ -335,25 +335,12 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
     }
 
     /**
-     * 导出课表 JSON：**文本归本类，落盘归调起方**（与 `WeekViewModel.csvText` / `jsonText`
+     * 导出课表 JSON 的**文本**：落盘归调起方（与 `WeekViewModel.csvText` / `jsonText`
      * 同一口径——`ContentResolver` / `Uri` 是 Android 专有物，共享层看不见）。
      *
-     * [write] 返回 false = 用户取消或写入失败，两种情形都只说一句「导出失败」。
+     * 失败抛异常（`ScheduleRepository.exportJson` 自己的异常），由调起方 `runCatching` 收成一句提示。
      */
-    fun exportJson(write: (text: String) -> Boolean) {
-        viewModelScope.launch {
-            val json = runCatching { repo.exportJson() }.getOrElse {
-                _oneShot.value = OneShot.Message("导出失败：${it.message}")
-                return@launch
-            }
-            val ok = runCatching { write(json) }.getOrDefault(false)
-            _oneShot.value = if (ok) {
-                OneShot.Message("已导出课表 JSON")
-            } else {
-                OneShot.Message("导出失败：写入被取消或出错")
-            }
-        }
-    }
+    suspend fun exportJsonText(): String = repo.exportJson()
 
     /** 导入一段 JSON 文本（读文件归调起方）；null / 空 = 读取失败。 */
     fun importFromText(text: String?) {
