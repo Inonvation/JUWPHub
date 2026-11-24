@@ -1,0 +1,62 @@
+# XcodeGen 工程描述（P3，2026-11-24）
+#
+# 为什么用 xcodegen 而不是把 .xcodeproj/project.pbxproj 提交进来：
+# pbxproj 是二进制风格的老式 plist，手写几乎必错、且 diff 不可读。这里用一份 YAML
+# 描述工程，CI 上 `xcodegen generate` 现场生成 —— 工程结构改动在 diff 里一眼能看懂。
+#
+# 生成：cd iosApp && xcodegen generate
+# 生成的 JUWPHub.xcodeproj 不入库（见 iosApp/.gitignore）。
+
+name: JUWPHub
+
+options:
+  bundleIdPrefix: edu.jxslu.schedule
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+
+targets:
+  JUWPHub:
+    type: application
+    platform: iOS
+    sources:
+      - path: JUWPHub
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: edu.jxslu.schedule.ios
+        PRODUCT_NAME: JUWPHub
+        INFOPLIST_FILE: JUWPHub/Info.plist
+        # 只发 iPhone（这个 App 没有 iPad 布局，声明成 universal 反而会被审核要求截图）
+        TARGETED_DEVICE_FAMILY: "1"
+        # 生成的工程在 iosApp/ 下，所以 SRCROOT = iosApp/，共享模块在上一级
+        FRAMEWORK_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/../shared/build/bin/iosArm64/debugFramework
+        # `-framework Shared` 是主依赖；后面几个是 Kotlin/Native 静态 framework 需要的系统库
+        # （静态库不携带自己的 load command，符号要靠这里解析）。多写不报错，漏写会
+        # 报 Undefined symbols，所以宁可写全。
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -framework
+          - Shared
+          - -framework
+          - CoreImage
+          - -framework
+          - CoreGraphics
+          - -framework
+          - CoreFoundation
+          - -framework
+          - CoreText
+          - -framework
+          - QuartzCore
+          - -framework
+          - Metal
+          - -framework
+          - UIKit
+          - -framework
+          - Foundation

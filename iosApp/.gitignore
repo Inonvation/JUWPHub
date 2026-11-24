@@ -1,0 +1,5 @@
+# 生成物，不入库：工程由 iosApp/project.yml 现场生成（见该文件头的理由）
+JUWPHub.xcodeproj/
+build/
+DerivedData/
+*.ipa

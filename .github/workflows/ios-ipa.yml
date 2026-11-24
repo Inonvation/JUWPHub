@@ -1,0 +1,104 @@
+# 打 unsigned IPA（2026-11-24，iOS 移植 P3）
+#
+# 目的：**先让包能装到 iPhone 上跑起来**，再谈功能。这一版装上去看到的是链路验证屏
+# （`shared/src/commonMain/.../ui/LinkValidationScreen.kt`），故意把「iOS 的定点小数
+# 与 Android 是否一致」这个唯一已知运行期风险直接显示在屏幕上。
+#
+# 为什么是 unsigned：签一个能装的 IPA 需要 Apple 开发者证书。这里只产出**未签名**的
+# `Payload/JUWPHub.app` 打包，用户侧用 Sideloadly / SideStore 自签后安装
+# （免费 Apple ID 7 天、最多 3 个 App；¥688/年 开发者账号 1 年）。
+#
+# 与 ios-compile.yml 的分工：那个只验「编得过、链得过」（4~9 分钟，快）；
+# 这个额外跑 xcodegen + xcodebuild + 打包（更久，出的是可交付物）。
+
+name: iOS Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-port]
+    # 只有碰到 iOS 工程或共享代码才值得花 macOS 机时
+    paths:
+      - 'iosApp/**'
+      - 'shared/**'
+      - '.github/workflows/ios-ipa.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Gradle 配置阶段会连带配置 `:app`（AGP 要 compileSdk 36），macOS 上也要装齐
+      - name: 装 Android SDK 36
+        run: |
+          SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+          SDKMGR="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMGR" || SDKMGR="$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -1)"
+          yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
+          "$SDKMGR" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # 只链设备用的 arm64 framework；模拟器那份给 ios-compile.yml 验
+      - name: 链接 Shared.framework（device arm64）
+        run: ./gradlew :shared:linkDebugFrameworkIosArm64 --stacktrace
+
+      # 工程是生成的，不把 .xcodeproj 提交进仓库（见 iosApp/project.yml 文件头）
+      - name: 安装 xcodegen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        working-directory: iosApp
+        run: xcodegen generate
+
+      - name: 打印工具链
+        run: |
+          xcodebuild -version
+          ls -la iosApp
+
+      # CODE_SIGNING_ALLOWED=NO：不签名也能 build 出 .app，本步骤只要产物
+      - name: xcodebuild（不签名）
+        run: |
+          xcodebuild \
+            -project iosApp/JUWPHub.xcodeproj \
+            -scheme JUWPHub \
+            -sdk iphoneos \
+            -arch arm64 \
+            -configuration Debug \
+            -derivedDataPath iosApp/build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: 打包成 unsigned IPA
+        run: |
+          APP="iosApp/build/Build/Products/Debug-iphoneos/JUWPHub.app"
+          test -d "$APP" || { echo "::error::找不到 $APP"; find iosApp/build -name "*.app" -maxdepth 6; exit 1; }
+          rm -rf out && mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          cd out && zip -qry JUWPHub-unsigned.ipa Payload
+          ls -lh JUWPHub-unsigned.ipa
+          # 把大小与 bundle id 打出来，方便核对打的是不是这个 App
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" Payload/JUWPHub.app/Info.plist || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JUWPHub-unsigned-ipa
+          path: out/JUWPHub-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
