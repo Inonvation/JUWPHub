@@ -162,7 +162,7 @@ private fun ColumnScope.MarkdownBlock(
                             val external = refs.filterNot { isLocalImage(it) }
                             if (local.isNotEmpty()) {
                                 if (images != null) {
-                                    images.thumbnailRow(local) { name -> onImageClick?.invoke(name) }
+                                    images.thumbnailRow(local, onImageClick)
                                 } else {
                                     // 没有附件图能力：给一行说明，不静默吞掉（图还在正文里）
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

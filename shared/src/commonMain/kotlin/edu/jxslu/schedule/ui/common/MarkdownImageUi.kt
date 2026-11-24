@@ -29,6 +29,7 @@ class MarkdownImageUi(
     /**
      * 只读缩略图行：列表正文里连着的几张图合成一行 72dp 方图。
      * 与满宽图是**两种档位**（列表不能按 1080px 解码），不是同一个能力的大小参数。
+     * [onOpen] 为 null = 调用方没有查看器，缩略图不可点（与满宽图同口径）。
      */
-    val thumbnailRow: @Composable (fileNames: List<String>, onOpen: (String) -> Unit) -> Unit,
+    val thumbnailRow: @Composable (fileNames: List<String>, onOpen: ((String) -> Unit)?) -> Unit,
 )
