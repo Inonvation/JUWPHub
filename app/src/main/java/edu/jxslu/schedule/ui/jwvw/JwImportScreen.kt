@@ -115,32 +115,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
-/** 教务导入窗口的模式（DESIGN §4.14 / §4.15）。 */
-enum class JwImportMode {
-    /** 课表导入：理论 / 实验 / 考试安排，结果写进课表 Course。 */
-    Schedule,
-    /** 成绩导入：抓全部学期成绩，按学期替换入库（DESIGN §4.15）。 */
-    Scores,
-    /**
-     * 选课（DESIGN §4.35）：登录后落到学生选课中心 `/jsxsd/xsxk/xklc_list`，
-     * **只当浏览器用**——选课/退课操作由用户在教务页面上自己完成，App 不代选、
-     * 不注入、不写库。没有导入动作，底部只给「回到选课中心」一个入口。
-     */
-    Selection,
-    /**
-     * 学生评教（DESIGN §4.44）：登录后落教务主页，注入「取 token 再跳」
-     * （[JwTeachingEval]）到评教平台（`jiaowupj.juwp.edu.cn` 的 SPA）。
-     * **只当浏览器用第二例**——评教全部由用户在平台上自己完成，App 不代评、
-     * 不提交任何接口；没有导入动作，底部不出现任何按钮。
-     */
-    TeachingEval,
-    /**
-     * 只读网页核对：从各业务页顶部的「网页」图标进来，登录后直接打开目标页。
-     * **只当浏览器用第三例**——没有导入动作、不写库，复用本窗口的电脑版预览、
-     * 统一认证、返回语义与错误态。
-     */
-    Browse,
-}
+// `JwImportMode`（窗口有哪几种形态）已上移到共享层 `ui/jwvw/JwImportMode.kt`：
+// 包名不变，本文件与其余八个调用点都不用改导入。
 
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
@@ -376,7 +352,11 @@ fun JwImportScreen(
         wv.evaluateJavascript(JwWebFit.CLOSE_TOP_LAYER_JS) { raw ->
             // 关掉了一个页面弹层 → 这一下返回就用掉了，别顺带退页
             if (raw?.trim()?.removeSurrounding("\"") == "1") return@evaluateJavascript
-            val delta = JwWebBack.backDelta(wv.copyBackForwardList())
+            // 历史适配只在 Android 侧做这一处（判据在共享层的纯函数里，JVM 单测钉住）：
+            // `WebBackForwardList` 是 Android 类型，共享层看不见。
+            val list = wv.copyBackForwardList()
+            val entries = (0 until list.size).map { list.getItemAtIndex(it)?.url }
+            val delta = JwWebBack.backDelta(entries, list.currentIndex)
             if (delta != null) wv.goBackOrForward(delta) else onBack()
         }
     }

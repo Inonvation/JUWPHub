@@ -94,7 +94,7 @@ class PayCodeViewModel(
     private val db: edu.jxslu.schedule.data.local.JuwDatabase,
 ) : ViewModel() {
 
-    private val syncer = YktTurnoverSyncer(repo, db) { postYktPaymentInbox(appContext, it) }
+    private val syncer = YktTurnoverSyncer(repo, db) { postYktPaymentInbox(it) }
 
     /** 取码失败时的排查提示按它分支（口径见 `NetworkHint`）。 */
     private val isVpnActive: () -> Boolean = { JwVpnDetector.isVpnActive(appContext) }

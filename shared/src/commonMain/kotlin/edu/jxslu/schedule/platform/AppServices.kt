@@ -430,20 +430,47 @@ interface AppServices {
      */
     fun ujingReminder(): UjingReminder?
 
-    // ---- 今日页（iOS 移植 V1，2026-11-25） ----
+    // ---- 校园卡（付款码 / 流水 / 消费结果，iOS 移植 V2，2026-11-25） ----
     //
-    // 今日页搬进共享层带出来的**唯一**一个新成员。其余依赖按 `design/ios-port.md`
-    // §11.2 ④ 收成页面侧的可空槽位（服务卡 / 趣智面板 / 扫码 / 二级页栈），不在这里。
+    // `ui/campus` 里能搬的那一半带出来的两件**副作用**。两者都不是「一个服务」，
+    // 而是「本平台有没有这个东西」：桌面生活小组件（Android 的 Glance）与余额提醒
+    // （Android 的 AlarmManager + 通知渠道）。按同一把尺子做成默认空实现，
+    // 调用方（`CampusBalanceSync`）因此不用写空判。
 
     /**
-     * 宿舍报修进度快照（DESIGN §4.49，今日页收件箱卡里的报修状态行）。
+     * 桌面生活卡：把刚取到的正式卡余额推过去（零额外请求，后台另有闸门兜底）。
      *
-     * **非空**：`DormRepairStore` 是 `MirroredJsonStore`（`appDataDir()` 下一份 JSON，
-     * S7 起已在 commonMain，构造器不再吃 `Context`），两端都建得起来、读写同一份格式。
-     * 页面自己订阅 `snapshot` 并算「在途优先 / 3 天内完成」那一行。
+     * **默认空实现**：桌面小组件是 `androidx.glance`（Android 专有），iOS 没有这张卡，
+     * 所以这不是「以后补」的占位，而是本平台确实没有这个副作用。
+     * Android 侧转接 `ui/widget/LifeWidgetSync.pushCampusBalance`（口径同
+     * [pushQiekjWaterBalance]）。
+     */
+    suspend fun pushCampusBalance(cardFen: Long) {}
+
+    /**
+     * 用一份**已经在手上**的余额当场评估一次余额提醒（零额外请求）。
      *
-     * 注意它只给**快照**：拉取（`DormRepairSync`，带 WebView 登录态）还在 `:app`，
-     * 页面下拉刷新那一下通过 `onRefreshDormRepair` 回调交给宿主。
+     * 为什么不交给提醒侧自己拉：付款把余额刷低的那一刻，用户正回到页面，余额就在内存里；
+     * 再让提醒侧发一次请求只是白打服务端（`force = true` 那条口径已经用过一次了）。
+     *
+     * **默认空实现**：iOS 侧还没有通知与余额提醒（`ui/reminder` 整包是 `AlarmManager` +
+     * 通知渠道，见 `design/ios-port.md` §12.1），没有提醒可评估。
+     * Android 侧转接 `ui/reminder/BalanceAlertReminder.evaluateYktBalance`。
+     */
+    suspend fun evaluateYktBalance(cardFen: Long) {}
+
+    // ---- 宿舍报修（DESIGN §4.49，iOS 移植 V2，2026-11-25） ----
+    //
+    // 报修详情页搬进共享层带出来的。**只给本机快照存储**：真正去学工拉数据的那条链
+    // （`DormRepairSync`）还在 `:app` 的 `data/repo`，类型也还不在共享层，所以它由宿主
+    // 直接作为页面参数注入（`DormRepairScreen(onRefresh = …)`），不在这里占位。
+
+    /**
+     * 宿舍报修本机快照（解析结果 + 最近 20 条记录，JSON 落盘）。
+     *
+     * **非空**：`DormRepairStore` 早已在 `commonMain`，介质是 `appDataDir()` 下一份 JSON，
+     * 两端都能读写。必须是同一份实例——今日页卡片、报修详情页与同步链读写的都是它，
+     * 各建一个等于「同步写进 A、详情页看 B」。
      */
     fun dormRepairStore(): DormRepairStore
 }

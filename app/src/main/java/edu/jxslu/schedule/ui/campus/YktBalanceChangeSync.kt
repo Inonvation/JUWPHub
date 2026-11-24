@@ -76,7 +76,7 @@ object YktBalanceChangeSync {
                     if (!pull) return@withLock
                     val credentials = Graph.yktCredentialStore(appContext).read() ?: return@withLock
                     YktTurnoverSyncer(Graph.yktRepository(appContext), juwDatabase(appContext)) {
-                        postYktPaymentInbox(appContext, it)
+                        postYktPaymentInbox(it)
                     }.sync(
                         username = credentials.username,
                         password = credentials.password,

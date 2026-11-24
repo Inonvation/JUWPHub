@@ -19,8 +19,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.jw.JwVpnDetector
+import edu.jxslu.schedule.data.repo.DormRepairSync
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.ujing.UjingAlipay
+import edu.jxslu.schedule.data.xg.XgUrls
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.Services
@@ -46,6 +48,7 @@ import edu.jxslu.schedule.ui.me.hub.TimetableHubScreen
 import edu.jxslu.schedule.ui.campus.CampusCalendarScreen
 import edu.jxslu.schedule.ui.campus.CampusCardSettingsScreen
 import edu.jxslu.schedule.ui.campus.DormRepairScreen
+import edu.jxslu.schedule.ui.campus.DormRepairRefresh
 import edu.jxslu.schedule.ui.campus.LeaveHubScreen
 import edu.jxslu.schedule.ui.campus.PayCodeScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
@@ -264,10 +267,21 @@ class SubpageActivity : ComponentActivity() {
             SubpageScreen.KVCX -> KvcxScreen(onBack = onBack)
             SubpageScreen.KVCX_ORDERS -> KvcxOrdersScreen(onBack = onBack)
             SubpageScreen.CAMPUS_CALENDAR -> CampusCalendarScreen(onBack = onBack)
-            // 宿舍报修进度（DESIGN §4.49）：focusItemId = 学工记录 id；收件箱通知按下标定位
+            // 宿舍报修进度（DESIGN §4.49）：focusItemId = 学工记录 id；收件箱通知按下标定位。
+            // 页面已在共享层（iOS 移植 V2），两个平台动作从这里注入：
+            // 学工网页（`XgFormActivity`）与增量同步（`DormRepairSync`，类型还在 `:app` 的 data/repo）。
             SubpageScreen.DORM_REPAIR -> DormRepairScreen(
                 onBack = onBack,
                 focusItemId = focusItemId,
+                onOpenRepairPage = { XgFormActivity.start(this, XgUrls.REPAIR) },
+                onRefresh = {
+                    when (val result = Graph.dormRepairSync(this).refresh()) {
+                        is DormRepairSync.CheckResult.Ok -> DormRepairRefresh.Ok
+                        is DormRepairSync.CheckResult.Failed ->
+                            DormRepairRefresh.Failed(result.message)
+                        DormRepairSync.CheckResult.Skipped -> DormRepairRefresh.NoSession
+                    }
+                },
             )
             // 请假系统（2026-11-08）：三张学工表单的入口页，各自行里直接开 XgFormActivity
             SubpageScreen.LEAVE_HUB -> LeaveHubScreen(onBack = onBack)
@@ -692,7 +706,7 @@ class SubpageActivity : ComponentActivity() {
                         repo = services.yktRepository(),
                         credentialStore = services.yktCredentialStore(),
                         db = services.database(),
-                        postInbox = { row -> postYktPaymentInbox(this@SubpageActivity, row) },
+                        postInbox = { row -> postYktPaymentInbox(row) },
                     )
                 }
                 StatementScreen(
