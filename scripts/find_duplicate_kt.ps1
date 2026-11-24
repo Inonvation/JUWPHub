@@ -41,10 +41,17 @@ $funcs = New-Object System.Collections.ArrayList
 $privateNames = @{}
 $bigFiles = New-Object System.Collections.ArrayList
 
+# 生成物不计入「>1200 行只减不增」预算：文件大小由生成器与图标数量决定，
+# 按行数警告只会训练人忽略这条输出。判定靠文件头里那句固定标记。
+$generatedMarker = '这是生成物，不要手改'
+
 foreach ($f in $files) {
     $lines = [System.IO.File]::ReadAllLines($f.FullName)
     $rel = $f.FullName.Replace("$root\", '')
-    if ($lines.Count -gt 1200) { [void]$bigFiles.Add(('{0,6}  {1}' -f $lines.Count, $rel)) }
+    $isGenerated = ($lines.Count -gt 0) -and (($lines[0..([Math]::Min(40, $lines.Count - 1))] -join "`n").Contains($generatedMarker))
+    if (-not $isGenerated -and $lines.Count -gt 1200) {
+        [void]$bigFiles.Add(('{0,6}  {1}' -f $lines.Count, $rel))
+    }
 
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $line = $lines[$i]
