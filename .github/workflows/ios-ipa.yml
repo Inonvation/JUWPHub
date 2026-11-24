@@ -31,8 +31,12 @@ on:
       - '.github/workflows/ios-ipa.yml'
 
 concurrency:
+  # 不要 cancel-in-progress：这个 workflow 一次要排 10+ 分钟队、再跑 6~10 分钟，
+  # 被新触发掐掉等于白等。2026-11-24 实测 run 45365806747 就是这么被取消的
+  # （Canceling since a higher priority waiting request exists）。
+  # 改成排队：新的等旧的跑完。
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
