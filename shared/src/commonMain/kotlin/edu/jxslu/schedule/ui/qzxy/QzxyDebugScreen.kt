@@ -28,16 +28,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.qzxy.QzxyBluetoothScanner
-import edu.jxslu.schedule.data.qzxy.QzxyBoundDevice
-import edu.jxslu.schedule.data.qzxy.QzxyScannedDevice
+import edu.jxslu.schedule.data.qzxy.QzxyDeviceRef
+import edu.jxslu.schedule.data.qzxy.QzxyNearbyDevice
 import edu.jxslu.schedule.domain.QzxyProtocol
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -58,28 +54,22 @@ import kotlinx.coroutines.launch
  *
  * 独立窗口承载（`SubpageScreen.QZXY_DEBUG`）：页面自己不选设备，用上一页带过来的
  * 地址（[focusAddress]），没有就用上次用过的那台——诊断的对象永远是「当前这台」。
+ *
+ * iOS 移植 V3（2026-11-25）：VM 改成必填参数（宿主建，与开热水页共用同一套装配），
+ * `LocalContext` 只剩「复制到剪贴板」一件事，改用共享层的 `copyPlainText(label, text)`
+ * ——`ClipboardManager` / `UIPasteboard` 的差异在那条缝里。**没有文件导出**：这一页
+ * 复制的是文本，不是文件，所以不需要 `Uri` / `ContentResolver`。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QzxyDebugScreen(
+    /** 必填，宿主建（`design/ios-port.md` §11.2 ①）。 */
+    viewModel: QzxyViewModel,
     focusAddress: String? = null,
     onBack: () -> Unit = {},
-    viewModel: QzxyViewModel = viewModel(
-        factory = QzxyViewModel.Factory(
-            Graph.qzxy(LocalContext.current),
-            QzxyBluetoothScanner(LocalContext.current),
-            Graph.qzxyLink(LocalContext.current),
-            Graph.qzxyFlowLock,
-            Graph.qzxyDevices(LocalContext.current),
-            Graph.qzxyDebug(LocalContext.current),
-            Graph.qzxyClear(LocalContext.current),
-            Graph.qzxyWatering(LocalContext.current),
-        ),
-    ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
@@ -99,14 +89,14 @@ fun QzxyDebugScreen(
         val current = viewModel.uiState.value
         val target = focusAddress?.let { address ->
             current.boundDevices.firstOrNull { it.address.equals(address, ignoreCase = true) }
-                ?: QzxyBoundDevice(address, address)
+                ?: QzxyDeviceRef(address, address)
         } ?: viewModel.lastUsedDevice()
         target?.let { viewModel.selectBoundDevice(it) }
     }
 
     // 协议排查要精确字节，截图会丢字符，所以给一个整段复制的出口
     val copyDiagnostic: () -> Unit = {
-        copyPlainText(context, "趣智校园诊断", viewModel.diagnosticText())
+        copyPlainText("趣智校园诊断", viewModel.diagnosticText())
         scope.launch {
             snackbar.showNotice(
                 AppNoticeVisuals("诊断信息已复制，可直接粘贴发出来", tone = NoticeTone.Success),
@@ -129,7 +119,7 @@ fun QzxyDebugScreen(
                 )
             }
         } else {
-            copyPlainText(context, "趣智校园会话", text)
+            copyPlainText("趣智校园会话", text)
             scope.launch {
                 snackbar.showNotice(
                     AppNoticeVisuals(
@@ -281,7 +271,7 @@ fun QzxyDebugScreen(
  * 数据对不上时能一眼看出断在哪一侧。
  */
 @Composable
-private fun DeviceFieldReport(state: QzxyUiState, selected: QzxyScannedDevice) {
+private fun DeviceFieldReport(state: QzxyUiState, selected: QzxyNearbyDevice) {
     val info = state.serverDevice
     val deviceState = state.deviceState
     Row(

@@ -35,13 +35,21 @@ import edu.jxslu.schedule.ui.icon.AppIcons
  * 各工具的重活都在自己的页面里（水印 / 拼接 / 菜鸟批量查）。
  *
  * 2026-10-12 用户口径：卡片竖排（最初做成了两列方卡网格，用户要一行一张）。
+ *
+ * ## 入口为什么可空（iOS 移植 V3，2026-11-25）
+ *
+ * 水印与拼接**整块是位图管线**（`android.graphics.Bitmap` 解码 → 画 → 编码 → 相册 /
+ * 分享），`commonMain` 里既没有解码器也没有相册。按 `design/ios-port.md` §11.2 ④：
+ * **null = 本平台没有图像处理能力，那张卡整行不渲染**——不是「以后补」的占位。
+ * 两个都传 null 时本页只剩一句说明，iOS 侧因此不出现百宝箱入口（`SubpageScreen` 那侧
+ * 也不给路由），而不是点进去看一屏空白。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ToolboxScreen(
     onBack: () -> Unit,
-    onOpenWatermark: () -> Unit,
-    onOpenStitch: () -> Unit,
+    onOpenWatermark: (() -> Unit)? = null,
+    onOpenStitch: (() -> Unit)? = null,
 ) {
     Scaffold(
         topBar = {
@@ -99,8 +107,10 @@ private fun ToolboxTile(
     icon: ImageVector,
     title: String,
     subtitle: String,
-    onClick: () -> Unit,
+    /** null = 本平台没有这个工具，整行不渲染（见 `ToolboxScreen` 的 KDoc）。 */
+    onClick: (() -> Unit)?,
 ) {
+    if (onClick == null) return
     AppCardRow(
         modifier = Modifier.fillMaxWidth(),
         onClick = onClick,

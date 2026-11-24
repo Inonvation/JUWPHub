@@ -1,29 +1,33 @@
 package edu.jxslu.schedule.ui.qzxy
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import android.os.SystemClock
-import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.qzxy.QzxyApiException
 import edu.jxslu.schedule.data.qzxy.QzxyBalance
 import edu.jxslu.schedule.data.qzxy.QzxyBill
-import edu.jxslu.schedule.data.qzxy.QzxyBluetoothScanner
-import edu.jxslu.schedule.data.qzxy.QzxyBoundDevice
-import edu.jxslu.schedule.data.qzxy.QzxyClearStore
-import edu.jxslu.schedule.data.qzxy.QzxyDebugStore
-import edu.jxslu.schedule.data.qzxy.QzxyDeviceStore
+import edu.jxslu.schedule.data.qzxy.QzxyBluetoothLink
 import edu.jxslu.schedule.data.qzxy.QzxyDeviceInfo
-import edu.jxslu.schedule.data.qzxy.QzxyGattCharacteristicInfo
-import edu.jxslu.schedule.data.qzxy.QzxyGattLink
+import edu.jxslu.schedule.data.qzxy.QzxyDeviceRef
+import edu.jxslu.schedule.data.qzxy.QzxyDeviceRegistry
+import edu.jxslu.schedule.data.qzxy.QzxyDeviceScanner
+import edu.jxslu.schedule.data.qzxy.QzxyLinkDiagnostics
+import edu.jxslu.schedule.data.qzxy.QzxyLinkState
+import edu.jxslu.schedule.data.qzxy.QzxyNearbyDevice
+import edu.jxslu.schedule.data.qzxy.QzxyPrefs
 import edu.jxslu.schedule.data.qzxy.QzxyRateOrderData
 import edu.jxslu.schedule.data.qzxy.QzxyRateOrderRequest
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
-import edu.jxslu.schedule.data.qzxy.QzxyScannedDevice
+import edu.jxslu.schedule.data.qzxy.QzxyServiceEntry
 import edu.jxslu.schedule.data.qzxy.QzxySessionExpiredException
 import edu.jxslu.schedule.data.qzxy.QzxyWaterFlow
-import edu.jxslu.schedule.data.qzxy.QzxyWateringStore
-import edu.jxslu.schedule.data.session.SessionExpiryStore
+import edu.jxslu.schedule.data.qzxy.QzxyWateringRegistry
+import edu.jxslu.schedule.data.qzxy.qzxyDeviceKey
+import edu.jxslu.schedule.data.session.SESSION_EXPIRED_NOTICE
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.GuessTarget
+import edu.jxslu.schedule.domain.InboxKeys
+import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.QzxyClData
 import edu.jxslu.schedule.domain.QzxyFrame
 import edu.jxslu.schedule.domain.QzxyProtocol
@@ -32,12 +36,12 @@ import edu.jxslu.schedule.domain.QzxySessionLink
 import edu.jxslu.schedule.domain.QzxySign
 import edu.jxslu.schedule.domain.QzxyWatering
 import edu.jxslu.schedule.domain.QzxyWateringFormat
-import edu.jxslu.schedule.domain.GuessTarget
-import edu.jxslu.schedule.domain.InboxKeys
-import edu.jxslu.schedule.domain.InboxKind
-import edu.jxslu.schedule.SubpageScreen
+import edu.jxslu.schedule.domain.TextFmt
+import edu.jxslu.schedule.domain.YearMonthKey
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.locked
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.ui.widget.WaterWidgetSync
+import kotlin.time.TimeSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
@@ -52,10 +56,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.time.YearMonth
 
 /**
  * 趣智校园开热水页状态（DESIGN §4.30）。
@@ -96,18 +96,18 @@ data class QzxyUiState(
     val refreshingBalance: Boolean = false,
     // ── 设备 ──
     val scanning: Boolean = false,
-    val devices: List<QzxyScannedDevice> = emptyList(),
+    val devices: List<QzxyNearbyDevice> = emptyList(),
     /** 已绑定设备（DESIGN §4.30）：不扫蓝牙也能直接连，省得每次重新找。 */
-    val boundDevices: List<QzxyBoundDevice> = emptyList(),
+    val boundDevices: List<QzxyDeviceRef> = emptyList(),
     /** 上次用过的设备：今日页卡片副行显示它，诊断页单独打开时也拿它兜底。 */
-    val lastUsedDevice: QzxyBoundDevice? = null,
-    /** 设备地址（见 [QzxyScannedDevice.addressKey]）→ 服务端设备信息。查不到的不会出现在这里。 */
+    val lastUsedDevice: QzxyDeviceRef? = null,
+    /** 设备地址（见 [QzxyNearbyDevice.addressKey]）→ 服务端设备信息。查不到的不会出现在这里。 */
     val deviceInfos: Map<String, QzxyDeviceInfo> = emptyMap(),
-    val selected: QzxyScannedDevice? = null,
+    val selected: QzxyNearbyDevice? = null,
     val serverDevice: QzxyDeviceInfo? = null,
     val deviceState: QzxyProtocol.DeviceState? = null,
     /** 最近一次连接设备读回的服务表（探测与开阀都会填）。 */
-    val gattTable: List<QzxyGattCharacteristicInfo> = emptyList(),
+    val gattTable: List<QzxyServiceEntry> = emptyList(),
     /** 试签名的逐条结果。 */
     val signatureTrials: List<SignatureTrial> = emptyList(),
     /** 清除命令的试错结果（功能码 + 参数组合，逐条试）。 */
@@ -262,16 +262,46 @@ sealed interface QzxyEvent {
     data class Notice(val text: String, val tone: NoticeTone) : QzxyEvent
 }
 
+/**
+ * 趣智校园开热水页的状态机（DESIGN §4.30）。
+ *
+ * ## iOS 移植 V3（2026-11-25）：构造签名为什么变了
+ *
+ * 搬进 `shared/commonMain` 之前，本类的八个依赖全是从 `Graph.xxx(context)` 直接拿的
+ * `:app` 类型（`QzxyBluetoothScanner` / `QzxyGattLink` / 四个 `SharedPreferences` store）。
+ * 现在它们各自换成共享层的缝（`data/qzxy/QzxyPlatformSeams.kt`），由装配根注入：
+ *
+ * | 原类型 | 现类型 | 谁来给 |
+ * |---|---|---|
+ * | `QzxyGattLink` | [QzxyBluetoothLink] | Android `QzxyGattLink` 本身（S12 就实现了这条缝） |
+ * | `QzxyGattLink.serviceTable` / `negotiatedMtu` | [QzxyLinkDiagnostics] | Android 侧包一层 |
+ * | `QzxyBluetoothScanner` | [QzxyDeviceScanner] | Android 侧包一层 |
+ * | `QzxyDeviceStore` | [QzxyDeviceRegistry] | 同上 |
+ * | `QzxyDebugStore` + `QzxyClearStore` | [QzxyPrefs] | 同上 |
+ * | `QzxyWateringStore` | [QzxyWateringRegistry] | 同上 |
+ *
+ * **除了 [diagnostics] 之外全部必填**：本平台缺哪一样，宿主就不该把这个页面挂出来
+ * （`fromServices()` 会返回 null），而不是让页面在半套依赖下跑——开阀链路的每一步都
+ * 依赖它们，缺一个的后果是「下了单但没记账」这类真正的数据问题。
+ *
+ * ## 蓝牙：只走缝，不改缝
+ *
+ * 页面里所有蓝牙动作都收在 `ensureConnected` / `exchange` / `disconnect` 三个方法上
+ * （见 [requestRaw] / [ensureLink]），`QzxyGattLink` 的 MTU 协商、分包、写回执、重连
+ * 语义一行没动。iOS 侧的 [QzxyBluetoothLink] 实现是失败桩，所以那边进页会落在
+ * 「本平台不支持蓝牙」的提示上——**这是有意的**，不是待补的空实现。
+ */
 class QzxyViewModel(
     private val repo: QzxyRepository,
-    private val scanner: QzxyBluetoothScanner,
-    private val link: QzxyGattLink,
+    private val scanner: QzxyDeviceScanner,
+    private val link: QzxyBluetoothLink,
+    /** 服务表与 MTU；null = 本平台不报告诊断读数（诊断页那一块不渲染）。 */
+    private val diagnostics: QzxyLinkDiagnostics?,
     /** 进程级的「一次只跑一条流程」锁，见 [valveMutex]。 */
     private val flowLock: Mutex,
-    private val deviceStore: QzxyDeviceStore,
-    private val debugStore: QzxyDebugStore,
-    private val clearStore: QzxyClearStore,
-    private val wateringStore: QzxyWateringStore,
+    private val devices: QzxyDeviceRegistry,
+    private val prefs: QzxyPrefs,
+    private val watering: QzxyWateringRegistry,
     /**
      * 是否在 init 里自动拉学校名与余额。侧栏那份实例传 false：冷启动没人看，等侧栏展开
      * 或趣智面板打开时由宿主显式刷新；页面实例保持默认 true，进页行为不变。
@@ -284,11 +314,11 @@ class QzxyViewModel(
             loggedIn = repo.localSession() != null,
             accountPhone = repo.localSession()?.telephone.orEmpty(),
             // 会话失效后重新登录少打 11 位数字；退出登录也留着（手机号不是凭证）
-            phone = debugStore.rememberedPhone,
-            boundDevices = deviceStore.list(),
-            lastUsedDevice = deviceStore.lastUsed(),
-            debugLogEnabled = debugStore.logEnabled,
-            autoSettleEnabled = debugStore.autoSettleEnabled,
+            phone = prefs.rememberedPhone,
+            boundDevices = devices.list(),
+            lastUsedDevice = devices.lastUsed(),
+            debugLogEnabled = prefs.logEnabled,
+            autoSettleEnabled = prefs.autoSettleEnabled,
         ),
     )
     val uiState: StateFlow<QzxyUiState> = _uiState.asStateFlow()
@@ -331,6 +361,23 @@ class QzxyViewModel(
 
     /** 空闲断连的计时任务，每发一条命令就重排，见 [armIdleDisconnect]。 */
     private var idleDisconnectJob: Job? = null
+
+    /**
+     * 最近一次建链成功的那台设备地址。
+     *
+     * 缝（[QzxyBluetoothLink]）只有「没连 / 在建 / 连着」三态，没有「连着谁」——
+     * 而「能否复用」必须按地址判（见 [isConnectedTo]）。所以本类自己记：
+     * 所有建链路径（[ensureLink] / [preconnect] / [reconnect] / [reconnectQuiet]）
+     * 成功时都写这里。进程内两份 ViewModel 实例共用同一条链路时，这一份可能落后
+     * 于对方的建链——那只会让本实例多走一次 `ensureConnected`，而它是幂等的
+     * （连着同一台且服务表还在就直接复用），不会多发指令。
+     *
+     * 只在主线程读写（ViewModel 的协程与 UI 驱动），因此不加锁也不加 `@Volatile`。
+     */
+    private var lastEnsuredAddress: String? = null
+
+    /** 单调时钟起点，供 [qzxyElapsedMillis] 量间隔（替代 `SystemClock.elapsedRealtime`）。 */
+    private val monotonicMark = TimeSource.Monotonic.markNow()
 
     /** 试签名试出来的可用签名；本次会话内开阀直接用它，成功后应固化进 [QzxySign]。 */
     private var workingSignature: String? = null
@@ -393,7 +440,7 @@ class QzxyViewModel(
      */
     private fun pushWaterWidget() {
         viewModelScope.launch {
-            runCatching { WaterWidgetSync.refreshQzxyWidget(Graph.appContext) }
+            runCatching { Services.current.refreshQzxyWaterWidget() }
         }
     }
 
@@ -413,13 +460,13 @@ class QzxyViewModel(
         // 都从这条流回流。两个 ViewModel 实例各持一份状态的话，页面里开阀、
         // 今日页卡片不会跟着变。
         viewModelScope.launch {
-            wateringStore.watering.collect { watering -> applyWatering(watering) }
+            watering.watering.collect { watering -> applyWatering(watering) }
         }
         // 已绑定设备与「上次使用」也走一条流：绑定发生在趣智校园页，而今日页卡片是
         // 另一份 ViewModel 实例，只读一次 SharedPreferences 的写法会让卡片一直
         // 显示「未绑定」
         viewModelScope.launch {
-            deviceStore.state.collect { deviceState ->
+            devices.state.collect { deviceState ->
                 _uiState.update {
                     it.copy(
                         boundDevices = deviceState.bound,
@@ -441,7 +488,7 @@ class QzxyViewModel(
             _uiState.update { it.copy(loggedIn = true, phoneError = null) }
             refreshAccount()
         } else {
-            link.close()
+            link.disconnect()
             pendingOpen = null
             // 扫描也要停：登出后回调还会继续往设备列表里塞东西，而且白占着无线电
             scanner.stopScan()
@@ -449,7 +496,7 @@ class QzxyViewModel(
             // 桌面趣智开水卡（DESIGN §3.6「开水两卡」）跟着切回未登录形态；
             // 登录方向的推送由 refreshAccount 成功接管，这里不重复取数
             viewModelScope.launch {
-                runCatching { WaterWidgetSync.refreshQzxyWidget(Graph.appContext) }
+                runCatching { Services.current.refreshQzxyWaterWidget() }
             }
         }
     }
@@ -463,8 +510,8 @@ class QzxyViewModel(
         watering = state.watering,
         lastUsedDevice = state.lastUsedDevice,
         // 手机号不是凭证，退出后留在输入框里，重新登录少打 11 位
-        phone = debugStore.rememberedPhone,
-        boundDevices = deviceStore.list(),
+        phone = prefs.rememberedPhone,
+        boundDevices = devices.list(),
         debugLogEnabled = state.debugLogEnabled,
         debugLog = state.debugLog,
         autoSettleEnabled = state.autoSettleEnabled,
@@ -496,18 +543,18 @@ class QzxyViewModel(
             _uiState.update { it.copy(wateringDeviceEnded = false) }
         }
         _uiState.update { state ->
-            val active = !watering.isExpired(System.currentTimeMillis()) && !state.wateringDeviceEnded
+            val active = !watering.isExpired(AppClock.nowMillis()) && !state.wateringDeviceEnded
             when {
                 state.selected?.address.equals(watering.deviceAddress, ignoreCase = true) ->
                     state.copy(watering = watering)
                 // 真正在用水中：把选中锁到那一台，结束用水的按钮不能连错机器
                 active -> state.copy(
                     watering = watering,
-                    selected = QzxyScannedDevice(
+                    selected = QzxyNearbyDevice(
                         name = watering.deviceName,
                         address = watering.deviceAddress,
                         rssi = 0,
-                        deviceKey = QzxyBluetoothScanner.extractDeviceKey(
+                        deviceKey = qzxyDeviceKey(
                             watering.deviceName,
                             watering.deviceAddress,
                         ),
@@ -523,12 +570,12 @@ class QzxyViewModel(
             }
         }
         // 卡片副行与重进页面的默认选中都读它，名字用当次记账的那份
-        watering?.let { rememberLastUsed(QzxyBoundDevice(it.deviceAddress, it.deviceName)) }
+        watering?.let { rememberLastUsed(QzxyDeviceRef(it.deviceAddress, it.deviceName)) }
     }
 
     /** 记住这台设备：落盘 + 同步进界面状态（今日页卡片副行读的就是它）。 */
-    private fun rememberLastUsed(device: QzxyBoundDevice) {
-        deviceStore.setLastUsed(device)
+    private fun rememberLastUsed(device: QzxyDeviceRef) {
+        devices.setLastUsed(device)
         _uiState.update { it.copy(lastUsedDevice = device) }
     }
 
@@ -551,7 +598,7 @@ class QzxyViewModel(
 
     fun sendCode() = viewModelScope.launch {
         val phone = _uiState.value.phone.trim()
-        val elapsed = System.currentTimeMillis() - codeSentAt
+        val elapsed = AppClock.nowMillis() - codeSentAt
         if (elapsed < 60_000) {
             notice("验证码已发送，请 ${(60 - elapsed / 1000).toInt()} 秒后再试", NoticeTone.Warning)
             return@launch
@@ -564,7 +611,7 @@ class QzxyViewModel(
             _uiState.update { it.copy(sendingCode = true) }
             repo.sendCode(phone)
         }.onSuccess {
-            codeSentAt = System.currentTimeMillis()
+            codeSentAt = AppClock.nowMillis()
             notice("验证码已发送", NoticeTone.Success)
         }.onFailure {
             notice(it.message ?: "验证码发送失败", NoticeTone.Error)
@@ -594,7 +641,7 @@ class QzxyViewModel(
                 repo.loginByPassword(state.phone, state.password)
             }
         }.onSuccess { session ->
-            debugStore.rememberedPhone = session.telephone
+            prefs.rememberedPhone = session.telephone
             _uiState.update {
                 it.copy(
                     loggedIn = true,
@@ -618,7 +665,7 @@ class QzxyViewModel(
 
     fun logout() {
         repo.logout()
-        link.close()
+        link.disconnect()
         // 只保留与账号无关的本地事实：水可能还在流、预扣还挂着，退登录不能把它一起抹掉，
         // 否则用户重新登录后看不到「上次开阀没结算」，绑定过的设备也会凭空消失
         _uiState.update { loggedOutState(it) }
@@ -666,7 +713,7 @@ class QzxyViewModel(
             repo.validateSession(candidate)
         }.onSuccess { project ->
             repo.adoptSession(candidate)
-            candidate.telephone.takeIf { it.isNotBlank() }?.let { debugStore.rememberedPhone = it }
+            candidate.telephone.takeIf { it.isNotBlank() }?.let { prefs.rememberedPhone = it }
             _uiState.update {
                 it.copy(
                     loggedIn = true,
@@ -729,7 +776,7 @@ class QzxyViewModel(
                 .onSuccess { balance ->
                     _uiState.update { it.copy(balance = balance, balanceLoaded = true) }
                     // 桌面趣智开水卡（DESIGN §3.6「开水两卡」）：余额已经在手上，顺手推一次
-                    runCatching { WaterWidgetSync.pushQzxyAccount(Graph.appContext, balance) }
+                    runCatching { Services.current.pushQzxyAccount(balance) }
                 }
                 .onFailure { error ->
                     _uiState.update { it.copy(balanceLoaded = true) }
@@ -759,6 +806,7 @@ class QzxyViewModel(
             )
         }
         val started = scanner.startScan(
+            durationMillis = SCAN_DURATION_MILLIS,
             onDevice = { device ->
                 _uiState.update { state ->
                     if (state.devices.any { it.address == device.address }) {
@@ -792,9 +840,11 @@ class QzxyViewModel(
      *
      * 失败不打扰用户：查不到就继续显示广播名，列表本身不受影响。
      */
-    private fun queryDeviceInfo(device: QzxyScannedDevice) {
+    private fun queryDeviceInfo(device: QzxyNearbyDevice) {
         val key = device.addressKey
-        synchronized(queriedAddresses) { if (!queriedAddresses.add(key)) return }
+        // 查过的地址只查一次：locked 不是 inline，lambda 里不能非局部 return
+        val firstQuery = locked(queriedAddresses) { queriedAddresses.add(key) }
+        if (!firstQuery) return
         viewModelScope.launch {
             infoMutex.withLock {
                 val info = runCatching { repo.deviceInfo(device.address) }
@@ -816,9 +866,9 @@ class QzxyViewModel(
      */
     private fun refreshBoundName(address: String, serverName: String?) {
         val name = serverName?.takeIf { it.isNotBlank() } ?: return
-        val bound = deviceStore.list().firstOrNull { it.address.equals(address, ignoreCase = true) }
+        val bound = devices.list().firstOrNull { it.address.equals(address, ignoreCase = true) }
         if (bound != null && bound.name != name) {
-            deviceStore.add(QzxyBoundDevice(address, name))
+            devices.add(QzxyDeviceRef(address, name))
         }
     }
 
@@ -831,7 +881,7 @@ class QzxyViewModel(
      * 广播名（`KLCXKJ-…`）的话，用户退出再进来看到的就是这串认不出的东西，只能重新
      * 绑一次才变正常。
      */
-    fun bindDevice(device: QzxyScannedDevice) = viewModelScope.launch {
+    fun bindDevice(device: QzxyNearbyDevice) = viewModelScope.launch {
         val known = _uiState.value.deviceInfos[device.addressKey]
             ?.deviceName
             ?.takeIf { it.isNotBlank() }
@@ -841,29 +891,29 @@ class QzxyViewModel(
                 ?.deviceName
                 ?.takeIf { it.isNotBlank() }
             ?: device.name
-        deviceStore.add(QzxyBoundDevice(device.address, name))
+        devices.add(QzxyDeviceRef(device.address, name))
         notice("已绑定「$name」", NoticeTone.Success)
     }
 
     fun unbindDevice(address: String) {
-        deviceStore.remove(address)
+        devices.remove(address)
         notice("已解除绑定")
     }
 
     /** 选中一台已绑定设备。rssi 留 0（没扫过，没有信号值），编号按名字推。 */
-    fun selectBoundDevice(bound: QzxyBoundDevice) {
+    fun selectBoundDevice(bound: QzxyDeviceRef) {
         selectDevice(
-            QzxyScannedDevice(
+            QzxyNearbyDevice(
                 name = bound.name,
                 address = bound.address,
                 rssi = 0,
-                deviceKey = QzxyBluetoothScanner.extractDeviceKey(bound.name, bound.address),
+                deviceKey = qzxyDeviceKey(bound.name, bound.address),
             ),
         )
     }
 
     /** 选中设备并发一次 HTTP 设备信息查询，把服务端的说法与蓝牙现场对照着看。 */
-    fun selectDevice(device: QzxyScannedDevice) {
+    fun selectDevice(device: QzxyNearbyDevice) {
         // 扫描与连接抢同一个无线电，扫描不停建链会慢好几倍。用户点选设备时
         // 扫描通常还在跑（默认扫 10 秒），所以先停掉再连。
         scanner.stopScan()
@@ -884,7 +934,7 @@ class QzxyViewModel(
         preconnect(device)
         // 记下这台：今日页卡片副行与重进页面的默认选中都读它。
         // 名字先用广播名，下面服务端信息回来会换成带楼栋楼层的那份
-        rememberLastUsed(QzxyBoundDevice(device.address, device.name))
+        rememberLastUsed(QzxyDeviceRef(device.address, device.name))
         if (cached != null) return
         viewModelScope.launch {
             runCatching { repo.deviceInfo(device.address) }
@@ -900,7 +950,7 @@ class QzxyViewModel(
                         )
                     }
                     info?.deviceName?.takeIf { it.isNotBlank() }?.let { name ->
-                        rememberLastUsed(QzxyBoundDevice(device.address, name))
+                        rememberLastUsed(QzxyDeviceRef(device.address, name))
                     }
                     // 选中的这台若是已绑定的，名字也一并修正（历史数据里可能是广播名）
                     refreshBoundName(device.address, info?.deviceName)
@@ -929,15 +979,22 @@ class QzxyViewModel(
                 _uiState.update { it.copy(timings = emptyList()) }
                 step("连接设备并读取服务表")
                 // 探测要的是「这次连上时设备声明的服务表」，所以强制重连一次。
-                // 走 reconnect 而不是直接 link.connect：预连接可能正在建链。
-                val table = timed("连接") { reconnect(device) }.getOrElse { error ->
+                // 走 reconnect 而不是直接 link.ensureConnected：预连接可能正在建链。
+                timed("连接") { reconnect(device) }.getOrElse { error ->
                     fail("连接设备失败", error.message)
                     return@launch
                 }
+                // 服务表来自可选的诊断读数（[QzxyLinkDiagnostics]）。本平台不报告时
+                // 这一步仍算成功——它确实连上了，只是没有表可列。
+                val table = diagnostics?.serviceTable.orEmpty()
                 _uiState.update {
                     it.copy(
                         gattTable = table,
-                        flow = QzxyFlowState.Success("读到 ${table.size} 项服务/特征值，见下方列表"),
+                        flow = if (diagnostics == null) {
+                            QzxyFlowState.Success("已连接；本平台不报告设备服务表")
+                        } else {
+                            QzxyFlowState.Success("读到 ${table.size} 项服务/特征值，见下方列表")
+                        },
                     )
                 }
             } finally {
@@ -1059,7 +1116,7 @@ class QzxyViewModel(
      * 清除/结算后重开，每一步都必须走这里，否则就会出现第二份「下单 + 写设备」实现。
      */
     private suspend fun attemptOpenLocked(
-        device: QzxyScannedDevice,
+        device: QzxyNearbyDevice,
         forceResend: Boolean,
     ): QzxyOpenAttempt? {
         val cached = if (forceResend) {
@@ -1109,7 +1166,7 @@ class QzxyViewModel(
                         downDataHex = hex,
                         orderNo = order.orderNo,
                         preDeductMoney = order.preDeductMoney,
-                        createdAtMillis = System.currentTimeMillis(),
+                        createdAtMillis = AppClock.nowMillis(),
                     )
                     downData
                 }
@@ -1145,11 +1202,11 @@ class QzxyViewModel(
                             },
                     )
                 }
-                log("开阀成功：downData ${outcome.downData.size} 字节，MTU ${link.negotiatedMtu}")
+                log("开阀成功：downData ${outcome.downData.size} 字节，MTU ${diagnostics?.negotiatedMtu ?: 0}")
                 log("下单响应：${orderDiagnosticOf(order) ?: "-"}")
                 // 旧记账还挂着 = 上一笔没结清（或没走完对账）。覆盖前把钱的去向说清：
                 // 消费记录是长期核对渠道，App 不重复造状态。
-                if (wateringStore.watering.value != null) {
+                if (watering.watering.value != null) {
                     notice(
                         "上一笔用水的记录还没结清，已由本次覆盖。它的预扣由平台自动处理" +
                             "（一般次日）；消费记录里先显示 ¥0、退回后显示实际金额",
@@ -1158,16 +1215,16 @@ class QzxyViewModel(
                 }
                 // 开阀成功 = 进入「用水中」：状态落到 store，页面与今日页卡片同时切换。
                 // 不再给一句一次性成功文案——那一刻起用户要盯的是计时与结束按钮。
-                wateringStore.begin(
+                watering.begin(
                     QzxyWatering(
-                        startedAtMillis = System.currentTimeMillis(),
+                        startedAtMillis = AppClock.nowMillis(),
                         deviceAddress = device.address,
                         deviceName = deviceDisplayName(device),
                         preDeductMilli = preDeductMoney,
                     ),
                 )
                 // 「猜你想用」：开阀成功 = 一次真实订单（与打开趣智页无关）
-                Graph.recordGuessOrder(GuessTarget.QZXY)
+                Services.current.recordGuessOrder(GuessTarget.QZXY)
                 // 桌面趣智开水卡立刻切「用水中」（本地镜像，零网络）
                 pushWaterWidget()
                 // 成功也收掉自动修复弹窗：重试走通时它就是最后一步。
@@ -1193,7 +1250,7 @@ class QzxyViewModel(
                     QzxyProtocol.STATE_FINISHED_UNCOLLECTED
                 val busy = outcome.kind == QzxyWaterFlow.BlockedKind.DeviceBusy
                 val stale = state3 && busy
-                val ours = wateringStore.watering.value?.deviceAddress
+                val ours = watering.watering.value?.deviceAddress
                     ?.equals(device.address, ignoreCase = true) == true
                 // 状态 3 挡着时，上一单的 downData 已经没有意义；留着它只会让
                 // 下一次开阀误以为还能重发。清除后重新下单。
@@ -1248,10 +1305,10 @@ class QzxyViewModel(
     }
 
     /** 取这台设备还没过期的待重发订单；过期就顺手清掉，避免拿旧单去写。 */
-    private fun pendingOpenFor(device: QzxyScannedDevice): PendingOpen? {
+    private fun pendingOpenFor(device: QzxyNearbyDevice): PendingOpen? {
         val pending = pendingOpen ?: return null
         if (!pending.address.equals(device.address, ignoreCase = true)) return null
-        if (System.currentTimeMillis() - pending.createdAtMillis > PENDING_OPEN_TTL_MILLIS) {
+        if (AppClock.nowMillis() - pending.createdAtMillis > PENDING_OPEN_TTL_MILLIS) {
             pendingOpen = null
             return null
         }
@@ -1335,9 +1392,9 @@ class QzxyViewModel(
      * 再按设备状态分流（空闲→重发/下单，状态 3→自己的先结算，别人的先清除，
      * 结算中/出水中→只等）。清除过一遍仍是状态 3 就停手——再清也不会变。
      */
-    private suspend fun runRecoveryLocked(device: QzxyScannedDevice, kind: QzxyRecovery.Failure) {
+    private suspend fun runRecoveryLocked(device: QzxyNearbyDevice, kind: QzxyRecovery.Failure) {
         val recovery = _uiState.value.recovery ?: return
-        val startedAt = SystemClock.elapsedRealtime()
+        val startedAt = qzxyElapsedMillis()
         var note: String? = null
         var lastFailure: QzxyOpenAttempt? = null
         var opened = false
@@ -1352,7 +1409,7 @@ class QzxyViewModel(
         }
         try {
             for (round in 1..QzxyRecovery.MAX_ROUNDS) {
-                if (SystemClock.elapsedRealtime() - startedAt > QzxyRecovery.BUDGET_MILLIS) {
+                if (qzxyElapsedMillis() - startedAt > QzxyRecovery.BUDGET_MILLIS) {
                     note = "已经自动处理到时间上限"
                     break
                 }
@@ -1386,7 +1443,7 @@ class QzxyViewModel(
                 var settled = false
                 var roundFinished = false
                 for (probe in 1..QzxyRecovery.PROBES_PER_ROUND) {
-                    if (SystemClock.elapsedRealtime() - startedAt > QzxyRecovery.BUDGET_MILLIS) {
+                    if (qzxyElapsedMillis() - startedAt > QzxyRecovery.BUDGET_MILLIS) {
                         note = "已经自动处理到时间上限"
                         roundFinished = true
                         break
@@ -1558,16 +1615,16 @@ class QzxyViewModel(
     }
 
     /** 重试要用哪台：当前选中 → 上次用过 → 唯一一台已绑定。都没有返回 null。 */
-    private fun currentOrLastDevice(): QzxyScannedDevice? {
+    private fun currentOrLastDevice(): QzxyNearbyDevice? {
         _uiState.value.selected?.let { return it }
-        val bound = deviceStore.lastUsed()
+        val bound = devices.lastUsed()
             ?: _uiState.value.boundDevices.firstOrNull()
             ?: return null
-        return QzxyScannedDevice(
+        return QzxyNearbyDevice(
             name = bound.name,
             address = bound.address,
             rssi = 0,
-            deviceKey = QzxyBluetoothScanner.extractDeviceKey(bound.name, bound.address),
+            deviceKey = qzxyDeviceKey(bound.name, bound.address),
         )
     }
 
@@ -1578,9 +1635,9 @@ class QzxyViewModel(
      * 「待核对」展示，设备上那条多半已经属于别人——拿去结算等于把别人的消费
      * 记到自己账上，比清掉更糟。
      */
-    private fun recordIsOurs(device: QzxyScannedDevice): Boolean {
-        val watering = wateringStore.watering.value ?: return false
-        if (watering.isExpired(System.currentTimeMillis())) return false
+    private fun recordIsOurs(device: QzxyNearbyDevice): Boolean {
+        val watering = watering.watering.value ?: return false
+        if (watering.isExpired(AppClock.nowMillis())) return false
         return watering.deviceAddress.equals(device.address, ignoreCase = true)
     }
 
@@ -1591,13 +1648,16 @@ class QzxyViewModel(
      * GATT 上会互相拆台）。失败只写日志：下一步读状态还会再连一次，这里报错
      * 只会多一条假失败。
      */
-    private suspend fun reconnectQuiet(device: QzxyScannedDevice): Boolean =
+    private suspend fun reconnectQuiet(device: QzxyNearbyDevice): Boolean =
         connectMutex.withLock {
-            link.close()
+            link.disconnect()
             delay(QzxyRecovery.RECONNECT_SETTLE_MILLIS)
-            val ok = link.connect(device.address)
-                .onSuccess { table ->
-                    _uiState.update { it.copy(gattTable = table) }
+            val ok = link.ensureConnected(device.address)
+                .onSuccess {
+                    // 服务表是缝之外的可选读数（[QzxyLinkDiagnostics]）：没有就不填
+                    diagnostics?.serviceTable?.takeIf { it.isNotEmpty() }?.let { table ->
+                        _uiState.update { it.copy(gattTable = table) }
+                    }
                     armIdleDisconnect()
                 }
                 .onFailure { error -> log("自动重试重连失败：${error.message}") }
@@ -1606,7 +1666,7 @@ class QzxyViewModel(
         }
 
     /** 断开链路。连接期间设备不广播，短扫前必须先让出（与 [reconnectQuiet] 共用锁）。 */
-    private suspend fun closeLinkQuiet() = connectMutex.withLock { link.close() }
+    private suspend fun closeLinkQuiet() = connectMutex.withLock { link.disconnect() }
 
     /**
      * 短扫确认设备还在附近。
@@ -1614,7 +1674,7 @@ class QzxyViewModel(
      * 扫不了（没权限 / 蓝牙关着 / 页面正在扫）一律当「情况不明，继续」：这一步
      * 是加分项，不该因为它没跑起来就把整轮重试拦下。
      */
-    private suspend fun deviceSeenOrUnknown(device: QzxyScannedDevice): Boolean {
+    private suspend fun deviceSeenOrUnknown(device: QzxyNearbyDevice): Boolean {
         // 页面自己的扫描正在跑：抢过来会换掉它的回调，页面会一直停在「扫描中」
         if (_uiState.value.scanning) return true
         val found = CompletableDeferred<Boolean>()
@@ -1642,7 +1702,7 @@ class QzxyViewModel(
      * 失败不算终点——返回 false 后阶梯会改走清除（放弃上报），与失败卡上
      * 「重试结算 / 清除设备记录」两个出口的语义一致。
      */
-    private suspend fun settleQuiet(device: QzxyScannedDevice): Boolean {
+    private suspend fun settleQuiet(device: QzxyNearbyDevice): Boolean {
         _uiState.update {
             it.copy(timings = emptyList(), clearTrials = emptyList(), clearResult = null)
         }
@@ -1654,8 +1714,8 @@ class QzxyViewModel(
             verifyDelayMillis = CLEAR_VERIFY_DELAY_MILLIS,
             clearTimeoutMillis = CLEAR_TIMEOUT_MILLIS,
             maxClearAttempts = CLEAR_TRIAL_LIMIT,
-            preferredClearKey = clearStore.preferredKey,
-            nowMillis = { SystemClock.elapsedRealtime() },
+            preferredClearKey = prefs.preferredClearKey,
+            nowMillis = { qzxyElapsedMillis() },
             delayMillis = { delay(it) },
         )
         return when (outcome) {
@@ -1677,7 +1737,7 @@ class QzxyViewModel(
      */
     fun openValveFromCard() {
         if (_uiState.value.selected == null) {
-            val target = deviceStore.lastUsed()
+            val target = devices.lastUsed()
                 ?: _uiState.value.boundDevices.firstOrNull()
             if (target == null) {
                 notice("还没绑定热水器，先到趣智校园页选一台", NoticeTone.Warning)
@@ -1693,7 +1753,7 @@ class QzxyViewModel(
      *
      * 设备口径与 [openValveFromCard] 一致（上次那台 → 唯一绑定那台 → 提示去选）。
      * 已在用水 / 流程进行中 / 未登录都静默跳过；「在用水」直接问真相源
-     * [wateringStore]——init 的收集器还没发首帧时，界面状态可能落后于本地记账。
+     * [watering]——init 的收集器还没发首帧时，界面状态可能落后于本地记账。
      */
     fun requestAutoOpen() {
         if (autoOpenRequested) return
@@ -1702,8 +1762,8 @@ class QzxyViewModel(
             if (!_uiState.value.loggedIn) return@launch
             // 「在用水中」= 记账还没过期（水可能还在流），别叠一单；
             // 过期的残留记账不挡新开水——它会由对账收尾（状态 3 挡开阀时也照实报）
-            val watering = wateringStore.watering.value
-            if (watering != null && !watering.isExpired(System.currentTimeMillis())) return@launch
+            val watering = watering.watering.value
+            if (watering != null && !watering.isExpired(AppClock.nowMillis())) return@launch
             if (_uiState.value.flow !is QzxyFlowState.Idle) return@launch
             openValveFromCard()
         }
@@ -1718,7 +1778,7 @@ class QzxyViewModel(
      * 上次用过的设备。诊断页从开热水页进来时带着地址，单独打开（比如从「校园服务」）
      * 时没有地址可带，用它兜底——诊断的对象永远是「当前这台」。
      */
-    fun lastUsedDevice(): QzxyBoundDevice? = deviceStore.lastUsed()
+    fun lastUsedDevice(): QzxyDeviceRef? = devices.lastUsed()
 
     /**
      * 把本地用水记账标记为已结束，不动设备（除非用户之后自己点「结算核对」）。
@@ -1730,7 +1790,7 @@ class QzxyViewModel(
      */
     fun abandonWatering() {
         pendingOpen = null
-        wateringStore.clear()
+        watering.clear()
         _uiState.update {
             it.copy(flow = QzxyFlowState.Idle, lastSettlement = null, wateringDeviceEnded = false)
         }
@@ -1744,7 +1804,7 @@ class QzxyViewModel(
      *
      * 卡片副行、用水记账、页面标题都走这一处，免得同一个设备在三处叫三个名字。
      */
-    private fun deviceDisplayName(device: QzxyScannedDevice): String =
+    private fun deviceDisplayName(device: QzxyNearbyDevice): String =
         _uiState.value.deviceInfos[device.addressKey]?.deviceName?.takeIf { it.isNotBlank() }
             ?: _uiState.value.serverDevice?.deviceName?.takeIf { it.isNotBlank() }
             ?: device.name
@@ -1787,7 +1847,7 @@ class QzxyViewModel(
      */
     fun clearAndOpen() {
         if (_uiState.value.selected == null) {
-            val target = deviceStore.lastUsed() ?: _uiState.value.boundDevices.firstOrNull()
+            val target = devices.lastUsed() ?: _uiState.value.boundDevices.firstOrNull()
             if (target != null) selectBoundDevice(target)
         }
         val device = _uiState.value.selected ?: run {
@@ -1814,7 +1874,7 @@ class QzxyViewModel(
      * @return true = 设备回读已离开状态 3，记录确实清掉了。
      */
     private suspend fun clearDeviceRecordLocked(
-        device: QzxyScannedDevice,
+        device: QzxyNearbyDevice,
         allowIdle: Boolean = false,
         quiet: Boolean = false,
     ): Boolean {
@@ -1854,11 +1914,11 @@ class QzxyViewModel(
                 verifyDelayMillis = CLEAR_VERIFY_DELAY_MILLIS,
                 clearTimeoutMillis = CLEAR_TIMEOUT_MILLIS,
                 maxAttempts = CLEAR_TRIAL_LIMIT,
-                preferredKey = clearStore.preferredKey,
+                preferredKey = prefs.preferredClearKey,
                 delayMillis = { delay(it) },
             )
         }
-        outcome.key?.let { clearStore.preferredKey = it }
+        outcome.key?.let { prefs.preferredClearKey = it }
         _uiState.update {
             it.copy(
                 deviceState = if (outcome.cleared) null else it.deviceState,
@@ -1895,7 +1955,7 @@ class QzxyViewModel(
         // 结算对象是「那笔用水记账」的设备，不是现在选中的设备：待核对的记账不锁选中
         // （用户可以切到别的设备做准备），结算不能被切设备带偏。没有记账时才用选中那台
         // （比如失败卡里的「结算设备记录」）。
-        val device = wateringStore.watering.value?.let { deviceForWatering(it) }
+        val device = watering.watering.value?.let { deviceForWatering(it) }
             ?: _uiState.value.selected
             ?: run {
                 if (!auto) notice("请先选择设备", NoticeTone.Warning)
@@ -1916,8 +1976,8 @@ class QzxyViewModel(
                     verifyDelayMillis = CLEAR_VERIFY_DELAY_MILLIS,
                     clearTimeoutMillis = CLEAR_TIMEOUT_MILLIS,
                     maxClearAttempts = CLEAR_TRIAL_LIMIT,
-                    preferredClearKey = clearStore.preferredKey,
-                    nowMillis = { SystemClock.elapsedRealtime() },
+                    preferredClearKey = prefs.preferredClearKey,
+                    nowMillis = { qzxyElapsedMillis() },
                     delayMillis = { delay(it) },
                 )
                 when (outcome) {
@@ -1946,7 +2006,7 @@ class QzxyViewModel(
      * @return true = 值得继续轮询；false = 停（没有记账 / 到终端态 / 连续读不到设备 / 已自动结算过 / 自动结算已关）。
      */
     suspend fun reconcileWateringOnce(): Boolean {
-        val watering = wateringStore.watering.value ?: return false
+        val watering = watering.watering.value ?: return false
         // 有流程在跑：这一拍交给流程，别再动蓝牙（自动结算自己也在内）
         if (_uiState.value.flow is QzxyFlowState.Working) return true
         val device = deviceForWatering(watering) ?: return false
@@ -2015,17 +2075,17 @@ class QzxyViewModel(
     }
 
     /** 对账用的设备对象：优先当前选中那台，否则按记账里的地址重建。 */
-    private fun deviceForWatering(watering: QzxyWatering): QzxyScannedDevice? {
+    private fun deviceForWatering(watering: QzxyWatering): QzxyNearbyDevice? {
         if (watering.deviceAddress.isBlank()) return null
         val selected = _uiState.value.selected
         if (selected != null && selected.address.equals(watering.deviceAddress, ignoreCase = true)) {
             return selected
         }
-        return QzxyScannedDevice(
+        return QzxyNearbyDevice(
             name = watering.deviceName,
             address = watering.deviceAddress,
             rssi = 0,
-            deviceKey = QzxyBluetoothScanner.extractDeviceKey(watering.deviceName, watering.deviceAddress),
+            deviceKey = qzxyDeviceKey(watering.deviceName, watering.deviceAddress),
         )
     }
 
@@ -2046,7 +2106,7 @@ class QzxyViewModel(
         if (clDataRaw != null) {
             log("clData ${clDataRaw.length} 字符 → ${QzxyClData.describe(clDataPlain)}")
         }
-        result.clearKey?.let { clearStore.preferredKey = it }
+        result.clearKey?.let { prefs.preferredClearKey = it }
         _uiState.update {
             it.copy(
                 clDataRaw = result.clDataRaw,
@@ -2079,14 +2139,14 @@ class QzxyViewModel(
         startedAt?.let { start ->
             viewModelScope.launch {
                 runCatching {
-                    Graph.inboxRepository(Graph.appContext).post(
+                    Services.current.inboxRepository().post(
                         kind = InboxKind.QZXY_SESSION,
                         dedupeKey = InboxKeys.QZXY_PREFIX + start,
                         title = "用水已结算",
                         body = buildString {
                             append(wateringDeviceName?.ifBlank { null } ?: "热水器")
                             append(" · 实扣 ${milliYuanText(result.consumeMoney)}")
-                            val duration = QzxyWateringFormat.duration(System.currentTimeMillis() - start)
+                            val duration = QzxyWateringFormat.duration(AppClock.nowMillis() - start)
                             if (duration.isNotBlank()) append(" · 用时 $duration")
                         },
                         // 落点 = 趣智页（消费记录 / 账单在那里）；静默留痕不点红点
@@ -2096,7 +2156,7 @@ class QzxyViewModel(
                 }
             }
         }
-        wateringStore.clear()
+        watering.clear()
         // 桌面趣智开水卡退出「用水中」
         pushWaterWidget()
         _uiState.update {
@@ -2108,7 +2168,7 @@ class QzxyViewModel(
                 lastSettlement = QzxySettlement(
                     consumeMoneyMilli = result.consumeMoney,
                     durationMillis = startedAt?.let { start ->
-                        System.currentTimeMillis() - start
+                        AppClock.nowMillis() - start
                     },
                     note = if (result.cleared) null else "设备记录没清掉：${result.clearDetail}",
                     startedAtMillis = startedAt,
@@ -2198,7 +2258,7 @@ class QzxyViewModel(
                 appendLine("清除试错:")
                 state.clearTrials.forEach { appendLine("  ${it.label} → ${it.result}") }
             }
-            appendLine("MTU: ${link.negotiatedMtu}")
+            appendLine("MTU: ${diagnostics?.negotiatedMtu ?: 0}")
             appendLine(
                 "downData: ${state.lastDownDataHex?.length?.div(2) ?: 0} 字节 / " +
                     (state.lastDownDataHex ?: "-"),
@@ -2209,7 +2269,7 @@ class QzxyViewModel(
                 "本地用水记账: ${state.watering?.let { w ->
                     "开阀 ${QzxyWateringFormat.clockText(w.startedAtMillis)}" +
                         " 预扣 ${w.preDeductMilli ?: "-"} 厘" +
-                        if (w.isExpired(System.currentTimeMillis())) "（已过 1 小时）" else ""
+                        if (w.isExpired(AppClock.nowMillis())) "（已过 1 小时）" else ""
                 } ?: "-"}",
             )
             if (state.timings.isNotEmpty()) {
@@ -2224,7 +2284,7 @@ class QzxyViewModel(
      * 官方走的是蓝牙查询结果，服务端校验的也是这一份。
      */
     private fun buildOrderRequest(
-        device: QzxyScannedDevice,
+        device: QzxyNearbyDevice,
         state: QzxyProtocol.DeviceState,
     ): QzxyRateOrderRequest {
         val info = _uiState.value.serverDevice
@@ -2236,10 +2296,10 @@ class QzxyViewModel(
         val mac = (info?.macAddress?.takeIf { it.isNotBlank() } ?: device.address)
             .replace(":", "")
             .replace("-", "")
-            .uppercase(java.util.Locale.ROOT)
+            .uppercase()
         return QzxyRateOrderRequest(
             macAddress = mac,
-            macTypeHex = "%02x%02x".format(mainType, subType),
+            macTypeHex = TextFmt.hex2(mainType) + TextFmt.hex2(subType),
             protocolType = state.protocolType.orEmpty(),
             deviceId = state.deviceId.toString(),
             bigTypeId = info?.bigTypeId ?: mainType.toString(),
@@ -2259,7 +2319,7 @@ class QzxyViewModel(
      * 开阀不走这条缓存——开阀前必须重新读，设备状态与随机数都可能是旧的。
      */
     private suspend fun ensureDeviceState(
-        device: QzxyScannedDevice,
+        device: QzxyNearbyDevice,
         forceRefresh: Boolean = false,
     ): QzxyProtocol.DeviceState? {
         if (!forceRefresh) {
@@ -2305,8 +2365,8 @@ class QzxyViewModel(
         timeoutMillis: Int = RESPONSE_TIMEOUT_MILLIS,
     ): RawReply? {
         val frame = QzxyFrame.encode(functionCode, payload)
-        log("→ %02x %d 字节 ${QzxyFrame.bytesToHex(frame)}".format(functionCode, frame.size))
-        val raw = link.request(frame, timeoutMillis).getOrElse { error ->
+        log("→ ${TextFmt.hex2(functionCode)} ${frame.size} 字节 ${QzxyFrame.bytesToHex(frame)}")
+        val raw = link.exchange(frame, timeoutMillis).getOrElse { error ->
             log("← 发送失败：${error.message}")
             return null
         }
@@ -2325,7 +2385,7 @@ class QzxyViewModel(
             // 回包功能码对不上：多半是设备异步推的别的帧插到了前面。
             // 不能把它当这次命令的结果——那会把「上一帧的成功」读成「这次的成败」，
             // 清除命令尤其危险。当成没收到，由调用方按「设备没有回包」处理。
-            log("← 功能码不符：期望 %02x，收到 %02x，这一帧丢掉".format(functionCode, response.functionCode))
+            log("← 功能码不符：期望 ${TextFmt.hex2(functionCode)}，收到 ${TextFmt.hex2(response.functionCode)}，这一帧丢掉")
             return null
         }
         log("← ${response.summary}")
@@ -2335,31 +2395,41 @@ class QzxyViewModel(
 
     /**
      * 保证 GATT 链路可用。断过就重连一次——设备侧超时、被官方 App 抢占都会断，
-     * 而 [QzxyGattLink.request] 在彻底没回应时会主动 `close()`，下一次必须重建。
+     * 而链路在彻底没回应时会主动断开（`QzxyGattLink.request` 的既有行为），下一次必须重建。
      *
      * [announce] 为 false 时不写流程状态，只安静地失败，供试错循环用。
      */
-    private suspend fun ensureLink(device: QzxyScannedDevice, announce: Boolean): Boolean {
+    private suspend fun ensureLink(device: QzxyNearbyDevice, announce: Boolean): Boolean {
         // 建链是整条链路最慢的一段（一到两秒），选中设备时已经在后台建过一次，
         // 这里多半直接复用。加锁是为了让「预连接」与用户操作不会同时去连同一个 GATT。
         return connectMutex.withLock {
-            // 必须按地址判：连着另一台设备时 isConnected 也是 true，
+            // 必须按地址判：连着另一台设备时「已连接」也是 true，
             // 不复用会一路把指令发到别的设备上
-            if (link.isConnectedTo(device.address)) {
+            if (isConnectedTo(device.address)) {
                 // 复用链路时把缓存的服务表也填进界面：跨窗口复用（面板里开阀连上、
                 // 再进页面或诊断页）时这份表来自上一次连接，本来就该显示它
-                if (_uiState.value.gattTable.isEmpty() && link.serviceTable.isNotEmpty()) {
-                    _uiState.update { it.copy(gattTable = link.serviceTable) }
+                if (_uiState.value.gattTable.isEmpty()) {
+                    val cached = diagnostics?.serviceTable.orEmpty()
+                    if (cached.isNotEmpty()) {
+                        _uiState.update { it.copy(gattTable = cached) }
+                    }
                 }
                 return@withLock true
             }
-            link.close()
             if (announce) step("连接设备")
-            val table = link.connect(device.address).getOrElse { error ->
+            // **不在这里先 disconnect**：缝的 `ensureConnected` 自己判复用
+            // （连着同一台且服务表还在就直接返回，否则先断开再建链）。
+            // 显式断开会让「另一个窗口刚连上、本实例还不知道」的情况白断一次，
+            // 那正是搬迁前 `link.isConnectedTo` 挡掉的那一段。
+            link.ensureConnected(device.address).getOrElse { error ->
                 if (announce) fail("连接设备失败", error.message) else log("重连失败：${error.message}")
                 return@withLock false
             }
-            _uiState.update { it.copy(gattTable = table) }
+            // 缝的 `ensureConnected` 只回成败，服务表要另从诊断读数取（可空）
+            lastEnsuredAddress = device.address
+            diagnostics?.serviceTable?.takeIf { it.isNotEmpty() }?.let { table ->
+                _uiState.update { it.copy(gattTable = table) }
+            }
             // 建链成功后同样要排空闲断连：BLE 外设被连着就不再广播，我们一直占着会让
             // 这台水表在别人（和官方 App）的扫描结果里消失。预连接那条路径本来就有，
             // 用户直接点开阀走的是这一条，之前漏了
@@ -2376,19 +2446,23 @@ class QzxyViewModel(
      *
      * 不动流程状态、失败不提示：用户点开阀时会走 [ensureLink] 正常重连并报错。
      */
-    private fun preconnect(device: QzxyScannedDevice) {
+    private fun preconnect(device: QzxyNearbyDevice) {
         viewModelScope.launch {
             connectMutex.withLock {
-                if (link.isConnectedTo(device.address)) return@withLock
-                val startedAt = SystemClock.elapsedRealtime()
-                link.connect(device.address)
-                    .onSuccess { table ->
-                        _uiState.update { it.copy(gattTable = table) }
+                if (isConnectedTo(device.address)) return@withLock
+                val startedAt = qzxyElapsedMillis()
+                link.ensureConnected(device.address)
+                    .onSuccess {
+                        lastEnsuredAddress = device.address
+                        val table = diagnostics?.serviceTable.orEmpty()
+                        if (table.isNotEmpty()) {
+                            _uiState.update { it.copy(gattTable = table) }
+                        }
                         log("预连接完成，${table.size} 项服务/特征值")
                         armIdleDisconnect()
                     }
                     .onFailure { error -> log("预连接失败：${error.message}") }
-                log("预连接耗时 ${SystemClock.elapsedRealtime() - startedAt}ms")
+                log("预连接耗时 ${qzxyElapsedMillis() - startedAt}ms")
             }
         }
     }
@@ -2396,14 +2470,32 @@ class QzxyViewModel(
     /**
      * 强制重新建链，用于探测服务表。
      *
-     * 与 [preconnect] 共用 [connectMutex]：预连接可能正在建链，两个 `connect` 撞在
+     * 与 [preconnect] 共用 [connectMutex]：预连接可能正在建链，两个建链动作撞在
      * 同一个 `BluetoothGatt` 上会互相拆台。
+     *
+     * 返回 [Result]<Unit>：服务表不在缝的返回值里，调用方连上后读 [QzxyLinkDiagnostics]。
      */
-    private suspend fun reconnect(device: QzxyScannedDevice): Result<List<QzxyGattCharacteristicInfo>> =
+    private suspend fun reconnect(device: QzxyNearbyDevice): Result<Unit> =
         connectMutex.withLock {
-            link.close()
-            link.connect(device.address)
+            link.disconnect()
+            link.ensureConnected(device.address).onSuccess {
+                lastEnsuredAddress = device.address
+            }
         }
+
+    /**
+     * 链路此刻是否连着**指定**设备。
+     *
+     * 缝只暴露三态（[QzxyLinkState]），没有「连着谁」——地址由本类自己记：
+     * 所有建链都经过 [ensureLink] / [preconnect] / [reconnectQuiet] / [reconnect]，
+     * 它们都会把 [lastEnsuredAddress] 记成刚连上的那台。必须按地址判，不能只看
+     * 「已连接」：连着另一台设备时把指令发过去，就是往别人的水表上下单。
+     */
+    private fun isConnectedTo(address: String): Boolean =
+        linkConnected() && lastEnsuredAddress.equals(address, ignoreCase = true)
+
+    /** 链路是否活着（缝的三态里的 Connected）。 */
+    private fun linkConnected(): Boolean = link.connectionState.value == QzxyLinkState.Connected
 
     /**
      * 重排空闲断连计时：一段时间没有命令就主动断开，把设备让出来。
@@ -2421,14 +2513,14 @@ class QzxyViewModel(
         idleDisconnectJob = viewModelScope.launch {
             delay(IDLE_DISCONNECT_MILLIS)
             if (_uiState.value.watering != null) return@launch
-            if (!link.isConnected) return@launch
-            link.close()
+            if (!linkConnected()) return@launch
+            link.disconnect()
             log("空闲 ${IDLE_DISCONNECT_MILLIS}ms，主动断开蓝牙，把设备让出来")
         }
     }
 
     /** 安静地读一次设备状态：不写流程、不弹提示，供对账与试错循环判定用。读不到返回 null。 */
-    private suspend fun readStateQuiet(device: QzxyScannedDevice): QzxyProtocol.DeviceState? {
+    private suspend fun readStateQuiet(device: QzxyNearbyDevice): QzxyProtocol.DeviceState? {
         if (!ensureLink(device, announce = false)) return null
         val reply = requestRaw(
             QzxyProtocol.QUERY_DEVICE,
@@ -2448,7 +2540,7 @@ class QzxyViewModel(
      * 等于把解套的办法藏起来。
      */
     private suspend fun loadConsumeRecord(
-        device: QzxyScannedDevice,
+        device: QzxyNearbyDevice,
         forceRefresh: Boolean = false,
     ): ByteArray? {
         if (!forceRefresh) {
@@ -2512,7 +2604,7 @@ class QzxyViewModel(
      *
      * 蓝牙时序与成败判定全在 [QzxyWaterFlow]，这里只做接线，避免再长出第二份实现。
      */
-    private fun waterFlow(device: QzxyScannedDevice): QzxyWaterFlow {
+    private fun waterFlow(device: QzxyNearbyDevice): QzxyWaterFlow {
         val flow = QzxyWaterFlow(
             link = object : QzxyWaterFlow.Link {
                 override suspend fun request(
@@ -2521,11 +2613,11 @@ class QzxyViewModel(
                     timeoutMillis: Int,
                 ): ByteArray? {
                     // 建链是整条链路最慢的一段：真正新建过就记一笔「连接」耗时（复用不算）
-                    val wasConnected = link.isConnectedTo(device.address)
-                    val connectStart = SystemClock.elapsedRealtime()
+                    val wasConnected = isConnectedTo(device.address)
+                    val connectStart = qzxyElapsedMillis()
                     if (!ensureLink(device, announce = true)) return null
                     if (!wasConnected) {
-                        recordTiming("连接", SystemClock.elapsedRealtime() - connectStart)
+                        recordTiming("连接", qzxyElapsedMillis() - connectStart)
                     }
                     val reply = requestRaw(functionCode, payload, timeoutMillis) ?: return null
                     // 查询设备的回包顺手投射进界面状态：开阀被挡的提示与诊断都读它
@@ -2571,7 +2663,7 @@ class QzxyViewModel(
     // ── 调试日志 ──
 
     fun setDebugLogEnabled(value: Boolean) {
-        debugStore.logEnabled = value
+        prefs.logEnabled = value
         _uiState.update {
             it.copy(debugLogEnabled = value, debugLog = if (value) it.debugLog else emptyList())
         }
@@ -2579,7 +2671,7 @@ class QzxyViewModel(
 
     /** 设备关停后自动结算的开关（趣智页尾，DESIGN §4.30）。落盘即生效，两份实例各自读。 */
     fun setAutoSettleEnabled(value: Boolean) {
-        debugStore.autoSettleEnabled = value
+        prefs.autoSettleEnabled = value
         _uiState.update { it.copy(autoSettleEnabled = value) }
     }
 
@@ -2625,11 +2717,11 @@ class QzxyViewModel(
                         clearTimeoutMillis = CLEAR_TIMEOUT_MILLIS,
                         // 试错入口不受日常条数限制，整张候选表跑完
                         maxAttempts = Int.MAX_VALUE,
-                        preferredKey = clearStore.preferredKey,
+                        preferredKey = prefs.preferredClearKey,
                         delayMillis = { delay(it) },
                     )
                 }
-                outcome.key?.let { clearStore.preferredKey = it }
+                outcome.key?.let { prefs.preferredClearKey = it }
                 _uiState.update {
                     it.copy(
                         deviceState = if (outcome.cleared) null else it.deviceState,
@@ -2662,6 +2754,17 @@ class QzxyViewModel(
 
     // ── 计时与前置检查 ──
 
+    /**
+     * 单调时钟毫秒（进程内任意起点）。
+     *
+     * 原来这里全是 `android.os.SystemClock.elapsedRealtime()`。换成
+     * `TimeSource.Monotonic` 的语义**相同**：只用来量两段代码之间的间隔
+     * （建链耗时、修复阶梯的预算），从不与墙上时间比较，也不落盘。
+     * 用它而不是 [AppClock.nowMillis]：后者会被用户改系统时间或 NTP 校正带偏，
+     * 量出来的「连接耗时」可能为负。
+     */
+    private fun qzxyElapsedMillis(): Long = monotonicMark.elapsedNow().inWholeMilliseconds
+
     /** 记一段耗时。诊断文本里列出来，用来判断慢在建链、蓝牙往返还是 HTTP。 */
     private fun recordTiming(label: String, millis: Long) {
         _uiState.update { it.copy(timings = it.timings + "$label ${millis}ms") }
@@ -2669,11 +2772,11 @@ class QzxyViewModel(
 
     /** 包一段耗时。抛异常也记：失败的那一段同样是排查线索。 */
     private suspend fun <T> timed(label: String, block: suspend () -> T): T {
-        val startedAt = SystemClock.elapsedRealtime()
+        val startedAt = qzxyElapsedMillis()
         try {
             return block()
         } finally {
-            recordTiming(label, SystemClock.elapsedRealtime() - startedAt)
+            recordTiming(label, qzxyElapsedMillis() - startedAt)
         }
     }
 
@@ -2684,7 +2787,7 @@ class QzxyViewModel(
      * 结算时报「未找到订单」。选中设备时已经查过一次，这里只是兜底：
      * 查不到或没有登记地址就返回 null，由调用方报错，别拿广播地址凑数。
      */
-    private suspend fun ensureServerDevice(device: QzxyScannedDevice): QzxyDeviceInfo? {
+    private suspend fun ensureServerDevice(device: QzxyNearbyDevice): QzxyDeviceInfo? {
         _uiState.value.serverDevice
             ?.takeIf { !it.macAddress.isNullOrBlank() }
             ?.let { return it }
@@ -2740,7 +2843,7 @@ class QzxyViewModel(
     /** 开关开着才记。内容够定位问题即可，不写流水账。 */
     private fun log(message: String) {
         if (!_uiState.value.debugLogEnabled) return
-        val stamp = DEBUG_TIME_FORMAT.format(Date())
+        val stamp = debugStamp()
         _uiState.update {
             it.copy(debugLog = (it.debugLog + "[$stamp] $message").takeLast(DEBUG_LOG_LIMIT))
         }
@@ -2750,14 +2853,14 @@ class QzxyViewModel(
     private fun handleFailure(error: Throwable, fallback: String) {
         if (error is QzxySessionExpiredException) {
             repo.markExpired()
-            link.close()
+            link.disconnect()
             scanner.stopScan()
             // 用 loggedOutState 而不是空状态：会话失效不等于「这台机器上什么都没发生过」，
             // 用水中、已绑定设备、调试开关都得留着（与 syncLoginState 的登出分支同一口径）。
             // 用空状态还有个副作用：loggedIn 立刻变成 false，随后那条登录态流比较后直接
             // 返回，loggedOutState 永远轮不到执行
             _uiState.update { loggedOutState(it) }
-            notice(SessionExpiryStore.NOTICE_TEXT, NoticeTone.Warning)
+            notice(SESSION_EXPIRED_NOTICE, NoticeTone.Warning)
         } else {
             notice(error.message ?: fallback, NoticeTone.Error)
         }
@@ -2765,73 +2868,77 @@ class QzxyViewModel(
 
     override fun onCleared() {
         scanner.stopScan()
-        link.close()
+        link.disconnect()
         super.onCleared()
     }
 
-    class Factory(
-        private val repo: QzxyRepository,
-        private val scanner: QzxyBluetoothScanner,
-        /** 由 [edu.jxslu.schedule.Graph.qzxyLink] 提供，进程内一份，见那边的说明。 */
-        private val link: QzxyGattLink,
-        private val flowLock: Mutex,
-        private val deviceStore: QzxyDeviceStore,
-        private val debugStore: QzxyDebugStore,
-        private val clearStore: QzxyClearStore,
-        private val wateringStore: QzxyWateringStore,
-        private val autoLoad: Boolean = true,
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            QzxyViewModel(
-                repo,
-                scanner,
-                link,
-                flowLock,
-                deviceStore,
-                debugStore,
-                clearStore,
-                wateringStore,
-                autoLoad,
-            ) as T
-    }
+    companion object {
 
-    private companion object {
         /**
-         * 停阀后等设备结算的总时长与轮询间隔。
+         * 宿主一行构造：依赖全从 [Services] 取。
          *
+         * **返回 null = 本平台挂不出这个页面**，目前就是 iOS：`qzxyRepository()` 要一份
+         * 加密会话存储（Android 是 `EncryptedSharedPreferences`，iOS 还没有 Keychain 实现），
+         * 所以那边连仓库都是 null，页面根本没有数据来源。宿主据此**不给路由**，
+         * 而不是进页看一屏空白。
+         *
+         * Android 侧不用这个入口：它要显式传 `autoLoad` 与进程级 `Graph.qzxyFlowLock`。
+         */
+        fun fromServices(autoLoad: Boolean = true): QzxyViewModel? {
+            val services = Services.current
+            val repo = services.qzxyRepository() ?: return null
+            val scanner = services.qzxyScanner() ?: return null
+            val link = services.qzxyBluetoothLink() ?: return null
+            val devices = services.qzxyDeviceRegistry() ?: return null
+            val prefs = services.qzxyPrefs() ?: return null
+            val watering = services.qzxyWateringRegistry() ?: return null
+            return QzxyViewModel(
+                repo = repo,
+                scanner = scanner,
+                link = link,
+                diagnostics = services.qzxyLinkDiagnostics(),
+                flowLock = services.qzxyFlowLock(),
+                devices = devices,
+                prefs = prefs,
+                watering = watering,
+                autoLoad = autoLoad,
+            )
+        }
+
+        /**
+         * 停阀后等设备结算的总时长与轮询间隔。         *
          * 预算给到 12 秒是因为实测出现过状态 6（结算中）持续五秒以上的情况
          * （2026-09-27）：按老代码 5 秒就放弃，用户得手动再点一次「结束用水」。
          *
          * 循环是「先查再等」：停阀回包到达时设备往往已经结算完，原来固定先睡 600ms
          * 等于每次白等一档。间隔 300ms 也是同一个道理，查询本身只要两三百毫秒。
          */
-        const val STOP_POLL_TIMEOUT_MILLIS = 12_000L
-        const val STOP_POLL_INTERVAL_MILLIS = 300L
+        private const val STOP_POLL_TIMEOUT_MILLIS = 12_000L
+        private const val STOP_POLL_INTERVAL_MILLIS = 300L
 
         /**
          * 轮询里连续读不到状态的次数上限。到了就认定设备不理人（被抢占或断开），
          * 提前收手并照实报，别把 12 秒预算耗完再给一句「设备还没结算完」。
          */
-        const val STOP_POLL_MAX_FAILURES = 4
+        private const val STOP_POLL_MAX_FAILURES = 4
 
         /** 与 [QzxyWaterFlow.QUERY_TIMEOUT_MILLIS] 同一口径，见那边的说明。 */
-        const val QUERY_TIMEOUT_MILLIS = 3_000
+        private const val QUERY_TIMEOUT_MILLIS = 3_000
 
-        /** 一般命令的回包超时，与 [QzxyGattLink] 的默认值一致。 */
-        const val RESPONSE_TIMEOUT_MILLIS = 5_000
+        /** 一般命令的回包超时，与链路实现的默认值一致。 */
+        private const val RESPONSE_TIMEOUT_MILLIS = 5_000
 
         /**
          * 日常流程里清除命令最多试几条。候选表把服务端凭据排在前面，正常一两条就中；
          * 试错入口不受这个限制，它要跑完整张表。
          */
-        const val CLEAR_TRIAL_LIMIT = 3
+        private const val CLEAR_TRIAL_LIMIT = 3
 
         /** 发完清除命令后等设备处理的时间，再回读状态校验。 */
-        const val CLEAR_VERIFY_DELAY_MILLIS = 300L
+        private const val CLEAR_VERIFY_DELAY_MILLIS = 300L
 
         /** 清除命令的回包超时。候选表最多九条，超时给长了会把试错拖成好几分钟。 */
-        const val CLEAR_TIMEOUT_MILLIS = 2_000
+        private const val CLEAR_TIMEOUT_MILLIS = 2_000
 
         /**
          * 待重发订单的本地有效期。
@@ -2839,27 +2946,47 @@ class QzxyViewModel(
          * 服务端订单什么时候过期没有公开口径；两分钟足够用户看到失败、点一次重发，
          * 又不至于拿很久以前的 downData 去写设备。
          */
-        const val PENDING_OPEN_TTL_MILLIS = 120_000L
+        private const val PENDING_OPEN_TTL_MILLIS = 120_000L
 
         /**
          * 空闲多久主动断开蓝牙。给 60 秒：选设备到点开阀通常几秒内完成，
          * 预连接的收益还在；而一直占着链路会让这台水表在别人（和官方 App）的
          * 扫描结果里消失。
          */
-        const val IDLE_DISCONNECT_MILLIS = 60_000L
+        private const val IDLE_DISCONNECT_MILLIS = 60_000L
 
         /**
          * 用水对账连续读不到设备的次数上限。人不在设备旁时每次都要走建链超时，
          * 到上限就停（本次前台周期内不再尝试），回前台时由 [onWateringWatchResumed]
          * 复位重试。对账的节奏（间隔）在 UI 侧的驱动里。
          */
-        const val WATERING_POLL_MAX_FAILURES = 3
+        private const val WATERING_POLL_MAX_FAILURES = 3
 
         /** 调试日志上限，够翻一次现场即可。 */
-        const val DEBUG_LOG_LIMIT = 200
-        val DEBUG_TIME_FORMAT = SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA)
+        private const val DEBUG_LOG_LIMIT = 200
 
-        /** 当前月份，`yyyy-MM`。 */
-        fun currentMonth(): String = YearMonth.now().toString()
+        /** 页面里「扫描」按钮的扫描时长，与搬迁前 QzxyBluetoothScanner 的默认值一致。 */
+        private const val SCAN_DURATION_MILLIS = 10_000L
+
+        /**
+         * 调试日志的时间戳 `MM-dd HH:mm:ss`。
+         *
+         * 原来是一个 `SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA)` 常量
+         * （`SimpleDateFormat` 是 JVM 专有）。这里用 [AppClock] 取本地墙上时刻再手拼，
+         * 时区口径与搬迁前一致（都是系统默认时区），只是不再依赖 `java.text`。
+         */
+        private fun debugStamp(nowMillis: Long = AppClock.nowMillis()): String {
+            val at = AppClock.dateTimeOf(nowMillis)
+            return "${TextFmt.pad(at.monthNumber)}-${TextFmt.pad(at.dayOfMonth)} " +
+                "${TextFmt.pad(at.hour)}:${TextFmt.pad(at.minute)}:${TextFmt.pad(at.second)}"
+        }
+
+        /**
+         * 当前月份，`yyyy-MM`。
+         *
+         * 原来是 `YearMonth.now()`（`java.time`）；换成 [YearMonthKey] + [AppClock] 后
+         * `toString()` 仍是定宽 `yyyy-MM`，服务端接口参数形态不变。
+         */
+        private fun currentMonth(): String = YearMonthKey.fromDate(AppClock.today()).toString()
     }
 }

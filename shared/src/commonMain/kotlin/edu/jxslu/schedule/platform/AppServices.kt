@@ -8,7 +8,14 @@ import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.qiekj.BalanceData
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
+import edu.jxslu.schedule.data.qzxy.QzxyBalance
+import edu.jxslu.schedule.data.qzxy.QzxyBluetoothLink
+import edu.jxslu.schedule.data.qzxy.QzxyDeviceRegistry
+import edu.jxslu.schedule.data.qzxy.QzxyDeviceScanner
+import edu.jxslu.schedule.data.qzxy.QzxyLinkDiagnostics
+import edu.jxslu.schedule.data.qzxy.QzxyPrefs
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
+import edu.jxslu.schedule.data.qzxy.QzxyWateringRegistry
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.CurriculumRepository
 import edu.jxslu.schedule.data.repo.CurriculumSync
@@ -38,6 +45,7 @@ import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.sync.Mutex
 
 /**
  * 共享层向「各平台装配根」要服务的唯一入口（iOS 移植 M1，2026-11-25）。
@@ -500,6 +508,70 @@ interface AppServices {
      */
     fun dormRepairStore(): DormRepairStore
 
+    // ---- 趣智校园页面层（iOS 移植 V3，2026-11-25） ----
+    //
+    // 趣智的页面层（`ui/qzxy` 整包）搬进共享层带出来的六个成员。协议、帧编解码、
+    // 状态机与仓库早在共享层；这六件是页面**之外**的平台件：蓝牙链路的诊断读数、
+    // 扫描器、四份本机存储、进程锁与桌面小组件副作用。
+    //
+    // 五个可空成员的介质说明（为什么不是共享层的 JSON 实现）：`QzxyDeviceRegistry` /
+    // `QzxyPrefs` / `QzxyWateringRegistry` 在 Android 侧是 `SharedPreferences`，
+    // 里面装着老用户已绑定的设备与未结算的用水记账，换介质等于当场读不出来
+    // （与 `QiekjOrderHistoryStore` 同一条口径，见 `design/ios-port.md` §10.5）。
+    // 所以这里返回 null 而不是另造一份「能跑但读不到老数据」的实现。
+
+    /**
+     * 趣智的蓝牙链路（`data/qzxy/QzxyBluetoothLink` 这条既有缝）；**null = 本平台没有 BLE**。
+     *
+     * Android 侧就是 `QzxyGattLink` 本身（S12 起它已实现该接口）。iOS 侧给的是
+     * `QzxyUnimplementedBluetoothLink`——连接与收发立刻回失败，页面据此落在
+     * 「本平台不支持蓝牙」的提示上，**这是有意终态，不是待补的空实现**。
+     */
+    fun qzxyBluetoothLink(): QzxyBluetoothLink?
+
+    /**
+     * 链路的诊断读数（协商 MTU + 设备服务表）；**null = 本平台不报告诊断读数**。
+     *
+     * 只有诊断页与「探测服务」用它。单独一条缝而不是塞进 [qzxyBluetoothLink]：
+     * 后者的四个成员是「把一帧送到设备」的最小面，本轮明确不改形状
+     * （`design/ios-port.md` §12.1）。
+     */
+    fun qzxyLinkDiagnostics(): QzxyLinkDiagnostics?
+
+    /** BLE 广播扫描；**null = 本平台没有蓝牙扫描**（设备弹层里「扫描」整行不渲染）。 */
+    fun qzxyScanner(): QzxyDeviceScanner?
+
+    /** 已绑定设备与「上次使用」；**null = 本平台没有这份落点**（绑定入口不渲染）。 */
+    fun qzxyDeviceRegistry(): QzxyDeviceRegistry?
+
+    /** 调试开关 / 记住的手机号 / 清除命令候选；**null = 本平台没有这份落点**（用安全默认值）。 */
+    fun qzxyPrefs(): QzxyPrefs?
+
+    /** 进行中的用水记账；**null = 本平台没有这份落点**（结算后没有「待核对」态）。 */
+    fun qzxyWateringRegistry(): QzxyWateringRegistry?
+
+    /**
+     * 趣智的「一次只跑一条链路」进程锁（Android 是 `Graph.qzxyFlowLock`）。
+     *
+     * **非空**：`kotlinx.coroutines.sync.Mutex` 在两端都建得起来；但必须是**进程级同一份**
+     * ——今日页面板、趣智页、诊断页各持一份 ViewModel，共用同一条 GATT 链路，
+     * 各自的锁互不相识就会两个窗口同时去动设备。
+     */
+    fun qzxyFlowLock(): Mutex
+
+    /**
+     * 桌面趣智开水卡：按本地事实重刷一次快照（DESIGN §3.6「开水两卡」）。
+     *
+     * **默认空实现**：桌面小组件是 `androidx.glance`（Android 专有），iOS 没有这张卡。
+     */
+    suspend fun refreshQzxyWaterWidget() {}
+
+    /**
+     * 桌面趣智开水卡：把刚取到的余额推给小组件（零额外请求）。
+     *
+     * **默认空实现**：理由同 [refreshQzxyWaterWidget]。
+     */
+    suspend fun pushQzxyAccount(balance: QzxyBalance) {}
 }
 
 /**

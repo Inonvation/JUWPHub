@@ -1,8 +1,5 @@
 package edu.jxslu.schedule.ui.qzxy
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.BackHandler
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -43,7 +40,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,21 +49,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.R
-import edu.jxslu.schedule.data.qzxy.QzxyBluetoothScanner
 import edu.jxslu.schedule.data.qzxy.QzxyDeviceInfo
-import edu.jxslu.schedule.data.qzxy.QzxyScannedDevice
+import edu.jxslu.schedule.data.qzxy.QzxyNearbyDevice
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.domain.Money
 import edu.jxslu.schedule.domain.MoneyFormat
@@ -75,9 +62,10 @@ import edu.jxslu.schedule.domain.entrySummary
 import edu.jxslu.schedule.domain.QzxyWatering
 import edu.jxslu.schedule.domain.QzxyWateringFormat
 import edu.jxslu.schedule.domain.QzxyPhoneMask
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AccountHeroCard
+import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
-import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
@@ -85,8 +73,6 @@ import edu.jxslu.schedule.ui.common.HeroActionButton
 import edu.jxslu.schedule.ui.common.MetricCell
 import edu.jxslu.schedule.ui.common.MetricsRow
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.SubpageActivity
-import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
@@ -97,6 +83,7 @@ import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.RechargeRiskNote
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
+import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import androidx.compose.runtime.rememberCoroutineScope
 import edu.jxslu.schedule.ui.common.showNotice
@@ -113,31 +100,42 @@ import kotlinx.coroutines.launch
  * 为什么不再把调试信息留在页内：链路 2026-09-27 真机跑通之后，设备现场十四行、
  * 服务表、试签名、试清除、日志都只在协议对不上时才有用，常显会把日常动作挤到
  * 看不见的地方。需要时点页尾那一行进诊断页，内容一行没少。
+ *
+ * ## iOS 移植 V3（2026-11-25）：四件平台事收成参数
+ *
+ * 页面搬进 `commonMain` 后不再自己拿 `Context`，四个平台动作按
+ * `design/ios-port.md` §11.2 ④ 收成可空回调——**null = 本平台没有这项能力，
+ * 对应入口整行不渲染**：
+ *
+ * | 参数 | Android | iOS |
+ * |---|---|---|
+ * | [viewModel] | `viewModel { QzxyPlatform.viewModel(context) }` | 无（本平台挂不出，见 `QzxyViewModel.fromServices`） |
+ * | [onRequestScan] | 权限检查 + `startScan` | 无 BLE，扫描入口不渲染 |
+ * | [onOpenRecharge] | 支付宝小程序深链 | 没有 `alipays://` 白名单时不给入口 |
+ * | [onOpenBills] | 二级页 `QZXY_BILLS` | 无二级页栈 |
+ * | [brandIcon] | `R.drawable.ic_brand_qzxy` | null（共享层没有这套位图） |
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QzxyScreen(
+    /** 必填，宿主建（`design/ios-port.md` §11.2 ①：commonMain 里没有 `viewModel()`）。 */
+    viewModel: QzxyViewModel,
     onBack: () -> Unit = {},
     /** 打开诊断页。带当前设备地址过去，诊断页据此选中同一台。 */
     onOpenDiagnostics: (String?) -> Unit = {},
     /** 小组件「去开水」直达（WaterAutoStart）：进页自动开阀一次；普通入口保持 false。 */
     autoStart: Boolean = false,
-    viewModel: QzxyViewModel = viewModel(
-        factory = QzxyViewModel.Factory(
-            Graph.qzxy(LocalContext.current),
-            QzxyBluetoothScanner(LocalContext.current),
-            Graph.qzxyLink(LocalContext.current),
-            Graph.qzxyFlowLock,
-            Graph.qzxyDevices(LocalContext.current),
-            Graph.qzxyDebug(LocalContext.current),
-            Graph.qzxyClear(LocalContext.current),
-            Graph.qzxyWatering(LocalContext.current),
-        ),
-    ),
+    /** 请求一次扫描所需的运行时权限，回调 true = 已授权；null = 本平台没有蓝牙扫描。 */
+    onRequestScan: ((onPermissionResult: (Boolean) -> Unit) -> Unit)? = null,
+    /** 打开支付宝的趣智校园小程序充值；null = 本平台拉不起这条深链。返回 false = 没装支付宝。 */
+    onOpenRecharge: (() -> Boolean)? = null,
+    /** 打开消费记录页；null = 本平台没有二级页栈。 */
+    onOpenBills: (() -> Unit)? = null,
+    /** 品牌位图（宿主的 `R.drawable.ic_brand_*`）；null = 本平台没有这套素材。 */
+    brandIcon: Int? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     // 上次在别处判定登录过期：进页说一句为什么退回登录表单（只提示一次）
@@ -148,7 +146,7 @@ fun QzxyScreen(
     // 充值会跳出本应用、且充错账户退不回来：先在弹窗里说清账号口径，确认后才跳转
     var confirmRecharge by remember { mutableStateOf(false) }
     // 发起过充值才在下次 ON_RESUME 刷余额：页面里还有权限弹窗等其他 resume 路径，
-    // 无条件刷新会多打两轮请求（见下面的生命周期观察者）
+    // 无条件刷新会多打两轮请求（见下面的 resume 计数）
     var awaitingRecharge by remember { mutableStateOf(false) }
 
     // 桌面胶囊直达：首帧触发一次（VM 内有防重入，未登录 / 用水中 / 流程进行中会自行跳过）
@@ -156,30 +154,24 @@ fun QzxyScreen(
         if (autoStart) viewModel.requestAutoOpen()
     }
 
-    // 蓝牙扫描要运行时权限（Android 12+ 是「附近的设备」，更低版本是定位）。
-    // 授权完直接接上这次点击要做的扫描，省得用户再点一次。
-    val scanPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { result ->
-        if (result.values.all { granted -> granted }) {
-            viewModel.startScan()
-        } else {
-            scope.launch {
-                snackbar.showNotice(
-                    AppNoticeVisuals(
-                        "缺少「附近的设备」权限，扫不到热水器。可到系统设置里为本应用打开该权限后重试。",
-                        tone = NoticeTone.Warning,
-                    ),
-                )
+    // 扫描：权限是平台事（Android 12+ 是「附近的设备」，更低版本是定位），扫描本身归 VM。
+    // 没有这项能力（onRequestScan == null）时弹层里不出现「扫描」，只剩已绑定的设备。
+    val requestScan: (() -> Unit)? = onRequestScan?.let { requestPermission ->
+        {
+            requestPermission { granted ->
+                if (granted) {
+                    viewModel.startScan()
+                } else {
+                    scope.launch {
+                        snackbar.showNotice(
+                            AppNoticeVisuals(
+                                "缺少「附近的设备」权限，扫不到热水器。可到系统设置里为本应用打开该权限后重试。",
+                                tone = NoticeTone.Warning,
+                            ),
+                        )
+                    }
+                }
             }
-        }
-    }
-    val requestScan: () -> Unit = {
-        val missing = AppPermissions.missingBluetoothScan(context)
-        if (missing.isEmpty()) {
-            viewModel.startScan()
-        } else {
-            scanPermissionLauncher.launch(missing.toTypedArray())
         }
     }
 
@@ -210,7 +202,8 @@ fun QzxyScreen(
             onBack()
         }
     }
-    BackHandler(enabled = state.flow is QzxyFlowState.Working) { requestBack() }
+    // 共享层的返回缝：Android 转调 androidx.activity 的 BackHandler，iOS 空实现（无系统返回键）
+    AppBackHandler(enabled = state.flow is QzxyFlowState.Working) { requestBack() }
 
     // 账单只在页面里拉：卡片那份实例不需要它，见 QzxyViewModel.loadBillsOnce。
     // 跟着登录态跑：首启引导里登录过之后进页面、或在页面里登录，都要拉到当月账单
@@ -223,29 +216,31 @@ fun QzxyScreen(
     WateringReconcileEffect(viewModel = viewModel, enabled = state.watering != null)
 
     // 充值在支付宝里完成，回到本页（ON_RESUME）时余额要重拉，否则还显示充值前的数。
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && awaitingRecharge) {
-                awaitingRecharge = false
-                viewModel.refreshAccount()
-            }
+    // 用共享层的 `rememberResumeTick`（Android 观察 ON_RESUME，iOS 恒 0）代替
+    // `LocalLifecycleOwner` + `LifecycleEventObserver`——后两者在 commonMain 不可见。
+    val resumeTick = rememberResumeTick()
+    LaunchedEffect(resumeTick) {
+        if (awaitingRecharge) {
+            awaitingRecharge = false
+            viewModel.refreshAccount()
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val openRecharge: () -> Unit = {
-        if (QzxyRecharge.open(context)) {
-            awaitingRecharge = true
-        } else {
-            scope.launch {
-                snackbar.showNotice(
-                    AppNoticeVisuals(
-                        "没找到能打开支付宝的应用。充值在支付宝的趣智校园小程序里完成，先装一个支付宝。",
-                        tone = NoticeTone.Warning,
-                    ),
-                )
+    // 充值入口：本平台拉不起 `alipays://` 深链时整行不渲染（见 KDoc 的表格）。
+    // 回调返回 false = 这台机器上没有能打开支付宝的应用，页面负责把原因说清。
+    val openRecharge: (() -> Unit)? = onOpenRecharge?.let { open ->
+        {
+            if (open()) {
+                awaitingRecharge = true
+            } else {
+                scope.launch {
+                    snackbar.showNotice(
+                        AppNoticeVisuals(
+                            "没找到能打开支付宝的应用。充值在支付宝的趣智校园小程序里完成，先装一个支付宝。",
+                            tone = NoticeTone.Warning,
+                        ),
+                    )
+                }
             }
         }
     }
@@ -296,8 +291,10 @@ fun QzxyScreen(
                 } else {
                     QzxyHeroCard(
                         state = state,
+                        brandIcon = brandIcon,
                         onTogglePhone = viewModel::toggleShowPhone,
-                        onRecharge = { confirmRecharge = true },
+                        // 充值入口不存在时（本平台拉不起深链）卡片底部那颗按钮整块不渲染
+                        onRecharge = openRecharge?.let { { confirmRecharge = true } },
                     )
                     BalanceSection(state = state)
                     StatusCard(
@@ -306,7 +303,7 @@ fun QzxyScreen(
                         onOpenDiagnostics = onOpenDiagnostics,
                         onPickDevice = { showDeviceSheet = true },
                     )
-                    BillsEntrySection(state = state)
+                    BillsEntrySection(state = state, onOpenBills = onOpenBills)
                 }
                 PreferencesSection(
                     state = state,
@@ -356,7 +353,7 @@ fun QzxyScreen(
             confirmLabel = "去充值",
             onConfirm = {
                 confirmRecharge = false
-                openRecharge()
+                openRecharge?.invoke()
             },
             onDismiss = { confirmRecharge = false },
             // 钱付给趣智运营方，本应用只跳转；不是危险动作，确认键保持主色
@@ -527,8 +524,11 @@ private fun UnsettledNotice(watering: QzxyWatering, viewModel: QzxyViewModel) {
 @Composable
 private fun QzxyHeroCard(
     state: QzxyUiState,
+    /** 宿主给的品牌位图 id；null = 本平台没有这套素材（`AccountHeroCard` 会整块不占位）。 */
+    brandIcon: Int?,
     onTogglePhone: () -> Unit,
-    onRecharge: () -> Unit,
+    /** null = 本平台拉不起充值深链：卡片底部那颗按钮不渲染。 */
+    onRecharge: (() -> Unit)?,
 ) {
     val hasPhone = state.accountPhone.isNotBlank()
     val eye: (@Composable () -> Unit)? = if (hasPhone) {
@@ -537,7 +537,7 @@ private fun QzxyHeroCard(
         null
     }
     AccountHeroCard(
-        brandIcon = R.drawable.ic_brand_qzxy,
+        brandIcon = brandIcon,
         title = state.schoolName.ifBlank { "趣智校园" },
         subtitle = buildString {
             if (hasPhone) {
@@ -548,12 +548,14 @@ private fun QzxyHeroCard(
         },
         pill = "已登录",
         trailing = eye,
-        action = {
-            HeroActionButton(
-                text = "充值到趣智账户",
-                icon = AppIcons.WalletAdd01,
-                onClick = onRecharge,
-            )
+        action = onRecharge?.let { recharge ->
+            {
+                HeroActionButton(
+                    text = "充值到趣智账户",
+                    icon = AppIcons.WalletAdd01,
+                    onClick = recharge,
+                )
+            }
         },
     )
 }
@@ -952,7 +954,8 @@ internal fun FailedDetailDialog(
 private fun DevicePickerSheet(
     state: QzxyUiState,
     viewModel: QzxyViewModel,
-    onRequestScan: () -> Unit,
+    /** null = 本平台没有蓝牙扫描：这一行整块不渲染。 */
+    onRequestScan: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     val onSurface = MaterialTheme.colorScheme.onSurface
@@ -1019,7 +1022,8 @@ private fun DevicePickerSheet(
                 )
                 if (state.scanning) {
                     TextButton(onClick = { viewModel.stopScan() }) { Text("停止") }
-                } else {
+                } else if (onRequestScan != null) {
+                    // 本平台没有蓝牙扫描时这一行连标题一起不渲染：只剩「已绑定」
                     TextButton(onClick = onRequestScan) { Text("扫描") }
                 }
             }
@@ -1079,7 +1083,7 @@ private fun DevicePickerSheet(
  * 设备列表项的副行：查到了服务端信息就把位置补上，并把广播名留在最前面——
  * 它是现场唯一不会骗人的标识，服务端那条记录有可能是别人登记错的。
  */
-private fun deviceSubtitle(device: QzxyScannedDevice, info: QzxyDeviceInfo?): String = buildList {
+private fun deviceSubtitle(device: QzxyNearbyDevice, info: QzxyDeviceInfo?): String = buildList {
     if (info?.deviceName?.isNotBlank() == true) add(device.name)
     info?.let { detail ->
         val place = listOfNotNull(detail.buildingName, detail.floorName, detail.roomName)
@@ -1150,14 +1154,15 @@ private fun DeviceRow(
  * 数字仍然只来自服务端账单（`order/query/account/bill/list`），本地不推算。
  */
 @Composable
-private fun BillsEntrySection(state: QzxyUiState) {
-    val context = LocalContext.current
+private fun BillsEntrySection(state: QzxyUiState, onOpenBills: (() -> Unit)?) {
+    // 没有二级页栈的平台（iOS）连这张卡一起不渲染：一个点了没反应的行比没有更糟
+    if (onOpenBills == null) return
     SettingsSection(title = "消费记录") {
         SettingItem(
             title = "账单明细",
             subtitle = "今日 / 本周 / 本月 / 全部 · 按日分组",
             value = if (state.billLoaded) entrySummary(state.bills) else null,
-            onClick = { SubpageActivity.start(context, SubpageScreen.QZXY_BILLS) },
+            onClick = onOpenBills,
         )
     }
 }

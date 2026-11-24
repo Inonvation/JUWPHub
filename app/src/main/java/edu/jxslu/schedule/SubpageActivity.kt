@@ -23,6 +23,7 @@ import edu.jxslu.schedule.data.repo.DormRepairSync
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.ujing.UjingAlipay
 import edu.jxslu.schedule.data.xg.XgUrls
+import edu.jxslu.schedule.domain.CainiaoQuery
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.Services
@@ -60,6 +61,7 @@ import edu.jxslu.schedule.ui.common.rememberMarkdownImageUi
 import edu.jxslu.schedule.ui.common.rememberMarkdownUi
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
+import edu.jxslu.schedule.ui.common.ShortcutLauncher
 import edu.jxslu.schedule.ui.common.washerScanIntent
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
@@ -95,6 +97,9 @@ import edu.jxslu.schedule.ui.score.ScoreSettingsScreen
 import edu.jxslu.schedule.ui.score.TranscriptHistoryScreen
 import edu.jxslu.schedule.ui.qzxy.QzxyScreen
 import edu.jxslu.schedule.ui.qzxy.QzxyBillScreen
+import edu.jxslu.schedule.ui.qzxy.rememberQzxyRecharge
+import edu.jxslu.schedule.ui.qzxy.rememberQzxyScanPermission
+import edu.jxslu.schedule.ui.qzxy.QzxyBillViewModel
 import edu.jxslu.schedule.ui.qzxy.QzxyDebugScreen
 import edu.jxslu.schedule.ui.scholar.ScholarScreen
 import edu.jxslu.schedule.ui.selection.SelectionCenterScreen
@@ -413,19 +418,37 @@ class SubpageActivity : ComponentActivity() {
                     onOpenWechat = actions.openWechat,
                 )
             }
-            SubpageScreen.QZXY -> QzxyScreen(
-                onBack = onBack,
-                onOpenDiagnostics = { address ->
-                    SubpageActivity.start(this, SubpageScreen.QZXY_DEBUG, focusItemId = address)
-                },
-                autoStart = autoStart,
-            )
+            // 趣智校园三页已在 shared/commonMain（iOS 移植 V3）：VM 由宿主建，
+            // 平台动作（权限 / 支付宝深链 / 品牌位图 / 二级页跳转）逐项传进去；
+            // 回调里 null 的语义是「本平台没这项能力」，入口整行不渲染。
+            SubpageScreen.QZXY -> {
+                val scanPermission = rememberQzxyScanPermission()
+                val recharge = rememberQzxyRecharge()
+                QzxyScreen(
+                    viewModel = viewModel { QzxyPlatform.viewModel(this@SubpageActivity) },
+                    onBack = onBack,
+                    onOpenDiagnostics = { address ->
+                        SubpageActivity.start(this, SubpageScreen.QZXY_DEBUG, focusItemId = address)
+                    },
+                    autoStart = autoStart,
+                    onRequestScan = scanPermission,
+                    onOpenRecharge = recharge,
+                    onOpenBills = {
+                        SubpageActivity.start(this, SubpageScreen.QZXY_BILLS)
+                    },
+                    brandIcon = R.drawable.ic_brand_qzxy,
+                )
+            }
             SubpageScreen.QZXY_DEBUG -> QzxyDebugScreen(
+                viewModel = viewModel { QzxyPlatform.viewModel(this@SubpageActivity) },
                 focusAddress = focusItemId,
                 onBack = onBack,
             )
             // 趣智消费记录（2026-11-05）：从趣智页入口卡进来，页面自带 VM（按月拉 + 本地按时段筛）
-            SubpageScreen.QZXY_BILLS -> QzxyBillScreen(onBack = onBack)
+            SubpageScreen.QZXY_BILLS -> QzxyBillScreen(
+                viewModel = viewModel { QzxyBillViewModel(repo = Graph.qzxy(this@SubpageActivity)) },
+                onBack = onBack,
+            )
             SubpageScreen.WIDGET_SETTINGS -> WidgetSettingsScreen(onBack = onBack)
             SubpageScreen.CALENDAR_SETTINGS -> CalendarSettingsScreen(onBack = onBack)
             SubpageScreen.REMINDER_SETTINGS -> ReminderSettingsScreen(onBack = onBack)
@@ -661,7 +684,19 @@ class SubpageActivity : ComponentActivity() {
             )
             SubpageScreen.TOOLBOX_WATERMARK -> WatermarkScreen(onBack = onBack)
             SubpageScreen.TOOLBOX_STITCH -> StitchScreen(onBack = onBack)
-            SubpageScreen.TOOLBOX_CAINIAO -> CainiaoQueryScreen(onBack = onBack)
+            // 菜鸟批量查已搬进 shared/commonMain（iOS 移植 V3）：本平台能做的事只剩
+            // 「装没装菜鸟」+「按 scheme 拉起」，两句都是 Android 的，收在这个回调里。
+            // 返回 null = 已经交给系统；非 null = 给用户看的失败原因。
+            SubpageScreen.TOOLBOX_CAINIAO -> CainiaoQueryScreen(
+                onBack = onBack,
+                onOpenCainiao = { item ->
+                    if (packageManager.getLaunchIntentForPackage(CainiaoQuery.PKG) == null) {
+                        "未安装菜鸟 App"
+                    } else {
+                        ShortcutLauncher.launch(this, item)
+                    }
+                },
+            )
             SubpageScreen.QUIET_HOURS -> QuietHoursScreen(onBack = onBack)
             SubpageScreen.ACCOUNTS -> AccountsHubScreen(
                 onBack = onBack,

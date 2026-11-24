@@ -29,19 +29,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.CainiaoQuery
 import edu.jxslu.schedule.domain.ShortcutItem
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.ui.common.ShortcutLauncher
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
@@ -57,16 +55,27 @@ import kotlinx.coroutines.launch
  * 大小写不敏感去重 · 上限 20），被丢掉的「重复 / 杂项 / 超上限」在计数行里报数，
  * 不静默少发。最近提交存本机 DataStore（见
  * [edu.jxslu.schedule.data.prefs.DisplayPrefsStore.updateCainiaoQueryHistory]），点一条回填输入框。
+ *
+ * ## 拉起外部应用为什么是回调（iOS 移植 V3，2026-11-25）
+ *
+ * 「有没有装菜鸟」「能不能按 scheme 拉起它」都是平台能力：Android 是
+ * `packageManager.getLaunchIntentForPackage` + `ShortcutLauncher`（显式 intent 优先，
+ * 退到 `market://` / 官网），iOS 要 `LSApplicationQueriesSchemes` 白名单 + `openURL`，
+ * 两端没有一行共用代码。所以 [onOpenCainiao] 由宿主给：**返回 null = 已经交给系统，
+ * 非 null = 给用户看的失败原因**；传 null（整个回调为 null）= 本平台拉不起外部应用，
+ * 底部的「发送到菜鸟」整块不渲染，而不是留一个点了没反应的按钮。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CainiaoQueryScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
+fun CainiaoQueryScreen(
+    onBack: () -> Unit,
+    /** 见 KDoc：null = 本平台没有拉起外部应用的能力。 */
+    onOpenCainiao: ((ShortcutItem) -> String?)? = null,
+) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    val prefs = remember(context) { Graph.displayPrefs(context) }
-    val historyFlow = remember(context) { prefs.cainiaoQueryHistory }
-    val history by historyFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val prefs = remember { Services.current.displayPrefs() }
+    val history by prefs.cainiaoQueryHistory.collectAsStateWithLifecycle(initialValue = emptyList())
 
     var input by remember { mutableStateOf("") }
     val parsed = remember(input) { CainiaoQuery.parseInput(input) }
@@ -75,14 +84,8 @@ fun CainiaoQueryScreen(onBack: () -> Unit) {
     fun send() {
         val items = CainiaoQuery.parseInput(input).numbers
         if (items.isEmpty()) return
-        if (context.packageManager.getLaunchIntentForPackage(CainiaoQuery.PKG) == null) {
-            scope.launch {
-                snackbar.showNotice(AppNoticeVisuals("未安装菜鸟 App", tone = NoticeTone.Error))
-            }
-            return
-        }
-        val error = ShortcutLauncher.launch(
-            context,
+        val open = onOpenCainiao ?: return
+        val error = open(
             ShortcutItem(
                 id = "cainiao_batch_query",
                 name = "菜鸟批量查",
@@ -117,14 +120,17 @@ fun CainiaoQueryScreen(onBack: () -> Unit) {
                 },
             )
         },
-        // 主操作冻结在底部（DESIGN §4.47）：输入框与计数行留在内容里
+        // 主操作冻结在底部（DESIGN §4.47）：输入框与计数行留在内容里。
+        // 拉不起外部应用的平台（onOpenCainiao == null）连这条按钮条一起不渲染。
         bottomBar = {
-            ToolboxActionBar {
-                Button(
-                    onClick = { send() },
-                    enabled = parsed.numbers.isNotEmpty(),
-                    modifier = Modifier.weight(1f),
-                ) { Text("发送到菜鸟") }
+            if (onOpenCainiao != null) {
+                ToolboxActionBar {
+                    Button(
+                        onClick = { send() },
+                        enabled = parsed.numbers.isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("发送到菜鸟") }
+                }
             }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },

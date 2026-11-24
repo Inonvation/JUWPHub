@@ -18,12 +18,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.data.qzxy.QzxyBill
 import edu.jxslu.schedule.domain.BillRange
 import edu.jxslu.schedule.domain.billMoneyText
@@ -31,6 +28,7 @@ import edu.jxslu.schedule.domain.groupBillsByDay
 import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.domain.parseBillCents
 import edu.jxslu.schedule.domain.parseBillTime
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
@@ -50,9 +48,8 @@ import edu.jxslu.schedule.ui.common.SettingsSection
 @Composable
 fun QzxyBillScreen(
     onBack: () -> Unit,
-    viewModel: QzxyBillViewModel = viewModel(
-        factory = QzxyBillViewModel.factory(LocalContext.current),
-    ),
+    /** 必填，宿主建（design/ios-port.md §11.2 ①：commonMain 里没有 iewModel()）。 */
+    viewModel: QzxyBillViewModel,
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
