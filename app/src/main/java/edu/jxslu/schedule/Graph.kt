@@ -6,6 +6,7 @@ import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.ai.AiCredentialStore
 import edu.jxslu.schedule.data.ai.AiScheduleClient
+import edu.jxslu.schedule.data.ai.createAiScheduleClient
 import edu.jxslu.schedule.data.kqcx.KqcxAuthClient
 import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
 import edu.jxslu.schedule.data.kqcx.KqxCredentialStore
@@ -971,7 +972,7 @@ object Graph {
     /** AI 调课服务客户端单例（DESIGN §4.39）：OkHttp 连接池只建一次；无日志拦截器。 */
     fun aiScheduleClient(context: Context): AiScheduleClient =
         aiScheduleClient ?: synchronized(this) {
-            aiScheduleClient ?: AiScheduleClient.create().also { aiScheduleClient = it }
+            aiScheduleClient ?: createAiScheduleClient().also { aiScheduleClient = it }
         }
 
     /**
