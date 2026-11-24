@@ -57,7 +57,7 @@ fun RechargeHost(
     /** 壳层 Snackbar（充值流程的提示共用这一份） */
     snackbar: SnackbarHostState,
     scope: CoroutineScope,
-    viewModel: LifeViewModel = viewModel(factory = LifeViewModel.Factory(LocalContext.current)),
+    viewModel: LifeViewModel = viewModel(factory = lifeViewModelFactory(LocalContext.current)),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current

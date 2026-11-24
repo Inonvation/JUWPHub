@@ -1,10 +1,7 @@
 package edu.jxslu.schedule.ui.life
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.power.PowerException
 import edu.jxslu.schedule.data.power.PowerEntryState
@@ -13,13 +10,12 @@ import edu.jxslu.schedule.data.power.PowerModels
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerSnapshot
-import edu.jxslu.schedule.data.jw.JwVpnDetector
 import edu.jxslu.schedule.data.session.NetworkHint
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -83,9 +79,26 @@ sealed interface LifeEvent {
     data class OpenBankCashier(val url: String) : LifeEvent
 }
 
+/**
+ * 侧栏电费卡 + 电费充值的状态机（DESIGN §3.13 / §4.24），iOS 移植 U1（2026-11-25）
+ * 随 `ui/life` 搬进 `shared/commonMain`。
+ *
+ * ## 为什么这里没有 `Factory`
+ *
+ * 造它要 `JwVpnDetector`（`android.net`）与桌面小组件镜像（`androidx.glance`）两样平台能力，
+ * 都只有 `:app` 拿得到。按 `PowerRoomPickerFactory.kt` 的先例，工厂留成 `:app` 的同包顶层
+ * 函数 `lifeViewModelFactory(context)`，本类只收已构造好的依赖。
+ */
 class LifeViewModel(
     private val powerRepo: PowerRepository,
-    private val credentialStore: YktCredentialStore,
+    /**
+     * 一卡通凭证存储；**null = 本平台还没有加密凭证存储**（iOS 等 Keychain）。
+     *
+     * 与 `AppServices.yktCredentialStore()` 的可空口径一致：null 时电费卡整块落
+     * 「未开启一卡通」态（[PowerCardState.noCredentials]），不是点了没反应。
+     * 电费与一卡通共用同一份学号 + 查询密码，存不住密码就等于没有电费可看。
+     */
+    private val credentialStore: YktCredentialStore?,
     /** 本机读数（Room）：侧栏电费卡首屏种子的来源，见 [seedPowerFromReadings]。 */
     private val readingStore: PowerReadingStore,
     /**
@@ -96,6 +109,13 @@ class LifeViewModel(
      * 与出口无关，照旧报原文。
      */
     private val isVpnActive: () -> Boolean = { false },
+    /**
+     * 读数已落 Room 之后顺手镜像一次桌面生活小组件（DESIGN §3.6 二条目改版，零网络）。
+     *
+     * **默认空实现**：桌面小组件是 `androidx.glance`（Android 专有），iOS 没有这张卡。
+     * Android 侧转接 `LifeWidgetSync.refreshLifeWidgets`，由 `lifeViewModelFactory` 注入。
+     */
+    private val onPowerRead: suspend () -> Unit = {},
 ) : ViewModel() {
 
     private val _power = MutableStateFlow(PowerCardState())
@@ -104,7 +124,7 @@ class LifeViewModel(
     val events = _events.receiveAsFlow()
 
     init {
-        viewModelScope.launch(Dispatchers.IO) { seedPowerFromReadings() }
+        viewModelScope.launch(Dispatchers.Default) { seedPowerFromReadings() }
     }
 
     /**
@@ -119,7 +139,7 @@ class LifeViewModel(
      * 免得旧读数把新的盖回去。凭证没开就没有电费可看，直接跳过。
      */
     private suspend fun seedPowerFromReadings() {
-        if (credentialStore.read() == null) return
+        if (credentialStore?.read() == null) return
         val latest = runCatching { readingStore.latest() }.getOrNull() ?: return
         _power.update { state ->
             if (state.snapshot != null) state else state.copy(snapshot = PowerModels.snapshotSeedOf(latest))
@@ -136,7 +156,7 @@ class LifeViewModel(
      * [force] = true 时绕过仓库内存缓存并重取；进页那条路传 false。
      */
     fun refreshPower(force: Boolean = true) {
-        val credentials = credentialStore.read()
+        val credentials = credentialStore?.read()
         if (credentials == null) {
             _power.value = PowerCardState(noCredentials = true)
             return
@@ -148,7 +168,7 @@ class LifeViewModel(
                 _power.update { it.copy(loading = false, snapshot = snapshot, error = null, roomNotBound = false) }
                 // 桌面生活小组件的电费副行（DESIGN §3.6 二条目改版）：读数已落 Room，
                 // 顺手镜像一次（零网络）
-                runCatching { LifeWidgetSync.refreshLifeWidgets(Graph.appContext) }
+                runCatching { onPowerRead() }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: PowerException.RoomNotBound) {
@@ -249,7 +269,7 @@ class LifeViewModel(
     fun preparePowerRecharge() {
         flowSession++
         _powerRecharge.value = PowerRechargeUi()
-        val credentials = credentialStore.read() ?: return
+        val credentials = credentialStore?.read() ?: return
         pendingOrderCleanup?.cancel()
         pendingOrderCleanup = viewModelScope.launch {
             val cleaned = try {
@@ -273,7 +293,7 @@ class LifeViewModel(
      * App 不再选渠道、也不碰任何支付密码。
      */
     fun placePowerOrder(yuan: String) {
-        val credentials = credentialStore.read() ?: run {
+        val credentials = credentialStore?.read() ?: run {
             _events.trySend(LifeEvent.Notice("请先在「我的 → 校园卡」开启一卡通", NoticeTone.Warning))
             return
         }
@@ -375,7 +395,7 @@ class LifeViewModel(
      * 用户看到的现象就是「点重新打开，又一直转圈」。
      */
     fun reopenBankCashier() {
-        val credentials = credentialStore.read() ?: return
+        val credentials = credentialStore?.read() ?: return
         val state = _powerRecharge.value
         val orderId = state.orderId ?: return
         // 进行中就别再点火：按钮虽已按 busy 置灰，连点仍有「重组前那一下」的空窗，
@@ -430,7 +450,7 @@ class LifeViewModel(
      * 传 false，同样没查到也给同一句实话。
      */
     fun checkBankPaid(silent: Boolean = false) {
-        val credentials = credentialStore.read() ?: return
+        val credentials = credentialStore?.read() ?: return
         val state = _powerRecharge.value
         val orderId = state.orderId ?: return
         if (state.step != PowerRechargeUi.Step.BankPay) return
@@ -529,7 +549,7 @@ class LifeViewModel(
     private fun postPowerRechargeInbox(orderId: String, amountYuan: String?) {
         viewModelScope.launch {
             runCatching {
-                Graph.inboxRepository(Graph.appContext).post(
+                Services.current.inboxRepository().post(
                     kind = InboxKind.POWER_RECHARGE,
                     dedupeKey = InboxKeys.POWER_RECHARGE_PREFIX + orderId,
                     title = "电费充值成功",
@@ -555,7 +575,7 @@ class LifeViewModel(
         url: suspend (String, String) -> String,
         onReady: (String) -> Unit,
     ) {
-        val credentials = credentialStore.read()
+        val credentials = credentialStore?.read()
         if (credentials == null) {
             _events.trySend(LifeEvent.Notice("请先在「我的 → 校园卡」开启一卡通，再用${what}", NoticeTone.Warning))
             return
@@ -585,15 +605,5 @@ class LifeViewModel(
 
         /** 入账确认的总查单次数（含第一次）：有界，不无限轮询第三方平台。 */
         private const val ENTRY_CONFIRM_ATTEMPTS = 3
-
-        fun Factory(context: Context) = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = LifeViewModel(
-                Graph.powerRepository(context.applicationContext),
-                Graph.yktCredentialStore(context.applicationContext),
-                Graph.powerReadingStore(context.applicationContext),
-                isVpnActive = { JwVpnDetector.isVpnActive(context.applicationContext) },
-            ) as T
-        }
     }
 }
