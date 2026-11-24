@@ -1,8 +1,6 @@
 package edu.jxslu.schedule.ui.jw
 
 import androidx.compose.foundation.background
-import kotlinx.datetime.toJavaLocalDate
-import kotlinx.datetime.toKotlinLocalDate
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -24,33 +22,46 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.JwImportActivity
 import edu.jxslu.schedule.data.jw.JwUrls
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.SemesterConfig
+import edu.jxslu.schedule.domain.TextFmt
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.PageEmpty
 import edu.jxslu.schedule.ui.common.PageScaffold
-import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.first
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
 
 /**
  * 教务 → 教学日历（2026-10-20）。
  *
  * 只展示本机课表的学期配置能确定的东西：第 1 周周一、当前周、每周起止日期。
  * 完整的教务周历（备注列等）仍在顶栏外链打开的原始网页里，不在本地重解析。
+ *
+ * ## 平台动作在参数里（iOS 移植 S18，2026-11-25）
+ *
+ * | 参数 | null 的含义 |
+ * |---|---|
+ * | [onOpenWebPage] | 平台没有内置浏览窗口 → 顶栏外链图标消失 |
+ * | [onOpenJwImport] | 平台没有导入窗口 → 空态的「去导入课表」消失 |
  */
 @Composable
-fun TeachingCalendarScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val repo = remember(context) { Graph.repository(context) }
+fun TeachingCalendarScreen(
+    onBack: () -> Unit,
+    /** 在教务网页核对（Android 走 `JwImportActivity.startBrowse`）。 */
+    onOpenWebPage: ((title: String, url: String) -> Unit)? = null,
+    /** 去导入课表（Android 走 `JwImportActivity.start`）。 */
+    onOpenJwImport: (() -> Unit)? = null,
+) {
+    // 仓库由装配根提供（Android `GraphServices` / iOS `IosServices`），本页不再摸 `Context`。
+    val repo = remember { Services.current.scheduleRepository() }
     val snackbar = remember { SnackbarHostState() }
     var config by remember { mutableStateOf<SemesterConfig?>(null) }
     var term by remember { mutableStateOf<String?>(null) }
@@ -62,10 +73,9 @@ fun TeachingCalendarScreen(onBack: () -> Unit) {
         loaded = true
     }
 
-    val formatter = remember { DateTimeFormatter.ofPattern("MM-dd") }
     val weeks = remember(config) { config?.let(::weekRanges).orEmpty() }
     val currentWeek = config?.let {
-        ScheduleCalculator.weekNumberOf(it, LocalDate.now().toKotlinLocalDate()).takeIf { week ->
+        ScheduleCalculator.weekNumberOf(it, AppClock.today()).takeIf { week ->
             ScheduleCalculator.isWeekInTerm(it, week)
         }
     }
@@ -75,15 +85,16 @@ fun TeachingCalendarScreen(onBack: () -> Unit) {
         title = "教学日历",
         onBack = onBack,
         snackbar = snackbar,
-        actions = { JwWebActionButton("教学日历", webUrl) },
+        actions = { JwWebActionButton("教学日历", webUrl, onOpenWebPage) },
         loading = !loaded,
         loadingText = "正在读取教学日历",
         empty = if (loaded && config == null) {
             PageEmpty(
                 title = "还没有学期配置",
                 body = "导入课表后会自动按教务教学日历校准开学日；也可以先手动设置学期。",
-                actionLabel = "去导入课表",
-                onAction = { JwImportActivity.start(context) },
+                // 宿主没给导入窗口就不给按钮（不给死入口）
+                actionLabel = if (onOpenJwImport != null) "去导入课表" else null,
+                onAction = onOpenJwImport,
             )
         } else null,
     ) {
@@ -102,7 +113,7 @@ fun TeachingCalendarScreen(onBack: () -> Unit) {
                     SummaryItem(
                         label = "第 1 周周一",
                         value = config?.startDate?.let {
-                            runCatching { LocalDate.parse(it).format(formatter) }.getOrDefault(it)
+                            runCatching { monthDay(LocalDate.parse(it)) }.getOrDefault(it)
                         } ?: "—",
                     )
                     SummaryItem(
@@ -128,8 +139,8 @@ fun TeachingCalendarScreen(onBack: () -> Unit) {
                     }
                     WeekRow(
                         week = range.week,
-                        start = range.start.format(formatter),
-                        end = range.end.format(formatter),
+                        start = monthDay(range.start),
+                        end = monthDay(range.end),
                         current = range.week == currentWeek,
                     )
                 }
@@ -153,14 +164,29 @@ private data class WeekRange(
     val end: LocalDate,
 )
 
+/**
+ * 每周起止日期（周一 → 周日）。
+ *
+ * `plusWeeks` / `plusDays` 在 kotlinx-datetime 里没有同名成员，改用 [DatePeriod] 位移
+ * （与 `ScheduleCalculator.startOfWeek` 同一写法）。**没有 `weeks` 这个字段**，
+ * 周数一律折成 `days = 7 * n`——日历日相加，跨月跨年由库自己处理。
+ */
 private fun weekRanges(config: SemesterConfig): List<WeekRange> {
-    val start = runCatching { ScheduleCalculator.parseDate(config.startDate) }.getOrNull()
-        ?.let(ScheduleCalculator::startOfWeek)?.toJavaLocalDate() ?: return emptyList()
+    val start = runCatching {
+        ScheduleCalculator.startOfWeek(ScheduleCalculator.parseDate(config.startDate))
+    }.getOrNull() ?: return emptyList()
     return (1..config.totalWeeks).map { week ->
-        val monday = start.plusWeeks((week - 1).toLong())
-        WeekRange(week = week, start = monday, end = monday.plusDays(6))
+        val monday = start.plus(DatePeriod(days = 7 * (week - 1)))
+        WeekRange(week = week, start = monday, end = monday.plus(DatePeriod(days = 6)))
     }
 }
+
+/**
+ * 日期 → `MM-dd`（**补零**，与搬迁前 `DateTimeFormatter.ofPattern("MM-dd")` 同口径；
+ * 与课表清单页的 `M/d` 不补零是两套既有文案，别顺手统一）。
+ */
+private fun monthDay(date: LocalDate): String =
+    "${TextFmt.pad(date.monthNumber)}-${TextFmt.pad(date.dayOfMonth)}"
 
 @Composable
 private fun SummaryItem(label: String, value: String) {

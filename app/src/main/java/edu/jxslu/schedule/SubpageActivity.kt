@@ -281,7 +281,16 @@ class SubpageActivity : ComponentActivity() {
                     onOpenImport = actions.openImport,
                 )
             }
-            SubpageScreen.TEXTBOOKS -> TextbookScreen(onBack = onBack)
+            // 教材 / 教学日历已搬进 shared/commonMain（iOS 移植 S18）：平台动作（浏览窗口 /
+            // 导入窗口）由本侧给，共享层只认可空回调。
+            SubpageScreen.TEXTBOOKS -> {
+                val actions = rememberJwScreenPlatformActions()
+                TextbookScreen(
+                    onBack = onBack,
+                    onOpenWebPage = actions.openWebPage,
+                    onOpenJwImport = actions.openJwImport,
+                )
+            }
             // 课表清单已搬进 shared/commonMain（iOS 移植 S18）：平台动作（浏览窗口 / 导入窗口）
             // 由本侧给，共享层只认可空回调。
             SubpageScreen.THEORY_SCHEDULE -> {
@@ -303,7 +312,14 @@ class SubpageActivity : ComponentActivity() {
                 )
             }
             SubpageScreen.STUDENT_INFO -> StudentInfoScreen(onBack = onBack)
-            SubpageScreen.TEACHING_CALENDAR -> TeachingCalendarScreen(onBack = onBack)
+            SubpageScreen.TEACHING_CALENDAR -> {
+                val actions = rememberJwScreenPlatformActions()
+                TeachingCalendarScreen(
+                    onBack = onBack,
+                    onOpenWebPage = actions.openWebPage,
+                    onOpenJwImport = actions.openJwImport,
+                )
+            }
             SubpageScreen.SCHOLAR -> ScholarScreen(onBack = onBack)
             SubpageScreen.CURRICULUM -> CurriculumScreen(onBack = onBack)
             SubpageScreen.INTERNSHIP_BASES -> InternshipBasesScreen(onBack = onBack)

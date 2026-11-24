@@ -163,11 +163,7 @@ fun JwScheduleListScreen(
                 },
                 actions = {
                     // 宿主不给浏览窗口就不渲染这一格，不留点了没反应的图标
-                    if (onOpenWebPage != null) {
-                        IconButton(onClick = { onOpenWebPage(title, webUrl) }) {
-                            Icon(AppIcons.ExternalLink, contentDescription = "在教务网页核对$title")
-                        }
-                    }
+                    JwWebActionButton(title, webUrl, onOpenWebPage)
                 },
             )
         },

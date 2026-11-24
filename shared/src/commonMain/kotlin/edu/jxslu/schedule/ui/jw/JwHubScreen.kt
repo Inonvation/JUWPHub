@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -170,12 +169,13 @@ fun JwHubScreen(
                 actions = {
                     // 2026-11-08 用户口径：这一格去**校园门户**（工作台 / 服务 / 应用），
                     // 不是强智教务主页。门户自己会跳统一认证，浏览窗口的自动登录照旧接管。
-                    // 宿主不给浏览窗口（iOS 侧还没有）就不渲染这一格，不留点了没反应的图标。
-                    if (onOpenWebPage != null) {
-                        IconButton(onClick = { onOpenWebPage("校园门户", JwUrls.PORTAL) }) {
-                            Icon(AppIcons.ExternalLink, contentDescription = "打开学校智慧校园门户")
-                        }
-                    }
+                    // 宿主不给浏览窗口（iOS 侧还没有）时这只图标不渲染，不留点了没反应的入口。
+                    JwWebActionButton(
+                        title = "校园门户",
+                        url = JwUrls.PORTAL,
+                        onOpenWebPage = onOpenWebPage,
+                        description = "打开学校智慧校园门户",
+                    )
                 },
             )
         },
