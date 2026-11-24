@@ -6,6 +6,7 @@ import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
+import edu.jxslu.schedule.data.repo.InboxRepository
 import edu.jxslu.schedule.data.repo.NoteRepository
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
@@ -60,6 +61,8 @@ class GraphServices(private val context: Context) : AppServices {
     override fun noteRepository(): NoteRepository = Graph.noteRepository(appContext)
 
     override fun homeworkRepository(): HomeworkRepository = Graph.homeworkRepository(appContext)
+
+    override fun inboxRepository(): InboxRepository = Graph.inboxRepository(appContext)
 
     // ---- 一卡通 / 寝室电费（S14） ----
     //

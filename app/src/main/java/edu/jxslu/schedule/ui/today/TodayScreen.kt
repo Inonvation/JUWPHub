@@ -76,6 +76,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
+import edu.jxslu.schedule.SubpageActivity
+import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.DormRepairRecord
 import edu.jxslu.schedule.domain.DormRepairRules
@@ -94,6 +96,7 @@ import edu.jxslu.schedule.ui.ebike.KvcxAction
 import edu.jxslu.schedule.ui.ebike.KvcxRideState
 import edu.jxslu.schedule.ui.ebike.kvcxConfirmDialog
 import edu.jxslu.schedule.ui.icon.AppIcons
+import edu.jxslu.schedule.ui.inbox.inboxKindIcon
 import edu.jxslu.schedule.ui.qzxy.QzxyViewModel
 import edu.jxslu.schedule.ui.qzxy.QzxyEvent
 import edu.jxslu.schedule.ui.qzxy.QzxyFlowState
@@ -301,6 +304,11 @@ fun TodayScreen(
     // 免费时长计时的两个值直接读偏好仓库：`DisplayPrefs` 那层合并读模型不带它们，
     // 而快趣卡只是展示（与 RideScreen / RideViewModel 读同一个单例）
     val context = LocalContext.current
+    // 收件箱卡点消息行 → 二级页。`SubpageActivity` 是 Android 的窗口概念，共享层的
+    // 收件箱卡只收成一个可空回调（见 InboxTodayCard 的 onOpenSubpage 参数）。
+    val openSubpage: (SubpageScreen, String?) -> Unit = { target, focusItemId ->
+        SubpageActivity.start(context, target, focusItemId = focusItemId)
+    }
     // 胖乖「出水中」的跨窗口真相源（2026-10-21）：服务卡与侧栏高亮都读它——
     // 开水页（另一个 Activity 的 ViewModel）里开的阀，今日页也看得到。
     val qiekjWaterStore = remember(context) { Graph.qiekjWatering(context) }
@@ -758,6 +766,7 @@ fun TodayScreen(
                         repair = dormRepair,
                         guessPick = guessPick,
                         onOpenGuess = openGuess,
+                        onOpenSubpage = openSubpage,
                     )
                 }
 
@@ -771,6 +780,7 @@ fun TodayScreen(
                     repair = dormRepair,
                     guessPick = guessPick,
                     onOpenGuess = openGuess,
+                    onOpenSubpage = openSubpage,
                 )
 
                 state.totalCourseCount == 0 -> TodayEmptyContent(
@@ -783,6 +793,7 @@ fun TodayScreen(
                     repair = dormRepair,
                     guessPick = guessPick,
                     onOpenGuess = openGuess,
+                    onOpenSubpage = openSubpage,
                 )
 
                 else -> TodayContent(
@@ -796,6 +807,7 @@ fun TodayScreen(
                     repair = dormRepair,
                     guessPick = guessPick,
                     onOpenGuess = openGuess,
+                    onOpenSubpage = openSubpage,
                     kvcxRideState = kvcxRideState?.takeIf { kvcxInAppRide && kvcxLoggedIn },
                     // 卡片位置判据（2026-11-12）：**只认同步状态**（快趣单例的 state + 登录态）。
                     // `ebikeUseMode` 是 DataStore 冷流，新组合的第一帧恒是 `Default`（小程序方式，
@@ -1055,17 +1067,25 @@ private fun TodayEmptyContent(
     /** 「猜你想用」推荐（DESIGN §3.33）；null = 当前时段不出卡。 */
     guessPick: GuessPick? = null,
     onOpenGuess: (GuessPick) -> Unit = {},
+    /** 收件箱卡点消息行跳二级页（`SubpageActivity`）；null = 本平台没有二级页栈。 */
+    onOpenSubpage: ((SubpageScreen, String?) -> Unit)? = null,
 ) {
     val bottom: @Composable () -> Unit = {
         Column {
             // 推荐卡的落点与正常内容一致：收件箱列表正上方；空态也挂，因为它只依赖时间 / 课程 / 订单
             guessPick?.let { pick ->
-                GuessYouWantCard(pick = pick, onClick = { onOpenGuess(pick) })
+                GuessYouWantCard(
+                    pick = pick,
+                    onClick = { onOpenGuess(pick) },
+                    brandIcon = rememberBrandIconPainter(pick.target),
+                )
             }
             InboxTodayCard(
+                kindIcon = ::inboxKindIcon,
                 repair = repair,
                 onOpenInbox = onOpenInbox,
                 onOpenRepair = onOpenRepair,
+                onOpenSubpage = onOpenSubpage,
             )
         }
     }
@@ -1089,6 +1109,8 @@ private fun TodayContent(
     /** 「猜你想用」推荐（DESIGN §3.33）；null = 当前时段不出卡。 */
     guessPick: GuessPick? = null,
     onOpenGuess: (GuessPick) -> Unit = {},
+    /** 收件箱卡点消息行跳二级页（`SubpageActivity`）；null = 本平台没有二级页栈。 */
+    onOpenSubpage: ((SubpageScreen, String?) -> Unit)? = null,
     // ── 进行中服务卡（2026-10-21）：数据在 TodayScreen 收集，卡片按需渲染 ──
     /** 快趣骑行状态（能力闸 + 登录双闸已在调用侧滤过）；null = 行不出现。 */
     kvcxRideState: KvcxRideState? = null,
@@ -1281,6 +1303,7 @@ private fun TodayContent(
                         pick = pick,
                         onClick = { onOpenGuess(pick) },
                         modifier = Modifier.animateItem(placementSpec = null),
+                        brandIcon = rememberBrandIconPainter(pick.target),
                     )
                 }
             }
@@ -1291,9 +1314,11 @@ private fun TodayContent(
             // 放在作业卡之后：与作业同属「顺带看一眼」，不抢课程区的位置。
             item(key = "inbox") {
                 InboxTodayCard(
+                    kindIcon = ::inboxKindIcon,
                     repair = repair,
                     onOpenInbox = onOpenInbox,
                     onOpenRepair = onOpenRepair,
+                    onOpenSubpage = onOpenSubpage,
                 )
             }
         }

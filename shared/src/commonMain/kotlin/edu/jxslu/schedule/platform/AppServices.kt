@@ -5,6 +5,7 @@ import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
+import edu.jxslu.schedule.data.repo.InboxRepository
 import edu.jxslu.schedule.data.repo.NoteRepository
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
@@ -98,6 +99,14 @@ interface AppServices {
 
     /** 作业仓库（DESIGN §3.11）。 */
     fun homeworkRepository(): HomeworkRepository
+
+    /**
+     * 收件箱仓库（DESIGN §3.24）。
+     *
+     * **非空**：`inbox_messages` 是本地表，两端都能读写；今日页的收件箱卡
+     * （`ui/today/InboxTodayCard`，iOS 移植 S16）直接订阅它，收件箱页同理。
+     */
+    fun inboxRepository(): InboxRepository
 
     // ---- 一卡通 / 寝室电费（iOS 移植 S14，2026-11-25） ----
     //
