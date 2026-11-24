@@ -513,7 +513,7 @@ class IosServices : AppServices {
     override fun qzxyLinkDiagnostics(): QzxyLinkDiagnostics? = null
 
     /** BLE 扫描：**null**（iOS 侧没有 `CBCentralManager` 扫描实现）。设备弹层里「扫描」整行不渲染。 */
-    override fun qzxyDeviceScanner(): QzxyDeviceScanner? = null
+    override fun qzxyScanner(): QzxyDeviceScanner? = null
 
     /**
      * 已绑定设备：**null**。
