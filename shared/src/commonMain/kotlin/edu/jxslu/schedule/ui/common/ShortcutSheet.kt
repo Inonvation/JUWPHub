@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +62,18 @@ import edu.jxslu.schedule.ui.theme.Motion
  *
  * 2026-10-19 从生活页移到今日页「江水生活」里的图标入口：组件本身搬进 ui/common，
  * 生活页与今日页不再各留一份。关弹层走 [rememberSheetDismisser]，点条目先播退场再拉起。
+ *
+ * ## 2026-11-25 搬进共享层（S23）
+ *
+ * 整张弹层没有一处平台 API（触感、弹层、动效、图标都是共享层的），搬过来只差一样：
+ * 预设条目的**品牌图**是 `res/drawable/ic_preset_*.webp`，只有 Android 的 `R` 认得。
+ * 所以收成 [brandIconFor] 参数，口径同 `ui/today/GuessYouWantCard` 的 `brandIcon`。
+ *
+ * 该参数**不给默认值**：宿主必须明确回答「本平台有没有这套素材」。null 不是省略，
+ * 是能力声明（`design/ios-port.md` §11.2 ④）——没有品牌图时预设条目退回矢量图标，
+ * 条目名与目标仍完整可用，不藏条目。
+ *
+ * @param brandIconFor 预设条目的品牌图；返回 null = 本平台没有这套素材
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,6 +88,7 @@ fun ShortcutSheet(
     onEdit: (String) -> Unit,
     onAdd: () -> Unit,
     onOpenCainiao: () -> Unit,
+    brandIconFor: @Composable (ShortcutItem) -> Painter?,
 ) {
     val presets = settings.items.filter { it.presetIndex >= 0 }
     val customs = settings.items.filter { it.presetIndex < 0 }
@@ -101,6 +115,7 @@ fun ShortcutSheet(
                 ShortcutCategoryLabel("取快递", presets.size)
                 ShortcutTileGrid(
                     items = presets,
+                    brandIconFor = brandIconFor,
                     onLaunch = { item -> dismiss { onLaunchItem(item) } },
                     onPin = { item -> dismiss { onPinItem(item) } },
                     onEdit = { id -> dismiss { onEdit(id) } },
@@ -141,6 +156,7 @@ fun ShortcutSheet(
             ) {
                 ShortcutTileGrid(
                     items = customs,
+                    brandIconFor = brandIconFor,
                     onLaunch = { item -> dismiss { onLaunchItem(item) } },
                     onPin = { item -> dismiss { onPinItem(item) } },
                     onEdit = { id -> dismiss { onEdit(id) } },
@@ -224,6 +240,7 @@ private fun ShortcutCategoryHeader(
 @Composable
 private fun ShortcutTileGrid(
     items: List<ShortcutItem>,
+    brandIconFor: @Composable (ShortcutItem) -> Painter?,
     onLaunch: (ShortcutItem) -> Unit,
     onPin: (ShortcutItem) -> Unit,
     onEdit: (String) -> Unit,
@@ -240,6 +257,7 @@ private fun ShortcutTileGrid(
                     } else {
                         ShortcutSheetTile(
                             item = item!!,
+                            brandIcon = brandIconFor(item),
                             modifier = Modifier.weight(1f),
                             onLaunch = { onLaunch(item) },
                             onPin = { onPin(item) },
@@ -258,6 +276,7 @@ private fun ShortcutTileGrid(
 @Composable
 private fun ShortcutSheetTile(
     item: ShortcutItem,
+    brandIcon: Painter?,
     modifier: Modifier = Modifier,
     onLaunch: () -> Unit,
     onPin: () -> Unit,
@@ -285,7 +304,7 @@ private fun ShortcutSheetTile(
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                ShortcutIcon(item, Modifier.size(30.dp))
+                ShortcutIcon(item, brandIcon, Modifier.size(30.dp))
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(
