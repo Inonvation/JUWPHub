@@ -200,7 +200,7 @@ fun WeekScreen(
     /** 调课处置页（「检测」发现差异后的「查看」）。 */
     onOpenScheduleChanges: () -> Unit = {},
     /** 分享为图片的二级页；参数是进页时要预览的周次。 */
-    onOpenScheduleShare: (week: Int) -> Unit = {},
+    onOpenScheduleShare: ((week: Int) -> Unit)? = null,
     /** 选一个文本文件；回调给 null = 用户取消或读不出来。 */
     onPickJsonFile: ((onText: (String?) -> Unit) -> Unit)? = null,
     /** 另存一段文本；`onSaved` 为 false = 用户取消或写入失败。 */
@@ -553,6 +553,11 @@ fun WeekScreen(
                     checking = checking,
                     canQuickCheck = viewModel.canQuickCheck,
                     canOpenDisplay = displaySettings != null,
+                    // 分享弹层里四行全部依赖平台动作；一个都给不出来时整只图标不出现，
+                    // 而不是弹一个空弹层或点了没反应的死入口。
+                    canShare = onSyncCalendar != null ||
+                        onSaveTextFile != null ||
+                        onOpenScheduleShare != null,
                     onOpenPicker = { pickerOpen = true },
                     onOpenDisplay = { displaySheetOpen = true },
                     onOpenTimetables = { switchOpen = true },
@@ -788,11 +793,7 @@ fun WeekScreen(
                     }
                 }
             },
-            onShareImage = {
-                // 退场动画播完、弹层状态已落之后才开二级页：弹层是独立窗口，盖在二级页之上会挡住它
-                // focusItemId 复用为「进页时预览哪一周」（与 SHORTCUTS / RIDE 同纪律）
-                onOpenScheduleShare(state.week)
-            },
+            onShareImage = onOpenScheduleShare?.let { share -> { share(state.week) } },
             onDismiss = { shareOpen = false },
         )
     }
@@ -1049,6 +1050,8 @@ private fun WeekTopBar(
     canQuickCheck: Boolean,
     /** 宿主有没有给显示设置面板；false 时「眼睛」不渲染。 */
     canOpenDisplay: Boolean,
+    /** 四种分享动作是否至少有一个可用；false 时「分享」图标不渲染。 */
+    canShare: Boolean,
     onOpenPicker: () -> Unit,
     onOpenDisplay: () -> Unit,
     onOpenTimetables: () -> Unit,
@@ -1128,13 +1131,15 @@ private fun WeekTopBar(
             }
         }
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = { haptics.tap(); onOpenShare() }) {
-            Icon(
-                AppIcons.Share08,
-                contentDescription = "分享课表",
-                tint = onSurface.copy(alpha = 0.75f),
-                modifier = Modifier.size(20.dp),
-            )
+        if (canShare) {
+            IconButton(onClick = { haptics.tap(); onOpenShare() }) {
+                Icon(
+                    AppIcons.Share08,
+                    contentDescription = "分享课表",
+                    tint = onSurface.copy(alpha = 0.75f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
         if (canOpenDisplay) {
             IconButton(onClick = { haptics.tap(); onOpenDisplay() }) {

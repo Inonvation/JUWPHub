@@ -295,7 +295,7 @@ fun ShareEntrySheet(
     onSyncCalendar: (() -> Unit)? = null,
     onExportCsv: (() -> Unit)? = null,
     onExportJson: (() -> Unit)? = null,
-    onShareImage: () -> Unit,
+    onShareImage: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -337,12 +337,14 @@ fun ShareEntrySheet(
                     onClick = { dismiss { onExportJson() } },
                 )
             }
-            ImportEntryRow(
-                icon = { Icon(AppIcons.ImageDownload, contentDescription = null, modifier = Modifier.size(22.dp)) },
-                title = "导出为图片",
-                subtitle = "生成一张只含本周课表的图，可保存到相册或直接分享",
-                onClick = { dismiss { onShareImage() } },
-            )
+            if (onShareImage != null) {
+                ImportEntryRow(
+                    icon = { Icon(AppIcons.ImageDownload, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                    title = "导出为图片",
+                    subtitle = "生成一张只含本周课表的图，可保存到相册或直接分享",
+                    onClick = { dismiss { onShareImage() } },
+                )
+            }
         }
     }
 }
