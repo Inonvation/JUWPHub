@@ -56,6 +56,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import platform.Foundation.NSBundle
+import edu.jxslu.schedule.ui.ai.AiApiKeys
 
 /**
  * iOS 侧的共享服务装配（iOS 移植 M1 起，M2 补齐教务三件套）。
@@ -390,6 +391,18 @@ class IosServices : AppServices {
 
         override fun clear() = aiKeychain.clear()
     }
+
+    /**
+     * AI 页面要的三回调形状（读 / 写 / 清），与 [aiApiKeys] 指向**同一个** Keychain 条目。
+     *
+     * 两套形状并存是刻意的：账号中心只需要「读 + 清」（它不配置 Key），
+     * 而 AI 设置页要能写。各建一份存储会让「账号中心清掉了、AI 页还认为有 Key」。
+     */
+    val aiKeys: AiApiKeys = AiApiKeys(
+        read = { aiKeychain.readApiKey() },
+        save = { aiKeychain.saveApiKey(it) },
+        clear = { aiKeychain.clear() },
+    )
 
     /** 趣智：**iOS 侧返回 null**——会话里含 token，等 `QzxyRepository` 的构造口。 */
     override fun qzxyRepository(): QzxyRepository? = null

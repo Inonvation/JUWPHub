@@ -28,6 +28,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.CourseKind
+import edu.jxslu.schedule.ui.ai.AiChatScreen
+import edu.jxslu.schedule.ui.ai.AiChatViewModel
+import edu.jxslu.schedule.ui.ai.AiHistoryScreen
+import edu.jxslu.schedule.ui.ai.AiHistoryViewModel
+import edu.jxslu.schedule.ui.ai.AiSettingsScreen
+import edu.jxslu.schedule.ui.ai.AiSettingsViewModel
+import edu.jxslu.schedule.ui.me.hub.AccountsHubScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.exam.ExamScreen
@@ -127,6 +134,12 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     IosDrawerEntry("生活", IosRoute(SubpageScreen.WEATHER), "天气"),
     // 设置
     IosDrawerEntry("设置", IosRoute(SubpageScreen.DATA_SETTINGS), "数据与备份"),
+    // 账号
+    IosDrawerEntry("账号", IosRoute(SubpageScreen.ACCOUNTS), "账号中心"),
+    // 江水生活（已搬的三块）
+    IosDrawerEntry("江水生活", IosRoute(SubpageScreen.AI_SCHEDULE), "AI 调课"),
+    IosDrawerEntry("江水生活", IosRoute(SubpageScreen.AI_SETTINGS), "AI 设置"),
+    IosDrawerEntry("江水生活", IosRoute(SubpageScreen.AI_HISTORY), "调课记录"),
 )
 
 /**
@@ -280,6 +293,69 @@ internal fun IosRouteContent(
 
         // ---------------------------------------------------------------- 设置
         SubpageScreen.DATA_SETTINGS -> DataSettingsScreen(onBack = pop, viewModel = meViewModel)
+
+        // ---------------------------------------------------------------- 账号中心
+        //
+        // 十个入口全部 push 路由：已搬的进真页面，没搬的落在 IosNotPortedScreen。
+        // 账号中心自己会按 `accountCredentials()` / 各仓库是否为 null 决定显示什么，
+        // 所以 iOS 上它表现为「全部未配置」——那是真实结论（凭证存储还没接全）。
+        SubpageScreen.ACCOUNTS -> AccountsHubScreen(
+            onBack = pop,
+            onOpenJw = { push(IosRoute(SubpageScreen.JW_ACCOUNT)) },
+            onOpenYkt = { push(IosRoute(SubpageScreen.CAMPUS_CARD_SETTINGS)) },
+            onOpenQiekj = { push(IosRoute(SubpageScreen.WATER)) },
+            onOpenQzxy = { push(IosRoute(SubpageScreen.QZXY)) },
+            onOpenUjing = { push(IosRoute(SubpageScreen.UJING)) },
+            onOpenKvcx = { push(IosRoute(SubpageScreen.KVCX)) },
+            onOpenRide = { push(IosRoute(SubpageScreen.RIDE)) },
+            onOpenWenqu = { push(IosRoute(SubpageScreen.WENQU)) },
+            onOpenAiSettings = { push(IosRoute(SubpageScreen.AI_SETTINGS)) },
+        )
+
+        // ---------------------------------------------------------------- AI 调课
+        //
+        // 三页在 iOS 上都能跑：客户端与调课历史仓都是 `appDataDir()` 落盘（两端同一份），
+        // API Key 走 Keychain。图片那套（截图 / 相册）iOS 没有，`imageUi = null`
+        // 让输入区的图片入口整行不渲染。
+        SubpageScreen.AI_SCHEDULE -> {
+            val vm = remember {
+                AiChatViewModel(
+                    repo = services.scheduleRepository(),
+                    client = services.aiScheduleClient(),
+                    historyStore = services.aiApplyHistoryStore(),
+                    imageStore = null,
+                    apiKeys = services.aiKeys,
+                )
+            }
+            AiChatScreen(
+                viewModel = vm,
+                onBack = pop,
+                onOpenSettings = { push(IosRoute(SubpageScreen.AI_SETTINGS)) },
+                onOpenHistory = { push(IosRoute(SubpageScreen.AI_HISTORY)) },
+                imageUi = null,
+            )
+        }
+
+        SubpageScreen.AI_SETTINGS -> {
+            val vm = remember {
+                AiSettingsViewModel(
+                    repo = services.scheduleRepository(),
+                    client = services.aiScheduleClient(),
+                    apiKeys = services.aiKeys,
+                )
+            }
+            AiSettingsScreen(viewModel = vm, onBack = pop)
+        }
+
+        SubpageScreen.AI_HISTORY -> {
+            val vm = remember {
+                AiHistoryViewModel(
+                    repo = services.scheduleRepository(),
+                    historyStore = services.aiApplyHistoryStore(),
+                )
+            }
+            AiHistoryScreen(viewModel = vm, onBack = pop)
+        }
 
         else -> IosNotPortedScreen(screen = route.screen, onBack = pop)
     }
