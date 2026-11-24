@@ -72,15 +72,13 @@ import edu.jxslu.schedule.ui.ebike.KvcxAction
 import edu.jxslu.schedule.ui.ebike.KvcxReturnSummary
 import edu.jxslu.schedule.ui.ebike.KvcxRideState
 import edu.jxslu.schedule.ui.ebike.unlockCooldownSecondsLeft
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.qzxy.QzxySettlement
 import edu.jxslu.schedule.ui.qzxy.isQzxyWateringExpired
 import edu.jxslu.schedule.ui.qzxy.rememberQzxyWateringClock
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.delay
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.CheckmarkCircle02
-import me.rerere.hugeicons.stroke.ChevronRight
 
 /**
  * 今日页「进行中服务」状态卡（2026-10-21）：快趣骑行 / 胖乖开水 / 趣智洗澡 / U净 洗烘
@@ -621,7 +619,7 @@ private fun rememberLastRowMode(active: Boolean, done: Boolean): LastRowMode {
 @Composable
 private fun DoneCheck() {
     androidx.compose.material3.Icon(
-        HugeIcons.CheckmarkCircle02,
+        AppIcons.CheckmarkCircle02,
         contentDescription = null,
         tint = MaterialTheme.semanticColors.success,
         modifier = Modifier.size(18.dp),
@@ -1099,7 +1097,7 @@ private fun WaterActiveRow(
                 )
             } else {
                 androidx.compose.material3.Icon(
-                    HugeIcons.ChevronRight,
+                    AppIcons.ChevronRight,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                     modifier = Modifier.size(16.dp),
@@ -1280,7 +1278,7 @@ private fun UjingActiveRow(order: UjingOrderSnapshot, onOpen: () -> Unit) {
         onClickLabel = "查看洗衣订单",
         trailing = {
             androidx.compose.material3.Icon(
-                HugeIcons.ChevronRight,
+                AppIcons.ChevronRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                 modifier = Modifier.size(16.dp),

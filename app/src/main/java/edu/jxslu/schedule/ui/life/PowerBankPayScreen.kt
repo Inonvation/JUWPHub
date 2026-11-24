@@ -54,10 +54,7 @@ import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.ui.common.handleWebViewRendererGone
 import edu.jxslu.schedule.ui.common.launchWebViewExternal
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.Browser
-import me.rerere.hugeicons.stroke.Refresh
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 支付收银台（**App 内嵌**，DESIGN §4.24「聚合收银台」）。
@@ -114,17 +111,17 @@ fun PowerBankPayScreen(
                 title = { Text("电费支付", maxLines = 1) },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(HugeIcons.ArrowLeft01, contentDescription = "关闭")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "关闭")
                     }
                 },
                 actions = {
                     IconButton(onClick = { webView?.reload() }) {
-                        Icon(HugeIcons.Refresh, contentDescription = "刷新")
+                        Icon(AppIcons.Refresh, contentDescription = "刷新")
                     }
                     // 兜底出口：同一个链接交给系统浏览器（已验证可用），页面在 WebView 里
                     // 出任何幺蛾子时用户都有一条确定能走的路
                     IconButton(onClick = openInBrowser) {
-                        Icon(HugeIcons.Browser, contentDescription = "用浏览器打开")
+                        Icon(AppIcons.Browser, contentDescription = "用浏览器打开")
                     }
                 },
             )

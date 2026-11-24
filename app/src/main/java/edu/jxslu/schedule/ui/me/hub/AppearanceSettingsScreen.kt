@@ -57,18 +57,10 @@ import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.theme.paletteSwatch
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Blur
-import me.rerere.hugeicons.stroke.ColorPicker
-import me.rerere.hugeicons.stroke.Home01
-import me.rerere.hugeicons.stroke.Palette
-import me.rerere.hugeicons.stroke.Star
-import me.rerere.hugeicons.stroke.SwatchBook
-import me.rerere.hugeicons.stroke.TextFont
-import me.rerere.hugeicons.stroke.Vibrate
 
 /**
  * 设置 → 应用 → 外观与交互（DESIGN §3.3）。
@@ -122,7 +114,7 @@ fun AppearanceSettingsScreen(
             SettingsSection(title = "主题与字体") {
                 SettingChoiceRow(
                     title = "外观主题",
-                    icon = HugeIcons.Palette,
+                    icon = AppIcons.Palette,
                     options = ThemeMode.entries.map { it.label },
                     selectedIndex = ThemeMode.entries.indexOf(state.themeMode),
                     onSelect = { index ->
@@ -137,7 +129,7 @@ fun AppearanceSettingsScreen(
                     } else {
                         "内置配色，选中即实时生效"
                     },
-                    icon = HugeIcons.SwatchBook,
+                    icon = AppIcons.SwatchBook,
                     value = state.displayPrefs.themePalette.label,
                     enabled = !state.displayPrefs.dynamicColor,
                     onClick = { showPaletteSheet = true },
@@ -146,21 +138,21 @@ fun AppearanceSettingsScreen(
                     title = "触感反馈",
                     checked = state.displayPrefs.hapticsEnabled,
                     onCheckedChange = viewModel::setHapticsEnabled,
-                    icon = HugeIcons.Vibrate,
+                    icon = AppIcons.Vibrate,
                 )
                 SettingSwitchRow(
                     title = "动态取色",
                     subtitle = "跟随壁纸配色（Material You）",
                     checked = state.displayPrefs.dynamicColor,
                     onCheckedChange = viewModel::setDynamicColor,
-                    icon = HugeIcons.ColorPicker,
+                    icon = AppIcons.ColorPicker,
                 )
                 SettingSwitchRow(
                     title = "固定字体大小",
                     subtitle = "不随系统字体缩放；关闭后跟随系统",
                     checked = state.displayPrefs.fontScaleLocked,
                     onCheckedChange = viewModel::setFontScaleLocked,
-                    icon = HugeIcons.TextFont,
+                    icon = AppIcons.TextFont,
                 )
             }
 
@@ -174,7 +166,7 @@ fun AppearanceSettingsScreen(
                         viewModel.setFloatingNavBar(value)
                         showNotice("已保存，重启应用后生效")
                     },
-                    icon = HugeIcons.Blur,
+                    icon = AppIcons.Blur,
                 )
                 val startPages = StartPage.visiblePages()
                 val effectiveStart = StartPage.effectivePage(state.displayPrefs.startPage)
@@ -182,7 +174,7 @@ fun AppearanceSettingsScreen(
                     title = "启动页",
                     titleTag = "重启生效",
                     subtitle = "打开应用时先显示这一页",
-                    icon = HugeIcons.Home01,
+                    icon = AppIcons.Home01,
                     options = startPages.map { it.label },
                     selectedIndex = startPages.indexOf(effectiveStart),
                     onSelect = { index ->
@@ -204,7 +196,7 @@ fun AppearanceSettingsScreen(
                         viewModel.setGuessYouWantEnabled(enabled)
                         if (enabled) showNotice("已清空使用习惯记录")
                     },
-                    icon = HugeIcons.Star,
+                    icon = AppIcons.Star,
                 )
             }
         }

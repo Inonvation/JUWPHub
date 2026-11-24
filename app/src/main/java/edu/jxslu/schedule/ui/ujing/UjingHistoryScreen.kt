@@ -45,13 +45,12 @@ import edu.jxslu.schedule.data.ujing.UjingHistoryEntry
 import edu.jxslu.schedule.domain.UjingState
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.WashingMachine
 
 /**
  * U净 历史账单（DESIGN §3.23 / §4.37，2026-10-02）：本 App 发起的每一笔订单
@@ -142,7 +141,7 @@ private fun EmptyHistory(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(
-            HugeIcons.WashingMachine,
+            AppIcons.WashingMachine,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
             modifier = Modifier.size(44.dp),

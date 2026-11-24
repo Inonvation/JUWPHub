@@ -59,6 +59,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.LocalTimeLike
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.buildTodayState
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
@@ -88,13 +89,6 @@ import edu.jxslu.schedule.ui.widget.widgetMetricsFor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.BatteryCharging01
-import me.rerere.hugeicons.stroke.Calendar01
-import me.rerere.hugeicons.stroke.Droplet
-import me.rerere.hugeicons.stroke.Energy
-import me.rerere.hugeicons.stroke.GlassWater
-import me.rerere.hugeicons.stroke.Wallet03
 import java.time.LocalDate
 
 /**
@@ -337,7 +331,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                     title = "忽略电池优化",
                     detail = "防止系统冻结后台刷新；不同手机叫「电池优化白名单 / 省电策略无限制」",
                     granted = caps.batteryWhitelisted,
-                    icon = HugeIcons.BatteryCharging01,
+                    icon = AppIcons.BatteryCharging01,
                     actionText = if (caps.batteryWhitelisted) "查看" else "去开启",
                     onClick = { WidgetCapabilities.jumpBatteryOptimization(context) },
                 )
@@ -346,7 +340,7 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                     title = "允许自启动",
                     detail = "开机与被杀后能自行恢复刷新；在厂商设置里找「自启动 / 允许后台运行」",
                     granted = null,
-                    icon = HugeIcons.Energy,
+                    icon = AppIcons.Energy,
                     actionText = "去设置",
                     onClick = { WidgetCapabilities.jumpAutoStart(context) },
                 )
@@ -396,7 +390,7 @@ private val entries = listOf(
         label = "JUWPHub · 课表",
         description = "小尺寸看正在上 / 下一节，拖到 4×4 变本周课表",
         receiver = ScheduleWidgetReceiver::class.java,
-        icon = HugeIcons.Calendar01,
+        icon = AppIcons.Calendar01,
         iconTint = Color(0xFF0F7C7C),
         countOf = { it.scheduleAdded },
     ),
@@ -404,7 +398,7 @@ private val entries = listOf(
         label = "JUWPHub · 校园卡 · 电费",
         description = "余额大字 + 电费小字；点卡片出示付款码，点电费行进用电统计",
         receiver = CampusCardWidgetReceiver::class.java,
-        icon = HugeIcons.Wallet03,
+        icon = AppIcons.Wallet03,
         iconTint = Color(0xFF1F7A4D),
         countOf = { it.campusAdded },
     ),
@@ -412,7 +406,7 @@ private val entries = listOf(
         label = "JUWPHub · 胖乖开水",
         description = "固定 2×2；小票余额大字 + 积分，点「去开水」直达开水",
         receiver = QiekjWaterWidgetReceiver::class.java,
-        icon = HugeIcons.Droplet,
+        icon = AppIcons.Droplet,
         iconTint = Color(0xFF0F7C7C),
         countOf = { it.qiekjAdded },
     ),
@@ -420,7 +414,7 @@ private val entries = listOf(
         label = "JUWPHub · 趣智开水",
         description = "固定 2×2；余额 / 用水中 + 设备，点「去开水」直达开阀",
         receiver = QzxyWaterWidgetReceiver::class.java,
-        icon = HugeIcons.GlassWater,
+        icon = AppIcons.GlassWater,
         iconTint = Color(0xFF2A6489),
         countOf = { it.qzxyAdded },
     ),
@@ -441,7 +435,7 @@ private val tileEntries = listOf(
         label = "付款码",
         description = "点磁贴直达一卡通付款码；未配置凭证时进校园卡设置",
         service = PayCodeTileService::class.java,
-        icon = HugeIcons.Wallet03,
+        icon = AppIcons.Wallet03,
         iconTint = Color(0xFF1F7A4D),
         drawableRes = R.drawable.ic_tile_pay_code,
     ),
@@ -449,7 +443,7 @@ private val tileEntries = listOf(
         label = "胖乖开水",
         description = "点磁贴进胖乖生活并自动开水；未登录时停在登录页",
         service = QiekjWaterTileService::class.java,
-        icon = HugeIcons.Droplet,
+        icon = AppIcons.Droplet,
         iconTint = Color(0xFF0F7C7C),
         drawableRes = R.drawable.ic_tile_qiekj_water,
     ),
@@ -457,7 +451,7 @@ private val tileEntries = listOf(
         label = "趣智开水",
         description = "点磁贴进趣智校园并自动开阀；未登录 / 没设备时停在页面引导",
         service = QzxyWaterTileService::class.java,
-        icon = HugeIcons.GlassWater,
+        icon = AppIcons.GlassWater,
         iconTint = Color(0xFF2A6489),
         drawableRes = R.drawable.ic_tile_qzxy_water,
     ),

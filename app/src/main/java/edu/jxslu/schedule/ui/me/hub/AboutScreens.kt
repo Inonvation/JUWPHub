@@ -69,25 +69,9 @@ import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.ebike.EbikeMapCache
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.me.WidgetCapabilities
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Agreement01
-import me.rerere.hugeicons.stroke.Alert02
-import me.rerere.hugeicons.stroke.BatteryCharging01
-import me.rerere.hugeicons.stroke.Bug01
-import me.rerere.hugeicons.stroke.CalendarSetting01
-import me.rerere.hugeicons.stroke.Delete02
-import me.rerere.hugeicons.stroke.Energy
-import me.rerere.hugeicons.stroke.Github
-import me.rerere.hugeicons.stroke.Image01
-import me.rerere.hugeicons.stroke.InformationCircle
-import me.rerere.hugeicons.stroke.MapsLocation02
-import me.rerere.hugeicons.stroke.Megaphone01
-import me.rerere.hugeicons.stroke.Notification01
-import me.rerere.hugeicons.stroke.Refresh
-import me.rerere.hugeicons.stroke.SoftwareLicense
-import me.rerere.hugeicons.stroke.SystemUpdate01
 
 /** 公开仓库地址（GPL-3.0）；「开源仓库」点击后经系统浏览器打开。 */
 private const val REPO_URL = "https://github.com/Inonvation/JUWPHub"
@@ -171,7 +155,7 @@ fun AboutUpdateScreen(
                 SettingItem(
                     title = "关于 JUWPHub",
                     subtitle = "非学校官方应用 · 教务与第三方接口风险自负",
-                    icon = HugeIcons.InformationCircle,
+                    icon = AppIcons.InformationCircle,
                     value = "v${BuildConfig.VERSION_NAME}",
                     showArrow = false,
                 )
@@ -183,7 +167,7 @@ fun AboutUpdateScreen(
                             "发现新版本 v${updateAvailable!!.version} · 点此查看"
                         else -> "从发布仓库检查新版本 · 可选国内镜像下载"
                     },
-                    icon = HugeIcons.Refresh,
+                    icon = AppIcons.Refresh,
                     enabled = !updateChecking,
                     onClick = {
                         if (updateAvailable != null) showUpdateDialog = true else checkForUpdate()
@@ -199,7 +183,7 @@ fun AboutUpdateScreen(
                         onCheckedChange = { value ->
                             scope.launch { repo.setAutoUpdateCheckEnabled(value) }
                         },
-                        icon = HugeIcons.SystemUpdate01,
+                        icon = AppIcons.SystemUpdate01,
                     )
                 }
             }
@@ -208,13 +192,13 @@ fun AboutUpdateScreen(
                 SettingItem(
                     title = "开源仓库",
                     subtitle = "github.com/Inonvation/JUWPHub",
-                    icon = HugeIcons.Github,
+                    icon = AppIcons.Github,
                     onClick = { openUrl(context, REPO_URL)?.let(showNotice) },
                 )
                 SettingItem(
                     title = "开源许可",
                     subtitle = "本应用 GPL-3.0 · 第三方组件与参考项目",
-                    icon = HugeIcons.SoftwareLicense,
+                    icon = AppIcons.SoftwareLicense,
                     onClick = { showLicenses = true },
                 )
             }
@@ -445,7 +429,7 @@ fun PermissionsStorageScreen(
                     title = "忽略电池优化",
                     detail = "防止系统冻结后台刷新；不同手机叫「电池优化白名单 / 省电策略无限制」",
                     granted = batteryWhitelisted,
-                    icon = HugeIcons.BatteryCharging01,
+                    icon = AppIcons.BatteryCharging01,
                     actionText = if (batteryWhitelisted) "查看" else "去开启",
                     onClick = { WidgetCapabilities.jumpBatteryOptimization(context) },
                 )
@@ -453,7 +437,7 @@ fun PermissionsStorageScreen(
                     title = "允许自启动 / 锁后台",
                     detail = "开机与被杀后能自行恢复；在厂商设置里找「自启动 / 允许后台运行 / 锁后台」",
                     granted = null,
-                    icon = HugeIcons.Energy,
+                    icon = AppIcons.Energy,
                     actionText = "去设置",
                     onClick = { WidgetCapabilities.jumpAutoStart(context) },
                 )
@@ -470,7 +454,7 @@ fun PermissionsStorageScreen(
                         "关闭时提醒不会弹出；点「去开启」授权"
                     },
                     granted = notifEnabled,
-                    icon = HugeIcons.Notification01,
+                    icon = AppIcons.Notification01,
                     actionText = if (notifEnabled) "去设置" else "去开启",
                     onClick = { requestNotif() },
                 )
@@ -487,7 +471,7 @@ fun PermissionsStorageScreen(
                         "未开启时日历同步会停在提示上；点「去开启」授权"
                     },
                     granted = calendarGranted,
-                    icon = HugeIcons.CalendarSetting01,
+                    icon = AppIcons.CalendarSetting01,
                     actionText = if (calendarGranted) "查看" else "去开启",
                     onClick = { requestCalendar() },
                 )
@@ -504,7 +488,7 @@ fun PermissionsStorageScreen(
                         else -> "已开启；只在单车地图页取一次坐标，不做后台跟踪"
                     },
                     granted = locationGranted && locationServiceOn,
-                    icon = HugeIcons.MapsLocation02,
+                    icon = AppIcons.MapsLocation02,
                     actionText = if (locationGranted) "查看" else "去开启",
                     // 只有权限真的缺了才申请；总开关关着时带用户去应用详情页没有意义
                     onClick = {
@@ -526,7 +510,7 @@ fun PermissionsStorageScreen(
                             "未开启时「保存到相册」会提示没有相册写入权限，二维码出得来但存不下"
                         },
                         granted = albumWriteGranted,
-                        icon = HugeIcons.Image01,
+                        icon = AppIcons.Image01,
                         actionText = if (albumWriteGranted) "查看" else "去开启",
                         onClick = {
                             if (albumWriteGranted) {
@@ -545,14 +529,14 @@ fun PermissionsStorageScreen(
                         append("网页缓存 · 地图瓦片 · 崩溃记录等")
                         cacheBytes?.let { append(" · 共 ").append(EbikeMapCache.sizeLabel(it)) }
                     },
-                    icon = HugeIcons.Delete02,
+                    icon = AppIcons.Delete02,
                     onClick = { showClearCache = true },
                 )
                 SettingItem(
                     title = "导出诊断日志",
                     subtitle = crashFileCount.takeIf { it > 0 }?.let { "$it 份崩溃记录 · 经系统分享发送" }
                         ?: "没有崩溃记录",
-                    icon = HugeIcons.Bug01,
+                    icon = AppIcons.Bug01,
                     showArrow = crashFileCount > 0,
                     onClick = { shareLatestCrash = crashFileCount > 0 },
                 )
@@ -625,20 +609,20 @@ fun TermsDeclarationsScreen(
                 SettingItem(
                     title = "用户须知",
                     subtitle = "非官方 · 数据只存本机 · 第三方接口可能随时失效",
-                    icon = HugeIcons.Megaphone01,
+                    icon = AppIcons.Megaphone01,
                     value = if (userNoticeConfirmed) "已确认" else "未确认",
                     onClick = { showUserNotice = true },
                 )
                 SettingItem(
                     title = "免责声明",
                     subtitle = "非学校官方应用 · 第三方接口风险 · 仅供学习",
-                    icon = HugeIcons.Agreement01,
+                    icon = AppIcons.Agreement01,
                     onClick = { showDisclaimer = true },
                 )
                 SettingItem(
                     title = "充值风险提醒",
                     subtitle = "电费与校园卡充值的风险提示全文",
-                    icon = HugeIcons.Alert02,
+                    icon = AppIcons.Alert02,
                     onClick = { showRechargeNotice = true },
                 )
             }

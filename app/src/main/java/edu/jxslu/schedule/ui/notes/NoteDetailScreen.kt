@@ -62,11 +62,8 @@ import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberImageInserter
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.common.TitleTextField
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Eye
-import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.hugeicons.stroke.PencilEdit02
 
 /**
  * 笔记详情/编辑（DESIGN §3.11）：**单页双态**，2026-10-21 重排。
@@ -285,7 +282,7 @@ fun NoteDetailScreen(
                                 editing = false
                             },
                         ) {
-                            Icon(HugeIcons.Eye, contentDescription = "预览")
+                            Icon(AppIcons.Eye, contentDescription = "预览")
                         }
                         TextButton(
                             onClick = {
@@ -303,12 +300,12 @@ fun NoteDetailScreen(
                                 editing = true
                             },
                         ) {
-                            Icon(HugeIcons.PencilEdit02, contentDescription = "编辑")
+                            Icon(AppIcons.PencilEdit02, contentDescription = "编辑")
                         }
                     }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
-                            Icon(HugeIcons.MoreVertical, contentDescription = "更多")
+                            Icon(AppIcons.MoreVertical, contentDescription = "更多")
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             if (original != null) {

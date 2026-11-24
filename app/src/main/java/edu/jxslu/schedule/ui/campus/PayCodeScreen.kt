@@ -53,9 +53,7 @@ import edu.jxslu.schedule.ui.common.SkeletonBox
 import edu.jxslu.schedule.ui.common.lineHeightDp
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.CreditCard
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 校园卡付款码页（DESIGN §3.10）：进页自动取码，大 QR + Code128 双展示。
@@ -128,7 +126,7 @@ fun PayCodeScreen(
                 title = { Text("水宝宝一卡通") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(HugeIcons.ArrowLeft01, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
             )
@@ -262,7 +260,7 @@ private fun PayCodeBody(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Icon(
-                        HugeIcons.CreditCard,
+                        AppIcons.CreditCard,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(32.dp),

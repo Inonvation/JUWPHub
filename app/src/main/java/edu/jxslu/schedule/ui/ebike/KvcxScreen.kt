@@ -63,15 +63,9 @@ import edu.jxslu.schedule.ui.common.SessionExpiredNotice
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.postNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.History
-import me.rerere.hugeicons.stroke.InformationCircle
-import me.rerere.hugeicons.stroke.Refresh
-import me.rerere.hugeicons.stroke.View
-import me.rerere.hugeicons.stroke.ViewOff
 import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
@@ -246,7 +240,7 @@ private fun AssetsSection(
             } else {
                 IconButton(onClick = onRefreshAssets) {
                     Icon(
-                        HugeIcons.Refresh,
+                        AppIcons.Refresh,
                         contentDescription = "刷新资产",
                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                         modifier = Modifier.size(18.dp),
@@ -420,7 +414,7 @@ private fun SumRow(label: String, value: String, onInfo: (() -> Unit)? = null) {
         if (onInfo != null) {
             IconButton(onClick = onInfo, modifier = Modifier.size(36.dp)) {
                 Icon(
-                    HugeIcons.InformationCircle,
+                    AppIcons.InformationCircle,
                     contentDescription = "$label 的算法说明",
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                     modifier = Modifier.size(16.dp),
@@ -524,7 +518,7 @@ private fun StatsSumRow(
         )
         if (summary != null) {
             Icon(
-                HugeIcons.ChevronRight,
+                AppIcons.ChevronRight,
                 contentDescription = "查看超时费明细",
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                 modifier = Modifier
@@ -612,7 +606,7 @@ private fun OrdersSection(onOpenOrders: () -> Unit) {
         SettingItem(
             title = "历史订单",
             subtitle = "电单车 / 单车分档，按月份查询",
-            icon = HugeIcons.History,
+            icon = AppIcons.History,
             onClick = onOpenOrders,
         )
     }
@@ -723,7 +717,7 @@ private fun LoginSection(state: KvcxUiState, viewModel: KvcxViewModel) {
                 // 眼睛图标与一卡通 / 胖乖 / 「我的」页同一套（2026-10-07 统一，原是文字按钮）
                 IconButton(onClick = { showPassword = !showPassword }) {
                     Icon(
-                        imageVector = if (showPassword) HugeIcons.ViewOff else HugeIcons.View,
+                        imageVector = if (showPassword) AppIcons.ViewOff else AppIcons.View,
                         contentDescription = if (showPassword) "隐藏密码" else "显示密码",
                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     )

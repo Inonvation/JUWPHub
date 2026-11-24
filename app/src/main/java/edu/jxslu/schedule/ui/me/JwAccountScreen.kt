@@ -49,15 +49,11 @@ import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.rememberResumeTick
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jwvw.JwImportMode
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Book01
-import me.rerere.hugeicons.stroke.CalendarSetting01
-import me.rerere.hugeicons.stroke.GridView
-import me.rerere.hugeicons.stroke.Settings01
 
 /**
  * 教务账户页（DESIGN §3.3）。
@@ -158,25 +154,25 @@ fun JwAccountScreen(onBack: () -> Unit) {
                 SettingItem(
                     title = "更新账号密码",
                     subtitle = "学校改过密码后在这里重填，自动续登立即恢复",
-                    icon = HugeIcons.Settings01,
+                    icon = AppIcons.Settings01,
                     onClick = { OnboardingActivity.start(context, startAtJw = true) },
                 )
                 SettingItem(
                     title = "导入课表",
                     subtitle = "打开教务学期课表页并导入",
-                    icon = HugeIcons.Book01,
+                    icon = AppIcons.Book01,
                     onClick = { JwImportActivity.start(context) },
                 )
                 SettingItem(
                     title = "导入成绩",
                     subtitle = "抓全部学期成绩，按学期替换",
-                    icon = HugeIcons.GridView,
+                    icon = AppIcons.GridView,
                     onClick = { JwImportActivity.start(context, JwImportMode.Scores) },
                 )
                 SettingItem(
                     title = "导出盖章成绩单",
                     subtitle = "签章系统出单，含教务处章",
-                    icon = HugeIcons.CalendarSetting01,
+                    icon = AppIcons.CalendarSetting01,
                     onClick = { TranscriptActivity.start(context) },
                 )
             }

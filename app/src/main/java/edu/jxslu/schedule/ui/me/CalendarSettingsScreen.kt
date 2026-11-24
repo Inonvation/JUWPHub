@@ -52,6 +52,7 @@ import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -62,11 +63,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.CalendarAdd01
-import me.rerere.hugeicons.stroke.CalendarClock
-import me.rerere.hugeicons.stroke.CalendarSetting01
-import me.rerere.hugeicons.stroke.Delete02
 
 /** 同步前置条件检测结果：驱动同步行的可用态与说明文案（DESIGN §4.12 的就绪口径）。 */
 sealed interface SyncReadiness {
@@ -219,14 +215,14 @@ fun CalendarSettingsScreen(
                     },
                     onClick = { startSync() },
                     enabled = syncEnabled,
-                    icon = HugeIcons.CalendarAdd01,
+                    icon = AppIcons.CalendarAdd01,
                 )
                 SettingItem(
                     title = "一键删除已同步课程",
                     subtitle = if (busy) "请等当前动作完成" else "只删除本应用写入的日历事件",
                     onClick = { showDeleteConfirm = true },
                     enabled = !busy,
-                    icon = HugeIcons.Delete02,
+                    icon = AppIcons.Delete02,
                 )
                 SettingItem(
                     title = "提醒时长",
@@ -234,7 +230,7 @@ fun CalendarSettingsScreen(
                     value = CalendarSyncDefaults.reminderLabel(reminder),
                     onClick = { showReminderPicker = true },
                     enabled = !busy,
-                    icon = HugeIcons.CalendarClock,
+                    icon = AppIcons.CalendarClock,
                 )
                 SettingItem(
                     title = "日历读写权限",
@@ -244,7 +240,7 @@ fun CalendarSettingsScreen(
                     } else {
                         { requestCalendarPermission() }
                     },
-                    icon = HugeIcons.CalendarSetting01,
+                    icon = AppIcons.CalendarSetting01,
                     showArrow = !calendarGranted,
                 )
             }

@@ -25,10 +25,7 @@ import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.SettingsIconBadge
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.ImageComposition
-import me.rerere.hugeicons.stroke.Stamp01
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 百宝箱首页（DESIGN §4.47）：工具卡片**竖排**（一行一张，整宽）。
@@ -78,7 +75,7 @@ fun ToolboxScreen(
             }
             item {
                 ToolboxTile(
-                    icon = HugeIcons.Stamp01,
+                    icon = AppIcons.Stamp01,
                     title = "图片水印",
                     subtitle = "文字平铺满图",
                     onClick = onOpenWatermark,
@@ -86,7 +83,7 @@ fun ToolboxScreen(
             }
             item {
                 ToolboxTile(
-                    icon = HugeIcons.ImageComposition,
+                    icon = AppIcons.ImageComposition,
                     title = "图片拼接",
                     subtitle = "多图竖拼长图",
                     onClick = onOpenStitch,
@@ -119,7 +116,7 @@ private fun ToolboxTile(
             )
         }
         Icon(
-            HugeIcons.ChevronRight,
+            AppIcons.ChevronRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )

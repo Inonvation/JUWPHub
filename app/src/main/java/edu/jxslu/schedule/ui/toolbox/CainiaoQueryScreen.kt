@@ -44,9 +44,8 @@ import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.ShortcutLauncher
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Cancel01
 
 /**
  * 菜鸟批量查（DESIGN §4.47）：贴入多个运单号 → 拉起菜鸟的「三方路由」批量查链接
@@ -149,7 +148,7 @@ fun CainiaoQueryScreen(onBack: () -> Unit) {
                     trailingIcon = {
                         if (input.isNotEmpty()) {
                             IconButton(onClick = { input = "" }) {
-                                Icon(HugeIcons.Cancel01, contentDescription = "清空输入")
+                                Icon(AppIcons.Cancel01, contentDescription = "清空输入")
                             }
                         }
                     },
@@ -214,7 +213,7 @@ fun CainiaoQueryScreen(onBack: () -> Unit) {
                                 }
                             },
                         ) {
-                            Icon(HugeIcons.Cancel01, contentDescription = "删除这条历史")
+                            Icon(AppIcons.Cancel01, contentDescription = "删除这条历史")
                         }
                     }
                 }

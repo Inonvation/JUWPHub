@@ -82,22 +82,10 @@ import edu.jxslu.schedule.ui.common.SessionExpiredNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.reminder.WenquActivityAlertReminder
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Alert02
-import me.rerere.hugeicons.stroke.ArrowUp01
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.ChevronDown
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.ChevronUp
-import me.rerere.hugeicons.stroke.Filter
-import me.rerere.hugeicons.stroke.HeartHandshake
-import me.rerere.hugeicons.stroke.Medal02
-import me.rerere.hugeicons.stroke.Search01
-import me.rerere.hugeicons.stroke.Settings01
-import me.rerere.hugeicons.stroke.Target01
 import edu.jxslu.schedule.data.prefs.setWenquGrabPinnedAlertedId
 import edu.jxslu.schedule.data.prefs.setWenquGrabPinnedId
 
@@ -213,11 +201,11 @@ fun WenquScreen(
                             // 蹲点抢活动（2026-10-11，DESIGN §3.28）：独立二级页 WenquGrabScreen，
                             // 到点自动检测目标活动、命中弹确认框（不自动提交）
                             IconButton(onClick = onOpenGrab) {
-                                Icon(HugeIcons.Target01, contentDescription = "蹲点抢活动")
+                                Icon(AppIcons.Target01, contentDescription = "蹲点抢活动")
                             }
                             // 设置（DESIGN §3.28）：活动提醒 / 退出登录都在那一页
                             IconButton(onClick = onOpenSettings) {
-                                Icon(HugeIcons.Settings01, contentDescription = "问渠设置")
+                                Icon(AppIcons.Settings01, contentDescription = "问渠设置")
                             }
                         }
                     },
@@ -285,14 +273,14 @@ fun WenquScreen(
                                             overflow = TextOverflow.Ellipsis,
                                         )
                                     },
-                                    leadingIcon = { Icon(HugeIcons.Search01, contentDescription = null) },
+                                    leadingIcon = { Icon(AppIcons.Search01, contentDescription = null) },
                                     trailingIcon = {
                                         if (searchText.isNotEmpty()) {
                                             IconButton(onClick = {
                                                 // 清空 = 回浏览模式；浏览那串一直留着，不用重新请求
                                                 searchText = ""
                                                 vm.search("")
-                                            }) { Icon(HugeIcons.Cancel01, contentDescription = "清空") }
+                                            }) { Icon(AppIcons.Cancel01, contentDescription = "清空") }
                                         }
                                     },
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -312,7 +300,7 @@ fun WenquScreen(
                                     },
                                 ) {
                                     IconButton(onClick = { filterSheetOpen = true }) {
-                                        Icon(HugeIcons.Filter, contentDescription = "筛选与排序")
+                                        Icon(AppIcons.Filter, contentDescription = "筛选与排序")
                                     }
                                 }
                             }
@@ -344,7 +332,7 @@ fun WenquScreen(
                                     )
                                     Spacer(Modifier.width(2.dp))
                                     Icon(
-                                        imageVector = HugeIcons.ChevronDown,
+                                        imageVector = AppIcons.ChevronDown,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                                         modifier = Modifier.size(16.dp),
@@ -443,7 +431,7 @@ fun WenquScreen(
                         },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     ) {
-                        Icon(HugeIcons.ArrowUp01, contentDescription = "回到顶部")
+                        Icon(AppIcons.ArrowUp01, contentDescription = "回到顶部")
                     }
                 }
             }
@@ -721,7 +709,7 @@ private fun HoursRow(state: WenquViewModel.UiState, onOpenRecords: () -> Unit) {
     AppCard(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                imageVector = HugeIcons.HeartHandshake,
+                imageVector = AppIcons.HeartHandshake,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp),
@@ -741,7 +729,7 @@ private fun HoursRow(state: WenquViewModel.UiState, onOpenRecords: () -> Unit) {
             Spacer(Modifier.weight(1f))
             if (state.starLabel.isNotBlank()) {
                 Icon(
-                    imageVector = HugeIcons.Medal02,
+                    imageVector = AppIcons.Medal02,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(14.dp),
@@ -768,7 +756,7 @@ private fun HoursRow(state: WenquViewModel.UiState, onOpenRecords: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                 )
                 Icon(
-                    imageVector = HugeIcons.ChevronRight,
+                    imageVector = AppIcons.ChevronRight,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                     modifier = Modifier.size(16.dp),
@@ -816,7 +804,7 @@ private fun BlockedBanner(reason: String, expanded: Boolean, onToggle: () -> Uni
     AppCard(onClick = onToggle) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                imageVector = HugeIcons.Alert02,
+                imageVector = AppIcons.Alert02,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.error,
                 modifier = Modifier.size(18.dp),
@@ -830,7 +818,7 @@ private fun BlockedBanner(reason: String, expanded: Boolean, onToggle: () -> Uni
                 modifier = Modifier.weight(1f),
             )
             Icon(
-                imageVector = if (expanded) HugeIcons.ChevronUp else HugeIcons.ChevronDown,
+                imageVector = if (expanded) AppIcons.ChevronUp else AppIcons.ChevronDown,
                 contentDescription = if (expanded) "收起" else "展开",
                 tint = MaterialTheme.colorScheme.error,
                 modifier = Modifier.size(18.dp),

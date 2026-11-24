@@ -45,18 +45,13 @@ import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.reminder.WenquActivityAlertReminder
 import edu.jxslu.schedule.ui.reminder.WenquWeeklyAlertReminder
 import edu.jxslu.schedule.ui.score.maybeRequestNotifPermission
 import edu.jxslu.schedule.ui.score.openPdf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AlarmClock
-import me.rerere.hugeicons.stroke.Certificate01
-import me.rerere.hugeicons.stroke.Logout03
-import me.rerere.hugeicons.stroke.Note01
-import me.rerere.hugeicons.stroke.Notification03
 import edu.jxslu.schedule.data.prefs.setWenquActivityAlertEnabled
 import edu.jxslu.schedule.data.prefs.setWenquActivityIntervalHours
 import edu.jxslu.schedule.data.prefs.setWenquHideFull
@@ -149,14 +144,14 @@ fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
                 SettingItem(
                     title = "我的志愿服务记录",
                     subtitle = "我参加过的活动 · 每条可点开看详情",
-                    icon = HugeIcons.Note01,
+                    icon = AppIcons.Note01,
                     value = recordsCount?.let { "共 $it 条" },
                     onClick = onOpenRecords,
                 )
                 SettingItem(
                     title = "下载星级证书",
                     subtitle = "导出志愿星级证书 PDF（随时可重下）",
-                    icon = HugeIcons.Certificate01,
+                    icon = AppIcons.Certificate01,
                     value = if (downloadingCert) "下载中…" else null,
                     enabled = !downloadingCert,
                     onClick = {
@@ -194,7 +189,7 @@ fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
                 SettingSwitchRow(
                     title = "新增志愿活动提醒",
                     subtitle = "检测到新的「招募中」活动就发一条通知",
-                    icon = HugeIcons.Notification03,
+                    icon = AppIcons.Notification03,
                     checked = alertEnabled,
                     onCheckedChange = { want ->
                         // 开关变了要重排周期任务（这一路可能是五条链里最勤的那条）+ 立刻评估一次
@@ -221,7 +216,7 @@ fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
                 SettingSwitchRow(
                     title = "每周日 12:00 抢活动提醒",
                     subtitle = "学校常在这时发布新志愿活动，到点前提醒你去蹲",
-                    icon = HugeIcons.AlarmClock,
+                    icon = AppIcons.AlarmClock,
                     checked = weeklyEnabled,
                     onCheckedChange = { want ->
                         scope.launch {
@@ -263,7 +258,7 @@ fun WenquSettingsScreen(onBack: () -> Unit, onOpenRecords: () -> Unit) {
                 SettingItem(
                     title = "退出登录",
                     subtitle = "清除本机保存的问渠手机号、密码与会话",
-                    icon = HugeIcons.Logout03,
+                    icon = AppIcons.Logout03,
                     onClick = { confirmingLogout = true },
                 )
             }

@@ -79,13 +79,9 @@ import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.life.PowerRoomPickerSheet
 import edu.jxslu.schedule.ui.life.PowerRoomPickerViewModel
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.CreditCard
-import me.rerere.hugeicons.stroke.Home01
-import me.rerere.hugeicons.stroke.View
-import me.rerere.hugeicons.stroke.ViewOff
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 
@@ -427,7 +423,7 @@ fun CampusCardSettingsScreen(
                         trailingIcon = {
                             IconButton(onClick = { showPassword = !showPassword }) {
                                 Icon(
-                                    if (showPassword) HugeIcons.ViewOff else HugeIcons.View,
+                                    if (showPassword) AppIcons.ViewOff else AppIcons.View,
                                     contentDescription = if (showPassword) "隐藏密码" else "显示密码",
                                 )
                             }
@@ -492,7 +488,7 @@ fun CampusCardSettingsScreen(
             ) {
                 SettingSwitchRow(
                     title = "寝室电费",
-                    icon = HugeIcons.Home01,
+                    icon = AppIcons.Home01,
                     checked = powerAlertEnabled,
                     onCheckedChange = { want -> toggleAlert(want) { viewModel.setPowerAlertEnabled(it) } },
                 )
@@ -505,7 +501,7 @@ fun CampusCardSettingsScreen(
                 )
                 SettingSwitchRow(
                     title = "一卡通余额",
-                    icon = HugeIcons.CreditCard,
+                    icon = AppIcons.CreditCard,
                     checked = yktAlertEnabled,
                     onCheckedChange = { want -> toggleAlert(want) { viewModel.setYktAlertEnabled(it) } },
                 )

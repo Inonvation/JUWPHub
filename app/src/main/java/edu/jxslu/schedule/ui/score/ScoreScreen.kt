@@ -59,6 +59,7 @@ import edu.jxslu.schedule.TranscriptActivity
 import edu.jxslu.schedule.domain.ScoreCalculator
 import edu.jxslu.schedule.domain.ScoreGroups
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import edu.jxslu.schedule.domain.ScoreRecord
 import edu.jxslu.schedule.domain.ScoreSortMode
@@ -71,8 +72,6 @@ import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.SectionHeader
 import edu.jxslu.schedule.ui.jwvw.JwImportMode
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.BellRing
 
 /** 「全部」档的选中哨兵值：学期号/学年号不可能出现的字符串，避免与真实数据撞值。 */
 private const val SCOPE_ALL = "\u0000all"
@@ -232,7 +231,7 @@ fun ScoreScreen(onBack: () -> Unit) {
                             )
                         }
                         Icon(
-                            HugeIcons.BellRing,
+                            AppIcons.BellRing,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                         )

@@ -50,14 +50,8 @@ import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AiBrain01
-import me.rerere.hugeicons.stroke.Cpu
-import me.rerere.hugeicons.stroke.Image01
-import me.rerere.hugeicons.stroke.Link01
-import me.rerere.hugeicons.stroke.LockPassword
-import me.rerere.hugeicons.stroke.Refresh
 
 /**
  * AI 调课的服务配置页（DESIGN §4.39，2026-10-06）。
@@ -126,13 +120,13 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                 SettingItem(
                     title = "服务地址",
                     subtitle = baseUrl.ifBlank { "未填写" },
-                    icon = HugeIcons.Link01,
+                    icon = AppIcons.Link01,
                     onClick = { editingUrl = true },
                 )
                 SettingItem(
                     title = "模型",
                     subtitle = model.ifBlank { AiScheduleConfig.DEFAULT_MODEL },
-                    icon = HugeIcons.Cpu,
+                    icon = AppIcons.Cpu,
                     onClick = { editingModel = true },
                 )
                 SettingSwitchRow(
@@ -140,18 +134,18 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                     subtitle = "开启后可以在 AI 调课里发通知截图",
                     checked = supportsImage,
                     onCheckedChange = viewModel::setSupportsImage,
-                    icon = HugeIcons.Image01,
+                    icon = AppIcons.Image01,
                 )
                 SettingItem(
                     title = "API Key",
                     subtitle = if (apiKey.isNullOrBlank()) "未配置" else "已配置",
-                    icon = HugeIcons.LockPassword,
+                    icon = AppIcons.LockPassword,
                     onClick = { editingKey = true },
                 )
                 SettingItem(
                     title = "测试连接",
                     subtitle = "验证地址与 Key",
-                    icon = HugeIcons.Refresh,
+                    icon = AppIcons.Refresh,
                     enabled = !busy,
                     onClick = {
                         scope.launch {
@@ -186,14 +180,14 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                         AiScheduleClient.Effort.fromWire(thinkingEffort),
                     ),
                     onSelect = { index -> viewModel.setThinkingEffort(efforts[index].wire) },
-                    icon = HugeIcons.AiBrain01,
+                    icon = AppIcons.AiBrain01,
                 )
                 SettingSwitchRow(
                     title = "显示思考过程",
                     subtitle = "实时显示推理文本（默认收起）",
                     checked = showReasoning,
                     onCheckedChange = viewModel::setShowReasoning,
-                    icon = HugeIcons.AiBrain01,
+                    icon = AppIcons.AiBrain01,
                 )
             }
 
@@ -206,7 +200,7 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                     subtitle = "教师姓名替换成「教师1 / 教师2 …」",
                     checked = maskTeacher,
                     onCheckedChange = viewModel::setMaskTeacher,
-                    icon = HugeIcons.AiBrain01,
+                    icon = AppIcons.AiBrain01,
                 )
             }
         }

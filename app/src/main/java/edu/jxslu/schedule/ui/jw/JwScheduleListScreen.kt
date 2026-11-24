@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.jw
 
 import androidx.compose.foundation.background
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.datetime.toJavaLocalDate
 import kotlinx.datetime.toKotlinLocalDate
 import androidx.compose.foundation.clickable
@@ -66,9 +67,6 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.ArrowRight01
 
 /**
  * 教务 → 理论课表 / 实验课表（2026-10-21 二版：日程流）。
@@ -146,7 +144,7 @@ fun JwScheduleListScreen(kind: CourseKind, onBack: () -> Unit) {
                 title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(HugeIcons.ArrowLeft01, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
                 actions = { JwWebActionButton(title, webUrl) },
@@ -251,7 +249,7 @@ private fun WeekNavRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = { onPrev(week - 1) }, enabled = week > 1) {
-                Icon(HugeIcons.ArrowLeft01, contentDescription = "上一周", modifier = Modifier.size(18.dp))
+                Icon(AppIcons.ArrowLeft01, contentDescription = "上一周", modifier = Modifier.size(18.dp))
             }
             Row(
                 modifier = Modifier.weight(1f),
@@ -285,7 +283,7 @@ private fun WeekNavRow(
                 }
             }
             IconButton(onClick = { onNext(week + 1) }, enabled = week < totalWeeks) {
-                Icon(HugeIcons.ArrowRight01, contentDescription = "下一周", modifier = Modifier.size(18.dp))
+                Icon(AppIcons.ArrowRight01, contentDescription = "下一周", modifier = Modifier.size(18.dp))
             }
         }
         // 非本周时给一条显式回口；本 = 本周时不占位（防高度跳动）

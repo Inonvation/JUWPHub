@@ -59,10 +59,8 @@ import edu.jxslu.schedule.ui.common.SectionHeader
 import edu.jxslu.schedule.ui.common.courseTint
 import edu.jxslu.schedule.ui.common.epochMonthDay
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.ArrowDown01
 
 /**
  * 笔记·课件库（我的 → 学习 → 笔记·课件，DESIGN §3.11）：**按课程折叠分组**（2026-09-23 改）。
@@ -207,14 +205,14 @@ private fun NoteGroupCard(
             // 48dp 而不是 32dp：分组头整行是可点的（展开/收起），按钮命中区太小会误触成展开
             IconButton(onClick = onAdd, modifier = Modifier.size(48.dp)) {
                 Icon(
-                    imageVector = HugeIcons.Add01,
+                    imageVector = AppIcons.Add01,
                     contentDescription = "在 ${group.courseName} 新建笔记",
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }
             Icon(
-                imageVector = HugeIcons.ArrowDown01,
+                imageVector = AppIcons.ArrowDown01,
                 contentDescription = null,
                 modifier = Modifier
                     .size(18.dp)

@@ -87,6 +87,7 @@ import edu.jxslu.schedule.ui.common.ShortcutSheet
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -97,17 +98,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Bolt
-import me.rerere.hugeicons.stroke.Book01
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.CreditCard
-import me.rerere.hugeicons.stroke.Package01
-import me.rerere.hugeicons.stroke.QrCodeScan
-import me.rerere.hugeicons.stroke.Settings01
-import me.rerere.hugeicons.stroke.Task01
-import me.rerere.hugeicons.stroke.Toolbox
-import me.rerere.hugeicons.stroke.Wallet01
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -439,11 +429,11 @@ fun SideDrawerContent(
                 DrawerSection("生活") {
                     DrawerRow(
                         label = "取快递",
-                        icon = HugeIcons.Package01,
+                        icon = AppIcons.Package01,
                         onClick = { showShortcutSheet = true },
                     )
                     if (toolboxEnabled) {
-                        DrawerRow("百宝箱", HugeIcons.Toolbox, onClick = onOpenToolbox)
+                        DrawerRow("百宝箱", AppIcons.Toolbox, onClick = onOpenToolbox)
                     }
                 }
                 DrawerSection("江水生活") {
@@ -452,7 +442,7 @@ fun SideDrawerContent(
                     // 账号行与「账号与登录」页的「一卡通 · 电费」共用同一颗。
                     DrawerRow(
                         label = "一卡通账号",
-                        icon = HugeIcons.CreditCard,
+                        icon = AppIcons.CreditCard,
                         onClick = onOpenCampusAccount,
                     )
                     // 快趣/胖乖/趣智/U净/问渠五行走**官方品牌图标**（2026-10-21 用户口径）：
@@ -500,8 +490,8 @@ fun SideDrawerContent(
                     )
                 }
                 DrawerSection("学习") {
-                    DrawerRow("笔记 · 课件", HugeIcons.Book01, onClick = onOpenNotes)
-                    DrawerRow("作业", HugeIcons.Task01, onClick = onOpenHomework)
+                    DrawerRow("笔记 · 课件", AppIcons.Book01, onClick = onOpenNotes)
+                    DrawerRow("作业", AppIcons.Task01, onClick = onOpenHomework)
                 }
                 Spacer(Modifier.height(16.dp))
             }
@@ -666,7 +656,7 @@ private fun ScanCircle(onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = HugeIcons.QrCodeScan,
+            imageVector = AppIcons.QrCodeScan,
             contentDescription = null,
             tint = primary,
             modifier = Modifier.size(20.dp),
@@ -689,7 +679,7 @@ private fun AccountRow(onClick: () -> Unit) {
         Text("账号与登录", style = MaterialTheme.typography.labelMedium, color = muted)
         Spacer(Modifier.width(2.dp))
         Icon(
-            imageVector = HugeIcons.ChevronRight,
+            imageVector = AppIcons.ChevronRight,
             contentDescription = null,
             tint = muted,
             modifier = Modifier.size(14.dp),
@@ -896,7 +886,7 @@ private fun RechargeButton(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            HugeIcons.Wallet01,
+            AppIcons.Wallet01,
             contentDescription = null,
             tint = if (enabled) primary else muted,
             modifier = Modifier.size(16.dp),
@@ -1046,7 +1036,7 @@ private fun RechargeChoiceSheet(
                 RechargeTile(
                     title = "一卡通充值",
                     subtitle = "正式卡 / 电子账户",
-                    icon = HugeIcons.Wallet01,
+                    icon = AppIcons.Wallet01,
                     modifier = Modifier.weight(1f),
                     // 退场播完再弹下一张，两张弹层不叠在同一帧
                     onClick = { dismissThen(onPickCampus) },
@@ -1054,7 +1044,7 @@ private fun RechargeChoiceSheet(
                 RechargeTile(
                     title = "寝室电费充值",
                     subtitle = "缴费平台 · 房间电表",
-                    icon = HugeIcons.Bolt,
+                    icon = AppIcons.Bolt,
                     modifier = Modifier.weight(1f),
                     onClick = { dismissThen(onPickPower) },
                 )
@@ -1256,7 +1246,7 @@ private fun DrawerRow(
                 }
                 if (trailing != null) Spacer(Modifier.width(2.dp))
                 Icon(
-                    imageVector = HugeIcons.ChevronRight,
+                    imageVector = AppIcons.ChevronRight,
                     contentDescription = null,
                     tint = if (onTrailingClick != null) {
                         MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
@@ -1302,7 +1292,7 @@ private fun SettingsEntry(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = HugeIcons.Settings01,
+            imageVector = AppIcons.Settings01,
             contentDescription = null,
             tint = onSurface.copy(alpha = 0.7f),
             modifier = Modifier.size(20.dp),
@@ -1344,7 +1334,7 @@ private fun PaymentCodeEntry(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = HugeIcons.QrCodeScan,
+            imageVector = AppIcons.QrCodeScan,
             contentDescription = null,
             tint = primary,
             modifier = Modifier.size(20.dp),

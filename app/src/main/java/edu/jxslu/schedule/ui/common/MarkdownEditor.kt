@@ -44,18 +44,7 @@ import edu.jxslu.schedule.domain.autoPairDollar
 import edu.jxslu.schedule.domain.continueOnEnter
 import edu.jxslu.schedule.domain.imageRefs
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.CheckList
-import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.Heading02
-import me.rerere.hugeicons.stroke.ImageAdd01
-import me.rerere.hugeicons.stroke.LeftToRightListBullet
-import me.rerere.hugeicons.stroke.LeftToRightListNumber
-import me.rerere.hugeicons.stroke.QuoteUp
-import me.rerere.hugeicons.stroke.Sigma
-import me.rerere.hugeicons.stroke.TextBold
-import me.rerere.hugeicons.stroke.TextItalic
-import me.rerere.hugeicons.stroke.TextStrikethrough
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * Markdown 正文输入框（2026-10-21 从原 MarkdownEditor 拆出）：只有输入区，不含工具条。
@@ -164,16 +153,16 @@ private class ToolbarAction(
 )
 
 private val TOOLBAR: List<ToolbarAction> = listOf(
-    ToolbarAction(HugeIcons.Heading02, "标题", MdAction.Heading),
-    ToolbarAction(HugeIcons.TextBold, "加粗", MdAction.Bold),
-    ToolbarAction(HugeIcons.TextItalic, "斜体", MdAction.Italic),
-    ToolbarAction(HugeIcons.TextStrikethrough, "删除线", MdAction.Strike),
-    ToolbarAction(HugeIcons.LeftToRightListBullet, "无序列表", MdAction.Bullet),
-    ToolbarAction(HugeIcons.LeftToRightListNumber, "有序列表", MdAction.Ordered),
-    ToolbarAction(HugeIcons.CheckList, "任务项", MdAction.Task),
-    ToolbarAction(HugeIcons.QuoteUp, "引用", MdAction.Quote),
-    ToolbarAction(HugeIcons.Code, "代码", MdAction.Code),
-    ToolbarAction(HugeIcons.Sigma, "公式", MdAction.Math),
+    ToolbarAction(AppIcons.Heading02, "标题", MdAction.Heading),
+    ToolbarAction(AppIcons.TextBold, "加粗", MdAction.Bold),
+    ToolbarAction(AppIcons.TextItalic, "斜体", MdAction.Italic),
+    ToolbarAction(AppIcons.TextStrikethrough, "删除线", MdAction.Strike),
+    ToolbarAction(AppIcons.LeftToRightListBullet, "无序列表", MdAction.Bullet),
+    ToolbarAction(AppIcons.LeftToRightListNumber, "有序列表", MdAction.Ordered),
+    ToolbarAction(AppIcons.CheckList, "任务项", MdAction.Task),
+    ToolbarAction(AppIcons.QuoteUp, "引用", MdAction.Quote),
+    ToolbarAction(AppIcons.Code, "代码", MdAction.Code),
+    ToolbarAction(AppIcons.Sigma, "公式", MdAction.Math),
 )
 
 @Composable
@@ -227,7 +216,7 @@ fun MarkdownToolbar(
                 modifier = Modifier.size(38.dp),
             ) {
                 Icon(
-                    imageVector = HugeIcons.ImageAdd01,
+                    imageVector = AppIcons.ImageAdd01,
                     contentDescription = "插入图片",
                     modifier = Modifier.size(19.dp),
                 )

@@ -98,18 +98,12 @@ import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.me.MeViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Copy01
-import me.rerere.hugeicons.stroke.Droplet
-import me.rerere.hugeicons.stroke.History
-import me.rerere.hugeicons.stroke.View
-import me.rerere.hugeicons.stroke.ViewOff
-import me.rerere.hugeicons.stroke.WalletAdd01
 
 private val DATE_FORMAT = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
 
@@ -266,7 +260,7 @@ fun WaterScreen(
                         // 退出登录已挪到页尾（2026-11-05 改版）：顶栏只留复制 Token 这个
                         // 排障入口，避免同一个危险动作在页面上出现两次
                         IconButton(onClick = copyToken) {
-                            Icon(HugeIcons.Copy01, contentDescription = "复制 Token")
+                            Icon(AppIcons.Copy01, contentDescription = "复制 Token")
                         }
                     }
                 },
@@ -575,7 +569,7 @@ private fun QiekjHeroCard(
         action = {
             HeroActionButton(
                 text = "充值到胖乖账户",
-                icon = HugeIcons.WalletAdd01,
+                icon = AppIcons.WalletAdd01,
                 onClick = onRecharge,
             )
         },
@@ -586,7 +580,7 @@ private fun QiekjHeroCard(
 @Composable
 private fun PhoneEye(shown: Boolean, onToggle: () -> Unit) {
     Icon(
-        imageVector = if (shown) HugeIcons.ViewOff else HugeIcons.View,
+        imageVector = if (shown) AppIcons.ViewOff else AppIcons.View,
         contentDescription = if (shown) "隐藏手机号" else "显示手机号",
         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
         modifier = Modifier
@@ -718,7 +712,7 @@ private fun DeviceRowItem(state: WaterUiState, onPick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            HugeIcons.Droplet,
+            AppIcons.Droplet,
             contentDescription = null,
             tint = if (state.selectedDevice != null) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
@@ -961,7 +955,7 @@ private fun DeviceSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        HugeIcons.Droplet,
+                        AppIcons.Droplet,
                         contentDescription = null,
                         tint = if (isSelected) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
@@ -1004,7 +998,7 @@ private fun OrderSection(
         SettingItem(
             title = if (orders.isEmpty()) "还没有本地订单" else "本地 ${orders.size} 笔",
             subtitle = "点看明细",
-            icon = HugeIcons.History,
+            icon = AppIcons.History,
             onClick = { showOrders = true },
         )
     }

@@ -102,6 +102,7 @@ import edu.jxslu.schedule.ui.common.rememberCloseLock
 import edu.jxslu.schedule.ui.ebike.BikeLocator
 import edu.jxslu.schedule.ui.ebike.LocateResult
 import edu.jxslu.schedule.ui.ebike.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -110,12 +111,6 @@ import kotlin.math.ceil
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AlertCircle
-import me.rerere.hugeicons.stroke.Delete02
-import me.rerere.hugeicons.stroke.Plus
-import me.rerere.hugeicons.stroke.QrCodeScan
-import me.rerere.hugeicons.stroke.Refresh
 
 /** 订单进行中且页面可见时的轮询间隔（与 ViewModel 口径一致，只在 UI 侧用）。 */
 private const val ORDER_POLL_INTERVAL_MILLIS = 15_000L
@@ -542,7 +537,7 @@ private fun MetricsSection(state: UjingUiState, onRefresh: () -> Unit) {
             } else {
                 IconButton(onClick = onRefresh) {
                     Icon(
-                        HugeIcons.Refresh,
+                        AppIcons.Refresh,
                         contentDescription = "刷新空闲数",
                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                         modifier = Modifier.size(18.dp),
@@ -773,7 +768,7 @@ private fun BoardSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(onClick = onAdd) {
-                Icon(HugeIcons.Plus, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(AppIcons.Plus, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
                 Text(if (state.houses.isEmpty()) "添加洗衣房" else "添加")
             }
@@ -825,7 +820,7 @@ private fun BoardHouseRow(row: UjingBoardRow, onRemove: () -> Unit) {
         // 命中区 40dp（M3 IconButton 自带 48dp 触摸目标），此前 32dp 低于无障碍下限
         IconButton(onClick = onRemove, modifier = Modifier.size(40.dp)) {
             Icon(
-                HugeIcons.Delete02,
+                AppIcons.Delete02,
                 contentDescription = "删除 ${row.house.name}",
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                 modifier = Modifier.size(20.dp),
@@ -976,7 +971,7 @@ private fun ScanSection(
 
                     ScanPhase.Failed -> {
                         Icon(
-                            HugeIcons.AlertCircle,
+                            AppIcons.AlertCircle,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(16.dp),
@@ -1017,7 +1012,7 @@ private fun ScanSection(
                         .height(40.dp),
                 ) {
                     Icon(
-                        HugeIcons.QrCodeScan,
+                        AppIcons.QrCodeScan,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )
@@ -1034,7 +1029,7 @@ private fun ScanSection(
                         .height(48.dp),
                 ) {
                     Icon(
-                        HugeIcons.QrCodeScan,
+                        AppIcons.QrCodeScan,
                         contentDescription = null,
                         modifier = Modifier.size(20.dp),
                     )

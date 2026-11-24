@@ -47,12 +47,10 @@ import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.Refresh
 
 /**
  * 我的 → 校园服务 → 校历（DESIGN §4.34）。
@@ -84,7 +82,7 @@ fun CampusCalendarScreen(onBack: () -> Unit) {
                 title = { Text("校历") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(HugeIcons.ArrowLeft01, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
                 actions = {
@@ -130,7 +128,7 @@ fun CampusCalendarScreen(onBack: () -> Unit) {
                                 strokeWidth = 2.dp,
                             )
                         } else {
-                            Icon(HugeIcons.Refresh, contentDescription = "刷新")
+                            Icon(AppIcons.Refresh, contentDescription = "刷新")
                         }
                     }
                 },

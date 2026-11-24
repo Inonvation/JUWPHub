@@ -30,14 +30,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Alert02
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.CheckmarkCircle02
-import me.rerere.hugeicons.stroke.InformationCircle
 
 /**
  * 提示语义。决定图标与强调色，不改变文案来源——[Info] 是「未说明语气」的兜底，
@@ -244,7 +240,7 @@ private fun AppNoticeCard(data: SnackbarData) {
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(
-                    HugeIcons.Cancel01,
+                    AppIcons.Cancel01,
                     contentDescription = "关闭",
                     tint = scheme.onSurface.copy(alpha = 0.6f),
                     modifier = Modifier.size(16.dp),
@@ -256,10 +252,10 @@ private fun AppNoticeCard(data: SnackbarData) {
 
 /** 语气图标：形状先于颜色传达语气，色弱用户也分得清「成功」与「失败」。 */
 internal fun NoticeTone.icon(): ImageVector = when (this) {
-    NoticeTone.Info -> HugeIcons.InformationCircle
-    NoticeTone.Success -> HugeIcons.CheckmarkCircle02
-    NoticeTone.Warning -> HugeIcons.Alert02
-    NoticeTone.Error -> HugeIcons.Cancel01
+    NoticeTone.Info -> AppIcons.InformationCircle
+    NoticeTone.Success -> AppIcons.CheckmarkCircle02
+    NoticeTone.Warning -> AppIcons.Alert02
+    NoticeTone.Error -> AppIcons.Cancel01
 }
 
 /**
@@ -333,7 +329,7 @@ fun FooterDisclaimer(
         if (title != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = HugeIcons.InformationCircle,
+                    imageVector = AppIcons.InformationCircle,
                     contentDescription = null,
                     tint = onSurface.copy(alpha = 0.5f),
                     modifier = Modifier.size(16.dp),

@@ -43,11 +43,10 @@ import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.reminder.ClassReminder
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
 
 /**
  * 某课程的作业列表（DESIGN §3.11）。
@@ -84,7 +83,7 @@ fun HomeworkCourseScreen(
                 actions = {
                     // 新建：进入详情页的「新建」形态（itemId = 0）
                     IconButton(onClick = { onOpenHomework(0L, false) }) {
-                        Icon(HugeIcons.Add01, contentDescription = "新建作业")
+                        Icon(AppIcons.Add01, contentDescription = "新建作业")
                     }
                 },
             )

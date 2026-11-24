@@ -64,15 +64,11 @@ import edu.jxslu.schedule.domain.compactPosition
 import edu.jxslu.schedule.ui.common.courseColor
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import edu.jxslu.schedule.domain.monthDayText
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowDownDouble
-import me.rerere.hugeicons.stroke.ArrowLeftRight
-import me.rerere.hugeicons.stroke.Calendar03
 
 /**
  * 调课页（DESIGN §4.11）：选「被调整日期」与「调整到日期」，预览两侧课程，选模式后执行。
@@ -182,9 +178,9 @@ fun CourseTweakScreen(
                             leadingIcon = {
                                 Icon(
                                     imageVector = when (mode) {
-                                        TweakMode.Merge -> HugeIcons.ArrowDown01
-                                        TweakMode.Overwrite -> HugeIcons.ArrowDownDouble
-                                        TweakMode.Exchange -> HugeIcons.ArrowLeftRight
+                                        TweakMode.Merge -> AppIcons.ArrowDown01
+                                        TweakMode.Overwrite -> AppIcons.ArrowDownDouble
+                                        TweakMode.Exchange -> AppIcons.ArrowLeftRight
                                     },
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp),
@@ -320,7 +316,7 @@ private fun DateCard(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Icon(
-                    HugeIcons.Calendar03,
+                    AppIcons.Calendar03,
                     contentDescription = null,
                     modifier = Modifier.size(15.dp),
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),

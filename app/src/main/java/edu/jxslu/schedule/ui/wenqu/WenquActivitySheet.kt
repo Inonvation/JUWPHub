@@ -42,8 +42,7 @@ import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Copy01
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 活动详情弹层（DESIGN §3.28）。
@@ -661,7 +660,7 @@ private fun DetailRow(
         if (copyable) {
             Spacer(Modifier.width(8.dp))
             Icon(
-                imageVector = HugeIcons.Copy01,
+                imageVector = AppIcons.Copy01,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                 modifier = Modifier.size(16.dp),

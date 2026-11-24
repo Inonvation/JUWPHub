@@ -94,6 +94,7 @@ import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
@@ -102,12 +103,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.Eye
-import me.rerere.hugeicons.stroke.Import
-import me.rerere.hugeicons.stroke.Refresh
-import me.rerere.hugeicons.stroke.Share08
 import android.util.Log
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -1027,7 +1022,7 @@ private fun WeekTopBar(
         Spacer(Modifier.weight(1f))
         IconButton(onClick = { haptics.tap(); onOpenShare() }) {
             Icon(
-                HugeIcons.Share08,
+                AppIcons.Share08,
                 contentDescription = "分享课表",
                 tint = onSurface.copy(alpha = 0.75f),
                 modifier = Modifier.size(20.dp),
@@ -1035,7 +1030,7 @@ private fun WeekTopBar(
         }
         IconButton(onClick = { haptics.tap(); onOpenDisplay() }) {
             Icon(
-                HugeIcons.Eye,
+                AppIcons.Eye,
                 contentDescription = "显示设置",
                 tint = onSurface.copy(alpha = 0.75f),
                 modifier = Modifier.size(20.dp),
@@ -1054,7 +1049,7 @@ private fun WeekTopBar(
         } else {
             IconButton(onClick = { haptics.tap(); onQuickCheck() }) {
                 Icon(
-                    HugeIcons.Refresh,
+                    AppIcons.Refresh,
                     contentDescription = "检测课表与考试变动",
                     tint = onSurface.copy(alpha = 0.75f),
                     modifier = Modifier.size(20.dp),
@@ -1063,7 +1058,7 @@ private fun WeekTopBar(
         }
         IconButton(onClick = { haptics.tap(); onOpenImport() }) {
             Icon(
-                HugeIcons.Import,
+                AppIcons.Import,
                 contentDescription = "导入课表",
                 tint = onSurface.copy(alpha = 0.75f),
                 modifier = Modifier.size(20.dp),
@@ -1107,7 +1102,7 @@ private fun BackToCurrentWeekButton(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Icon(
-                HugeIcons.ArrowDown01,
+                AppIcons.ArrowDown01,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
             )

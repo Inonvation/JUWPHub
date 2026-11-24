@@ -67,11 +67,9 @@ import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import java.time.YearMonth
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.Bolt
 
 /**
  * 缴费账单页（DESIGN §3.13「缴费账单页」）。
@@ -136,7 +134,7 @@ fun PowerBillScreen(
                 title = { Text("缴费账单") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(HugeIcons.ArrowLeft01, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
             )
@@ -415,7 +413,7 @@ private fun BillRow(row: PowerTurnover, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = HugeIcons.Bolt,
+            imageVector = AppIcons.Bolt,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.tertiary,
@@ -562,7 +560,7 @@ private fun Footer(onOpenPlatform: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         TextButton(onClick = onOpenPlatform) {
-            Icon(HugeIcons.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
+            Icon(AppIcons.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
             Text("在缴费平台打开")
         }

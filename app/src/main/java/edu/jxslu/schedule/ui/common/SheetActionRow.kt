@@ -21,8 +21,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChevronRight
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 弹层里的一条整宽动作行（图标 + 标题 + 副标题 + 右箭头）。
@@ -65,7 +64,7 @@ fun SheetActionRow(
             )
         }
         Icon(
-            HugeIcons.ChevronRight,
+            AppIcons.ChevronRight,
             contentDescription = null,
             tint = onSurface.copy(alpha = 0.35f),
             modifier = Modifier.size(18.dp),

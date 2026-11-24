@@ -51,12 +51,11 @@ import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.SkeletonBox
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.TextFmt
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Inbox
 
 /**
  * 收件箱（DESIGN §3.24 / §4.38，2026-10-06）：应用内重要事实的留痕——考试安排、成绩、
@@ -345,7 +344,7 @@ private fun EmptyState() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(
-            HugeIcons.Inbox,
+            AppIcons.Inbox,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
             modifier = Modifier.size(44.dp),

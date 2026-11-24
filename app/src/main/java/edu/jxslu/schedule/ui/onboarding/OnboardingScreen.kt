@@ -135,6 +135,7 @@ import edu.jxslu.schedule.ui.common.NoticeDialog
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.emphasizedText
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jwvw.JwImportResultBus
 import edu.jxslu.schedule.ui.theme.rememberAnimationsEnabled
 import edu.jxslu.schedule.ui.theme.semanticColors
@@ -142,19 +143,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowLeft02
-import me.rerere.hugeicons.stroke.Calendar01
-import me.rerere.hugeicons.stroke.ChartAverage
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.CreditCard
-import me.rerere.hugeicons.stroke.Droplet
-import me.rerere.hugeicons.stroke.Eye
-import me.rerere.hugeicons.stroke.EyeOff
-import me.rerere.hugeicons.stroke.InformationCircle
-import me.rerere.hugeicons.stroke.Shield01
-import me.rerere.hugeicons.stroke.Tick02
 
 /** 引导步骤（DESIGN §3.16）。顺序即流程，[Done] 是终点。 */
 private enum class Step(val index: Int, val title: String, val desc: String) {
@@ -600,7 +588,7 @@ private fun OnboardingTopBar(
         if (showBack) {
             IconButton(onClick = onBack) {
                 Icon(
-                    HugeIcons.ArrowLeft02,
+                    AppIcons.ArrowLeft02,
                     contentDescription = "上一步",
                     modifier = Modifier.size(22.dp),
                 )
@@ -756,7 +744,7 @@ private fun StepHeader(tile: @Composable () -> Unit, title: String, desc: String
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        HugeIcons.Tick02,
+                        AppIcons.Tick02,
                         contentDescription = "已验证",
                         tint = MaterialTheme.colorScheme.surface,
                         modifier = Modifier.size(11.dp),
@@ -811,7 +799,7 @@ private fun WhyCard(question: String, body: String, modifier: Modifier = Modifie
             )
             Spacer(Modifier.weight(1f))
             Icon(
-                HugeIcons.ArrowDown01,
+                AppIcons.ArrowDown01,
                 contentDescription = if (open) "收起" else "展开",
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                 modifier = Modifier
@@ -842,7 +830,7 @@ private fun TrustBar(text: String, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.Top,
     ) {
         Icon(
-            HugeIcons.Shield01,
+            AppIcons.Shield01,
             contentDescription = null,
             tint = MaterialTheme.semanticColors.success,
             modifier = Modifier.size(17.dp),
@@ -1020,7 +1008,7 @@ private fun PasswordField(
         trailingIcon = {
             IconButton(onClick = { visible = !visible }, modifier = Modifier.size(40.dp)) {
                 Icon(
-                    if (visible) HugeIcons.EyeOff else HugeIcons.Eye,
+                    if (visible) AppIcons.EyeOff else AppIcons.Eye,
                     contentDescription = if (visible) "隐藏密码" else "显示密码",
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                     modifier = Modifier.size(19.dp),
@@ -1188,7 +1176,7 @@ private fun WelcomeHero() {
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    HugeIcons.Droplet,
+                    AppIcons.Droplet,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(40.dp),
@@ -1262,13 +1250,13 @@ private fun FeatureRow() {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FeatureCell(HugeIcons.Calendar01, "课表")
+        FeatureCell(AppIcons.Calendar01, "课表")
         Spacer(Modifier.width(10.dp))
-        FeatureCell(HugeIcons.ChartAverage, "成绩")
+        FeatureCell(AppIcons.ChartAverage, "成绩")
         Spacer(Modifier.width(10.dp))
-        FeatureCell(HugeIcons.CreditCard, "一卡通")
+        FeatureCell(AppIcons.CreditCard, "一卡通")
         Spacer(Modifier.width(10.dp))
-        FeatureCell(HugeIcons.Droplet, "开水")
+        FeatureCell(AppIcons.Droplet, "开水")
     }
 }
 
@@ -2119,7 +2107,7 @@ private fun QzxyStep(
                                 trailingIcon = {
                                     IconButton(onClick = { sessionVisible = !sessionVisible }, modifier = Modifier.size(40.dp)) {
                                         Icon(
-                                            if (sessionVisible) HugeIcons.EyeOff else HugeIcons.Eye,
+                                            if (sessionVisible) AppIcons.EyeOff else AppIcons.Eye,
                                             contentDescription = if (sessionVisible) "隐藏会话串" else "显示会话串",
                                             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                                             modifier = Modifier.size(19.dp),
@@ -2387,7 +2375,7 @@ private fun OptionalAccountRow(
         )
         Spacer(Modifier.width(2.dp))
         Icon(
-            HugeIcons.ChevronRight,
+            AppIcons.ChevronRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(14.dp),
@@ -2413,7 +2401,7 @@ private fun BgSyncLine(phase: BgSyncPhase) {
         }
         BgSyncPhase.DoneOk -> CenteredNote {
             Icon(
-                HugeIcons.Tick02,
+                AppIcons.Tick02,
                 contentDescription = null,
                 tint = MaterialTheme.semanticColors.success,
                 modifier = Modifier.size(14.dp),
@@ -2422,7 +2410,7 @@ private fun BgSyncLine(phase: BgSyncPhase) {
         }
         BgSyncPhase.DoneFailed -> CenteredNote {
             Icon(
-                HugeIcons.InformationCircle,
+                AppIcons.InformationCircle,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                 modifier = Modifier.size(14.dp),

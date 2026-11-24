@@ -29,9 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.session.LoginState
 import edu.jxslu.schedule.domain.AccountMask
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.View
-import me.rerere.hugeicons.stroke.ViewOff
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 账户卡（DESIGN §3.3）：姓名 + 学号（可遮罩）+ 副行 + 状态。
@@ -103,7 +101,7 @@ fun AccountCard(
             if (username.isNotBlank()) {
                 IconButton(onClick = { revealed = !revealed }) {
                     Icon(
-                        imageVector = if (revealed) HugeIcons.ViewOff else HugeIcons.View,
+                        imageVector = if (revealed) AppIcons.ViewOff else AppIcons.View,
                         contentDescription = if (revealed) "隐藏学号" else "显示学号",
                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     )

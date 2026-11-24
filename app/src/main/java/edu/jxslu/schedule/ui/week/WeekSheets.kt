@@ -34,14 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.Timetable
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.File02
-import me.rerere.hugeicons.stroke.FileExport
-import me.rerere.hugeicons.stroke.FileImport
-import me.rerere.hugeicons.stroke.Import
-import me.rerere.hugeicons.stroke.ImageDownload
-import me.rerere.hugeicons.stroke.CalendarSync
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 周次选择器：只管「看哪一周」。
@@ -261,19 +254,19 @@ fun ImportEntrySheet(
                 modifier = Modifier.padding(bottom = 8.dp),
             )
             ImportEntryRow(
-                icon = { Icon(HugeIcons.Add01, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                icon = { Icon(AppIcons.Add01, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "手动添加课程",
                 subtitle = "在网格空白处新增或编辑单门课程",
                 onClick = { dismiss { onManualAdd() } },
             )
             ImportEntryRow(
-                icon = { Icon(HugeIcons.FileImport, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                icon = { Icon(AppIcons.FileImport, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "导入 JSON 文件",
                 subtitle = "从导出的课表 JSON 恢复或合并",
                 onClick = { dismiss { onJsonImport() } },
             )
             ImportEntryRow(
-                icon = { Icon(HugeIcons.Import, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                icon = { Icon(AppIcons.Import, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "从教务导入",
                 subtitle = "登录教务系统，解析学期理论 / 实验课表",
                 onClick = { dismiss { onJwImport() } },
@@ -313,25 +306,25 @@ fun ShareEntrySheet(
                 modifier = Modifier.padding(bottom = 8.dp),
             )
             ImportEntryRow(
-                icon = { Icon(HugeIcons.CalendarSync, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                icon = { Icon(AppIcons.CalendarSync, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "一键同步到手机日历",
                 subtitle = "写入系统日历并按设置提醒；重复同步自动去重",
                 onClick = { dismiss { onSyncCalendar() } },
             )
             ImportEntryRow(
-                icon = { Icon(HugeIcons.FileExport, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                icon = { Icon(AppIcons.FileExport, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "导出为 CSV（日历格式）",
                 subtitle = "Google 日历可直接导入的通用格式",
                 onClick = { dismiss { onExportCsv() } },
             )
             ImportEntryRow(
-                icon = { Icon(HugeIcons.File02, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                icon = { Icon(AppIcons.File02, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "导出为 JSON",
                 subtitle = "完整课表数据，可在其他设备导入 JUWPHub",
                 onClick = { dismiss { onExportJson() } },
             )
             ImportEntryRow(
-                icon = { Icon(HugeIcons.ImageDownload, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                icon = { Icon(AppIcons.ImageDownload, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 title = "导出为图片",
                 subtitle = "生成一张只含本周课表的图，可保存到相册或直接分享",
                 onClick = { dismiss { onShareImage() } },

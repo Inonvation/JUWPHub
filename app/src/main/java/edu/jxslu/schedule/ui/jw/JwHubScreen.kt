@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.jw
 
 import androidx.compose.foundation.background
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.datetime.toKotlinLocalDate
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -59,16 +60,6 @@ import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Analytics01
-import me.rerere.hugeicons.stroke.Book01
-import me.rerere.hugeicons.stroke.Calendar01
-import me.rerere.hugeicons.stroke.CheckmarkCircle02
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.File01
-import me.rerere.hugeicons.stroke.Layers01
-import me.rerere.hugeicons.stroke.Task01
-import me.rerere.hugeicons.stroke.Toolbox
 
 /**
  * 教务 Tab（2026-10-20 新 IA，2026-10-20 第三版；2026-10-21 课表入原生页）。
@@ -103,36 +94,36 @@ fun JwHubScreen(
     JwImportOutcomeEffect(snackbar)
 
     val quickEntries = listOf(
-        QuickEntry("理论课表", stats.theoryShort, HugeIcons.Book01, onOpenTheorySchedule),
-        QuickEntry("实验课表", stats.labShort, HugeIcons.Layers01, onOpenLabSchedule),
-        QuickEntry("成绩查询", stats.scoresShort, HugeIcons.Analytics01, onOpenScores),
-        QuickEntry("考试安排", stats.examsShort, HugeIcons.Calendar01, onOpenExams),
+        QuickEntry("理论课表", stats.theoryShort, AppIcons.Book01, onOpenTheorySchedule),
+        QuickEntry("实验课表", stats.labShort, AppIcons.Layers01, onOpenLabSchedule),
+        QuickEntry("成绩查询", stats.scoresShort, AppIcons.Analytics01, onOpenScores),
+        QuickEntry("考试安排", stats.examsShort, AppIcons.Calendar01, onOpenExams),
     )
 
     val sections = listOf(
         HubSection(
             title = "教务服务",
             entries = listOf(
-                HubEntry("教材", "本学期教材清单", HugeIcons.Book01, onOpenTextbooks),
-                HubEntry("选课", "记录 · 轮次", HugeIcons.Task01, onOpenSelection),
-                HubEntry("教学日历", "第 1 周周一 · 每周起止", HugeIcons.Calendar01, onOpenTeachingCalendar),
+                HubEntry("教材", "本学期教材清单", AppIcons.Book01, onOpenTextbooks),
+                HubEntry("选课", "记录 · 轮次", AppIcons.Task01, onOpenSelection),
+                HubEntry("教学日历", "第 1 周周一 · 每周起止", AppIcons.Calendar01, onOpenTeachingCalendar),
             ),
         ),
         HubSection(
             title = "学业与规划",
             entries = listOf(
-                HubEntry("学业完成情况", "培养方案达成度", HugeIcons.Analytics01, onOpenScholar),
-                HubEntry("培养方案", "课程设置总表", HugeIcons.Book01, onOpenCurriculum),
-                HubEntry("实习基地", "基地清单", HugeIcons.Layers01, onOpenInternship),
+                HubEntry("学业完成情况", "培养方案达成度", AppIcons.Analytics01, onOpenScholar),
+                HubEntry("培养方案", "课程设置总表", AppIcons.Book01, onOpenCurriculum),
+                HubEntry("实习基地", "基地清单", AppIcons.Layers01, onOpenInternship),
             ),
         ),
         HubSection(
             title = "学工与校历",
             entries = listOf(
-                HubEntry("学生评教", "评完解锁成绩", HugeIcons.CheckmarkCircle02, onOpenTeachingEval),
-                HubEntry("请假系统", "请假 · 销假 · 续假", HugeIcons.File01, onOpenLeaveHub),
-                HubEntry("宿舍报修", "进度 · 审批", HugeIcons.Toolbox, onOpenRepair),
-                HubEntry("校历", "学年校历", HugeIcons.Calendar01, onOpenCalendar),
+                HubEntry("学生评教", "评完解锁成绩", AppIcons.CheckmarkCircle02, onOpenTeachingEval),
+                HubEntry("请假系统", "请假 · 销假 · 续假", AppIcons.File01, onOpenLeaveHub),
+                HubEntry("宿舍报修", "进度 · 审批", AppIcons.Toolbox, onOpenRepair),
+                HubEntry("校历", "学年校历", AppIcons.Calendar01, onOpenCalendar),
             ),
         ),
     )
@@ -377,7 +368,7 @@ private fun HubRow(entry: HubEntry) {
             )
         }
         Icon(
-            imageVector = HugeIcons.ChevronRight,
+            imageVector = AppIcons.ChevronRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
             modifier = Modifier.size(16.dp),

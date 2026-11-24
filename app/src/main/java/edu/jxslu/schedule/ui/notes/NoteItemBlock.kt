@@ -25,8 +25,7 @@ import edu.jxslu.schedule.domain.plainExcerpt
 import edu.jxslu.schedule.ui.common.AttachmentThumbnailRow
 import edu.jxslu.schedule.ui.common.epochMonthDay
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.PencilEdit02
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 笔记列表的**展开详情块**（2026-10-21，DESIGN §3.11）：
@@ -92,7 +91,7 @@ internal fun NoteItemBlock(
                 modifier = Modifier.size(40.dp),
             ) {
                 Icon(
-                    imageVector = HugeIcons.PencilEdit02,
+                    imageVector = AppIcons.PencilEdit02,
                     contentDescription = "编辑笔记",
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.primary,

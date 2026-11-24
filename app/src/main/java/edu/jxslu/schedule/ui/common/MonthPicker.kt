@@ -29,11 +29,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.icon.AppIcons
 import java.time.YearMonth
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChevronDown
-import me.rerere.hugeicons.stroke.ChevronLeft
-import me.rerere.hugeicons.stroke.ChevronRight
 
 /**
  * 月份导航与月份选择（消费流水页 / 缴费账单页共用，2026-09-26）。
@@ -67,7 +64,7 @@ fun MonthNavRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = { haptics.tap(); onPrev() }, enabled = prevEnabled) {
-            Icon(HugeIcons.ChevronLeft, contentDescription = "上一个月")
+            Icon(AppIcons.ChevronLeft, contentDescription = "上一个月")
         }
         TextButton(
             onClick = { haptics.tap(); onPick() },
@@ -80,14 +77,14 @@ fun MonthNavRow(
             )
             Spacer(Modifier.width(4.dp))
             Icon(
-                HugeIcons.ChevronDown,
+                AppIcons.ChevronDown,
                 contentDescription = "选择月份",
                 modifier = Modifier.width(16.dp),
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             )
         }
         IconButton(onClick = { haptics.tap(); onNext() }, enabled = nextEnabled) {
-            Icon(HugeIcons.ChevronRight, contentDescription = "下一个月")
+            Icon(AppIcons.ChevronRight, contentDescription = "下一个月")
         }
         Spacer(Modifier.weight(1f))
         if (showThisMonth) {

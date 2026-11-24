@@ -89,6 +89,7 @@ import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.CoroutineScope
@@ -96,13 +97,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.ChevronDown
-import me.rerere.hugeicons.stroke.Crosshair
-import me.rerere.hugeicons.stroke.Lock
-import me.rerere.hugeicons.stroke.MapsLocation02
-import me.rerere.hugeicons.stroke.Settings01
 
 /**
  * 快趣出行页的三种状态（DESIGN §3.9）。
@@ -853,7 +847,7 @@ fun RideScreen(
                 title = { Text("快趣出行") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(HugeIcons.ArrowLeft01, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
                 actions = {
@@ -879,7 +873,7 @@ fun RideScreen(
                         showSettings = true
                     }) {
                         Icon(
-                            HugeIcons.Settings01,
+                            AppIcons.Settings01,
                             contentDescription = "快趣出行设置",
                             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                         )
@@ -1077,7 +1071,7 @@ fun RideScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         MapCircleButton(
-                            icon = HugeIcons.MapsLocation02,
+                            icon = AppIcons.MapsLocation02,
                             label = "回到校区",
                             onClick = {
                                 haptics.tap()
@@ -1085,7 +1079,7 @@ fun RideScreen(
                             },
                         )
                         MapCircleButton(
-                            icon = HugeIcons.Crosshair,
+                            icon = AppIcons.Crosshair,
                             label = if (state.followUser && state.userLat != null) {
                                 "跟随中，点此回到我的位置"
                             } else {
@@ -1859,7 +1853,7 @@ private fun RideModeChip(
     ) {
         if (locked) {
             Icon(
-                HugeIcons.Lock,
+                AppIcons.Lock,
                 contentDescription = null,
                 tint = scheme.onSurface.copy(alpha = 0.5f),
                 modifier = Modifier.size(13.dp),
@@ -1876,7 +1870,7 @@ private fun RideModeChip(
             },
         )
         Icon(
-            HugeIcons.ChevronDown,
+            AppIcons.ChevronDown,
             contentDescription = null,
             tint = if (locked) {
                 scheme.onSurface.copy(alpha = 0.4f)

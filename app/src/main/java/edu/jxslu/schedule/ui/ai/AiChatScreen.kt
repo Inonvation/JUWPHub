@@ -72,13 +72,9 @@ import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.History
-import me.rerere.hugeicons.stroke.LockPassword
-import me.rerere.hugeicons.stroke.Settings02
 
 /**
  * AI 调课 · 单页工作单（DESIGN §3.25 v2，2026-10-07 重构；技术见 §4.39 / §4.40）。
@@ -190,10 +186,10 @@ fun AiChatScreen(
                 },
                 actions = {
                     IconButton(onClick = onOpenHistory) {
-                        Icon(HugeIcons.History, contentDescription = "调课记录")
+                        Icon(AppIcons.History, contentDescription = "调课记录")
                     }
                     IconButton(onClick = onOpenSettings) {
-                        Icon(HugeIcons.Settings02, contentDescription = "配置")
+                        Icon(AppIcons.Settings02, contentDescription = "配置")
                     }
                 },
             )
@@ -410,7 +406,7 @@ private fun readClipboardImages(context: Context): List<android.net.Uri> {
 private fun ConfigureGuideRow(onOpenSettings: () -> Unit) {
     AppCardRow(onClick = onOpenSettings) {
         Icon(
-            HugeIcons.LockPassword,
+            AppIcons.LockPassword,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(20.dp),
@@ -425,7 +421,7 @@ private fun ConfigureGuideRow(onOpenSettings: () -> Unit) {
             )
         }
         Icon(
-            HugeIcons.ChevronRight,
+            AppIcons.ChevronRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
             modifier = Modifier.size(18.dp),

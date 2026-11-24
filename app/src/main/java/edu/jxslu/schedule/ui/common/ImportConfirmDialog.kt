@@ -39,9 +39,7 @@ import edu.jxslu.schedule.data.jw.TermOption
 import edu.jxslu.schedule.data.repo.ImportStats
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.domain.Course
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.Tick02
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 导入目标。用户拍板：导入落点**每次强制选择**——既可导入已有课表，也可新建一张。
@@ -152,7 +150,7 @@ fun ImportTargetDialogHost(
                                 } else {
                                     Spacer(Modifier.size(2.dp))
                                     Icon(
-                                        HugeIcons.ArrowDown01,
+                                        AppIcons.ArrowDown01,
                                         contentDescription = "切换学期",
                                         modifier = Modifier.size(15.dp),
                                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
@@ -169,7 +167,7 @@ fun ImportTargetDialogHost(
                                         trailingIcon = {
                                             if (opt.text == term || opt.value == term) {
                                                 Icon(
-                                                    HugeIcons.Tick02,
+                                                    AppIcons.Tick02,
                                                     contentDescription = null,
                                                     modifier = Modifier.size(15.dp),
                                                 )

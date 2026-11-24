@@ -29,11 +29,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.semanticColors
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.ClipboardPaste
-import me.rerere.hugeicons.stroke.ImageAdd01
 
 /**
  * ① 通知输入卡（DESIGN §3.25 v2）：调课通知的文字与截图都贴在这里。
@@ -124,7 +121,7 @@ internal fun AiNoticeCard(
                 modifier = Modifier.heightIn(min = 44.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp),
             ) {
-                Icon(HugeIcons.ImageAdd01, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(AppIcons.ImageAdd01, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("添加截图", style = MaterialTheme.typography.labelLarge, maxLines = 1)
             }
@@ -134,7 +131,7 @@ internal fun AiNoticeCard(
                 modifier = Modifier.heightIn(min = 44.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp),
             ) {
-                Icon(HugeIcons.ClipboardPaste, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(AppIcons.ClipboardPaste, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("粘贴图片", style = MaterialTheme.typography.labelLarge, maxLines = 1)
             }
@@ -188,7 +185,7 @@ private fun AttachmentThumb(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    HugeIcons.Cancel01,
+                    AppIcons.Cancel01,
                     contentDescription = "移除这张图片",
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                     modifier = Modifier.size(12.dp),

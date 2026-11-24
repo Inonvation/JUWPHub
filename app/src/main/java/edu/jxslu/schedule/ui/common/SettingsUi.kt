@@ -33,8 +33,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowRight01
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 设置行统一网格：开关行 / 跳转行 / 纯展示行**等高**（DESIGN §3.3）。
@@ -195,7 +194,7 @@ fun SettingItem(
         when {
             trailing != null -> trailing()
             showArrow -> Icon(
-                HugeIcons.ArrowRight01,
+                AppIcons.ArrowRight01,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                 modifier = Modifier.size(18.dp),

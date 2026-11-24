@@ -50,12 +50,10 @@ import edu.jxslu.schedule.domain.EbikeQr
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Flashlight
-import me.rerere.hugeicons.stroke.Image01
 
 /** 底部两枚按钮的尺寸：同高（一圆一胶囊），横排不会一高一低。 */
 private val ScanButtonSize = 48.dp
@@ -362,7 +360,7 @@ private fun ScanTorchButton(
             .background(if (torchOn) scheme.primary else ScanButtonScrim),
     ) {
         Icon(
-            imageVector = HugeIcons.Flashlight,
+            imageVector = AppIcons.Flashlight,
             contentDescription = if (torchOn) "关闭手电筒" else "打开手电筒",
             tint = if (torchOn) scheme.onPrimary else Color.White,
             modifier = Modifier.size(22.dp),
@@ -387,7 +385,7 @@ private fun ScanGalleryButton(onClick: () -> Unit, modifier: Modifier = Modifier
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = HugeIcons.Image01,
+            imageVector = AppIcons.Image01,
             contentDescription = null,
             tint = Color.White,
             modifier = Modifier.size(18.dp),

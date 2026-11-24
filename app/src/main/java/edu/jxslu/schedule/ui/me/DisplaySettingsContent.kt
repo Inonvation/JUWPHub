@@ -54,11 +54,10 @@ import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.week.ScheduleBackgroundThumb
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
 
 /**
  * 显示设置的选项面板主体（字号 / 布局尺寸 / 格子样式 / 内容与开关）。
@@ -443,7 +442,7 @@ private fun CollapsibleSection(
             Spacer(Modifier.weight(1f))
             // 箭头随状态旋转：展开朝下、收起朝上。语义上「点开还有更多」
             Icon(
-                imageVector = HugeIcons.ArrowDown01,
+                imageVector = AppIcons.ArrowDown01,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                 modifier = Modifier

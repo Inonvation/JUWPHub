@@ -87,15 +87,11 @@ import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.shareFile
 import edu.jxslu.schedule.ui.common.saveBitmapToGallery
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.toKotlinLocalDate
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.ImageDownload
-import me.rerere.hugeicons.stroke.Share01
 import java.io.ByteArrayOutputStream
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -430,7 +426,7 @@ fun ScheduleShareScreen(
                             .weight(1f)
                             .heightIn(min = 48.dp),
                     ) {
-                        Icon(HugeIcons.ImageDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(AppIcons.ImageDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("保存到相册")
                     }
@@ -441,7 +437,7 @@ fun ScheduleShareScreen(
                             .weight(1f)
                             .heightIn(min = 48.dp),
                     ) {
-                        Icon(HugeIcons.Share01, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(AppIcons.Share01, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("分享")
                     }
@@ -480,7 +476,7 @@ private fun WeekStepper(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = { onChange(week - 1) }, enabled = enabled && week > 1) {
-            Icon(HugeIcons.ArrowLeft01, contentDescription = "上一周", modifier = Modifier.size(20.dp))
+            Icon(AppIcons.ArrowLeft01, contentDescription = "上一周", modifier = Modifier.size(20.dp))
         }
         Text(
             text = buildString {
@@ -492,7 +488,7 @@ private fun WeekStepper(
             modifier = Modifier.weight(1f),
         )
         IconButton(onClick = { onChange(week + 1) }, enabled = enabled && week < totalWeeks) {
-            Icon(HugeIcons.ArrowRight01, contentDescription = "下一周", modifier = Modifier.size(20.dp))
+            Icon(AppIcons.ArrowRight01, contentDescription = "下一周", modifier = Modifier.size(20.dp))
         }
     }
 }

@@ -61,14 +61,11 @@ import edu.jxslu.schedule.ui.common.SettingChoiceRow
 import edu.jxslu.schedule.ui.common.decodeUriSampled
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowUp01
-import me.rerere.hugeicons.stroke.Delete02
 
 /** 一次最多拼几张（Photo Picker 的多选上限与这里一致）。 */
 private const val MaxStitchImages = 9
@@ -444,13 +441,13 @@ private fun StitchRow(
             modifier = Modifier.weight(1f),
         )
         IconButton(onClick = onMoveUp, enabled = canMoveUp) {
-            Icon(HugeIcons.ArrowUp01, contentDescription = "上移")
+            Icon(AppIcons.ArrowUp01, contentDescription = "上移")
         }
         IconButton(onClick = onMoveDown, enabled = canMoveDown) {
-            Icon(HugeIcons.ArrowDown01, contentDescription = "下移")
+            Icon(AppIcons.ArrowDown01, contentDescription = "下移")
         }
         IconButton(onClick = onDelete) {
-            Icon(HugeIcons.Delete02, contentDescription = "移除")
+            Icon(AppIcons.Delete02, contentDescription = "移除")
         }
     }
 }

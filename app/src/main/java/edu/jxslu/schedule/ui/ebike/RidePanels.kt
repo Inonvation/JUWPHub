@@ -111,6 +111,7 @@ import edu.jxslu.schedule.ui.common.rememberResumedNow
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.delay
@@ -118,20 +119,6 @@ import kotlinx.coroutines.flow.first
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.BellRing
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.Filter
-import me.rerere.hugeicons.stroke.Keyboard
-import me.rerere.hugeicons.stroke.LockOpen
-import me.rerere.hugeicons.stroke.MapPin
-import me.rerere.hugeicons.stroke.MapsLocation02
-import me.rerere.hugeicons.stroke.QrCode01
-import me.rerere.hugeicons.stroke.QrCodeScan
-import me.rerere.hugeicons.stroke.Refresh
-import me.rerere.hugeicons.stroke.ScooterElectric
-import me.rerere.hugeicons.stroke.UserAccount
 import kotlin.math.roundToInt
 
 /**
@@ -643,16 +630,16 @@ private fun RideActionButtons(
     val settleSeconds = rememberSettleSecondsLeft(settleDeadlineAt)
     when {
         key == BAR_FINDING_PLAIN ->
-            RideActionButton("按车号生成乘车码", onOpenCarNumber, icon = HugeIcons.QrCode01)
+            RideActionButton("按车号生成乘车码", onOpenCarNumber, icon = AppIcons.QrCode01)
 
         key == BAR_FINDING_CODE ->
-            RideActionButton("打开微信扫一扫", onWechatScan, icon = HugeIcons.QrCodeScan)
+            RideActionButton("打开微信扫一扫", onWechatScan, icon = AppIcons.QrCodeScan)
 
         key == BAR_FINDING_LOGIN ->
-            RideActionButton("登录快趣账号", onLogin, icon = HugeIcons.UserAccount)
+            RideActionButton("登录快趣账号", onLogin, icon = AppIcons.UserAccount)
 
         key == BAR_FINDING_SCAN ->
-            RideActionButton("扫车身码", onScanBodyCode, icon = HugeIcons.QrCodeScan)
+            RideActionButton("扫车身码", onScanBodyCode, icon = AppIcons.QrCodeScan)
 
         carNum != null -> when {
             caps.directUnlock -> RideActionButton(
@@ -666,17 +653,17 @@ private fun RideActionButtons(
                     else -> "开启"
                 },
                 onClick = { onUnlock(carNum) },
-                icon = HugeIcons.LockOpen,
+                icon = AppIcons.LockOpen,
                 enabled = busy == null,
             )
 
             caps.wechatScan -> RideActionButton(
                 text = "生成乘车码",
                 onClick = { onGenerateForCar(carNum) },
-                icon = HugeIcons.QrCode01,
+                icon = AppIcons.QrCode01,
             )
 
-            else -> RideActionButton("登录后可开锁", onLogin, icon = HugeIcons.UserAccount)
+            else -> RideActionButton("登录后可开锁", onLogin, icon = AppIcons.UserAccount)
         }
 
         // 骑行态三槽位**固定**（2026-10-08 用户口径「参考官方、按钮位置别变」）：
@@ -959,7 +946,7 @@ private fun RideCarUpper(
         RideUpperCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    HugeIcons.ScooterElectric,
+                    AppIcons.ScooterElectric,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp),
@@ -975,13 +962,13 @@ private fun RideCarUpper(
                 )
                 if (bike != null) {
                     IconButtonSmall(
-                        icon = HugeIcons.MapsLocation02,
+                        icon = AppIcons.MapsLocation02,
                         label = "在地图上定位这辆车",
                         tint = MaterialTheme.colorScheme.primary,
                         onClick = { onFocus(carNum) },
                     )
                 }
-                IconButtonSmall(HugeIcons.Cancel01, "收起车辆卡", onClick = onDismiss)
+                IconButtonSmall(AppIcons.Cancel01, "收起车辆卡", onClick = onDismiss)
             }
             Text(
                 text = when {
@@ -1003,7 +990,7 @@ private fun RideCarUpper(
             // 服务端说过不可用（已出租 / 维修）时不给这枚——给一辆骑不成的车出码没意义。
             if (caps.inAppRide && issue == null) {
                 RideTextAction(
-                    icon = HugeIcons.QrCode01,
+                    icon = AppIcons.QrCode01,
                     text = "生成乘车码",
                     onClick = { onGenerate(carNum) },
                     modifier = Modifier.align(Alignment.CenterHorizontally),
@@ -1053,7 +1040,7 @@ private fun RideRidingUpper(
         RideUpperCard(tone = tone) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    HugeIcons.ScooterElectric,
+                    AppIcons.ScooterElectric,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp),
@@ -1095,7 +1082,7 @@ private fun RideRidingUpper(
                 }
                 if (ride != null) {
                     IconButtonSmall(
-                        icon = HugeIcons.MapsLocation02,
+                        icon = AppIcons.MapsLocation02,
                         label = "在地图上定位到车",
                         enabled = busy == null,
                         onClick = onLocateCar,
@@ -1103,13 +1090,13 @@ private fun RideRidingUpper(
                     IconButtonSmall(
                         // 响铃寻车（2026-09-30）：车在车堆里认不出时让车鸣笛。没有计费后果，
                         // 不用确认；与官方骑行页「响铃寻车」同一位置语义
-                        icon = HugeIcons.BellRing,
+                        icon = AppIcons.BellRing,
                         label = "响铃寻车",
                         enabled = busy == null,
                         onClick = onRingFind,
                     )
                     IconButtonSmall(
-                        icon = HugeIcons.Refresh,
+                        icon = AppIcons.Refresh,
                         label = "刷新骑行状态",
                         enabled = busy == null,
                         onClick = onRefresh,
@@ -1466,7 +1453,7 @@ internal fun RideBikePanel(
                 // 只是小程序方式没出码时主动作本身就是"按车号生成乘车码"，那时不重复摆。
                 if (showCarNumberEntry) {
                     RideTextAction(
-                        icon = HugeIcons.Keyboard,
+                        icon = AppIcons.Keyboard,
                         text = "按车号",
                         onClick = onOpenCarNumber,
                     )
@@ -1513,7 +1500,7 @@ internal fun RideBikePanel(
                             }
                         } else {
                             IconButtonSmall(
-                                icon = HugeIcons.Refresh,
+                                icon = AppIcons.Refresh,
                                 label = "刷新附近车辆",
                                 tint = MaterialTheme.colorScheme.primary,
                                 onClick = onRefresh,
@@ -1767,7 +1754,7 @@ private fun RideMapModeButton(byBike: Boolean, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
         Icon(
-            if (byBike) HugeIcons.ScooterElectric else HugeIcons.MapPin,
+            if (byBike) AppIcons.ScooterElectric else AppIcons.MapPin,
             contentDescription = if (byBike) {
                 "当前按车辆显示，点此切换为按停车点"
             } else {
@@ -1796,7 +1783,7 @@ private fun RideFilterButton(filtered: Boolean, onClick: () -> Unit) {
     ) {
         IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
             Icon(
-                HugeIcons.Filter,
+                AppIcons.Filter,
                 contentDescription = if (filtered) "筛选（有开关已关掉）" else "筛选",
                 tint = if (filtered) scheme.primary else scheme.onSurface.copy(alpha = 0.7f),
                 modifier = Modifier.size(19.dp),
@@ -1902,7 +1889,7 @@ private fun RideClusterCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    HugeIcons.ScooterElectric,
+                    AppIcons.ScooterElectric,
                     contentDescription = null,
                     tint = scheme.primary,
                     modifier = Modifier.size(18.dp),
@@ -1933,7 +1920,7 @@ private fun RideClusterCard(
                     label = "clusterChevron",
                 )
                 Icon(
-                    HugeIcons.ChevronRight,
+                    AppIcons.ChevronRight,
                     contentDescription = null,
                     tint = scheme.onSurface.copy(alpha = 0.4f),
                     modifier = Modifier
@@ -2164,7 +2151,7 @@ internal fun RideCarNumberSheet(
                 // 尺寸不写死：M3 的 IconButton 自己保证 48dp 触摸区（旧版压到 32dp）
                 IconButton(onClick = { requestClose {} }) {
                     Icon(
-                        HugeIcons.Cancel01,
+                        AppIcons.Cancel01,
                         contentDescription = "关闭",
                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                         modifier = Modifier.size(20.dp),
@@ -2215,7 +2202,7 @@ internal fun RideCarNumberSheet(
                     RideActionButton(
                         text = "生成乘车码",
                         onClick = onGenerate,
-                        icon = HugeIcons.QrCode01,
+                        icon = AppIcons.QrCode01,
                         enabled = resolvedCarNum != null,
                     )
                 }
@@ -2225,7 +2212,7 @@ internal fun RideCarNumberSheet(
                     // 解锁在骑行卡上点
                     text = if (resolvedCarNum != null) "开启 · 车 $resolvedCarNum" else "开启",
                     onClick = { requestClose { onUnlock() } },
-                    icon = HugeIcons.LockOpen,
+                    icon = AppIcons.LockOpen,
                     enabled = resolvedCarNum != null,
                 )
                 // 生成乘车码这条路**账号方式也要留着**：支付分免押的账号开不了锁，生成一张
@@ -2240,7 +2227,7 @@ internal fun RideCarNumberSheet(
                     exit = fadeOut(animationSpec = Motion.exit()),
                 ) {
                     RideTextAction(
-                        icon = HugeIcons.QrCode01,
+                        icon = AppIcons.QrCode01,
                         text = "生成乘车码",
                         onClick = onGenerate,
                         enabled = resolvedCarNum != null,
@@ -2288,7 +2275,7 @@ internal fun RideCarNumberSheet(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Icon(
-                                HugeIcons.QrCode01,
+                                AppIcons.QrCode01,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.outline,
                                 modifier = Modifier.size(28.dp),
@@ -2422,7 +2409,7 @@ private fun RideCarField(
             }
             if (onScanBodyCode != null) {
                 IconButtonSmall(
-                    icon = HugeIcons.QrCodeScan,
+                    icon = AppIcons.QrCodeScan,
                     label = "扫车身码",
                     tint = scheme.primary,
                     onClick = onScanBodyCode,
@@ -2430,7 +2417,7 @@ private fun RideCarField(
             }
             if (canLocate) {
                 IconButtonSmall(
-                    icon = HugeIcons.MapsLocation02,
+                    icon = AppIcons.MapsLocation02,
                     label = "在地图上定位这辆车",
                     tint = scheme.primary,
                     onClick = onLocateCar,
@@ -2543,7 +2530,7 @@ private fun RideSpotsContent(
                     onClickLabel = "把镜头对准${spot.displayName}",
                 ) {
                     Icon(
-                        HugeIcons.MapPin,
+                        AppIcons.MapPin,
                         contentDescription = null,
                         tint = SPOT_COLOR,
                         modifier = Modifier.size(18.dp),
@@ -2566,7 +2553,7 @@ private fun RideSpotsContent(
                         )
                     }
                     Icon(
-                        HugeIcons.ChevronRight,
+                        AppIcons.ChevronRight,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                         modifier = Modifier.size(16.dp),

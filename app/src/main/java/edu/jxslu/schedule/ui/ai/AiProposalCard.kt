@@ -60,14 +60,9 @@ import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.ChangeDetailLabels
 import edu.jxslu.schedule.ui.common.ScheduleChangeCard
 import edu.jxslu.schedule.ui.common.SkeletonBox
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Alert02
-import me.rerere.hugeicons.stroke.CheckmarkCircle02
-import me.rerere.hugeicons.stroke.ChevronDown
-import me.rerere.hugeicons.stroke.ChevronUp
-import me.rerere.hugeicons.stroke.Undo02
 
 /**
  * ② 提案卡 / 失败卡（DESIGN §3.25 v2）。
@@ -215,7 +210,7 @@ private fun CollapsedSummary(work: AiWorkState, onExpand: () -> Unit, onUndo: ()
             )
         } else {
             Icon(
-                HugeIcons.ChevronDown,
+                AppIcons.ChevronDown,
                 contentDescription = "展开",
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(18.dp),
@@ -606,7 +601,7 @@ private fun RejectedNote(work: AiWorkState) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                HugeIcons.Alert02,
+                AppIcons.Alert02,
                 contentDescription = null,
                 tint = MaterialTheme.semanticColors.warning,
                 modifier = Modifier.size(16.dp),
@@ -620,7 +615,7 @@ private fun RejectedNote(work: AiWorkState) {
                 modifier = Modifier.weight(1f),
             )
             Icon(
-                if (expanded) HugeIcons.ChevronUp else HugeIcons.ChevronDown,
+                if (expanded) AppIcons.ChevronUp else AppIcons.ChevronDown,
                 contentDescription = if (expanded) "收起" else "展开",
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 modifier = Modifier.size(16.dp),
@@ -734,7 +729,7 @@ internal fun AiReceiptRow(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                if (undone) HugeIcons.Undo02 else HugeIcons.CheckmarkCircle02,
+                if (undone) AppIcons.Undo02 else AppIcons.CheckmarkCircle02,
                 contentDescription = null,
                 tint = if (undone) {
                     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)

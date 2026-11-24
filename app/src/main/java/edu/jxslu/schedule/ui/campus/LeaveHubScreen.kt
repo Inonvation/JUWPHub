@@ -29,11 +29,7 @@ import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.PageScaffoldColumn
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.CalendarCheckIn01
-import me.rerere.hugeicons.stroke.CalendarCheckOut01
-import me.rerere.hugeicons.stroke.CalendarPlus01
-import me.rerere.hugeicons.stroke.ChevronRight
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 请假系统（2026-11-08 用户口径）：学工「新版请销假」分组的三个入口页。
@@ -54,19 +50,19 @@ fun LeaveHubScreen(onBack: () -> Unit) {
     ) {
         AppCard(contentPadding = PaddingValues(0.dp)) {
             LeaveEntry(
-                icon = HugeIcons.CalendarCheckIn01,
+                icon = AppIcons.CalendarCheckIn01,
                 form = XgUrls.LEAVE,
                 onClick = { XgFormActivity.start(context, XgUrls.LEAVE) },
             )
             AppCardDivider(Modifier.padding(start = 48.dp))
             LeaveEntry(
-                icon = HugeIcons.CalendarCheckOut01,
+                icon = AppIcons.CalendarCheckOut01,
                 form = XgUrls.LEAVE_CANCEL,
                 onClick = { XgFormActivity.start(context, XgUrls.LEAVE_CANCEL) },
             )
             AppCardDivider(Modifier.padding(start = 48.dp))
             LeaveEntry(
-                icon = HugeIcons.CalendarPlus01,
+                icon = AppIcons.CalendarPlus01,
                 form = XgUrls.LEAVE_EXTEND,
                 onClick = { XgFormActivity.start(context, XgUrls.LEAVE_EXTEND) },
             )
@@ -123,7 +119,7 @@ private fun LeaveEntry(
             )
         }
         Icon(
-            imageVector = HugeIcons.ChevronRight,
+            imageVector = AppIcons.ChevronRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
             modifier = Modifier.size(16.dp),

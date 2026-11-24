@@ -35,10 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.QrCodeScan
 
 /**
  * U净 弹窗（从下弹出）：与胖乖 / 趣智校园那种入口面板同形态。
@@ -96,7 +94,7 @@ fun UjingEntrySheet(
                     .height(52.dp),
                 shape = RoundedCornerShape(16.dp),
             ) {
-                Icon(HugeIcons.QrCodeScan, contentDescription = null, modifier = Modifier.size(21.dp))
+                Icon(AppIcons.QrCodeScan, contentDescription = null, modifier = Modifier.size(21.dp))
                 Spacer(Modifier.width(9.dp))
                 Text("扫码识别洗衣机", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             }
@@ -111,7 +109,7 @@ fun UjingEntrySheet(
                 Text("查看洗衣房空闲情况", style = MaterialTheme.typography.bodyLarge)
                 Spacer(Modifier.weight(1f))
                 Icon(
-                    HugeIcons.ChevronRight,
+                    AppIcons.ChevronRight,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                     modifier = Modifier.size(18.dp),

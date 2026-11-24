@@ -49,14 +49,9 @@ import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.Notification02
-import me.rerere.hugeicons.stroke.Settings01
-import me.rerere.hugeicons.stroke.UserAccount
 
 /**
  * 「快趣出行设置」弹层（DESIGN §3.9）：**快趣相关设置的唯一入口**。
@@ -112,7 +107,7 @@ internal fun EbikeSettingsSheet(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    HugeIcons.Settings01,
+                    AppIcons.Settings01,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp),
@@ -126,7 +121,7 @@ internal fun EbikeSettingsSheet(
                 )
                 IconButton(onClick = { dismiss {} }) {
                     Icon(
-                        HugeIcons.Cancel01,
+                        AppIcons.Cancel01,
                         contentDescription = "关闭",
                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                         modifier = Modifier.size(20.dp),
@@ -239,7 +234,7 @@ private fun KvcxAccountRow(loggedIn: Boolean, onClick: () -> Unit) {
         onClickLabel = if (loggedIn) "打开快趣账号" else "登录快趣",
     ) {
         Icon(
-            HugeIcons.UserAccount,
+            AppIcons.UserAccount,
             contentDescription = null,
             tint = if (loggedIn) {
                 MaterialTheme.colorScheme.primary
@@ -272,7 +267,7 @@ private fun KvcxAccountRow(loggedIn: Boolean, onClick: () -> Unit) {
         )
         Spacer(Modifier.width(4.dp))
         Icon(
-            HugeIcons.ChevronRight,
+            AppIcons.ChevronRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
             modifier = Modifier.size(16.dp),
@@ -503,7 +498,7 @@ private fun ReminderSettingsSection(
             SettingItem(
                 title = "通知与悬浮",
                 subtitle = "没弹出、没震动时进系统通知：允许通知，「免费时长提醒」设为横幅 + 震动",
-                icon = HugeIcons.Notification02,
+                icon = AppIcons.Notification02,
                 onClick = { AppPermissions.jumpNotificationSettings(context) },
             )
         }

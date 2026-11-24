@@ -2,24 +2,7 @@ package edu.jxslu.schedule.ui.inbox
 
 import androidx.compose.ui.graphics.vector.ImageVector
 import edu.jxslu.schedule.domain.InboxKind
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Alert02
-import me.rerere.hugeicons.stroke.Bicycle
-import me.rerere.hugeicons.stroke.BookEdit
-import me.rerere.hugeicons.stroke.Calendar01
-import me.rerere.hugeicons.stroke.CalendarAdd01
-import me.rerere.hugeicons.stroke.CalendarSetting01
-import me.rerere.hugeicons.stroke.Droplet
-import me.rerere.hugeicons.stroke.Exchange01
-import me.rerere.hugeicons.stroke.Flash
-import me.rerere.hugeicons.stroke.GraduationScroll
-import me.rerere.hugeicons.stroke.HeartHandshake
-import me.rerere.hugeicons.stroke.Repair
-import me.rerere.hugeicons.stroke.ShoppingBag01
-import me.rerere.hugeicons.stroke.ShowerHead
-import me.rerere.hugeicons.stroke.Wallet01
-import me.rerere.hugeicons.stroke.WalletAdd01
-import me.rerere.hugeicons.stroke.WashingMachine
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 收件箱各来源的行首图标（图标名全部查过本地 JAR 或项目已在用，勿在此替换成没查过的名字）。
@@ -28,21 +11,21 @@ import me.rerere.hugeicons.stroke.WashingMachine
 internal fun inboxKindIcon(kind: String): ImageVector = when (
     runCatching { InboxKind.valueOf(kind) }.getOrDefault(InboxKind.EXAM)
 ) {
-    InboxKind.EXAM -> HugeIcons.Calendar01
-    InboxKind.SCORE -> HugeIcons.GraduationScroll
-    InboxKind.SCHEDULE_CHANGE -> HugeIcons.Exchange01
-    InboxKind.SCHEDULE_ARCHIVE -> HugeIcons.CalendarSetting01
-    InboxKind.SCHEDULE_NEW_TERM -> HugeIcons.CalendarAdd01
-    InboxKind.SELECTION_ROUND -> HugeIcons.BookEdit
-    InboxKind.POWER_LOW -> HugeIcons.Alert02
-    InboxKind.YKT_LOW -> HugeIcons.Wallet01
-    InboxKind.WENQU_ACTIVITY -> HugeIcons.HeartHandshake
-    InboxKind.DORM_REPAIR -> HugeIcons.Repair
-    InboxKind.KVCX_RIDE -> HugeIcons.Bicycle
-    InboxKind.WATER_SESSION -> HugeIcons.Droplet
-    InboxKind.QZXY_SESSION -> HugeIcons.ShowerHead
-    InboxKind.UJING_ORDER -> HugeIcons.WashingMachine
-    InboxKind.YKT_RECHARGE -> HugeIcons.WalletAdd01
-    InboxKind.YKT_PAYMENT -> HugeIcons.ShoppingBag01
-    InboxKind.POWER_RECHARGE -> HugeIcons.Flash
+    InboxKind.EXAM -> AppIcons.Calendar01
+    InboxKind.SCORE -> AppIcons.GraduationScroll
+    InboxKind.SCHEDULE_CHANGE -> AppIcons.Exchange01
+    InboxKind.SCHEDULE_ARCHIVE -> AppIcons.CalendarSetting01
+    InboxKind.SCHEDULE_NEW_TERM -> AppIcons.CalendarAdd01
+    InboxKind.SELECTION_ROUND -> AppIcons.BookEdit
+    InboxKind.POWER_LOW -> AppIcons.Alert02
+    InboxKind.YKT_LOW -> AppIcons.Wallet01
+    InboxKind.WENQU_ACTIVITY -> AppIcons.HeartHandshake
+    InboxKind.DORM_REPAIR -> AppIcons.Repair
+    InboxKind.KVCX_RIDE -> AppIcons.Bicycle
+    InboxKind.WATER_SESSION -> AppIcons.Droplet
+    InboxKind.QZXY_SESSION -> AppIcons.ShowerHead
+    InboxKind.UJING_ORDER -> AppIcons.WashingMachine
+    InboxKind.YKT_RECHARGE -> AppIcons.WalletAdd01
+    InboxKind.YKT_PAYMENT -> AppIcons.ShoppingBag01
+    InboxKind.POWER_RECHARGE -> AppIcons.Flash
 }

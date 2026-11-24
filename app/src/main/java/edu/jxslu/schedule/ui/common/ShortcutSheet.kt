@@ -46,14 +46,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.ShortcutItem
 import edu.jxslu.schedule.domain.ShortcutSettings
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.ChevronDown
-import me.rerere.hugeicons.stroke.ChevronUp
-import me.rerere.hugeicons.stroke.Edit02
-import me.rerere.hugeicons.stroke.Link01
-import me.rerere.hugeicons.stroke.PackageSearch01
 
 /**
  * 取快递弹窗（从下弹出）：预设归「取快递」段、自定义归「其他」段，中间一条分割线；
@@ -114,7 +108,7 @@ fun ShortcutSheet(
                 )
                 Spacer(Modifier.height(12.dp))
                 SheetActionRow(
-                    icon = HugeIcons.PackageSearch01,
+                    icon = AppIcons.PackageSearch01,
                     title = "菜鸟批量查",
                     subtitle = "多单号一次导入取件码",
                     onClick = { dismiss { onOpenCainiao() } },
@@ -218,7 +212,7 @@ private fun ShortcutCategoryHeader(
         }
         Spacer(Modifier.weight(1f))
         Icon(
-            imageVector = if (expanded) HugeIcons.ChevronUp else HugeIcons.ChevronDown,
+            imageVector = if (expanded) AppIcons.ChevronUp else AppIcons.ChevronDown,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             modifier = Modifier.size(18.dp),
@@ -296,7 +290,7 @@ private fun ShortcutSheetTile(
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(
                     text = { Text("添加到桌面") },
-                    leadingIcon = { Icon(HugeIcons.Link01, null, modifier = Modifier.size(18.dp)) },
+                    leadingIcon = { Icon(AppIcons.Link01, null, modifier = Modifier.size(18.dp)) },
                     onClick = {
                         menuOpen = false
                         haptics.tap()
@@ -305,7 +299,7 @@ private fun ShortcutSheetTile(
                 )
                 DropdownMenuItem(
                     text = { Text("编辑") },
-                    leadingIcon = { Icon(HugeIcons.Edit02, null, modifier = Modifier.size(18.dp)) },
+                    leadingIcon = { Icon(AppIcons.Edit02, null, modifier = Modifier.size(18.dp)) },
                     onClick = {
                         menuOpen = false
                         onEdit()
@@ -339,7 +333,7 @@ private fun AddShortcutTile(modifier: Modifier = Modifier, onClick: () -> Unit) 
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                HugeIcons.Add01,
+                AppIcons.Add01,
                 contentDescription = null,
                 tint = onSurface.copy(alpha = 0.5f),
                 modifier = Modifier.size(26.dp),

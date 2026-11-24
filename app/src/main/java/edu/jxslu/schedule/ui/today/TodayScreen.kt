@@ -93,6 +93,7 @@ import edu.jxslu.schedule.ui.ebike.EbikeFreeRideReminder
 import edu.jxslu.schedule.ui.ebike.KvcxAction
 import edu.jxslu.schedule.ui.ebike.KvcxRideState
 import edu.jxslu.schedule.ui.ebike.kvcxConfirmDialog
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.qzxy.QzxyViewModel
 import edu.jxslu.schedule.ui.qzxy.QzxyEvent
 import edu.jxslu.schedule.ui.qzxy.QzxyFlowState
@@ -143,10 +144,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.CalendarOff
-import me.rerere.hugeicons.stroke.CheckmarkCircle02
-import me.rerere.hugeicons.stroke.Menu01
 import edu.jxslu.schedule.domain.TodayTip
 import edu.jxslu.schedule.domain.PendingHomework
 import edu.jxslu.schedule.ui.homework.HomeworkTodayCard
@@ -594,7 +591,7 @@ fun TodayScreen(
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
                         Icon(
-                            imageVector = HugeIcons.Menu01,
+                            imageVector = AppIcons.Menu01,
                             contentDescription = "打开生活侧栏",
                         )
                     }
@@ -1626,9 +1623,9 @@ private fun DoneBlock(state: TodayState) {
     ) {
         Icon(
             imageVector = if (state.todayAllDone) {
-                HugeIcons.CheckmarkCircle02
+                AppIcons.CheckmarkCircle02
             } else {
-                HugeIcons.CalendarOff
+                AppIcons.CalendarOff
             },
             contentDescription = null,
             tint = primary,

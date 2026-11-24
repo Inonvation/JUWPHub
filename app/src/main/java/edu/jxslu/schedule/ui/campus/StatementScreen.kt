@@ -63,13 +63,10 @@ import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
+import edu.jxslu.schedule.ui.icon.AppIcons
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.CreditCard
-import me.rerere.hugeicons.stroke.Receipt
 
 /**
  * 消费流水页（DESIGN §4.19 L3/L4）：本地库优先（秒开、离线可查）+ 下拉/进页增量同步。
@@ -126,7 +123,7 @@ fun StatementScreen(
                 title = { Text("消费流水") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(HugeIcons.ArrowLeft01, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
             )
@@ -476,7 +473,7 @@ private fun TurnoverRow(record: YktTurnoverEntity, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = if (income) HugeIcons.CreditCard else HugeIcons.Receipt,
+            imageVector = if (income) AppIcons.CreditCard else AppIcons.Receipt,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),

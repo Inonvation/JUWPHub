@@ -28,10 +28,8 @@ import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsNote
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SettingsSection
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.me.MeViewModel
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Cloudy
-import me.rerere.hugeicons.stroke.SunCloud01
 
 /**
  * 设置 → 功能 → 天气（DESIGN §3.29）。
@@ -78,12 +76,12 @@ fun WeatherSettingsScreen(
                     subtitle = "顶栏日期下一行显示天气与提醒，点它看详情",
                     checked = enabled,
                     onCheckedChange = viewModel::setWeatherEnabled,
-                    icon = HugeIcons.Cloudy,
+                    icon = AppIcons.Cloudy,
                 )
                 SettingItem(
                     title = "查看天气",
                     subtitle = "实时状态 · 今天与明天提醒 · 未来 7 天",
-                    icon = HugeIcons.SunCloud01,
+                    icon = AppIcons.SunCloud01,
                     onClick = onOpenWeather,
                 )
                 SettingsNote("18:00 前讲今天，18:00 起讲明天，方便提前准备")

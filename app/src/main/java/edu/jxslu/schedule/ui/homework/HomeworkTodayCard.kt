@@ -18,10 +18,8 @@ import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.PendingHomework
 import edu.jxslu.schedule.domain.dueLabel
 import edu.jxslu.schedule.ui.common.AppCardRow
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.datetime.LocalDate
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.Task01
 
 /**
  * 今日页作业卡（DESIGN §3.3/§3.11）：**有未完成作业才占位**。
@@ -51,7 +49,7 @@ fun HomeworkTodayCard(
         onClickLabel = "查看作业",
     ) {
         Icon(
-            imageVector = HugeIcons.Task01,
+            imageVector = AppIcons.Task01,
             contentDescription = null,
             tint = primary,
             modifier = Modifier.size(20.dp),
@@ -98,7 +96,7 @@ fun HomeworkTodayCard(
         // 挂在标题行里只会跟标题居中，两行结构下看着就偏上（2026-09-22 用户反馈）
         Spacer(Modifier.width(10.dp))
         Icon(
-            imageVector = HugeIcons.ChevronRight,
+            imageVector = AppIcons.ChevronRight,
             contentDescription = null,
             tint = onSurface.copy(alpha = 0.35f),
             modifier = Modifier.size(18.dp),

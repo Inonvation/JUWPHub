@@ -60,14 +60,11 @@ import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.reminder.ReminderChime
 import edu.jxslu.schedule.ui.reminder.ReminderVibration
 import edu.jxslu.schedule.ui.reminder.WenquActivityAlertReminder
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Bookmark01
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Target01
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -372,7 +369,7 @@ private fun GrabControlCard(
     AppCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                imageVector = HugeIcons.Target01,
+                imageVector = AppIcons.Target01,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp),
@@ -408,7 +405,7 @@ private fun GrabControlCard(
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = HugeIcons.Bookmark01,
+                    imageVector = AppIcons.Bookmark01,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(16.dp),
@@ -424,7 +421,7 @@ private fun GrabControlCard(
                 )
                 IconButton(onClick = onUnpin) {
                     Icon(
-                        imageVector = HugeIcons.Cancel01,
+                        imageVector = AppIcons.Cancel01,
                         contentDescription = "不盯了",
                         modifier = Modifier.size(18.dp),
                     )
@@ -455,7 +452,7 @@ private fun GrabControlCard(
                 )
                 IconButton(onClick = onCancelPrereg) {
                     Icon(
-                        imageVector = HugeIcons.Cancel01,
+                        imageVector = AppIcons.Cancel01,
                         contentDescription = "取消预报名",
                         modifier = Modifier.size(18.dp),
                     )

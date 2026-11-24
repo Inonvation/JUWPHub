@@ -32,9 +32,7 @@ import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.Textbook
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.compactPosition
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Note01
-import me.rerere.hugeicons.stroke.Task01
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 课程详情（只读）。
@@ -150,7 +148,7 @@ fun CourseDetailSheet(
                                 .height(44.dp),
                         ) {
                             Icon(
-                                imageVector = HugeIcons.Note01,
+                                imageVector = AppIcons.Note01,
                                 contentDescription = null,
                                 modifier = Modifier.size(17.dp),
                             )
@@ -166,7 +164,7 @@ fun CourseDetailSheet(
                                 .height(44.dp),
                         ) {
                             Icon(
-                                imageVector = HugeIcons.Task01,
+                                imageVector = AppIcons.Task01,
                                 contentDescription = null,
                                 modifier = Modifier.size(17.dp),
                             )

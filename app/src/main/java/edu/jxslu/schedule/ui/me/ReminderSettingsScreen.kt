@@ -47,6 +47,7 @@ import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.reminder.ClassReminder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -55,11 +56,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AlarmClock
-import me.rerere.hugeicons.stroke.BellRing
-import me.rerere.hugeicons.stroke.Notification03
-import me.rerere.hugeicons.stroke.Task01
 
 /**
  * 提醒子页（DESIGN §3.7 上课提醒 + §3.11 作业截止提醒）：开关 + 提前量 + 通知权限状态 + 说明。
@@ -160,14 +156,14 @@ fun ReminderSettingsScreen(
                         viewModel.setEnabled(value)
                         if (value) requestNotifPermission()
                     },
-                    icon = HugeIcons.BellRing,
+                    icon = AppIcons.BellRing,
                 )
                 SettingItem(
                     title = "提前量",
                     subtitle = "提前多少分钟提醒",
                     value = ReminderDefaults.leadLabel(lead),
                     onClick = { showLeadPicker = true },
-                    icon = HugeIcons.AlarmClock,
+                    icon = AppIcons.AlarmClock,
                 )
                 // 提醒发出时直接震动，可穿透免打扰；原在「提醒与桌面」hub，2026-11-01 并回本页
                 SettingSwitchRow(
@@ -175,7 +171,7 @@ fun ReminderSettingsScreen(
                     subtitle = "提醒发出时直接震动，可穿透免打扰；关闭时按系统设置振动",
                     checked = strongReminderVibration,
                     onCheckedChange = viewModel::setStrongReminderVibration,
-                    icon = HugeIcons.Notification03,
+                    icon = AppIcons.Notification03,
                 )
             }
 
@@ -192,7 +188,7 @@ fun ReminderSettingsScreen(
                         viewModel.setHomeworkEnabled(value)
                         if (value) requestNotifPermission()
                     },
-                    icon = HugeIcons.Task01,
+                    icon = AppIcons.Task01,
                 )
             }
 

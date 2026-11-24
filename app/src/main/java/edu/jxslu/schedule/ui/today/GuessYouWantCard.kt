@@ -25,8 +25,7 @@ import edu.jxslu.schedule.domain.GuessPick
 import edu.jxslu.schedule.domain.GuessSource
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.ui.common.AppCard
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChevronRight
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 今日页「猜你想用」推荐卡（DESIGN §3.33 / §4.51）。
@@ -93,7 +92,7 @@ fun GuessYouWantCard(
             }
             Spacer(Modifier.width(8.dp))
             Icon(
-                imageVector = HugeIcons.ChevronRight,
+                imageVector = AppIcons.ChevronRight,
                 contentDescription = null,
                 tint = onSurface.copy(alpha = 0.35f),
                 modifier = Modifier.size(18.dp),

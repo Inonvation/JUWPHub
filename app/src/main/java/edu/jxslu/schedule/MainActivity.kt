@@ -77,6 +77,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -145,10 +146,6 @@ import edu.jxslu.schedule.domain.StartPage
 import edu.jxslu.schedule.domain.ThemeMode
 import edu.jxslu.schedule.domain.ThemePalette
 import edu.jxslu.schedule.domain.WenquRules
-import me.rerere.hugeicons.stroke.Book01
-import me.rerere.hugeicons.stroke.Calendar01
-import me.rerere.hugeicons.stroke.School01
-import me.rerere.hugeicons.HugeIcons
 
 class MainActivity : ComponentActivity() {
     /**
@@ -1300,9 +1297,9 @@ internal fun JuwApp(
 
     // 底栏三项：今日 · 课表 · 教务（生活/我的已收进侧栏，2026-10-20）
     val tabs = buildList {
-        add(BottomTab(Routes.TODAY, R.string.tab_today, HugeIcons.Calendar01))
-        add(BottomTab(Routes.WEEK, R.string.tab_week, HugeIcons.Book01))
-        add(BottomTab(Routes.JW, R.string.tab_jw, HugeIcons.School01))
+        add(BottomTab(Routes.TODAY, R.string.tab_today, AppIcons.Calendar01))
+        add(BottomTab(Routes.WEEK, R.string.tab_week, AppIcons.Book01))
+        add(BottomTab(Routes.JW, R.string.tab_jw, AppIcons.School01))
     }
 
     // 悬浮形态的底部净空 = 胶囊高 + 离底间距 + 手势条。**解析式算，不去测量**：

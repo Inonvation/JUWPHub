@@ -66,14 +66,12 @@ import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SectionHeader
 import edu.jxslu.schedule.ui.common.courseTint
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.reminder.ClassReminder
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.ArrowDown01
 
 /**
  * 作业库（我的 → 学习 → 作业，DESIGN §3.11）：**按课程折叠分组**（2026-09-23 改）。
@@ -264,7 +262,7 @@ internal fun HomeworkCourseCard(
                 // 48dp 而不是 32dp：分组头整行是可点的（展开/收起），按钮命中区太小会误触成展开
                 IconButton(onClick = onAdd, modifier = Modifier.size(48.dp)) {
                     Icon(
-                        imageVector = HugeIcons.Add01,
+                        imageVector = AppIcons.Add01,
                         contentDescription = "在 $courseName 新建作业",
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.primary,
@@ -272,7 +270,7 @@ internal fun HomeworkCourseCard(
                 }
             }
             Icon(
-                imageVector = HugeIcons.ArrowDown01,
+                imageVector = AppIcons.ArrowDown01,
                 contentDescription = null,
                 modifier = Modifier
                     .size(18.dp)

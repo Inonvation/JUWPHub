@@ -31,12 +31,11 @@ import edu.jxslu.schedule.ui.common.SettingsNote
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import edu.jxslu.schedule.ui.reminder.ScoreAlertReminder
 import edu.jxslu.schedule.ui.score.maybeRequestNotifPermission
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Import
 
 /**
  * 考试设置（2026-10-20）：考试页的提醒设置、自动合并开关与「导入到课表」卡片统一收在这里。
@@ -136,7 +135,7 @@ fun ExamSettingsScreen(onBack: () -> Unit) {
                 )
             }
             Icon(
-                HugeIcons.Import,
+                AppIcons.Import,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
             )

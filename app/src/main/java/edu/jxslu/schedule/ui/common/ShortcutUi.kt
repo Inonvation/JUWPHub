@@ -9,46 +9,32 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.ShortcutItem
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Book01
-import me.rerere.hugeicons.stroke.Clock01
-import me.rerere.hugeicons.stroke.Flash
-import me.rerere.hugeicons.stroke.Globe02
-import me.rerere.hugeicons.stroke.Home01
-import me.rerere.hugeicons.stroke.Link01
-import me.rerere.hugeicons.stroke.Package01
-import me.rerere.hugeicons.stroke.QrCode01
-import me.rerere.hugeicons.stroke.Rocket
-import me.rerere.hugeicons.stroke.School01
-import me.rerere.hugeicons.stroke.ShoppingCart02
-import me.rerere.hugeicons.stroke.SmartPhone01
-import me.rerere.hugeicons.stroke.Star
-import me.rerere.hugeicons.stroke.Wallet01
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 自定义快捷方式的图标注册表：key 持久化进 [ShortcutItem.icon]（序列化稳定值），
  * 换图标库/改映射不影响已存数据。顺序即编辑表单里的展示顺序。
  */
 val shortcutIconChoices: List<Pair<String, ImageVector>> = listOf(
-    "link" to HugeIcons.Link01,
-    "flash" to HugeIcons.Flash,
-    "rocket" to HugeIcons.Rocket,
-    "qr" to HugeIcons.QrCode01,
-    "package" to HugeIcons.Package01,
-    "star" to HugeIcons.Star,
-    "home" to HugeIcons.Home01,
-    "school" to HugeIcons.School01,
-    "book" to HugeIcons.Book01,
-    "clock" to HugeIcons.Clock01,
-    "globe" to HugeIcons.Globe02,
-    "cart" to HugeIcons.ShoppingCart02,
-    "wallet" to HugeIcons.Wallet01,
-    "phone" to HugeIcons.SmartPhone01,
+    "link" to AppIcons.Link01,
+    "flash" to AppIcons.Flash,
+    "rocket" to AppIcons.Rocket,
+    "qr" to AppIcons.QrCode01,
+    "package" to AppIcons.Package01,
+    "star" to AppIcons.Star,
+    "home" to AppIcons.Home01,
+    "school" to AppIcons.School01,
+    "book" to AppIcons.Book01,
+    "clock" to AppIcons.Clock01,
+    "globe" to AppIcons.Globe02,
+    "cart" to AppIcons.ShoppingCart02,
+    "wallet" to AppIcons.Wallet01,
+    "phone" to AppIcons.SmartPhone01,
 )
 
 /** 图标 key → ImageVector；未知 key（换版本后的脏数据）退回链接图标。 */
 fun shortcutIconVector(key: String): ImageVector =
-    shortcutIconChoices.firstOrNull { it.first == key }?.second ?: HugeIcons.Link01
+    shortcutIconChoices.firstOrNull { it.first == key }?.second ?: AppIcons.Link01
 
 /** 预设条目的品牌图标资源；下标即 [ShortcutItem.presetIndex]（0=拼多多 1=淘宝 2=菜鸟）。 */
 private val presetShortcutIcons = listOf(

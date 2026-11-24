@@ -46,12 +46,10 @@ import edu.jxslu.schedule.ui.common.emphasizedText
 import edu.jxslu.schedule.ui.common.saveBitmapToGallery
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.ebike.openWechatScan
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Heart
-import me.rerere.hugeicons.stroke.ImageDownload
 
 /** 赞赏码打包资源（res/drawable-nodpi/ic_reward_qr.webp），固定 1037×1037；改图要同步这行。 */
 private const val REWARD_QR_RATIO = 1f
@@ -125,7 +123,7 @@ fun SupportDevScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        HugeIcons.Heart,
+                        AppIcons.Heart,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(30.dp),
@@ -174,7 +172,7 @@ fun SupportDevScreen(
                         .heightIn(min = 48.dp),
                 ) {
                     Icon(
-                        HugeIcons.ImageDownload,
+                        AppIcons.ImageDownload,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )

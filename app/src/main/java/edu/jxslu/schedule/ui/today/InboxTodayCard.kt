@@ -38,15 +38,13 @@ import edu.jxslu.schedule.ui.common.formatDormRepairTime
 import edu.jxslu.schedule.ui.common.heroToneAccent
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.toHeroTone
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.inbox.inboxKindIcon
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChevronRight
-import me.rerere.hugeicons.stroke.Repair
 
 /**
  * 今日页收件箱列表（2026-10-21 收口；2026-10-22 改为**不包卡片**的列表式）：
@@ -162,7 +160,7 @@ fun InboxTodayCard(
                 maxLines = 1,
             )
             Icon(
-                imageVector = HugeIcons.ChevronRight,
+                imageVector = AppIcons.ChevronRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(16.dp),
@@ -234,7 +232,7 @@ private fun RepairTodayRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = HugeIcons.Repair,
+            imageVector = AppIcons.Repair,
             contentDescription = null,
             tint = accent,
             modifier = Modifier.size(18.dp),
@@ -278,7 +276,7 @@ private fun RepairTodayRow(
         }
         Spacer(Modifier.width(8.dp))
         Icon(
-            imageVector = HugeIcons.ChevronRight,
+            imageVector = AppIcons.ChevronRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
             modifier = Modifier.size(16.dp),

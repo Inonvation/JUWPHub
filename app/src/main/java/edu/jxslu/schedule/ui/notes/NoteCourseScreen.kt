@@ -31,8 +31,7 @@ import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.LoadingHint
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 某课程的笔记列表（DESIGN §3.11）。
@@ -66,7 +65,7 @@ fun NoteCourseScreen(
                 },
                 actions = {
                     IconButton(onClick = { onOpenNote(0L, false) }) {
-                        Icon(HugeIcons.Add01, contentDescription = "新建笔记")
+                        Icon(AppIcons.Add01, contentDescription = "新建笔记")
                     }
                 },
             )

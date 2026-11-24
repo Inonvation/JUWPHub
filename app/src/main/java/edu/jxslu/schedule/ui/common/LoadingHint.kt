@@ -26,9 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.rememberAnimationsEnabled
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Droplet
 
 /**
  * 统一加载态（DESIGN §3.2「加载态」）：水滴呼吸 + 文案，水平垂直双居中。
@@ -85,7 +84,7 @@ fun LoadingHint(
     Box(modifier, contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             androidx.compose.material3.Icon(
-                imageVector = HugeIcons.Droplet,
+                imageVector = AppIcons.Droplet,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier

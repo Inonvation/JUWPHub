@@ -84,6 +84,7 @@ import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberImageInserter
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.reminder.ClassReminder
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DatePeriod
@@ -94,11 +95,6 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Calendar03
-import me.rerere.hugeicons.stroke.Eye
-import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.hugeicons.stroke.PencilEdit02
 
 /**
  * 作业详情/编辑（DESIGN §3.11）：**编辑/预览双态**，2026-10-21 重排。
@@ -383,7 +379,7 @@ fun HomeworkDetailScreen(
                                 editing = false
                             },
                         ) {
-                            Icon(HugeIcons.Eye, contentDescription = "预览")
+                            Icon(AppIcons.Eye, contentDescription = "预览")
                         }
                         TextButton(
                             onClick = {
@@ -401,12 +397,12 @@ fun HomeworkDetailScreen(
                                 editing = true
                             },
                         ) {
-                            Icon(HugeIcons.PencilEdit02, contentDescription = "编辑")
+                            Icon(AppIcons.PencilEdit02, contentDescription = "编辑")
                         }
                     }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
-                            Icon(HugeIcons.MoreVertical, contentDescription = "更多")
+                            Icon(AppIcons.MoreVertical, contentDescription = "更多")
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
@@ -685,7 +681,7 @@ private fun HomeworkMetaCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = HugeIcons.Calendar03,
+                imageVector = AppIcons.Calendar03,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 modifier = Modifier.size(18.dp),

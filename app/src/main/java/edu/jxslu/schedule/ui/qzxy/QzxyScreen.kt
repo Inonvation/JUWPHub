@@ -100,14 +100,9 @@ import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import androidx.compose.runtime.rememberCoroutineScope
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Droplet
-import me.rerere.hugeicons.stroke.InformationCircle
-import me.rerere.hugeicons.stroke.View
-import me.rerere.hugeicons.stroke.ViewOff
-import me.rerere.hugeicons.stroke.WalletAdd01
 
 /**
  * 趣智校园开热水页（DESIGN §3.18）。
@@ -556,7 +551,7 @@ private fun QzxyHeroCard(
         action = {
             HeroActionButton(
                 text = "充值到趣智账户",
-                icon = HugeIcons.WalletAdd01,
+                icon = AppIcons.WalletAdd01,
                 onClick = onRecharge,
             )
         },
@@ -567,7 +562,7 @@ private fun QzxyHeroCard(
 @Composable
 private fun PhoneEye(shown: Boolean, onToggle: () -> Unit) {
     Icon(
-        imageVector = if (shown) HugeIcons.ViewOff else HugeIcons.View,
+        imageVector = if (shown) AppIcons.ViewOff else AppIcons.View,
         contentDescription = if (shown) "隐藏手机号" else "显示手机号",
         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
         modifier = Modifier
@@ -659,7 +654,7 @@ private fun DeviceRowItem(state: QzxyUiState, onPick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            HugeIcons.Droplet,
+            AppIcons.Droplet,
             contentDescription = null,
             tint = if (name != null) primary else onSurface.copy(alpha = 0.45f),
             modifier = Modifier.size(20.dp),
@@ -1123,7 +1118,7 @@ private fun DeviceRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            HugeIcons.Droplet,
+            AppIcons.Droplet,
             contentDescription = null,
             tint = accent,
             modifier = Modifier.size(18.dp),
@@ -1193,7 +1188,7 @@ private fun PreferencesSection(
         SettingItem(
             title = "诊断与调试",
             subtitle = "设备现场 · 服务表 · 调试日志",
-            icon = HugeIcons.InformationCircle,
+            icon = AppIcons.InformationCircle,
             onClick = onOpenDiagnostics,
         )
     }

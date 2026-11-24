@@ -57,6 +57,7 @@ import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jwvw.JwImportMode
 import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
 import edu.jxslu.schedule.ui.reminder.ScoreAlertReminder
@@ -65,11 +66,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AddToList
-import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.CheckList
-import me.rerere.hugeicons.stroke.Globe
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -230,7 +226,7 @@ fun SelectionScreen(onBack: () -> Unit) {
                     SettingItem(
                         title = "已选课程",
                         subtitle = recordsSubtitle(allState),
-                        icon = HugeIcons.CheckList,
+                        icon = AppIcons.CheckList,
                         onClick = {
                             SubpageActivity.start(context, SubpageScreen.SELECTION_RECORDS)
                         },
@@ -242,7 +238,7 @@ fun SelectionScreen(onBack: () -> Unit) {
                         } else {
                             "已有 ${wishes.size} 条 · 命中课程在选课中心优先显示"
                         },
-                        icon = HugeIcons.AddToList,
+                        icon = AppIcons.AddToList,
                         onClick = {
                             SubpageActivity.start(context, SubpageScreen.SELECTION_WISHES)
                         },
@@ -250,7 +246,7 @@ fun SelectionScreen(onBack: () -> Unit) {
                     SettingItem(
                         title = "教务网页",
                         subtitle = "选课/退课尽量在应用内完成 · 此为备用入口",
-                        icon = HugeIcons.Globe,
+                        icon = AppIcons.Globe,
                         onClick = {
                             // 全页唯一的教务 WebView 入口：开「学生选课中心」列表，
                             // 不带轮次（轮次直达已在轮次行上收进应用内中心）
@@ -445,7 +441,7 @@ private fun RoundRow(
         PhaseTag(phase)
         if (onOpen != null) {
             Icon(
-                HugeIcons.ArrowRight01,
+                AppIcons.ArrowRight01,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                 modifier = Modifier

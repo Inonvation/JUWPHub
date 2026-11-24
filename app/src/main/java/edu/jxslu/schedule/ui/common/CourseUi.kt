@@ -51,9 +51,7 @@ import edu.jxslu.schedule.domain.monthDayText
 import edu.jxslu.schedule.domain.WeeksText
 import edu.jxslu.schedule.domain.compactPosition
 import edu.jxslu.schedule.domain.dayLabel
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ClipboardPen
-import me.rerere.hugeicons.stroke.FlaskRound
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 课程调色板：中饱和粉彩，实色块配白字。
@@ -179,8 +177,8 @@ private fun Modifier.courseSolidBorder(
  */
 private fun kindIcon(kind: CourseKind): ImageVector? = when (kind) {
     CourseKind.Theory -> null
-    CourseKind.Lab -> HugeIcons.FlaskRound
-    CourseKind.Exam -> HugeIcons.ClipboardPen
+    CourseKind.Lab -> AppIcons.FlaskRound
+    CourseKind.Exam -> AppIcons.ClipboardPen
 }
 
 /**

@@ -63,14 +63,8 @@ import edu.jxslu.schedule.ui.common.SkeletonBox
 import edu.jxslu.schedule.ui.common.SkeletonLine
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Droplet
-import me.rerere.hugeicons.stroke.Sun01
-import me.rerere.hugeicons.stroke.Sunrise
-import me.rerere.hugeicons.stroke.Temperature
-import me.rerere.hugeicons.stroke.Umbrella
-import me.rerere.hugeicons.stroke.Wind
 import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.daysUntil
@@ -469,10 +463,10 @@ private fun DetailsGrid(snapshot: WeatherSnapshot) {
     val current = snapshot.current
     val today = snapshot.day(0)
     val cells = listOf(
-        Triple(HugeIcons.Temperature, "体感温度", current.apparentC?.let { "${it.roundToInt()}°" } ?: "—"),
-        Triple(HugeIcons.Droplet, "湿度", current.humidity?.let { "$it%" } ?: "—"),
+        Triple(AppIcons.Temperature, "体感温度", current.apparentC?.let { "${it.roundToInt()}°" } ?: "—"),
+        Triple(AppIcons.Droplet, "湿度", current.humidity?.let { "$it%" } ?: "—"),
         Triple(
-            HugeIcons.Wind,
+            AppIcons.Wind,
             "风",
             buildString {
                 append(WeatherCodes.windLabel(current.windDirection) ?: "风向 —")
@@ -480,19 +474,19 @@ private fun DetailsGrid(snapshot: WeatherSnapshot) {
             },
         ),
         Triple(
-            HugeIcons.Sun01,
+            AppIcons.Sun01,
             "紫外线",
             today?.uvIndexMax?.let { value ->
                 "${value.roundToInt()} ${WeatherCodes.uvLabel(value)}"
             } ?: "—",
         ),
         Triple(
-            HugeIcons.Umbrella,
+            AppIcons.Umbrella,
             "降水概率",
             today?.precipProbabilityMax?.let { "今天 $it%" } ?: "—",
         ),
         Triple(
-            HugeIcons.Sunrise,
+            AppIcons.Sunrise,
             "日出 · 日落",
             if (today?.sunrise != null && today.sunset != null) {
                 "${today.sunrise} · ${today.sunset}"

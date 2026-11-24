@@ -63,6 +63,7 @@ import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jwvw.SCHEDULE_IMPORT_CAVEAT
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -70,13 +71,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.BookMarked
-import me.rerere.hugeicons.stroke.Copy01
-import me.rerere.hugeicons.stroke.Delete02
-import me.rerere.hugeicons.stroke.Edit02
-import me.rerere.hugeicons.stroke.MoreVertical
 
 /**
  * 课表管理页的显示顺序（2026-11-19 用户要求「按学期排序」）。
@@ -304,7 +298,7 @@ fun TimetableManageScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(HugeIcons.Add01, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(AppIcons.Add01, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("新建课表")
             }
@@ -496,7 +490,7 @@ private fun TimetableCard(
                         modifier = Modifier.size(32.dp),
                     ) {
                         Icon(
-                            HugeIcons.MoreVertical,
+                            AppIcons.MoreVertical,
                             contentDescription = "更多操作",
                             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                             modifier = Modifier.size(18.dp),
@@ -505,7 +499,7 @@ private fun TimetableCard(
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
                             text = { Text("重命名") },
-                            leadingIcon = { Icon(HugeIcons.Edit02, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            leadingIcon = { Icon(AppIcons.Edit02, contentDescription = null, modifier = Modifier.size(18.dp)) },
                             onClick = {
                                 menuOpen = false
                                 onRename()
@@ -513,7 +507,7 @@ private fun TimetableCard(
                         )
                         DropdownMenuItem(
                             text = { Text("复制") },
-                            leadingIcon = { Icon(HugeIcons.Copy01, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            leadingIcon = { Icon(AppIcons.Copy01, contentDescription = null, modifier = Modifier.size(18.dp)) },
                             onClick = {
                                 menuOpen = false
                                 onDuplicate()
@@ -522,7 +516,7 @@ private fun TimetableCard(
                         DropdownMenuItem(
                             text = { Text(if (isDefaultSource) "取消默认" else "设为默认") },
                             leadingIcon = {
-                                Icon(HugeIcons.BookMarked, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(AppIcons.BookMarked, contentDescription = null, modifier = Modifier.size(18.dp))
                             },
                             onClick = {
                                 menuOpen = false
@@ -533,7 +527,7 @@ private fun TimetableCard(
                             text = { Text("删除", color = MaterialTheme.colorScheme.error) },
                             leadingIcon = {
                                 Icon(
-                                    HugeIcons.Delete02,
+                                    AppIcons.Delete02,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.error,
                                     modifier = Modifier.size(18.dp),

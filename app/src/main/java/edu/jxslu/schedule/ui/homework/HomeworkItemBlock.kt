@@ -30,9 +30,8 @@ import edu.jxslu.schedule.domain.homeworkDisplay
 import edu.jxslu.schedule.ui.common.MarkdownView
 import edu.jxslu.schedule.ui.common.MdImageStyle
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.datetime.LocalDate
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.PencilEdit02
 
 /**
  * 作业列表的**展开详情块**（2026-10-21，DESIGN §3.11）：
@@ -108,7 +107,7 @@ internal fun HomeworkItemBlock(
                 modifier = Modifier.size(40.dp),
             ) {
                 Icon(
-                    imageVector = HugeIcons.PencilEdit02,
+                    imageVector = AppIcons.PencilEdit02,
                     contentDescription = "编辑作业",
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.primary,

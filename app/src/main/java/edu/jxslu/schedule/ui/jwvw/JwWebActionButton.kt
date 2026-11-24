@@ -5,8 +5,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import edu.jxslu.schedule.JwImportActivity
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ExternalLink
+import edu.jxslu.schedule.ui.icon.AppIcons
 
 /**
  * 业务页顶栏的「在教务网页核对」动作（2026-10-20）。
@@ -18,6 +17,6 @@ import me.rerere.hugeicons.stroke.ExternalLink
 fun JwWebActionButton(title: String, url: String, description: String? = null) {
     val context = LocalContext.current
     IconButton(onClick = { JwImportActivity.startBrowse(context, title, url) }) {
-        Icon(HugeIcons.ExternalLink, contentDescription = description ?: "在教务网页核对$title")
+        Icon(AppIcons.ExternalLink, contentDescription = description ?: "在教务网页核对$title")
     }
 }

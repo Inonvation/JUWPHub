@@ -66,6 +66,7 @@ import edu.jxslu.schedule.ui.common.StaggeredReveal
 import edu.jxslu.schedule.ui.common.emphasizedText
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberResumeTick
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.CancellationException
@@ -73,18 +74,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AiBrain01
-import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.CreditCard
-import me.rerere.hugeicons.stroke.Delete02
-import me.rerere.hugeicons.stroke.Droplet
-import me.rerere.hugeicons.stroke.GraduationCap
-import me.rerere.hugeicons.stroke.HeartHandshake
-import me.rerere.hugeicons.stroke.Shield01
-import me.rerere.hugeicons.stroke.ShowerHead
-import me.rerere.hugeicons.stroke.ScooterElectric
-import me.rerere.hugeicons.stroke.WashingMachine
 
 /**
  * 账号与登录（DESIGN §3.3，2026-10-20）。
@@ -290,14 +279,14 @@ fun AccountsHubScreen(
                     AccountRow(
                         title = "教务",
                         subtitle = "课表 · 成绩 · 学工 · 成绩单",
-                        icon = HugeIcons.GraduationCap,
+                        icon = AppIcons.GraduationCap,
                         state = jwState,
                         onClick = onOpenJw,
                     )
                     AccountRow(
                         title = "一卡通 · 电费",
                         subtitle = "余额 · 付款码 · 流水 · 寝室电费",
-                        icon = HugeIcons.CreditCard,
+                        icon = AppIcons.CreditCard,
                         state = yktState,
                         onClick = onOpenYkt,
                     )
@@ -312,21 +301,21 @@ fun AccountsHubScreen(
                     AccountRow(
                         title = "胖乖生活",
                         subtitle = "开水房 · 余额 · 订单",
-                        icon = HugeIcons.Droplet,
+                        icon = AppIcons.Droplet,
                         state = qiekjState,
                         onClick = onOpenQiekj,
                     )
                     AccountRow(
                         title = "趣智校园",
                         subtitle = "洗澡开热水 · 余额 · 账单",
-                        icon = HugeIcons.ShowerHead,
+                        icon = AppIcons.ShowerHead,
                         state = qzxyState,
                         onClick = onOpenQzxy,
                     )
                     AccountRow(
                         title = "U净",
                         subtitle = "洗衣房空闲 · 扫码识别",
-                        icon = HugeIcons.WashingMachine,
+                        icon = AppIcons.WashingMachine,
                         state = ujingState,
                         onClick = onOpenUjing,
                     )
@@ -339,7 +328,7 @@ fun AccountsHubScreen(
                             } else {
                                 "当前为小程序方式 · 点此切换"
                             },
-                            icon = HugeIcons.ScooterElectric,
+                            icon = AppIcons.ScooterElectric,
                             state = kvcxState,
                             labels = if (kvcxAccountMode) {
                                 StatusLabels()
@@ -352,7 +341,7 @@ fun AccountsHubScreen(
                     AccountRow(
                         title = "问渠 · 志愿服务",
                         subtitle = "志愿工时 · 活动报名",
-                        icon = HugeIcons.HeartHandshake,
+                        icon = AppIcons.HeartHandshake,
                         state = wenquState,
                         onClick = onOpenWenqu,
                     )
@@ -367,7 +356,7 @@ fun AccountsHubScreen(
                     AccountRow(
                         title = "AI 调课",
                         subtitle = "自带 API Key · 可选功能",
-                        icon = HugeIcons.AiBrain01,
+                        icon = AppIcons.AiBrain01,
                         state = if (aiKey.isNullOrBlank()) LoginState.NotLoggedIn else LoginState.LoggedIn,
                         labels = StatusLabels(loggedIn = "已配置", login = "去配置"),
                         onClick = onOpenAiSettings,
@@ -386,7 +375,7 @@ fun AccountsHubScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(
-                            HugeIcons.Delete02,
+                            AppIcons.Delete02,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(16.dp),
@@ -518,7 +507,7 @@ private fun AccountRow(
             ) {
                 StatusPill(state = state, labels = labels)
                 Icon(
-                    HugeIcons.ArrowRight01,
+                    AppIcons.ArrowRight01,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                     modifier = Modifier.size(18.dp),
@@ -616,7 +605,7 @@ private fun TrustNote() {
         verticalAlignment = Alignment.Top,
     ) {
         Icon(
-            HugeIcons.Shield01,
+            AppIcons.Shield01,
             contentDescription = null,
             tint = success,
             modifier = Modifier.size(17.dp),

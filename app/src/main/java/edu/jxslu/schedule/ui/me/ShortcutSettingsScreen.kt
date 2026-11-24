@@ -80,6 +80,7 @@ import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.ShortcutLauncher
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.shortcutIconChoices
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -88,16 +89,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.AppStore
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowUp01
-import me.rerere.hugeicons.stroke.Delete02
-import me.rerere.hugeicons.stroke.Edit02
-import me.rerere.hugeicons.stroke.Flash
-import me.rerere.hugeicons.stroke.Play
-import me.rerere.hugeicons.stroke.RefreshCcw
 
 /**
  * 编辑表单的临时状态。[id] 为 null 表示新增（保存时生成 id）；[presetIndex] 随条目
@@ -236,7 +227,7 @@ fun ShortcutSettingsScreen(
                     subtitle = "关闭后今日页不再展示快捷入口",
                     checked = state.enabled,
                     onCheckedChange = viewModel::setEnabled,
-                    icon = HugeIcons.Flash,
+                    icon = AppIcons.Flash,
                 )
             }
 
@@ -280,7 +271,7 @@ fun ShortcutSettingsScreen(
                 SettingItem(
                     title = "添加快捷方式",
                     subtitle = "打开 App · 直达页面 · 打开链接",
-                    icon = HugeIcons.Add01,
+                    icon = AppIcons.Add01,
                     enabled = canAdd,
                     value = if (canAdd) null else "已达上限",
                     onClick = if (canAdd) {
@@ -295,7 +286,7 @@ fun ShortcutSettingsScreen(
                 onClick = { confirmResetAll = true },
                 modifier = Modifier.padding(vertical = 4.dp),
             ) {
-                Icon(HugeIcons.RefreshCcw, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(AppIcons.RefreshCcw, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("恢复全部默认")
             }
@@ -399,7 +390,7 @@ private fun ShortcutRow(
         }
         IconButton(onClick = { onMove(-1) }, enabled = canMoveUp) {
             Icon(
-                HugeIcons.ArrowUp01,
+                AppIcons.ArrowUp01,
                 contentDescription = "上移",
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (canMoveUp) 0.6f else 0.2f),
                 modifier = Modifier.size(18.dp),
@@ -407,7 +398,7 @@ private fun ShortcutRow(
         }
         IconButton(onClick = { onMove(1) }, enabled = canMoveDown) {
             Icon(
-                HugeIcons.ArrowDown01,
+                AppIcons.ArrowDown01,
                 contentDescription = "下移",
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (canMoveDown) 0.6f else 0.2f),
                 modifier = Modifier.size(18.dp),
@@ -415,7 +406,7 @@ private fun ShortcutRow(
         }
         IconButton(onClick = onEdit) {
             Icon(
-                HugeIcons.Edit02,
+                AppIcons.Edit02,
                 contentDescription = "编辑",
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 modifier = Modifier.size(18.dp),
@@ -593,7 +584,7 @@ private fun ShortcutEditSheet(
                 trailingIcon = {
                     IconButton(onClick = { showPicker = true }) {
                         Icon(
-                            HugeIcons.AppStore,
+                            AppIcons.AppStore,
                             contentDescription = "从已安装应用选择",
                         )
                     }
@@ -647,13 +638,13 @@ private fun ShortcutEditSheet(
                         }
                     },
                 ) {
-                    Icon(HugeIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(AppIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("测试")
                 }
                 if (onResetConfirmed != null) {
                     TextButton(onClick = onResetConfirmed) {
-                        Icon(HugeIcons.RefreshCcw, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(AppIcons.RefreshCcw, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("重置为默认")
                     }
@@ -661,7 +652,7 @@ private fun ShortcutEditSheet(
                 Spacer(Modifier.weight(1f))
                 if (onDelete != null) {
                     TextButton(onClick = onDelete) {
-                        Icon(HugeIcons.Delete02, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(AppIcons.Delete02, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("删除")
                     }

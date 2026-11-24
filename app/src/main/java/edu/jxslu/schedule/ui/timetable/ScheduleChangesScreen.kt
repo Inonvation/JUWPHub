@@ -54,10 +54,9 @@ import edu.jxslu.schedule.ui.common.ScheduleChangeGroupCard
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.reminder.ScoreAlertReminder
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.History
 
 /**
  * 调课处置页（DESIGN §4.17，2026-10-04 重立）：教务课表与基线比对出的差异在这里
@@ -254,7 +253,7 @@ fun ScheduleChangesScreen(
                 },
                 actions = {
                     IconButton(onClick = onOpenHistory) {
-                        Icon(HugeIcons.History, contentDescription = "调课记录")
+                        Icon(AppIcons.History, contentDescription = "调课记录")
                     }
                     TextButton(onClick = ::refreshNow, enabled = !busy) { Text("重新检查") }
                 },
