@@ -37,7 +37,10 @@ import edu.jxslu.schedule.ui.ai.AiHistoryViewModel
 import edu.jxslu.schedule.ui.ai.AiSettingsScreen
 import edu.jxslu.schedule.ui.ai.AiSettingsViewModel
 import edu.jxslu.schedule.ui.me.hub.AccountsHubScreen
+import edu.jxslu.schedule.ui.campus.CampusCalendarScreen
 import edu.jxslu.schedule.ui.campus.DormRepairScreen
+import edu.jxslu.schedule.ui.campus.LeaveHubScreen
+import edu.jxslu.schedule.ui.internship.InternshipBasesScreen
 import edu.jxslu.schedule.ui.me.CalendarSettingsScreen
 import edu.jxslu.schedule.ui.me.CalendarSettingsViewModel
 import edu.jxslu.schedule.ui.me.JwAccountScreen
@@ -158,6 +161,9 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     IosDrawerEntry("教务", IosRoute(SubpageScreen.SELECTION_RECORDS), "已选课程"),
     IosDrawerEntry("教务", IosRoute(SubpageScreen.SELECTION_WISHES), "预选清单"),
     IosDrawerEntry("教务", IosRoute(SubpageScreen.STUDENT_INFO), "学籍信息"),
+    IosDrawerEntry("教务", IosRoute(SubpageScreen.INTERNSHIP_BASES), "实习基地"),
+    IosDrawerEntry("教务", IosRoute(SubpageScreen.CAMPUS_CALENDAR), "校历"),
+    IosDrawerEntry("教务", IosRoute(SubpageScreen.LEAVE_HUB), "请假"),
     // 钱包
     IosDrawerEntry("钱包", IosRoute(SubpageScreen.POWER_BILL), "电费"),
     IosDrawerEntry("钱包", IosRoute(SubpageScreen.CAMPUS_STATEMENT), "消费流水"),
@@ -506,6 +512,17 @@ internal fun IosRouteContent(
         )
 
         SubpageScreen.SUPPORT_DEV -> SupportDevScreen(onBack = pop)
+
+        // ---------------------------------------------------------------- 学工 / 校历 / 实习
+        //
+        // 三页的数据层今晚搬进共享层了（学工 URL 规则、报修解析、校历存储、实习基地抓取）。
+        // 平台动作一律 null：请假要打开学工表单窗口、校历要位图解码、实习基地要内置浏览器，
+        // iOS 都还没有，对应入口整行不渲染。
+        SubpageScreen.LEAVE_HUB -> LeaveHubScreen(onBack = pop)
+
+        SubpageScreen.CAMPUS_CALENDAR -> CampusCalendarScreen(onBack = pop)
+
+        SubpageScreen.INTERNSHIP_BASES -> InternshipBasesScreen(onBack = pop)
 
         else -> IosNotPortedScreen(screen = route.screen, onBack = pop)
     }
