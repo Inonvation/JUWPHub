@@ -55,6 +55,15 @@ import edu.jxslu.schedule.ui.timetable.ScheduleChangesScreen
 import edu.jxslu.schedule.ui.timetable.TimetableManageScreen
 import edu.jxslu.schedule.ui.timetable.TimetableViewModel
 import edu.jxslu.schedule.ui.toolbox.CainiaoQueryScreen
+import edu.jxslu.schedule.ui.water.WaterScreen
+import edu.jxslu.schedule.ui.wenqu.WenquGrabScreen
+import edu.jxslu.schedule.ui.wenqu.WenquGrabViewModel
+import edu.jxslu.schedule.ui.wenqu.WenquRecordsScreen
+import edu.jxslu.schedule.ui.wenqu.WenquRecordsViewModel
+import edu.jxslu.schedule.ui.wenqu.WenquScreen
+import edu.jxslu.schedule.ui.wenqu.WenquSettingsScreen
+import edu.jxslu.schedule.ui.wenqu.WenquViewModel
+import edu.jxslu.schedule.ui.water.WaterViewModel
 import edu.jxslu.schedule.ui.toolbox.ToolboxScreen
 import edu.jxslu.schedule.ui.tweak.CourseTweakScreen
 import edu.jxslu.schedule.ui.tweak.CourseTweakViewModel
@@ -196,6 +205,10 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     // 账号
     IosDrawerEntry("账号", IosRoute(SubpageScreen.ACCOUNTS), "账号中心"),
     // 江水生活（已搬的三块）
+    IosDrawerEntry("江水生活", IosRoute(SubpageScreen.WATER), "开水房"),
+    IosDrawerEntry("江水生活", IosRoute(SubpageScreen.WENQU), "问渠"),
+    IosDrawerEntry("江水生活", IosRoute(SubpageScreen.WENQU_RECORDS), "问渠工时"),
+    IosDrawerEntry("江水生活", IosRoute(SubpageScreen.WENQU_GRAB), "问渠蹲点"),
     IosDrawerEntry("江水生活", IosRoute(SubpageScreen.AI_SCHEDULE), "AI 调课"),
     IosDrawerEntry("江水生活", IosRoute(SubpageScreen.AI_SETTINGS), "AI 设置"),
     IosDrawerEntry("江水生活", IosRoute(SubpageScreen.AI_HISTORY), "调课记录"),
@@ -555,6 +568,90 @@ internal fun IosRouteContent(
         SubpageScreen.CAMPUS_CALENDAR -> CampusCalendarScreen(onBack = pop)
 
         SubpageScreen.INTERNSHIP_BASES -> InternshipBasesScreen(onBack = pop)
+
+        // ---------------------------------------------------------------- 江水生活 · 开水房
+        //
+        // **iOS 上唯一能真开到水的一条链**：胖乖走 HTTP（不是蓝牙），三份平台存储
+        // 2026-11-25 全部到位（Keychain 凭证 + 订单快照 JSON + 过期留痕），
+        // 所以 `qiekjRepository()` 不再是 null。
+        //
+        // 两个平台动作传 null：品牌位图（Android 的 `ic_brand_pangguai`）与「充值」按钮
+        // （要拉起支付宝深链，`Info.plist` 还没声明 `LSApplicationQueriesSchemes`）。
+        SubpageScreen.WATER -> {
+            val repo = services.qiekjRepository()
+            if (repo == null) {
+                IosNotPortedScreen(screen = route.screen, onBack = pop)
+            } else {
+                val vm = remember {
+                    WaterViewModel(
+                        repo = repo,
+                        wateringStore = services.qiekjWateringSessions(),
+                    )
+                }
+                WaterScreen(
+                    viewModel = vm,
+                    prefsViewModel = meViewModel,
+                    onBack = pop,
+                )
+            }
+        }
+
+        // ---------------------------------------------------------------- 江水生活 · 问渠
+        //
+        // 问渠全链路是 HTTP，iOS 上能完整用：登录、活动列表、报名 / 取消、工时记录。
+        // 凭证走 Keychain，过期留痕与账号中心共用一张表。
+        //
+        // 通知类动作（蹲点提醒、报名提醒、微信拉起、证书下载）全部传 null：
+        // iOS 还没有 `UNUserNotificationCenter` 与 `LSApplicationQueriesSchemes`，
+        // 对应入口整行不渲染。
+        SubpageScreen.WENQU -> {
+            val repo = services.wenquRepository()
+            if (repo == null) {
+                IosNotPortedScreen(screen = route.screen, onBack = pop)
+            } else {
+                val vm = remember { WenquViewModel(repo, services.displayPrefs()) }
+                WenquScreen(
+                    onBack = pop,
+                    viewModel = vm,
+                    onOpenSettings = { push(IosRoute(SubpageScreen.WENQU_SETTINGS)) },
+                    onOpenRecords = { push(IosRoute(SubpageScreen.WENQU_RECORDS)) },
+                    onOpenGrab = { push(IosRoute(SubpageScreen.WENQU_GRAB)) },
+                )
+            }
+        }
+
+        SubpageScreen.WENQU_RECORDS -> {
+            val repo = services.wenquRepository()
+            if (repo == null) {
+                IosNotPortedScreen(screen = route.screen, onBack = pop)
+            } else {
+                val vm = remember { WenquRecordsViewModel(repo) }
+                WenquRecordsScreen(onBack = pop, viewModel = vm)
+            }
+        }
+
+        SubpageScreen.WENQU_SETTINGS -> {
+            val repo = services.wenquRepository()
+            if (repo == null) {
+                IosNotPortedScreen(screen = route.screen, onBack = pop)
+            } else {
+                WenquSettingsScreen(
+                    onBack = pop,
+                    onOpenRecords = { push(IosRoute(SubpageScreen.WENQU_RECORDS)) },
+                    repository = repo,
+                )
+            }
+        }
+
+        SubpageScreen.WENQU_GRAB -> {
+            val repo = services.wenquRepository()
+            if (repo == null) {
+                IosNotPortedScreen(screen = route.screen, onBack = pop)
+            } else {
+                val vm = remember { WenquGrabViewModel(repo, services.displayPrefs()) }
+                WenquGrabScreen(onBack = pop, viewModel = vm)
+            }
+        }
 
         else -> IosNotPortedScreen(screen = route.screen, onBack = pop)
     }

@@ -8,6 +8,9 @@ import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.prefs.recordGuessOrder
+import edu.jxslu.schedule.data.qiekj.IosQiekjCredentialStore
+import edu.jxslu.schedule.data.qiekj.IosQiekjExpiryMarker
+import edu.jxslu.schedule.data.qiekj.IosQiekjOrderStore
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
@@ -55,6 +58,7 @@ import edu.jxslu.schedule.data.ujing.UjingHistoryStore
 import edu.jxslu.schedule.data.ujing.UjingHouseStore
 import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
+import edu.jxslu.schedule.data.wenqu.IosWenquSessionStore
 import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
@@ -320,15 +324,27 @@ class IosServices : AppServices {
 
     // ---- 胖乖生活 / 开水房（iOS 移植 T2，2026-11-25） ----
 
+    override fun qiekjRepository(): QiekjRepository? = qiekjRepo
+
     /**
-     * 胖乖仓库：**iOS 侧返回 null**——构造要三份平台存储，现在只有凭证那份接上了 Keychain
-     * （`IosQiekjCredentialStore`），订单快照与过期标记还缺介质。
+     * 胖乖仓库：**iOS 侧已能建起来**（2026-11-25）。
      *
-     * 升级条件：给 `QiekjOrderStore` 与过期标记各写一份 `appDataDir()` 下的 JSON 实现
-     * （与 Android 的 `QiekjOrderHistoryStore` 同口径：最多 50 笔、按完成时间倒序），
-     * 然后把 `QiekjRepository(...)` 建在这里。**不要**退回 `NSUserDefaults` 存 token。
+     * 三份平台存储都到位了：凭证走 Keychain（[IosQiekjCredentialStore]）、订单快照走
+     * `appDataDir()/qiekj_orders.json`（[IosQiekjOrderStore]）、过期标记复用
+     * [IosSessionExpirySink]（[IosQiekjExpiryMarker]）。
+     *
+     * 惰性单例：开水页与账号中心读的必须是同一份（登录态、订单快照、开水流程的 Mutex
+     * 都在仓库里），各建一个会让「开水页登录了、账号中心还是未登录」。
+     *
+     * **不传 `debugDumpDir`**：那是 release 下不落盘的采样目录，iOS 侧没有对应需求。
      */
-    override fun qiekjRepository(): QiekjRepository? = null
+    private val qiekjRepo: QiekjRepository by lazy {
+        QiekjRepository(
+            tokenStore = IosQiekjCredentialStore(),
+            orderHistoryStore = IosQiekjOrderStore(),
+            expiry = IosQiekjExpiryMarker(sessionExpiry),
+        )
+    }
 
     /**
      * 「正在出水」登记：**iOS 侧是不落地的实现**。
@@ -429,8 +445,22 @@ class IosServices : AppServices {
     /** 快趣：**iOS 侧返回 null**，理由同上。 */
     override fun kqcxSession(): ThirdPartySession? = null
 
-    /** 问渠：**iOS 侧返回 null**，理由同上。 */
-    override fun wenquRepository(): WenquRepository? = null
+    /**
+     * 问渠仓库：**iOS 侧已能建起来**（2026-11-25）。
+     *
+     * 构造只要两样：凭证存储（[IosWenquSessionStore]，Keychain）与过期留痕
+     * （[IosSessionExpirySink]）。问渠全链路是 HTTP，没有蓝牙/通知依赖，
+     * 所以登录、活动列表、报名与取消在 iOS 上都能真跑——蹲点提醒那类通知动作由页面
+     * 的可空回调承担，传 null 后对应入口不渲染。
+     */
+    override fun wenquRepository(): WenquRepository? = wenquRepo
+
+    private val wenquRepo: WenquRepository by lazy {
+        WenquRepository(
+            store = IosWenquSessionStore(),
+            expiry = sessionExpiry,
+        )
+    }
 
     /** 应用级作用域（与 [repository] 的热流共用同一个，不另起一个）。 */
     override fun appScope(): CoroutineScope = scope
