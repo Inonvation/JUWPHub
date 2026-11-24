@@ -6,16 +6,24 @@
 # （排 15 分钟才 cancelled）是同一种 `cancelled` 结论、完全不同的原因。
 # 靠跑真构建来区分这两者，一次浪费 15 分钟；用这个探针只要几十秒。
 #
-# 用法：`gh workflow run runner-probe.yml`，然后看各 job 的结论。
+# 用法：改一下本文件再 push（`paths` 只匹配本文件，不会连带触发 ios-ipa），
+# 然后看各 job 的结论：
 #   - success  → 该标签可用，`uname -m` 那行给出架构（arm64 才能出 device 包）
 #   - cancelled + steps=0 → 该标签不被支持
 #   - cancelled + 有步骤跑过 → 是容量问题，稍后重试
+#
+# 为什么不用 workflow_dispatch：GitHub 只登记**默认分支**上的工作流，
+# `gh workflow run` 对只在 `feat/ios-port` 上的文件回 404；而默认分支（main）不动。
 #
 # 只做诊断，不进任何构建路径；结论写进 `design/ios-port.md` 后可以删掉本文件。
 
 name: Runner Probe
 
 on:
+  push:
+    branches: [feat/ios-port]
+    paths:
+      - '.github/workflows/runner-probe.yml'
   workflow_dispatch:
 
 permissions:
