@@ -26,17 +26,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.XgFormActivity
-import edu.jxslu.schedule.data.repo.DormRepairSync
-import edu.jxslu.schedule.data.xg.XgUrls
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.DormRepairRecord
 import edu.jxslu.schedule.domain.DormRepairRules
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.EmptyHint
@@ -53,20 +50,53 @@ import edu.jxslu.schedule.ui.common.toHeroTone
 import kotlinx.coroutines.launch
 
 /**
+ * 报修进度刷新的一次结果（平台动作的回传口径，见 `design/ios-port.md` §11.2 ④）。
+ *
+ * 为什么不用 `Boolean` / `String?`：三态本来就不同——「拉到了」「没有学工会话（去登录）」
+ * 「拉失败（给原因）」对用户的下一步动作不一样，合成两态就得在调用方那边再猜一次。
+ * 平台侧只需把自家的结果映射过来（Android：`DormRepairSync.CheckResult`），
+ * 文案留在本页，iOS 接上学工链时不用另写一套说法。
+ */
+sealed interface DormRepairRefresh {
+    /** 刷新成功（缓存已更新，`snapshot` 流会自己推下来）。 */
+    data object Ok : DormRepairRefresh
+
+    /** 本机没有可用的学工会话：提示去报修页登录一次。 */
+    data object NoSession : DormRepairRefresh
+
+    /** 失败，[message] 是给用户看的一句话。 */
+    data class Failed(val message: String) : DormRepairRefresh
+}
+
+/**
  * 宿舍报修详情（DESIGN §3.15 / §4.49，2026-10-19）：今日页卡片 / 收件箱通知的落点。
  *
  * 纯原生只读页：状态、报修字段、审批流程、当前处理人。底部「去学工报修页核对」
- * 打开现有 `XgFormActivity`，需要看官方页面时用；「完成并隐藏」**只写本机快照**，
+ * 打开学工报修页，需要看官方页面时用；「完成并隐藏」**只写本机快照**，
  * 不向学工提交任何写操作（真正的办结/评价在官方页面里由用户自己操作）。
+ *
+ * ## iOS 移植 V2（2026-11-25）：搬进 `shared/commonMain` 后平台动作怎么接
+ *
+ * 按 `design/ios-port.md` §11.2 ④，两个平台动作收成**可空回调**（`null` = 本平台没有
+ * 这项能力，对应入口整行不渲染）：
+ *
+ * | 参数 | Android（`SubpageActivity`） | 缺省时 |
+ * |---|---|---|
+ * | [onOpenRepairPage] | `XgFormActivity.start(this, XgUrls.REPAIR)` | 「去学工报修页核对」按钮与空态的「打开报修页」都不出现 |
+ * | [onRefresh] | `Graph.dormRepairSync(this).refresh()` → [DormRepairRefresh] | 顶栏刷新按钮不出现，进页也不自动拉；本机缓存照常展示 |
+ *
+ * 本机快照存储 [Services.dormRepairStore] 两端都有（JSON 落盘），所以页面本身哪一端都能画。
  */
 @Composable
 fun DormRepairScreen(
     onBack: () -> Unit,
     focusItemId: String? = null,
+    /** 打开学工报修页（官方页面）；null = 本平台没有学工网页。 */
+    onOpenRepairPage: (() -> Unit)? = null,
+    /** 拉一次报修进度；null = 本平台没有学工同步链。 */
+    onRefresh: (suspend () -> DormRepairRefresh)? = null,
 ) {
-    val context = LocalContext.current
-    val store = remember { Graph.dormRepairStore(context) }
-    val sync = remember { Graph.dormRepairSync(context) }
+    val store = remember { Services.current.dormRepairStore() }
     val snapshot by store.snapshot.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -76,7 +106,7 @@ fun DormRepairScreen(
 
     val targetId = remember(focusItemId) { focusItemId?.toLongOrNull() }
     val invalidTarget = focusItemId != null && targetId == null
-    val now = System.currentTimeMillis()
+    val now = AppClock.nowMillis()
     val record = remember(snapshot, targetId, invalidTarget) {
         when {
             invalidTarget -> null
@@ -90,11 +120,11 @@ fun DormRepairScreen(
             scope.launch {
                 busy = true
                 error = null
-                when (val result = sync.refresh()) {
-                    is DormRepairSync.CheckResult.Ok -> Unit
-                    is DormRepairSync.CheckResult.Failed -> error = result.message
-                    DormRepairSync.CheckResult.Skipped ->
+                when (val result = onRefresh?.invoke()) {
+                    null, DormRepairRefresh.Ok -> Unit
+                    DormRepairRefresh.NoSession ->
                         error = "没有可用的学工会话，先打开报修页登录一次"
+                    is DormRepairRefresh.Failed -> error = result.message
                 }
                 busy = false
                 refreshedOnce = true
@@ -102,9 +132,10 @@ fun DormRepairScreen(
         }
     }
 
-    // 缓存里没有目标记录才打一次网络；有缓存先展示，进页不打网络
+    // 缓存里没有目标记录才打一次网络；有缓存先展示，进页不打网络。
+    // 本平台没有同步链（onRefresh == null）时进页什么都不做，只展示本机缓存。
     LaunchedEffect(Unit) {
-        if (!invalidTarget && record == null) refresh()
+        if (!invalidTarget && record == null && onRefresh != null) refresh()
     }
     // 刷新失败 / 需要登录：用页面统一的提示宿主播一条，不弹系统 Toast
     LaunchedEffect(error) {
@@ -116,13 +147,13 @@ fun DormRepairScreen(
 
     // 首次进页 / 目标记录不在缓存：先给与成品同几何的加载态，别先渲染空态再跳
     val initialLoading =
-        record == null && !invalidTarget && (busy || !refreshedOnce)
+        record == null && !invalidTarget && (busy || (!refreshedOnce && onRefresh != null))
 
     PageScaffoldColumn(
         title = "宿舍报修",
         onBack = onBack,
         snackbar = snackbar,
-        actions = { PageRefreshAction(busy = busy, onClick = refresh) },
+        actions = { if (onRefresh != null) PageRefreshAction(busy = busy, onClick = refresh) },
     ) {
         when {
             initialLoading -> {
@@ -154,8 +185,9 @@ fun DormRepairScreen(
                         } else {
                             "在学工报修页提交后，进度会显示在这里。"
                         },
-                        actionLabel = "打开报修页",
-                        onAction = { XgFormActivity.start(context, XgUrls.REPAIR) },
+                        // 没有学工网页的平台不给这个入口（空态只说明事实，不留死按钮）
+                        actionLabel = if (onOpenRepairPage != null) "打开报修页" else null,
+                        onAction = onOpenRepairPage,
                     )
                 }
             }
@@ -166,7 +198,7 @@ fun DormRepairScreen(
                 RepairFlowCard(record)
                 RepairActionsCard(
                     record = record,
-                    onOpenWeb = { XgFormActivity.start(context, XgUrls.REPAIR) },
+                    onOpenWeb = onOpenRepairPage,
                     onDismiss = {
                         scope.launch {
                             store.dismiss(record.formUserId)
@@ -383,18 +415,21 @@ private fun RepairFlowCard(record: DormRepairRecord) {
 @Composable
 private fun RepairActionsCard(
     record: DormRepairRecord,
-    onOpenWeb: () -> Unit,
+    /** null = 本平台没有学工网页：整颗按钮不渲染（只留「完成并隐藏」）。 */
+    onOpenWeb: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     AppCard {
-        OutlinedButton(
-            onClick = onOpenWeb,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("去学工报修页核对")
+        if (onOpenWeb != null) {
+            OutlinedButton(
+                onClick = onOpenWeb,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("去学工报修页核对")
+            }
         }
         if (DormRepairRules.isFinished(record)) {
-            Spacer(Modifier.height(8.dp))
+            if (onOpenWeb != null) Spacer(Modifier.height(8.dp))
             Button(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth(),

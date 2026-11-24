@@ -10,6 +10,7 @@ import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
+import edu.jxslu.schedule.data.repo.DormRepairStore
 import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.data.repo.ExamSync
@@ -457,6 +458,21 @@ interface AppServices {
      * Android 侧转接 `ui/reminder/BalanceAlertReminder.evaluateYktBalance`。
      */
     suspend fun evaluateYktBalance(cardFen: Long) {}
+
+    // ---- 宿舍报修（DESIGN §4.49，iOS 移植 V2，2026-11-25） ----
+    //
+    // 报修详情页搬进共享层带出来的。**只给本机快照存储**：真正去学工拉数据的那条链
+    // （`DormRepairSync`）还在 `:app` 的 `data/repo`，类型也还不在共享层，所以它由宿主
+    // 直接作为页面参数注入（`DormRepairScreen(onRefresh = …)`），不在这里占位。
+
+    /**
+     * 宿舍报修本机快照（解析结果 + 最近 20 条记录，JSON 落盘）。
+     *
+     * **非空**：`DormRepairStore` 早已在 `commonMain`，介质是 `appDataDir()` 下一份 JSON，
+     * 两端都能读写。必须是同一份实例——今日页卡片、报修详情页与同步链读写的都是它，
+     * 各建一个等于「同步写进 A、详情页看 B」。
+     */
+    fun dormRepairStore(): DormRepairStore
 }
 
 /**

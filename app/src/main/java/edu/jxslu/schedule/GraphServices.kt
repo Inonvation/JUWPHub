@@ -13,6 +13,7 @@ import edu.jxslu.schedule.data.qiekj.QiekjWateringSession
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
+import edu.jxslu.schedule.data.repo.DormRepairStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
@@ -363,4 +364,14 @@ class GraphServices(private val context: Context) : AppServices {
     override suspend fun evaluateYktBalance(cardFen: Long) {
         BalanceAlertReminder.evaluateYktBalance(appContext, cardFen)
     }
+
+    // ---- 宿舍报修（iOS 移植 V2，2026-11-25） ----
+
+    /**
+     * 报修本机快照：转给 `Graph.dormRepairStore` 的同一份单例。
+     *
+     * 必须是同一份：同步链（`DormRepairSync`）写它、详情页读它，各建一个就会出现
+     * 「同步成功了、页面还显示没有报修」。
+     */
+    override fun dormRepairStore(): DormRepairStore = Graph.dormRepairStore(appContext)
 }
