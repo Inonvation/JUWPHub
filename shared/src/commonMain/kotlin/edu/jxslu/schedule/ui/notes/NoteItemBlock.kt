@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.Note
 import edu.jxslu.schedule.domain.imageRefs
 import edu.jxslu.schedule.domain.plainExcerpt
-import edu.jxslu.schedule.ui.common.AttachmentThumbnailRow
+import edu.jxslu.schedule.ui.common.AttachmentImageUi
 import edu.jxslu.schedule.ui.common.epochMonthDay
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.icon.AppIcons
@@ -35,13 +35,17 @@ import edu.jxslu.schedule.ui.icon.AppIcons
  * 和「有没有图」交代清楚。缩略图与作业列表同一口径（240px 解码、44dp 方图）。
  *
  * 本组件只画内容，不画卡片：组卡展开区直接平铺，课程页由调用方套 `AppCard`。
+ *
+ * 缩略图要平台位图解码，由 [images] 注入；**null = 本平台没有附件图能力**，那一行不渲染
+ * （iOS 移植 S13，2026-11-25）。
  */
 @Composable
 internal fun NoteItemBlock(
     note: Note,
     onClick: () -> Unit,
     onEdit: () -> Unit,
-    onImageClick: (String) -> Unit,
+    /** 附件图能力；null = 本平台没有 → 缩略图整行不渲染。 */
+    images: AttachmentImageUi? = null,
     modifier: Modifier = Modifier,
     /** true = 组卡展开区（左缘 32dp 与课程名对齐）；false = 课程页顶层卡片（左缘 14dp）。 */
     embedded: Boolean = true,
@@ -53,7 +57,7 @@ internal fun NoteItemBlock(
         }
     }
     val excerpt = remember(note.body) { plainExcerpt(note.body) }
-    val images = remember(note.body) { imageRefs(note.body).toList() }
+    val imageRefs = remember(note.body) { imageRefs(note.body).toList() }
     val startPadding = if (embedded) 32.dp else 14.dp
 
     Column(
@@ -107,13 +111,11 @@ internal fun NoteItemBlock(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (images.isNotEmpty()) {
-            AttachmentThumbnailRow(
-                fileNames = images,
-                size = 44.dp,
-                onOpen = onImageClick,
-                modifier = Modifier.padding(top = 2.dp),
-            )
+        if (imageRefs.isNotEmpty() && images != null) {
+            // 外层留 2dp：缩略图行自己不管外边距（槽只收文件名与点击回调）
+            Column(Modifier.padding(top = 2.dp)) {
+                images.thumbnailRow(imageRefs, 44.dp, images.openViewer)
+            }
         }
     }
 }

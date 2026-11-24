@@ -27,6 +27,8 @@ import edu.jxslu.schedule.ui.campus.DormRepairScreen
 import edu.jxslu.schedule.ui.campus.LeaveHubScreen
 import edu.jxslu.schedule.ui.campus.PayCodeScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
+import edu.jxslu.schedule.ui.common.rememberAttachmentImageUi
+import edu.jxslu.schedule.ui.common.rememberMarkdownUi
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
@@ -39,6 +41,7 @@ import edu.jxslu.schedule.ui.homework.HomeworkCourseScreen
 import edu.jxslu.schedule.ui.homework.HomeworkDetailScreen
 import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
 import edu.jxslu.schedule.ui.homework.HomeworkTodoScreen
+import edu.jxslu.schedule.ui.homework.openLink
 import edu.jxslu.schedule.ui.inbox.InboxScreen
 import edu.jxslu.schedule.ui.internship.InternshipBasesScreen
 import edu.jxslu.schedule.ui.jw.StudentInfoScreen
@@ -48,6 +51,7 @@ import edu.jxslu.schedule.ui.jw.TextbookScreen
 import edu.jxslu.schedule.ui.notes.NoteCourseScreen
 import edu.jxslu.schedule.ui.notes.NoteDetailScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
+import edu.jxslu.schedule.ui.reminder.ClassReminder
 import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.score.rememberScoreScreenActions
 import edu.jxslu.schedule.ui.score.ScoreSettingsScreen
@@ -60,6 +64,8 @@ import edu.jxslu.schedule.ui.selection.SelectionCenterScreen
 import edu.jxslu.schedule.ui.selection.SelectionRecordsScreen
 import edu.jxslu.schedule.ui.selection.SelectionScreen
 import edu.jxslu.schedule.ui.selection.SelectionWishesScreen
+import edu.jxslu.schedule.ui.selection.rememberSelectionCenterClient
+import edu.jxslu.schedule.ui.selection.rememberSelectionScreenActions
 import edu.jxslu.schedule.ui.ai.AiChatScreen
 import edu.jxslu.schedule.ui.ai.AiHistoryScreen
 import edu.jxslu.schedule.ui.ai.AiSettingsScreen
@@ -284,11 +290,35 @@ class SubpageActivity : ComponentActivity() {
             SubpageScreen.SCHOLAR -> ScholarScreen(onBack = onBack)
             SubpageScreen.CURRICULUM -> CurriculumScreen(onBack = onBack)
             SubpageScreen.INTERNSHIP_BASES -> InternshipBasesScreen(onBack = onBack)
-            SubpageScreen.SELECTIONS -> SelectionScreen(onBack = onBack)
+            // 选课四页已在 shared/commonMain（iOS 移植 S13），平台动作用
+            // `rememberSelectionScreenActions` 补齐；`client` 是选课接口（真身仍在 :app）。
+            SubpageScreen.SELECTIONS -> {
+                val actions = rememberSelectionScreenActions()
+                SelectionScreen(
+                    onBack = onBack,
+                    onOpenCenter = actions.openCenter,
+                    onOpenRecords = actions.openRecords,
+                    onOpenWishes = actions.openWishes,
+                    onOpenJwWeb = actions.openJwWeb,
+                    onOpenJwPage = actions.openJwPage,
+                    onAlertsChanged = actions.alertsChanged,
+                )
+            }
             // focusItemId 对 SELECTION_CENTER 复用为「直达轮次 id」（选课页点轮次行）
             SubpageScreen.SELECTION_CENTER ->
-                SelectionCenterScreen(onBack = onBack, focusRoundId = focusItemId)
-            SubpageScreen.SELECTION_WISHES -> SelectionWishesScreen(onBack = onBack)
+                SelectionCenterScreen(
+                    onBack = onBack,
+                    focusRoundId = focusItemId,
+                    client = rememberSelectionCenterClient(),
+                )
+            SubpageScreen.SELECTION_WISHES -> {
+                val actions = rememberSelectionScreenActions()
+                SelectionWishesScreen(
+                    onBack = onBack,
+                    onOpenCenter = actions.openCenter.let { open -> { open(null) } },
+                    client = rememberSelectionCenterClient(),
+                )
+            }
             SubpageScreen.SELECTION_RECORDS -> SelectionRecordsScreen(onBack = onBack)
             SubpageScreen.TRANSCRIPTS -> TranscriptHistoryScreen(onBack = onBack)
             // focusItemId 对 RIDE 复用为「进页即定位的车号」（2026-09-29）：识别 / 深链
@@ -375,6 +405,8 @@ class SubpageActivity : ComponentActivity() {
                 onOpenSettings = { SubpageActivity.start(this, SubpageScreen.CAMPUS_CARD_SETTINGS) },
             )
             // 笔记·课件（DESIGN §3.11）：课程库 → 课程列表 → 详情/编辑
+            // 库与课程列表已在 shared/commonMain（iOS 移植 S13）；附件图能力由
+            // `rememberAttachmentImageUi` 注入（缩略图解码 + 全屏查看器仍在 :app）。
             SubpageScreen.NOTES -> NoteLibraryScreen(
                 onBack = onBack,
                 onOpenNote = { name, id, startEditing ->
@@ -386,6 +418,7 @@ class SubpageActivity : ComponentActivity() {
                         startEditing = startEditing,
                     )
                 },
+                images = rememberAttachmentImageUi(),
             )
             SubpageScreen.NOTES_COURSE -> NoteCourseScreen(
                 courseName = courseName.orEmpty(),
@@ -399,6 +432,7 @@ class SubpageActivity : ComponentActivity() {
                         startEditing = startEditing,
                     )
                 },
+                images = rememberAttachmentImageUi(),
             )
             SubpageScreen.NOTE_DETAIL -> NoteDetailScreen(
                 courseName = courseName.orEmpty(),
@@ -407,6 +441,8 @@ class SubpageActivity : ComponentActivity() {
                 onBack = onBack,
             )
             // 作业：课程库 → 课程列表 → 详情/编辑 + 作业中心
+            // 库 / 课程列表 / 作业中心已在 shared/commonMain（iOS 移植 S13）；附件图、Markdown
+            // 渲染、开链接、截止提醒排程由这里注入（四件都在 :app）。
             SubpageScreen.HOMEWORK -> HomeworkLibraryScreen(
                 onBack = onBack,
                 onOpenHomework = { name, id, startEditing ->
@@ -418,6 +454,10 @@ class SubpageActivity : ComponentActivity() {
                         startEditing = startEditing,
                     )
                 },
+                images = rememberAttachmentImageUi(),
+                markdown = rememberMarkdownUi(),
+                onOpenLink = { url -> openLink(this, url) },
+                onHomeworkChanged = { ClassReminder.enqueueCheck(this) },
             )
             SubpageScreen.HOMEWORK_COURSE -> HomeworkCourseScreen(
                 courseName = courseName.orEmpty(),
@@ -431,6 +471,10 @@ class SubpageActivity : ComponentActivity() {
                         startEditing = startEditing,
                     )
                 },
+                images = rememberAttachmentImageUi(),
+                markdown = rememberMarkdownUi(),
+                onOpenLink = { url -> openLink(this, url) },
+                onHomeworkChanged = { ClassReminder.enqueueCheck(this) },
             )
             SubpageScreen.HOMEWORK_DETAIL -> HomeworkDetailScreen(
                 courseName = courseName.orEmpty(),
@@ -450,6 +494,10 @@ class SubpageActivity : ComponentActivity() {
                     )
                 },
                 onOpenLibrary = { SubpageActivity.start(this, SubpageScreen.HOMEWORK) },
+                images = rememberAttachmentImageUi(),
+                markdown = rememberMarkdownUi(),
+                onOpenLink = { url -> openLink(this, url) },
+                onHomeworkChanged = { ClassReminder.enqueueCheck(this) },
             )
         }
     }

@@ -16,9 +16,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -45,16 +42,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.jw.SelectionCenterParser
+import edu.jxslu.schedule.data.repo.SelectionCenterClient
 import edu.jxslu.schedule.data.repo.SelectionClientException
 import edu.jxslu.schedule.data.repo.SelectionSubmitResult
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.SelectionCourse
 import edu.jxslu.schedule.domain.SelectionCourseTypes
@@ -66,12 +62,15 @@ import edu.jxslu.schedule.domain.SelectionRounds
 import edu.jxslu.schedule.domain.SelectionSort
 import edu.jxslu.schedule.domain.SelectionWishHits
 import edu.jxslu.schedule.domain.WishHit
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -93,13 +92,28 @@ import kotlinx.coroutines.withContext
  *
  * 服务端的开放闸门是真源头：非选课时间教务回**「当前不在选课时间范围内，具体请查看学校
  * 选课通知！」**（2026-10-01 实测），client 把它原样带上来显示，不要自己编状态。
+ *
+ * ## 为什么 client 是参数（iOS 移植 S13，2026-11-25）
+ *
+ * 真身 `SelectionCenterHttpClient` 还在 `:app`（OkHttp + `CasSession`），`AppServices` 里没有
+ * 对应入口。本页只依赖它的接口 [SelectionCenterClient]（commonMain），所以由宿主注入：
+ * **null = 本平台还没有选课接口客户端**（iOS 现状），页面直接说明，不画一个点不动的筛选面。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
-    val context = LocalContext.current
-    val client = remember { Graph.selectionCenterClient(context) }
-    val prefs = remember { Graph.displayPrefs(context) }
+fun SelectionCenterScreen(
+    onBack: () -> Unit,
+    focusRoundId: String? = null,
+    /** 选课接口客户端；null = 本平台没有实现（iOS 要等 Ktor 版会话）。 */
+    client: SelectionCenterClient? = null,
+) {
+    val api = client
+    if (api == null) {
+        // 本平台没有选课接口客户端：只画说明，不画一个点了没反应的筛选面
+        SelectionCenterUnavailable(onBack = onBack)
+        return
+    }
+    val prefs = remember { Services.current.displayPrefs() }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
@@ -107,13 +121,17 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
 
     var rounds by remember { mutableStateOf<List<SelectionRound>>(emptyList()) }
     LaunchedEffect(Unit) {
-        rounds = withContext(Dispatchers.IO) { Graph.selectionSync(context).cachedRounds() }
+        // 快照是磁盘上的 JSON：换后台线程读（`Dispatchers.IO` 是 JVM 专有，见 SelectionScreen 注释）。
+        // 没有直取链的平台就当空快照，页面照常渲染（轮次名显示为「当前没有进行中的选课轮次」）。
+        rounds = withContext(Dispatchers.Default) {
+            Services.current.selectionSync()?.cachedRounds().orEmpty()
+        }
     }
     // 目标轮次：先认点轮次行带进来的直达轮次（focusRoundId），认不出再退回自动挑选
     // （进行中的优先，其次最近一个「即将开始」的；都没有 = 没有可操作的轮次）
     val round = remember(rounds, focusRoundId) {
         rounds.firstOrNull { it.id == focusRoundId }
-            ?: SelectionRounds.pickTarget(rounds, System.currentTimeMillis())
+            ?: SelectionRounds.pickTarget(rounds, AppClock.nowMillis())
     }
 
     /** 表单态（未提交的查询条件）。 */
@@ -167,7 +185,7 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
         nextStart = 0
         scope.launch {
             try {
-                val page = client.fetchPage(target.id, query, start = 0)
+                val page = api.fetchPage(target.id, query, start = 0)
                 courses = page.rows
                 total = page.total
                 nextStart = page.rows.size
@@ -188,7 +206,7 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
         loadingMore = true
         scope.launch {
             try {
-                val page = client.fetchPage(target.id, query, start = nextStart)
+                val page = api.fetchPage(target.id, query, start = nextStart)
                 val seen = courses.mapTo(mutableSetOf()) { it.id }
                 courses = courses + page.rows.filter { it.id !in seen }
                 nextStart += page.rows.size
@@ -224,7 +242,7 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
             try {
                 wishes.forEachIndexed { index, wish ->
                     if (index > 0) delay(AutoSyncRules.interRequestDelayMs())
-                    fetched[wish.id] = client.fetchCourses(target.id, listOf(wish.nameKeyword))
+                    fetched[wish.id] = api.fetchCourses(target.id, listOf(wish.nameKeyword))
                 }
                 wishHits = SelectionWishHits.group(wishes, fetched)
             } catch (e: SelectionClientException) {
@@ -254,7 +272,7 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
         submitting = submitting + course.id
         scope.launch {
             val result = try {
-                client.submit(target.id, course.id)
+                api.submit(target.id, course.id)
             } catch (e: SelectionClientException) {
                 SelectionSubmitResult.Fatal(e.message ?: "选课接口不可用")
             } catch (e: Exception) {
@@ -281,7 +299,7 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
         submitting = submitting + course.id
         scope.launch {
             val result = try {
-                client.drop(target.id, course.id)
+                api.drop(target.id, course.id)
             } catch (e: SelectionClientException) {
                 SelectionSubmitResult.Fatal(e.message ?: "选课接口不可用")
             } catch (e: Exception) {
@@ -308,7 +326,7 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
                 title = { Text("选课中心", style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
                 actions = {
@@ -319,7 +337,7 @@ fun SelectionCenterScreen(onBack: () -> Unit, focusRoundId: String? = null) {
                         },
                         enabled = !loading,
                     ) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                        Icon(AppIcons.Refresh, contentDescription = "刷新")
                     }
                 },
             )
@@ -924,4 +942,40 @@ private fun RemainingTag(remaining: Int?) {
         color = color,
         modifier = Modifier.padding(start = 8.dp),
     )
+}
+
+/**
+ * 「本平台还没有选课接口客户端」的整页说明（iOS 现状）。
+ *
+ * 为什么不干脆不显示入口：入口在选课页的轮次卡上，而那一页在 iOS 上是要能打开的；
+ * 点进来后给一句确定的话，比把按钮藏掉更容易解释「为什么没有选课中心」。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SelectionCenterUnavailable(onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("选课中心", style = MaterialTheme.typography.titleMedium) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentAlignment = Alignment.Center,
+        ) {
+            EmptyHint(
+                title = "本平台还没有应用内选课",
+                body = "选课中心要走教务接口，iOS 侧还没有这条会话链；" +
+                    "已同步过的选课记录仍可在「已选课程」里查看。",
+            )
+        }
+    }
 }

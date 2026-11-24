@@ -1,6 +1,7 @@
 package edu.jxslu.schedule
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,9 @@ import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.DataSelfTestResult
 import edu.jxslu.schedule.ui.DataSelfTestStrip
+import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
+import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
+import edu.jxslu.schedule.ui.selection.SelectionScreen
 import edu.jxslu.schedule.ui.theme.JuwTheme
 import edu.jxslu.schedule.ui.web.WebContentView
 import edu.jxslu.schedule.ui.web.WebViewController
@@ -77,6 +81,9 @@ fun MainViewController(): UIViewController {
 private fun IosRoot(services: IosServices) {
     JuwTheme {
         var jwOpen by remember { mutableStateOf(false) }
+        var page by remember { mutableStateOf(IosPage.Week) }
+        // 详情页（笔记 / 作业）还在 :app，iOS 点条目时给一句确定的话，不留「点了没反应」
+        var hint by remember { mutableStateOf<String?>(null) }
         if (jwOpen) {
             JwLoginScreen(services = services, onClose = { jwOpen = false })
         } else {
@@ -90,21 +97,85 @@ private fun IosRoot(services: IosServices) {
                         .weight(1f)
                         .fillMaxWidth(),
                 ) {
-                    // ViewModel 挂在组合上即可：iOS 侧没有 Android 的配置变更重建，
-                    // `remember` 的生命周期就等于这一屏的生命周期。
-                    val viewModel = remember { WeekViewModel(services.scheduleRepository()) }
-                    WeekScreen(
-                        viewModel = viewModel,
-                        // 空态的「去导入课表」→ 教务登录页（M2 第一步：先把登录页跑起来）
-                        onOpenJwImport = { jwOpen = true },
-                        // 其余平台动作在 iOS 侧都还没有实现，留空即可——
-                        // 传 null / 空 lambda 的入口本来就不渲染（见 WeekScreen 头部参数表）。
+                    when (page) {
+                        // ViewModel 挂在组合上即可：iOS 侧没有 Android 的配置变更重建，
+                        // `remember` 的生命周期就等于这一屏的生命周期。
+                        IosPage.Week -> {
+                            val viewModel = remember { WeekViewModel(services.scheduleRepository()) }
+                            WeekScreen(
+                                viewModel = viewModel,
+                                // 空态的「去导入课表」→ 教务登录页（M2 第一步：先把登录页跑起来）
+                                onOpenJwImport = { jwOpen = true },
+                                // 其余平台动作在 iOS 侧都还没有实现，留空即可——
+                                // 传 null / 空 lambda 的入口本来就不渲染（见 WeekScreen 头部参数表）。
+                            )
+                        }
+                        // 笔记库（S13 搬进共享层）：仓库是本地 Room 表，iOS 直接可读。
+                        // `images` 传 null = 本平台还没有附件图解码，缩略图整行不出现；
+                        // 详情页仍在 :app，条目点开先给提示（见 [hint]）。
+                        IosPage.Notes -> NoteLibraryScreen(
+                            onBack = { page = IosPage.Week },
+                            onOpenNote = { _, _, _ ->
+                                hint = "笔记详情页还在 Android 侧，下一批搬过来"
+                            },
+                        )
+                        // 作业库（S13）：同上。`markdown` 传 null 时正文退化成纯文本，
+                        // 不会因为「还没有渲染器」就把作业内容藏掉。
+                        IosPage.Homework -> HomeworkLibraryScreen(
+                            onBack = { page = IosPage.Week },
+                            onOpenHomework = { _, _, _ ->
+                                hint = "作业详情页还在 Android 侧，下一批搬过来"
+                            },
+                        )
+                        // 选课（S13）：iOS 没有教务直取链（`IosServices.selectionSync()` 返回 null），
+                        // 轮次卡会说「本平台还没有教务直取能力」；已同步过的记录仍可读。
+                        // 二级页（选课中心 / 预选清单 / 已选课程）在 iOS 侧还没有路由，全部传 null，
+                        // 对应入口整行不渲染。
+                        IosPage.Selection -> SelectionScreen(onBack = { page = IosPage.Week })
+                    }
+                }
+                hint?.let { text ->
+                    Text(
+                        text = text,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 12.dp),
                     )
+                }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    IosPage.entries.forEach { entry ->
+                        TextButton(
+                            onClick = {
+                                hint = null
+                                page = entry
+                            },
+                        ) { Text(entry.label) }
+                    }
                 }
                 DbSelfTestStrip()
             }
         }
     }
+}
+
+/**
+ * iOS 侧目前能进的一级页面（S13 起有笔记 / 作业 / 选课）。
+ *
+ * 为什么用枚举而不是导航库：iOS 侧还没有二级页栈（`SubpageActivity` 那一套是 Android 的），
+ * 这一版只要能切页就够验证「共享页面在 iOS 上真的画得出来」。等详情页搬完再换真正的路由。
+ */
+private enum class IosPage(val label: String) {
+    Week("课表"),
+    Notes("笔记"),
+    Homework("作业"),
+    Selection("选课"),
 }
 
 /**

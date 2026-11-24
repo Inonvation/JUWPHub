@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -22,31 +20,29 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.homeworkDisplayTitle
 import edu.jxslu.schedule.domain.pendingHomework
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.AttachmentImageUi
 import edu.jxslu.schedule.ui.common.rememberRevealSpacePx
 import edu.jxslu.schedule.ui.common.scrollToReveal
 import edu.jxslu.schedule.ui.common.EmptyHint
-import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.LoadingHint
+import edu.jxslu.schedule.ui.common.MarkdownUi
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SectionHeader
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
-import edu.jxslu.schedule.ui.reminder.ClassReminder
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.launch
 
 /**
@@ -59,6 +55,9 @@ import kotlinx.coroutines.launch
  * 2. 课程组**默认全展开**（今日页点进来是要处理作业的，先展开免得逐个点开）。
  *
  * 行内勾选即完成（给「撤销」Snackbar），点行进入该作业详情。
+ *
+ * 平台动作与作业库同一组可空参数（iOS 移植 S13，2026-11-25）：`images` / `markdown` /
+ * `onOpenLink` / `onHomeworkChanged`，null 的语义见 `HomeworkLibraryScreen` 的参数表。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,11 +65,18 @@ fun HomeworkTodoScreen(
     onBack: () -> Unit,
     onOpenHomework: (courseName: String, id: Long, startEditing: Boolean) -> Unit,
     onOpenLibrary: () -> Unit = {},
+    /** 附件图能力；null = 本平台没有。 */
+    images: AttachmentImageUi? = null,
+    /** Markdown 渲染槽；null = 本平台没有。 */
+    markdown: MarkdownUi? = null,
+    /** 打开正文链接，返回是否成功；null = 链接不可点。 */
+    onOpenLink: ((String) -> Boolean)? = null,
+    /** 完成状态改动后重排截止提醒。 */
+    onHomeworkChanged: (() -> Unit)? = null,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val repo = remember { Graph.homeworkRepository(context) }
-    val scheduleRepo = remember { Graph.repository(context) }
+    val repo = remember { Services.current.homeworkRepository() }
+    val scheduleRepo = remember { Services.current.scheduleRepository() }
     val courses by scheduleRepo.courses.collectAsStateWithLifecycle(initialValue = emptyList())
     val all by repo.observePending().collectAsStateWithLifecycle(initialValue = null)
     val snackbar = remember { SnackbarHostState() }
@@ -81,7 +87,6 @@ fun HomeworkTodoScreen(
     val pending = remember(all) { all?.let { pendingHomework(it, today) } }
     val listState = rememberLazyListState()
     val revealSpacePx = rememberRevealSpacePx()
-    var viewer by remember { mutableStateOf<String?>(null) }
 
     /** 展开时只补足下方缺的空间（与作业库同款）。 */
     Scaffold(
@@ -91,7 +96,7 @@ fun HomeworkTodoScreen(
                 title = { Text("作业") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
             )
@@ -144,7 +149,7 @@ fun HomeworkTodoScreen(
                             onToggleItem = { id, done ->
                                 scope.launch {
                                     repo.setDone(id, done)
-                                    ClassReminder.enqueueCheck(context)
+                                    onHomeworkChanged?.invoke()
                                     if (done) {
                                         val hw = items.firstOrNull { it.id == id }
                                         val label = hw?.let { homeworkDisplayTitle(it.detail) } ?: "作业"
@@ -155,18 +160,24 @@ fun HomeworkTodoScreen(
                                         )
                                         if (result == SnackbarResult.ActionPerformed) {
                                             repo.setDone(id, false)
-                                            ClassReminder.enqueueCheck(context)
+                                            onHomeworkChanged?.invoke()
                                         }
                                     }
                                 }
                             },
-                            onImageClick = { viewer = it },
-                            onLinkClick = { url ->
-                                if (!openLink(context, url)) {
-                                    scope.launch {
-                                        snackbar.showNotice(
-                                            AppNoticeVisuals("打不开这个链接", tone = NoticeTone.Warning),
-                                        )
+                            images = images,
+                            markdown = markdown,
+                            onOpenLink = onOpenLink?.let { open ->
+                                { url: String ->
+                                    if (!open(url)) {
+                                        scope.launch {
+                                            snackbar.showNotice(
+                                                AppNoticeVisuals(
+                                                    "打不开这个链接",
+                                                    tone = NoticeTone.Warning,
+                                                ),
+                                            )
+                                        }
                                     }
                                 }
                             },
@@ -175,9 +186,5 @@ fun HomeworkTodoScreen(
                 }
             }
         }
-    }
-
-    viewer?.let { fileName ->
-        ImageViewerDialog(fileName = fileName, onDismiss = { viewer = null })
     }
 }

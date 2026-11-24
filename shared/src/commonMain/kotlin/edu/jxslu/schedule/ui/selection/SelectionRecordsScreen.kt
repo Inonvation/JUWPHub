@@ -14,9 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -36,20 +33,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.domain.CourseSelection
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.launch
 
 /**
@@ -61,14 +58,17 @@ import kotlinx.coroutines.launch
  *
  * 数据闸门：进页自动同步一次、30 分钟内重复进页直接用缓存（`SelectionSync.MIN_REFRESH_MS`）；
  * 顶栏「更新」= 强制同步。失败不弹窗，用页内空态与气泡说明。只读教务数据，不写课表。
+ *
+ * iOS 现状：`AppServices.selectionSync()` 为 null（没有教务直取链），那时顶栏不画「更新」，
+ * 空态改说「本平台还没有教务直取能力」；**记录本身照常显示**——它读的是本地 Room 表。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SelectionRecordsScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val repo = remember { Graph.selectionRepository(context) }
-    val sync = remember { Graph.selectionSync(context) }
-    val prefs = remember { Graph.displayPrefs(context) }
+    val repo = remember { Services.current.selectionRepository() }
+    /** null = 本平台没有教务直取链：进页不同步，也不能「更新」。 */
+    val sync = remember { Services.current.selectionSync() }
+    val prefs = remember { Services.current.displayPrefs() }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
@@ -96,10 +96,11 @@ fun SelectionRecordsScreen(onBack: () -> Unit) {
     val moreTerms = remember(knownTerms, chipTerms) { knownTerms.filter { it !in chipTerms } }
 
     fun refresh(force: Boolean) {
+        val service = sync ?: return
         if (refreshing) return
         refreshing = true
         scope.launch {
-            val outcome = sync.refresh(force = force)
+            val outcome = service.refresh(force = force)
             knownTerms = prefs.selectionTerms()
             refreshing = false
             lastError = outcome.failedReason
@@ -121,10 +122,11 @@ fun SelectionRecordsScreen(onBack: () -> Unit) {
 
     /** 「更多学期」里选中一个：单学期抓一次，抓到但为空也记住（给空态）。 */
     fun loadTerm(term: String) {
+        val service = sync ?: return
         if (refreshing) return
         refreshing = true
         scope.launch {
-            when (val result = sync.syncTerm(term)) {
+            when (val result = service.syncTerm(term)) {
                 is SelectionSync.Result.Updated -> {
                     if (result.rowCount == 0) emptyTerms = emptyTerms + term
                     selectedTerm = term
@@ -150,12 +152,14 @@ fun SelectionRecordsScreen(onBack: () -> Unit) {
                 title = { Text("已选课程", style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
                 actions = {
-                    IconButton(onClick = { refresh(force = true) }, enabled = !refreshing) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "更新")
+                    if (sync != null) {
+                        IconButton(onClick = { refresh(force = true) }, enabled = !refreshing) {
+                            Icon(AppIcons.Refresh, contentDescription = "更新")
+                        }
                     }
                 },
             )
@@ -184,11 +188,16 @@ fun SelectionRecordsScreen(onBack: () -> Unit) {
                 item {
                     EmptyHint(
                         title = "还没有选课记录",
-                        body = lastError
-                            ?: "从教务同步「选课日志」后，这里会按学期展示选课记录。\n" +
-                            "只读教务数据，不会写入课表。",
-                        actionLabel = "立即同步",
-                        onAction = { refresh(force = true) },
+                        // 没有直取链时别给「立即同步」这个点不动的按钮，直接说明原因
+                        body = lastError ?: if (sync == null) {
+                            "本平台还没有教务直取能力，同步不了选课日志；" +
+                                "已经有记录的设备同步过之后，这里会按学期展示。"
+                        } else {
+                            "从教务同步「选课日志」后，这里会按学期展示选课记录。\n" +
+                                "只读教务数据，不会写入课表。"
+                        },
+                        actionLabel = if (sync != null) "立即同步" else null,
+                        onAction = sync?.let { { refresh(force = true) } },
                     )
                 }
             } else {
@@ -290,7 +299,7 @@ private fun TermHeader(term: String, rows: List<CourseSelection>) {
             modifier = Modifier.weight(1f),
         )
         Text(
-            "${trimCredit(credits)} 学分",
+            "${creditText(credits)} 学分",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
         )
@@ -313,7 +322,7 @@ private fun SelectionCard(row: CourseSelection, modifier: Modifier = Modifier) {
             if (row.credit > 0.0) {
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "${trimCredit(row.credit)} 学分",
+                    "${creditText(row.credit)} 学分",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                 )
@@ -362,15 +371,5 @@ private fun SelectionCard(row: CourseSelection, modifier: Modifier = Modifier) {
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
-    }
-}
-
-/** 学分展示：整数不带小数点（2.0 → 2），小数最多两位。 */
-private fun trimCredit(value: Double): String {
-    val rounded = Math.round(value * 100) / 100.0
-    return if (rounded == rounded.toLong().toDouble()) {
-        rounded.toLong().toString()
-    } else {
-        rounded.toString().trimEnd('0').trimEnd('.')
     }
 }
