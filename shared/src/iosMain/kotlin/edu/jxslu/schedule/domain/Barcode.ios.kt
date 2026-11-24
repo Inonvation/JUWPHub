@@ -39,8 +39,7 @@ import platform.Foundation.NSData
 import platform.Foundation.NSString
 import platform.Foundation.NSUTF8StringEncoding
 import platform.Foundation.dataUsingEncoding
-import platform.Foundation.valueForKey
-
+import platform.Foundation.setValue
 /**
  * [encodeQrMatrix] / [encodeCode128Matrix] / [decodeQrMatrix] 的 iOS 实现：
  * CoreImage 出码、`CIDetector` 读码。
@@ -154,10 +153,9 @@ private fun generatorImage(filterName: String, content: String): CIImage {
         // 容错 M（15%）：与 Android 侧 zxing 的 ErrorCorrectionLevel.M 同一档
         filter.setValue("M", forKey = "inputCorrectionLevel")
     }
-    // `outputImage` 在 K/N 的 CoreImage 绑定里不可见（既不是成员也不是可 import 的扩展），
-    // 走 KVC 取——`setValue(forKey:)` 那几条本来就在用，两边成对。
-    val output = filter.valueForKey("outputImage") as? CIImage
-        ?: error("$filterName 编不出这段内容")
+    // `outputImage` 是 CIFilter 的成员属性（直接取即可——之前报「未解析」是因为
+    // `CIFilter(name:)` 那一步失败、filter 成了错误类型，属于级联错）
+    val output = filter.outputImage ?: error("$filterName 编不出这段内容")
     // `CGRect` 是 C 结构体，`origin` 是嵌在里面的另一个结构体，取值要走 `CGRectGetMinX/Y`
     // （拿 CValue<CGRect> 直接 `.useContents { origin.x }` 在 Kotlin/Native 上解析不了）。
     val dx = CGRectGetMinX(output.extent)
