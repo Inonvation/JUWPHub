@@ -60,6 +60,8 @@ import edu.jxslu.schedule.ui.selection.SelectionCenterScreen
 import edu.jxslu.schedule.ui.selection.SelectionRecordsScreen
 import edu.jxslu.schedule.ui.selection.SelectionScreen
 import edu.jxslu.schedule.ui.selection.SelectionWishesScreen
+import edu.jxslu.schedule.ui.selection.rememberSelectionCenterClient
+import edu.jxslu.schedule.ui.selection.rememberSelectionScreenActions
 import edu.jxslu.schedule.ui.ai.AiChatScreen
 import edu.jxslu.schedule.ui.ai.AiHistoryScreen
 import edu.jxslu.schedule.ui.ai.AiSettingsScreen
@@ -284,11 +286,35 @@ class SubpageActivity : ComponentActivity() {
             SubpageScreen.SCHOLAR -> ScholarScreen(onBack = onBack)
             SubpageScreen.CURRICULUM -> CurriculumScreen(onBack = onBack)
             SubpageScreen.INTERNSHIP_BASES -> InternshipBasesScreen(onBack = onBack)
-            SubpageScreen.SELECTIONS -> SelectionScreen(onBack = onBack)
+            // 选课四页已在 shared/commonMain（iOS 移植 S13），平台动作用
+            // `rememberSelectionScreenActions` 补齐；`client` 是选课接口（真身仍在 :app）。
+            SubpageScreen.SELECTIONS -> {
+                val actions = rememberSelectionScreenActions()
+                SelectionScreen(
+                    onBack = onBack,
+                    onOpenCenter = actions.openCenter,
+                    onOpenRecords = actions.openRecords,
+                    onOpenWishes = actions.openWishes,
+                    onOpenJwWeb = actions.openJwWeb,
+                    onOpenJwPage = actions.openJwPage,
+                    onAlertsChanged = actions.alertsChanged,
+                )
+            }
             // focusItemId 对 SELECTION_CENTER 复用为「直达轮次 id」（选课页点轮次行）
             SubpageScreen.SELECTION_CENTER ->
-                SelectionCenterScreen(onBack = onBack, focusRoundId = focusItemId)
-            SubpageScreen.SELECTION_WISHES -> SelectionWishesScreen(onBack = onBack)
+                SelectionCenterScreen(
+                    onBack = onBack,
+                    focusRoundId = focusItemId,
+                    client = rememberSelectionCenterClient(),
+                )
+            SubpageScreen.SELECTION_WISHES -> {
+                val actions = rememberSelectionScreenActions()
+                SelectionWishesScreen(
+                    onBack = onBack,
+                    onOpenCenter = actions.openCenter.let { open -> { open(null) } },
+                    client = rememberSelectionCenterClient(),
+                )
+            }
             SubpageScreen.SELECTION_RECORDS -> SelectionRecordsScreen(onBack = onBack)
             SubpageScreen.TRANSCRIPTS -> TranscriptHistoryScreen(onBack = onBack)
             // focusItemId 对 RIDE 复用为「进页即定位的车号」（2026-09-29）：识别 / 深链

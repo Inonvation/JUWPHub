@@ -11,11 +11,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -38,20 +33,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.SubpageActivity
-import edu.jxslu.schedule.SubpageScreen
+import edu.jxslu.schedule.data.repo.SelectionCenterClient
 import edu.jxslu.schedule.data.repo.SelectionClientException
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.SelectionRound
 import edu.jxslu.schedule.domain.SelectionRounds
 import edu.jxslu.schedule.domain.SelectionWish
 import edu.jxslu.schedule.domain.SelectionWishes
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
@@ -59,6 +53,7 @@ import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.LoadingHint
+import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -81,14 +76,27 @@ import kotlinx.coroutines.withContext
  * **删除预选的确认弹窗（2026-11-06）只换了骨架**（自建 `AlertDialog` → `AppConfirmDialog`）：
  * 本页紧挨着教务选课流程，弹窗这一层任何判定/文案变化都会被误读成「选课行为变了」，
  * 所以文案、`danger`、确认/取消的动作**逐字保留**，只让公共件接管淡入、滚动兜底与 48dp 按钮。
+ *
+ * ## 平台动作全在参数里（iOS 移植 S13，2026-11-25）
+ *
+ * - [onOpenCenter]：null = 平台没有二级页路由 → 卡片上的「去选课中心确认」不出现。
+ * - [client]：选课接口客户端（真身还在 `:app`）；null = 本平台没有 → 「本轮已开 N 门」
+ *   那段不跑，清单本身（DataStore）与防重复对照（本地 Room）照常可用。
+ *
+ * 没有教务直取链时 `selectionSync()` 也是 null，`round` 就一直是 null——本页匹配那一列
+ * 自然不出现，不需要额外分支。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SelectionWishesScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val prefs = remember { Graph.displayPrefs(context) }
-    val client = remember { Graph.selectionCenterClient(context) }
-    val sync = remember { Graph.selectionSync(context) }
+fun SelectionWishesScreen(
+    onBack: () -> Unit,
+    /** 去选课中心（null = 平台没有二级页路由）。 */
+    onOpenCenter: (() -> Unit)? = null,
+    /** 选课接口客户端（null = 本平台没有实现，「本轮已开」匹配整列不出现）。 */
+    client: SelectionCenterClient? = null,
+) {
+    val prefs = remember { Services.current.displayPrefs() }
+    val sync = remember { Services.current.selectionSync() }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
@@ -97,19 +105,23 @@ fun SelectionWishesScreen(onBack: () -> Unit) {
     val sorted = remember(wishesState) { SelectionWishes.sorted(wishesState.orEmpty()) }
 
     // 防重复对照的数据源：已选课程（null = Room 流首帧未到，先不标）与当前课表课程
-    val selectionsState by remember { Graph.selectionRepository(context) }.observeAll()
+    val selectionsState by remember { Services.current.selectionRepository() }.observeAll()
         .collectAsStateWithLifecycle(initialValue = null)
-    val timetableCourses by remember { Graph.repository(context) }.courses
+    val timetableCourses by remember { Services.current.scheduleRepository() }.courses
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
     var editing by remember { mutableStateOf<SelectionWish?>(null) }
     var deleting by remember { mutableStateOf<SelectionWish?>(null) }
 
-    // 「本轮已开」匹配（v3）：进页 / 清单变化 / 手动刷新时各跑一次，每条预选一次查询
+    // 「本轮已开」匹配（v3）：进页 / 清单变化 / 手动刷新时各跑一次，每条预选一次查询。
+    // 两条前置条件任一不满足（没有直取链 / 没有接口客户端）就没有可匹配的轮次，
+    // round 保持 null，整列不出现。
     var round by remember { mutableStateOf<SelectionRound?>(null) }
     LaunchedEffect(Unit) {
-        round = withContext(Dispatchers.IO) {
-            SelectionRounds.pickTarget(sync.cachedRounds(), System.currentTimeMillis())
+        val service = sync ?: return@LaunchedEffect
+        round = withContext(Dispatchers.Default) {
+            // 快照是磁盘 JSON：换后台线程（`Dispatchers.IO` 是 JVM 专有）
+            SelectionRounds.pickTarget(service.cachedRounds(), AppClock.nowMillis())
         }
     }
     var hitCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
@@ -118,6 +130,7 @@ fun SelectionWishesScreen(onBack: () -> Unit) {
 
     fun loadHits() {
         val target = round ?: return
+        val api = client ?: return
         val list = wishesState.orEmpty()
         if (list.isEmpty() || hitsLoading) return
         hitsLoading = true
@@ -127,7 +140,7 @@ fun SelectionWishesScreen(onBack: () -> Unit) {
             try {
                 list.forEachIndexed { index, wish ->
                     if (index > 0) delay(AutoSyncRules.interRequestDelayMs())
-                    counts[wish.id] = client.fetchCourses(target.id, listOf(wish.nameKeyword))
+                    counts[wish.id] = api.fetchCourses(target.id, listOf(wish.nameKeyword))
                         .count { SelectionWishes.matches(wish, it.name, it.teacher) }
                 }
                 hitCounts = counts
@@ -180,7 +193,7 @@ fun SelectionWishesScreen(onBack: () -> Unit) {
                 title = { Text("预选清单", style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
                 actions = {
@@ -188,10 +201,10 @@ fun SelectionWishesScreen(onBack: () -> Unit) {
                         onClick = { loadHits() },
                         enabled = round != null && !hitsLoading,
                     ) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "重新匹配")
+                        Icon(AppIcons.Refresh, contentDescription = "重新匹配")
                     }
                     IconButton(onClick = { editing = SelectionWish() }) {
-                        Icon(Icons.Filled.Add, contentDescription = "添加")
+                        Icon(AppIcons.Add01, contentDescription = "添加")
                     }
                 },
             )
@@ -244,9 +257,7 @@ fun SelectionWishesScreen(onBack: () -> Unit) {
                         wish = wish,
                         dup = dupHints[wish.id].orEmpty(),
                         hitCount = if (hitsError == null && !hitsLoading) hitCounts[wish.id] else null,
-                        onOpenCenter = {
-                            SubpageActivity.start(context, SubpageScreen.SELECTION_CENTER)
-                        },
+                        onOpenCenter = onOpenCenter,
                         onClick = { editing = wish },
                         onDelete = { deleting = wish },
                         // 增删 / 改优先级都会重排：这一列是真正逐条变化的那种列表
@@ -305,7 +316,8 @@ private fun WishCard(
     dup: List<DupLine>,
     /** 本轮匹配到的候选班级数；null = 还没结果（匹配中 / 失败 / 不在选课期）。 */
     hitCount: Int?,
-    onOpenCenter: () -> Unit,
+    /** 去选课中心；null = 平台没有二级页路由 → 那颗按钮不出现。 */
+    onOpenCenter: (() -> Unit)?,
     onClick: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
@@ -325,7 +337,7 @@ private fun WishCard(
             )
             IconButton(onClick = onDelete) {
                 Icon(
-                    Icons.Filled.Delete,
+                    AppIcons.Delete02,
                     contentDescription = "删除",
                     tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
                 )
@@ -373,7 +385,7 @@ private fun WishCard(
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
-        if (hitCount != null && hitCount > 0) {
+        if (hitCount != null && hitCount > 0 && onOpenCenter != null) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
