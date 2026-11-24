@@ -32,8 +32,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.data.power.PowerSceneOption
+import edu.jxslu.schedule.domain.TextFmt
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
@@ -47,6 +48,10 @@ import edu.jxslu.schedule.ui.common.rememberAppHaptics
  *
  * 无状态组件：流程状态全在 [PowerRoomPickerViewModel]（宿主在打开前调 `start()` 重置）。
  * 含搜索输入框，键盘遮挡与退场走 [ImeAwareModalBottomSheet]（与充值弹层同款）。
+ *
+ * iOS 移植 S14（2026-11-25）：搬进 `:shared` 的 commonMain。两处跟着换：
+ * `collectAsStateWithLifecycle` 用 `platform` 那条缝（`androidx.lifecycle.compose` 是
+ * Android 专有），`"%.2f 度".format(…)` 换成 `TextFmt.decimals`。
  */
 @Composable
 fun PowerRoomPickerSheet(
@@ -125,7 +130,10 @@ fun PowerRoomPickerSheet(
                 state.atRoomLevel && state.pickedRoom != null -> {
                     RoomPreview(
                         room = state.pickedRoom!!.name,
-                        remainText = state.preview?.remain?.let { "%.2f 度".format(it) },
+                        // 原为 `"%.2f 度".format(it)`（String.format 是 JVM 专有）。
+                        // 改走 [TextFmt.decimals]，与用电统计的度数文案同一份实现
+                        // （Locale.ROOT，免得系统语言把小数点换成逗号）。
+                        remainText = state.preview?.remain?.let { "${TextFmt.decimals(it, 2)} 度" },
                         previewLoading = state.busy,
                         binding = state.binding,
                         onReselect = { haptics.tap(); viewModel.back() },

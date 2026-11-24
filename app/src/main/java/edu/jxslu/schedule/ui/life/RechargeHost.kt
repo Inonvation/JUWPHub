@@ -76,7 +76,7 @@ fun RechargeHost(
     var showPowerRecharge by remember { mutableStateOf(false) }
     var showRoomPicker by remember { mutableStateOf(false) }
     val roomPickerViewModel: PowerRoomPickerViewModel = viewModel(
-        factory = PowerRoomPickerViewModel.factory(context.applicationContext),
+        factory = powerRoomPickerFactory(context.applicationContext),
     )
     fun openRoomSetup() {
         roomPickerViewModel.start()

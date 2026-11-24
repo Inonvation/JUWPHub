@@ -1,10 +1,7 @@
 package edu.jxslu.schedule.ui.life
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.power.PowerException
 import edu.jxslu.schedule.data.power.PowerMeter
 import edu.jxslu.schedule.data.power.PowerModels
@@ -29,6 +26,10 @@ import kotlinx.coroutines.launch
  * 不开缓存、不轮询、失败不重试（错误留在弹层里，点「重试」才再发）。
  *
  * 弹层是宿主（侧栏电费卡 / 校园卡设置页）里挂的常驻组件，[start] 会在每次打开时重置。
+ *
+ * iOS 移植 S14（2026-11-25）：搬进 `:shared` 的 commonMain，**类本身零平台依赖**——
+ * 构造只要电费仓库与凭证存储。造它的工厂留在 `:app`
+ * （`ui/life/PowerRoomPickerFactory.kt`，那边才认识 `Graph`）。
  */
 class PowerRoomPickerViewModel(
     private val powerRepo: PowerRepository,
@@ -312,14 +313,6 @@ class PowerRoomPickerViewModel(
 
     companion object {
         private const val NO_CREDENTIALS = "请先在「我的 → 校园卡」填入学号与查询密码"
-
-        fun factory(context: Context): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = PowerRoomPickerViewModel(
-                Graph.powerRepository(context.applicationContext),
-                Graph.yktCredentialStore(context.applicationContext),
-            ) as T
-        }
     }
 }
 
@@ -327,8 +320,11 @@ class PowerRoomPickerViewModel(
  * 级联选择的一步（纯函数，`PowerSceneSelectionTest` 钉住）：写入 [step] 层的选择，
  * 并把更深层的旧选择清掉——改选楼栋后，上一个楼栋选过的房间不能残留
  * （残留会让「房间」层直接显示旧预览而不是候选列表；2026-10-08 复查轮修）。
+ *
+ * iOS 移植 S14（2026-11-25）：搬进 `:shared` 时从 `internal` 放开成 `public`——
+ * 跨模块 `internal` 不可见，而 `:app` 的单测直接钉这个函数。
  */
-internal fun applySceneChoice(
+fun applySceneChoice(
     chosen: List<PowerSceneOption?>,
     step: Int,
     option: PowerSceneOption,
