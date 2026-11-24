@@ -35,9 +35,18 @@ kotlin {
         }
     }
 
-    iosX64()
-    iosArm64()
-    iosSimulatorArm64()
+    // iOS 侧要把 `:shared` 当 framework 链进 Xcode 工程（P3）。现在还没有 `iosApp`，
+    // 但先把产物形状定下来、让 CI 真的链接一次——链接比编译更能暴露「导出面」的问题
+    // （比如 commonMain 用了 Kotlin/Native 导出不了的泛型/内联写法）。
+    // `isStatic = true`：静态库省掉 embed & sign 那一步，Swift 侧也不用管 dSYM 拷贝。
+    // 真要做成可替换的动态库那天再改，别在这里提前优化。
+    // 注意三个 target 只在这里声明一次——重复调用 `iosX64()` 会报 target already exists。
+    listOf(iosX64(), iosArm64(), iosSimulatorArm64()).forEach { target ->
+        target.binaries.framework {
+            baseName = "Shared"
+            isStatic = true
+        }
+    }
 
     compilerOptions {
         // kotlinx-datetime 0.8.0 起 `Instant` / `Clock` 改由 kotlin.time 提供，

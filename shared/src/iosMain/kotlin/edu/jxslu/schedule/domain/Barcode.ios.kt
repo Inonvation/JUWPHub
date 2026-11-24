@@ -44,14 +44,18 @@ import platform.Foundation.setValue
  * [encodeQrMatrix] / [encodeCode128Matrix] / [decodeQrMatrix] 的 iOS 实现：
  * CoreImage 出码、`CIDetector` 读码。
  *
- * ## 这个文件在本机无法编译验证
+ * ## 编译与运行状态（2026-11-24）
  *
- * Kotlin/Native 的 iOS target 只在 macOS + Xcode 上编译，开发机是 Windows，本地
- * `:shared:meta...` 只能验 commonMain 的纯净度，验不到这里。下面这些 ObjC 接口签名
- * 是按 Kotlin/Native 的映射规则推的，第一次在 mac 上跑 `:shared:compileKotlinIosArm64`
- * 时大概率要修 import 与参数名（重点怀疑 `CGImageAlphaInfo` / `CGInterpolationQuality`
- * 这类 CF_ENUM 的写法，以及 `CIFilter.setValue(forKey:)` 的 KVC 映射）。**口径不用改**：
- * 容错 M、静区按调用方给的量、只读二维码，这三条与 Android 侧一致。
+ * **编译**：已由 `.github/workflows/ios-compile.yml` 在 macOS 上验证通过（arm64 + simulatorArm64）。
+ * 曾经的一段注释写着「大概率要修 import」——那些确实要修，且已经修完了，写在这里备查，
+ * Kotlin/Native 的 ObjC 映射有三类坑：
+ * - CoreImage 的 category 成员（`CIFilter.filterWithName`、`CIContext.createCGImage`）在 K/N
+ *   里是 `platform.CoreImage` 的顶层函数，**必须单独 import**；
+ * - KVC 的 `setValue(forKey:)` 属于 `platform.Foundation`，同样要 import，否则会解析到
+ *   Kotlin 自己的 `setValue`（属性委托那个）并报一串看不懂的候选不适用；
+ * - `CGRect` 是 C 结构体，取值走 `CGRectGetMinX/Y`，`useContents { origin.x }` 解析不了。
+ *
+ * **运行**：未验证。本机是 Windows，没有模拟器；要等 `iosApp` 工程做出来（P3）才能真机看码。
  *
  * ## 为什么自己补静区
  *
@@ -59,7 +63,6 @@ import platform.Foundation.setValue
  * 把生成器输出当"纯符号区"，自己按调用方给的 margin 在四周填白。若生成器自带静区，
  * 总静区会偏大——偏大不影响扫码，偏小才扫不出，这是唯一安全的做法。
  */
-// shortcut: iOS 侧条码实现未经编译验证，首次在 mac 上跑 :shared:compileKotlinIosArm64 时修正, 到 P3 接真机验证时删掉这行
 
 internal actual fun encodeQrMatrix(
     content: String,
@@ -69,8 +72,8 @@ internal actual fun encodeQrMatrix(
     val symbol = generatorImage("CIQRCodeGenerator", content)
     // CIQRCodeGenerator 的输出是 1 点 = 1 模块，所以输出宽度就是模块数：
     // 用它把"模块数"换算成像素，静区才能按 zxing 的模块口径留。
-    // shortcut: 这条"1 点 = 1 模块"是经验值，Apple 没写进文档；若 mac 上量出不是 1:1，
-    // 把 modules 换成实际模块数即可（静区偏大仍可扫，偏小才出问题）。
+    // shortcut: 这条「1 点 = 1 模块」是经验值，Apple 没写进文档；若 mac 上量出不是 1:1，
+    // 把 modules 换成实际模块数即可（静区偏大仍可扫，偏小才出问题）。到 P3 真机点验时确认。
     val modules = symbol.extent.useContents { size.width }
     val modulePx = sizePx.toDouble() / (modules + 2.0 * marginModules)
     return rasterizeGray(symbol, sizePx, sizePx, modulePx * marginModules, modulePx * marginModules)

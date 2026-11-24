@@ -10,7 +10,10 @@ import platform.Foundation.NSLog
  * 是**够用且零胶水**的选择——输出进 Xcode 控制台与 Console.app，级别靠文本前缀区分。
  * 真要接 os_log 分级，改这一个文件即可，调用点不受影响。
  *
- * 本分支未编译验证（需要 macOS）。
+ * 编译状态：已被 `.github/workflows/ios-compile.yml` 在 macOS 上编译验证（2026-11-24）。
+ *
+ * **不要改回 `NSLog("%@: %@", a, b)` 那种带格式串的写法**：那要把 Kotlin `String` 塞进
+ * ObjC 的 vararg，靠桥接规则碰运气；这里先在 Kotlin 侧拼成一个串再传，零桥接面。
  */
 internal actual fun platformLog(
     level: LogLevel,
@@ -25,5 +28,5 @@ internal actual fun platformLog(
         LogLevel.Error -> "E"
     }
     val detail = if (throwable == null) message else "$message (${throwable::class.simpleName}: ${throwable.message})"
-    NSLog("%@/%@: %@", prefix, tag, detail)
+    NSLog("$prefix/$tag: $detail")
 }

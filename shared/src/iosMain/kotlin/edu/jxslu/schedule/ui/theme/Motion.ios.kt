@@ -12,7 +12,8 @@ import platform.UIKit.UIAccessibilityIsReduceMotionEnabled
  * 设置 → 辅助功能 → 动态效果 → 减弱动态效果。用户打开它时，本 App 的无限循环动画
  * （地图脉冲、扫描波纹、倒计时环、骨架微光）会停在静止态，与 Android 行为对齐。
  *
- * 本分支未编译验证（需要 macOS），见文件头之外的迁移记录。
+ * 本分支已被 `.github/workflows/ios-compile.yml` 编译验证（2026-11-24）；「减弱动态效果」
+ * 的实际行为要等 P3 的 `iosApp` 出来才能真机确认。
  */
 @Composable
 internal actual fun rememberPlatformAnimationsEnabled(): Boolean =

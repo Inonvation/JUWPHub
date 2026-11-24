@@ -69,11 +69,21 @@ jobs:
           xcodebuild -version
           java -version
 
-      # 只编 klib，不链接 framework：现在还没有 `iosApp` 工程，链接没有落点。
-      # 设备（arm64）与模拟器（simulatorArm64）两个都编——两者的可用 API 面不完全一样。
-      - name: 编译 :shared 的 iOS klib
+      # 编译 + 链接两步都要：
+      # - `compileKotlin*` 验「代码能不能编」；
+      # - `linkDebugFramework*` 验「产物能不能被 Xcode 消费」——链接会检查 `:shared` 的导出面
+      #   （Kotlin/Native 导出不了的泛型、内联类、默认参数之类只在链接期暴露）。
+      #   framework 已在 shared/build.gradle.kts 里声明为 `Shared`（static）。
+      - name: 编译并链接 :shared 的 iOS klib 与 framework
         run: |
           ./gradlew \
             :shared:compileKotlinIosArm64 \
             :shared:compileKotlinIosSimulatorArm64 \
+            :shared:linkDebugFrameworkIosArm64 \
+            :shared:linkDebugFrameworkIosSimulatorArm64 \
             --stacktrace
+
+      # 把 framework 的路径与大小打出来：P3 建 iosApp 时要链它，路径写死容易过期。
+      - name: 报告 framework 产物
+        run: |
+          find shared/build/bin -name "*.framework" -maxdepth 6 -print -exec du -sh {} \; || true

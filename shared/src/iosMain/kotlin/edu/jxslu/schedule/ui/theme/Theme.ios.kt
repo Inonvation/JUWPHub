@@ -11,7 +11,8 @@ import androidx.compose.runtime.Composable
  * 内置配色——这也正是该开关默认关着的原因：一个在 Android 上才有意义的选项，
  * 不该让 iOS 用户看到它没反应。
  *
- * 本分支未编译验证（需要 macOS）。
+ * 本分支已被 `.github/workflows/ios-compile.yml` 编译验证（2026-11-24）；运行期观感要等
+ * P3 的 `iosApp` 出来才能看。
  */
 @Composable
 internal actual fun platformDynamicColorScheme(darkTheme: Boolean): ColorScheme? = null
