@@ -82,6 +82,14 @@ kotlin {
             // 注：`FileDownload` / `History` 若不在 core 里，就换成 AppIcons 里的等价图标，
             // 由搬运那批文件的人现场判断——别为了一个图标把 extended 拉进来。
             api("org.jetbrains.compose.material:material-icons-core:1.7.3")
+            // ViewModel 从 lifecycle 2.8 起是 KMP 库：`:app` 那 80 个 ViewModel 的**类本身**
+            // 可以进 commonMain，不必改写成 UIKit 版本。
+            // 只引 `lifecycle-viewmodel`，**不引** `-compose`：后者的 KMP 变体要 Compose 1.9，
+            // 我们在 CMP 1.7.3 上会打架。所以 `viewModel()` 这个 Composable 入口暂时留在 `:app`，
+            // 等 UI 那一层搬过去时再一起处理。
+            // 另注：KMP 下 `viewModel()` 必须给 initializer（Native 无反射），Hilt 也不可用；
+            // 我们用 `Graph` 单例装配，改成可注入容器即可。
+            api("androidx.lifecycle:lifecycle-viewmodel:2.8.7")
             // Ktor 3（iOS 移植 P1 第一个试点模块）：OkHttp 与 Retrofit 都是 JVM 库，iOS 上没有；
             // Ktor 的 core 在 commonMain，引擎按平台各自声明（Android 仍走 OkHttp，iOS 走 Darwin）。
             // 版本选 3.0.3 是配现有的 kotlinx-coroutines 1.9.0（3.1+ 要 1.10.x），
