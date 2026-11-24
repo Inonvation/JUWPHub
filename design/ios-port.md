@@ -455,8 +455,9 @@ JVM/Android 依赖，必须同批处理，否则改完 `:shared` 还是编不过
 | `BuildConfig` | 3 / 25 | AGP 生成的，`:shared` 没有。做法：改成构造参数/常量，由 `:app` 侧调用点传进来（`UpdateCheckClient` 就是这么改的：无参构造删掉，`JuwApplication` 与 `AboutScreens` 传 `BuildConfig.VERSION_NAME`） |
 
 **已迁移清单（2026-11-24）**：`data/weather/WeatherApi`、`data/repo/UpdateCheckClient`、
-`data/wenqu/WenquApi`、`data/wenqu/WenquServerClock`、`data/kqcx/KqcxBikeClient`。
-五个都验证过 `commonMain` 元数据门禁 + 2418 个单测全绿。剩余 OkHttp/Retrofit 文件 **26 → 21**。
+`data/wenqu/WenquApi`、`data/wenqu/WenquServerClock`、`data/kqcx/KqcxBikeClient`、
+`data/ykt/YktClient` + `data/ykt/YktModels`。
+七个都验证过 `commonMain` 元数据门禁 + 2418 个单测全绿。剩余 OkHttp/Retrofit 文件 **26 → 20**。
 
 `KqcxBikeClient` 那次是这条线上**第一次真正删代码**：它用 `suspendCancellableCoroutine` +
 `okhttp3.Callback` 手工桥接「可取消的请求」（因为 OkHttp 的阻塞 `execute()` 中断不了，
@@ -464,11 +465,17 @@ JVM/Android 依赖，必须同批处理，否则改完 `:shared` 还是编不过
 `resume`/`invokeOnCancellation` 一起删掉。**判断一个文件该不该换，先看它有多少代码是在补偿
 旧库的缺陷**——那种才是净收益。
 
-**下一批已侦察清楚**：`ykt/YktClient` 137 + `ykt/YktModels` 347。`YktModels` 是纯的
-（只有 kotlinx.serialization，且 `YktException` 定义在里面），所以两个可以一起搬；
-`YktClient` 里唯一要改的是 `catch (java.io.IOException)` → 抹平成 Ktor 的异常，
-与 `KqcxBikeClient` 同一套做法。`YktRepository`（450 行）与 `YktTurnoverSyncer`（134 行）
-依赖 Context/DataStore，留到最后。
+**每次都会撞上的三类「搬过去才报错」**（已三次，P2 搬 UI 时会是第四次，先记死）：
+
+| 症状 | 原因 | 修法 |
+|---|---|---|
+| `Cannot access 'fun xxx'`：it is internal | 定义搬进 `:shared`、调用方留在 `:app` | 放开成 public，并在 KDoc 里写明为什么（`KvcxZones.capped`、`ScheduleExporter.teacherDescription`、`yktCredentialErrorText` 都是这么处理的） |
+| `Argument type mismatch: actual 'String?', but 'String' expected` | 对 `:shared` 里的**公开属性**做 `isNullOrBlank()` 之后的智能转换失效 | 显式收口：`orEmpty()` / `== true`（`MarkdownView.item.task`、`YktTurnoverSyncer.orderId`） |
+| `Unresolved reference 'android'` / `'java'` | 文件里还藏着 `android.util.Base64`、`java.net.URLEncoder` 这类**只在方法体里出现**的用法 | 逐个换：Base64 → okio `decodeBase64`；URLEncoder → Ktor `FormDataContent` + `Parameters` |
+
+**下一批目标**：`qiekj/QiekjApi`(125) + `QiekjRepository`(469) 是 Retrofit 组合，去掉注解后接口本身
+什么都不剩，必须连仓库一起改；`ai/AiScheduleClient`(335) 是 SSE 流式（要 `bodyAsChannel`）；
+`jw/JwHttpSession`(324) 是 Cookie + CAS 重定向，`session/*` 全依赖它。这三个都要单独设计，不能批处理。
 
 `WenquServerClock` 那次顺带解决了一类通用问题：**OkHttp 的 `Interceptor` 在 Ktor 里没有等价物**。
 它的实现是「发前取钟 → 收后取钟 → 读 `Date` 头算偏移」，改成在 `send()` 里就地记账即可——
