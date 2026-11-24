@@ -27,6 +27,7 @@ import edu.jxslu.schedule.ui.campus.DormRepairScreen
 import edu.jxslu.schedule.ui.campus.LeaveHubScreen
 import edu.jxslu.schedule.ui.campus.PayCodeScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
+import edu.jxslu.schedule.ui.common.rememberAttachmentImageUi
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
@@ -401,6 +402,8 @@ class SubpageActivity : ComponentActivity() {
                 onOpenSettings = { SubpageActivity.start(this, SubpageScreen.CAMPUS_CARD_SETTINGS) },
             )
             // 笔记·课件（DESIGN §3.11）：课程库 → 课程列表 → 详情/编辑
+            // 库与课程列表已在 shared/commonMain（iOS 移植 S13）；附件图能力由
+            // `rememberAttachmentImageUi` 注入（缩略图解码 + 全屏查看器仍在 :app）。
             SubpageScreen.NOTES -> NoteLibraryScreen(
                 onBack = onBack,
                 onOpenNote = { name, id, startEditing ->
@@ -412,6 +415,7 @@ class SubpageActivity : ComponentActivity() {
                         startEditing = startEditing,
                     )
                 },
+                images = rememberAttachmentImageUi(),
             )
             SubpageScreen.NOTES_COURSE -> NoteCourseScreen(
                 courseName = courseName.orEmpty(),
@@ -425,6 +429,7 @@ class SubpageActivity : ComponentActivity() {
                         startEditing = startEditing,
                     )
                 },
+                images = rememberAttachmentImageUi(),
             )
             SubpageScreen.NOTE_DETAIL -> NoteDetailScreen(
                 courseName = courseName.orEmpty(),

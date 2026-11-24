@@ -21,8 +21,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,27 +31,24 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.Note
 import edu.jxslu.schedule.domain.NoteCourseGroup
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.rememberRevealSpacePx
 import edu.jxslu.schedule.ui.common.scrollToReveal
 import edu.jxslu.schedule.ui.common.AppCardDivider
+import edu.jxslu.schedule.ui.common.AttachmentImageUi
 import edu.jxslu.schedule.ui.common.EmptyHint
-import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.SectionHeader
 import edu.jxslu.schedule.ui.common.courseTint
@@ -70,16 +65,20 @@ import edu.jxslu.schedule.ui.theme.Motion
  * （2026-10-21，`NoteItemBlock`）：标题 + 更新时间 + 2 行摘要 + 图片缩略图，行间走卡内细线。
  * 头行右侧「＋」直接在该课程下新建；条目右侧铅笔直达编辑态。
  * 展开时按培养方案同款 scrollToReveal 补足下方空间。
+ *
+ * [images] 是宿主给的附件图能力（缩略图解码 + 全屏查看器都在 `:app`）；
+ * **null = 本平台没有附件图能力**，缩略图整行不渲染（iOS 移植 S13）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NoteLibraryScreen(
     onBack: () -> Unit,
     onOpenNote: (courseName: String, id: Long, startEditing: Boolean) -> Unit,
+    /** 附件图能力；null = 本平台没有。 */
+    images: AttachmentImageUi? = null,
 ) {
-    val context = LocalContext.current
-    val repo = remember { Graph.noteRepository(context) }
-    val scheduleRepo = remember { Graph.repository(context) }
+    val repo = remember { Services.current.noteRepository() }
+    val scheduleRepo = remember { Services.current.scheduleRepository() }
     val groupsState by repo.observeGroups().collectAsStateWithLifecycle(initialValue = null)
     val allNotes by repo.observeAll().collectAsStateWithLifecycle(initialValue = null)
     val courses by scheduleRepo.courses.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -88,7 +87,6 @@ fun NoteLibraryScreen(
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
     val listState = rememberLazyListState()
     val revealSpacePx = rememberRevealSpacePx()
-    var viewer by remember { mutableStateOf<String?>(null) }
 
     /** 展开时只补足下方缺的空间（与作业库同款）。 */
     Scaffold(
@@ -97,7 +95,7 @@ fun NoteLibraryScreen(
                 title = { Text("笔记·课件") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
             )
@@ -145,15 +143,11 @@ fun NoteLibraryScreen(
                         onAdd = { onOpenNote(group.courseName, 0L, false) },
                         onOpenItem = { id -> onOpenNote(group.courseName, id, false) },
                         onEditItem = { id -> onOpenNote(group.courseName, id, true) },
-                        onImageClick = { viewer = it },
+                        images = images,
                     )
                 }
             }
         }
-    }
-
-    viewer?.let { fileName ->
-        ImageViewerDialog(fileName = fileName, onDismiss = { viewer = null })
     }
 }
 
@@ -169,7 +163,7 @@ private fun NoteGroupCard(
     onAdd: () -> Unit,
     onOpenItem: (Long) -> Unit,
     onEditItem: (Long) -> Unit,
-    onImageClick: (String) -> Unit,
+    images: AttachmentImageUi?,
 ) {
     val courseNotes = remember(allNotes, group.courseName) {
         allNotes.filter { it.courseName == group.courseName }
@@ -234,7 +228,7 @@ private fun NoteGroupCard(
                         note = note,
                         onClick = { onOpenItem(note.id) },
                         onEdit = { onEditItem(note.id) },
-                        onImageClick = onImageClick,
+                        images = images,
                     )
                 }
             }

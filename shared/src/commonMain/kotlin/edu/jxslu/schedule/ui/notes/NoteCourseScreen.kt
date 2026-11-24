@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -17,19 +15,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.AttachmentImageUi
 import edu.jxslu.schedule.ui.common.EmptyHint
-import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.icon.AppIcons
 
@@ -39,6 +34,9 @@ import edu.jxslu.schedule.ui.icon.AppIcons
  * 每条是 [NoteItemBlock]（2026-10-21）：标题（空标题用正文首行兜底）+ 更新时间 +
  * 2 行摘要 + 图片缩略图；点条目进详情，点铅笔直接编辑。新建入口在顶栏
  * （不用 FAB，列表页窄屏遮挡小）。
+ *
+ * [images] 是宿主给的附件图能力（解码 + 全屏查看器都在 `:app`）；
+ * **null = 本平台没有附件图能力**，缩略图整行不渲染（iOS 移植 S13）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,11 +44,11 @@ fun NoteCourseScreen(
     courseName: String,
     onBack: () -> Unit,
     onOpenNote: (id: Long, startEditing: Boolean) -> Unit,
+    /** 附件图能力；null = 本平台没有。 */
+    images: AttachmentImageUi? = null,
 ) {
-    val context = LocalContext.current
-    val repo = remember { Graph.noteRepository(context) }
+    val repo = remember { Services.current.noteRepository() }
     val notes by repo.observeForCourse(courseName).collectAsStateWithLifecycle(initialValue = null)
-    var viewer by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -60,7 +58,7 @@ fun NoteCourseScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
                 actions = {
@@ -96,16 +94,12 @@ fun NoteCourseScreen(
                             note = note,
                             onClick = { onOpenNote(note.id, false) },
                             onEdit = { onOpenNote(note.id, true) },
-                            onImageClick = { viewer = it },
+                            images = images,
                             embedded = false,
                         )
                     }
                 }
             }
         }
-    }
-
-    viewer?.let { fileName ->
-        ImageViewerDialog(fileName = fileName, onDismiss = { viewer = null })
     }
 }
