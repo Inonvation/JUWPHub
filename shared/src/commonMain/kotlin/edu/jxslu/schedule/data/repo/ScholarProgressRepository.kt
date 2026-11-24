@@ -1,7 +1,7 @@
 package edu.jxslu.schedule.data.repo
 
-import androidx.room.withTransaction
 import edu.jxslu.schedule.data.local.JuwDatabase
+import edu.jxslu.schedule.data.local.inTransaction
 import edu.jxslu.schedule.data.local.ScholarCourseEntity
 import edu.jxslu.schedule.data.local.ScholarGroupEntity
 import edu.jxslu.schedule.domain.ScholarCourse
@@ -30,7 +30,7 @@ class ScholarProgressRepository(private val db: JuwDatabase) {
 
     /** 整批替换。空列表会被调用方拦下（见 `ScholarProgressSync` 的完整性校验），这里不再兜。 */
     suspend fun replaceAll(groups: List<ScholarGroup>, courses: List<ScholarCourse>) {
-        db.withTransaction {
+        db.inTransaction {
             dao.deleteGroups()
             dao.deleteCourses()
             dao.insertGroups(groups.map { ScholarGroupEntity.fromDomain(it) })
@@ -39,7 +39,7 @@ class ScholarProgressRepository(private val db: JuwDatabase) {
     }
 
     suspend fun deleteAll() {
-        db.withTransaction {
+        db.inTransaction {
             dao.deleteGroups()
             dao.deleteCourses()
         }

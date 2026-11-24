@@ -349,6 +349,7 @@ object Graph {
             repository ?: ScheduleRepository(
                 juwDatabase(context),
                 displayPrefs(context),
+                appScope,
                 ScheduleBaselineStore(context.applicationContext),
             ).also { repository = it }
         }

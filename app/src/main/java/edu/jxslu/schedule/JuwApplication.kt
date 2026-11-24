@@ -8,6 +8,7 @@ import android.os.StrictMode
 import edu.jxslu.schedule.data.repo.CrashReporter
 import edu.jxslu.schedule.data.repo.UpdateCheckClient
 import edu.jxslu.schedule.data.repo.UpdateCheckResult
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.UpdateCheck
 import edu.jxslu.schedule.platform.initAppDirs
@@ -224,7 +225,7 @@ class JuwApplication : Application() {
                 // 放在归档闸门之外：归档早就完成的老设备重启一次也会改名；幂等、零网络。
                 Graph.scheduleTermImport(this@JuwApplication).normalizeTimetableNames()
                 Graph.repository(this@JuwApplication).syncCurrentTimetableToDate(
-                    today = java.time.LocalDate.now(),
+                    today = AppClock.today(),
                     preferredTerm = prefs.scheduleJwCurrentTerm(),
                 )
             }.onFailure {

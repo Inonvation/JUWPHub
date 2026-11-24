@@ -1,8 +1,8 @@
 package edu.jxslu.schedule.data.repo
 
-import androidx.room.withTransaction
 import edu.jxslu.schedule.data.local.CurriculumCourseEntity
 import edu.jxslu.schedule.data.local.JuwDatabase
+import edu.jxslu.schedule.data.local.inTransaction
 import edu.jxslu.schedule.domain.CurriculumCourse
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -25,7 +25,7 @@ class CurriculumRepository(private val db: JuwDatabase) {
 
     /** 整批替换。空列表会被调用方拦下（见 `CurriculumSync` 的完整性校验），这里不再兜。 */
     suspend fun replaceAll(courses: List<CurriculumCourse>) {
-        db.withTransaction {
+        db.inTransaction {
             dao.deleteAll()
             dao.insertAll(courses.map { CurriculumCourseEntity.fromDomain(it) })
         }

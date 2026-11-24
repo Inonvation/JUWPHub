@@ -1,11 +1,12 @@
 package edu.jxslu.schedule.data.repo
 
-import android.util.Log
 import edu.jxslu.schedule.data.local.InboxDao
 import edu.jxslu.schedule.data.local.InboxMessageEntity
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxRules
 import edu.jxslu.schedule.domain.InboxRules.PostDecision
+import edu.jxslu.schedule.platform.Logger
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -25,7 +26,7 @@ import kotlinx.coroutines.flow.Flow
  */
 class InboxRepository(
     private val dao: InboxDao,
-    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val nowMillis: () -> Long = AppClock::nowMillis,
 ) {
 
     /** 未读消息数（角标）。 */
@@ -78,7 +79,7 @@ class InboxRepository(
                 is PostDecision.RefreshDeleted ->
                     dao.refreshDeleted(decision.id, title, body, route, focusItemId, now)
             }
-        }.onFailure { Log.w(TAG, "inbox post failed", it) }
+        }.onFailure { Logger.w(TAG, "inbox post failed", it) }
     }
 
     /**
@@ -87,25 +88,25 @@ class InboxRepository(
      */
     suspend fun clearState(dedupeKey: String) {
         runCatching { dao.hardDeleteByKey(dedupeKey) }
-            .onFailure { Log.w(TAG, "inbox clearState failed", it) }
+            .onFailure { Logger.w(TAG, "inbox clearState failed", it) }
     }
 
     /** 单条标已读（点行）。 */
     suspend fun markRead(id: Long) {
         runCatching { dao.markRead(id, nowMillis()) }
-            .onFailure { Log.w(TAG, "inbox markRead failed", it) }
+            .onFailure { Logger.w(TAG, "inbox markRead failed", it) }
     }
 
     /** 一键已读。 */
     suspend fun markAllRead() {
         runCatching { dao.markAllRead(nowMillis()) }
-            .onFailure { Log.w(TAG, "inbox markAllRead failed", it) }
+            .onFailure { Logger.w(TAG, "inbox markAllRead failed", it) }
     }
 
     /** 按来源标已读（调课差异处置完成后调用——那条事实已经了结，别再亮着）。 */
     suspend fun markKindRead(kind: InboxKind) {
         runCatching { dao.markKindRead(kind.name, nowMillis()) }
-            .onFailure { Log.w(TAG, "inbox markKindRead failed", it) }
+            .onFailure { Logger.w(TAG, "inbox markKindRead failed", it) }
     }
 
     /**
@@ -121,14 +122,14 @@ class InboxRepository(
      */
     suspend fun markRouteRead(route: String) {
         runCatching { dao.markRouteRead(route, nowMillis()) }
-            .onFailure { Log.w(TAG, "inbox markRouteRead failed", it) }
+            .onFailure { Logger.w(TAG, "inbox markRouteRead failed", it) }
     }
 
     /** 批量软删（多选删除）；重投同键不复活，30 天后物理清除。 */
     suspend fun softDelete(ids: Collection<Long>) {
         if (ids.isEmpty()) return
         runCatching { dao.softDelete(ids.toList(), nowMillis()) }
-            .onFailure { Log.w(TAG, "inbox softDelete failed", it) }
+            .onFailure { Logger.w(TAG, "inbox softDelete failed", it) }
     }
 
     /**
@@ -139,7 +140,7 @@ class InboxRepository(
         runCatching {
             val plan = InboxRules.planPurge(dao.all().map(InboxMessageEntity::toDomain), nowMillis())
             if (plan.ids.isNotEmpty()) dao.deleteByIds(plan.ids)
-        }.onFailure { Log.w(TAG, "inbox purge failed", it) }
+        }.onFailure { Logger.w(TAG, "inbox purge failed", it) }
     }
 
     private companion object {

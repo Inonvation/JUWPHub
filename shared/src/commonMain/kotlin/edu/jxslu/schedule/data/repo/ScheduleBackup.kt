@@ -560,8 +560,11 @@ fun ScoreRecord.toBackupJson(): ScoreBackupJson = ScoreBackupJson(
  * 这类字段会直接从导出文件里消失。读取侧有默认值兜底、我们自己来回转换不会出错，
  * 但文件是要给兼容工具互导的（见设置页说明），键时有时无会让对方必须猜默认值。
  * 全量写出后导出结果自解释，代价只是文件略大。
+ *
+ * 公开：iOS 移植 S4 把本文件搬进 `:shared` 后，`app/src/test` 的 `ImportJsonShapeTest`
+ * 仍直接拿它 decode（测试留在 `:app`），`internal` 跨模块不可见。
  */
-internal val CourseJsonFormat: Json = Json {
+val CourseJsonFormat: Json = Json {
     prettyPrint = true
     ignoreUnknownKeys = true
     encodeDefaults = true
@@ -573,8 +576,10 @@ internal val CourseJsonFormat: Json = Json {
  *
  * 与解码分离：`Json` 只保证结构能读出来，字段取值范围要靠这一层，
  * 否则 day=9 这种脏数据会一路写进库里，最后表现成「课程不见了」。
+ *
+ * 公开的理由同 [CourseJsonFormat]：`app/src/test` 的 `ImportJsonShapeTest` 直接调用它。
  */
-internal fun validateCourseJson(index: Int, c: CourseJson): String? {
+fun validateCourseJson(index: Int, c: CourseJson): String? {
     val label = "第 ${index + 1} 门课"
     if (c.name.isBlank()) return "$label：缺少 name"
     if (c.day !in 1..7) return "$label「${c.name}」：day 应在 1–7，实际为 ${c.day}"
@@ -594,8 +599,12 @@ internal fun validateCourseJson(index: Int, c: CourseJson): String? {
 /** 目标课表的导入统计：弹窗按所选目标实时展示（覆盖会清掉 existing 门，合并新增 newCount 门）。 */
 data class ImportStats(val existing: Int, val newCount: Int)
 
-/** 备份文件的统一校验产物：预览与真导入共用，避免两条校验链漂移。 */
-internal data class ValidatedBackup(
+/**
+ * 备份文件的统一校验产物：预览与真导入共用，避免两条校验链漂移。
+ *
+ * 公开：iOS 移植 S4 起本文件在 `:shared`，`app/src/test` 的 `BackupValidationTest` 仍要用它。
+ */
+data class ValidatedBackup(
     val courses: List<Course>,
     val scores: List<ScoreRecord>,
     val scholarGroups: List<ScholarGroup>,
@@ -609,7 +618,8 @@ internal data class ValidatedBackup(
     val overrides: List<ScheduleOverride>,
 )
 
-internal sealed interface BackupCheck {
+/** 校验结论：公开的理由同 [ValidatedBackup]（`app/src/test` 的 `BackupValidationTest` 用）。 */
+sealed interface BackupCheck {
     data class Ok(val value: ValidatedBackup) : BackupCheck
     data class Error(val message: String) : BackupCheck
 }
@@ -626,8 +636,10 @@ internal sealed interface BackupCheck {
  * 旧备份导入 = 把本机在这之后写的笔记、作业、调休安排全部删光——「恢复备份」变成
  * 数据毁灭。代价是「想用备份把某段清空」做不到，这是有意接受的：清空有各自的入口
  * （笔记库/作业库/课表设置），不该靠导出一份空段来实现。
+ *
+ * 公开的理由同 [CourseJsonFormat]：`app/src/test` 的 `BackupValidationTest` 直接调用它。
  */
-internal fun validateBackup(export: CourseExport): BackupCheck {
+fun validateBackup(export: CourseExport): BackupCheck {
     if (export.courses.isEmpty()) return BackupCheck.Error("文件中没有课程（courses 为空）")
     export.courses.forEachIndexed { index, c ->
         validateCourseJson(index, c)?.let { return BackupCheck.Error(it) }

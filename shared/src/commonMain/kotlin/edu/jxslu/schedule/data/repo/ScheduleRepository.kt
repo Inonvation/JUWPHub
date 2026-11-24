@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.data.repo
 
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.DefaultData
 import edu.jxslu.schedule.data.local.CourseEntity
 import edu.jxslu.schedule.data.local.CurriculumCourseEntity
@@ -15,6 +14,7 @@ import edu.jxslu.schedule.data.local.SemesterConfigEntity
 import edu.jxslu.schedule.data.local.TextbookEntity
 import edu.jxslu.schedule.data.local.TimeSlotEntity
 import edu.jxslu.schedule.data.local.TimetableEntity
+import edu.jxslu.schedule.data.local.inTransaction
 import edu.jxslu.schedule.data.prefs.DisplayPrefs
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.prefs.ReminderKeyKind
@@ -59,7 +59,7 @@ import edu.jxslu.schedule.domain.TimeSlotRules
 import edu.jxslu.schedule.domain.TweakMode
 import edu.jxslu.schedule.domain.TweakPlan
 import edu.jxslu.schedule.domain.AppClock
-import androidx.room.withTransaction
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -70,19 +70,29 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.datetime.toKotlinLocalDate
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 /**
  * 课表仓储：课表 / 课程 / 作息 / 学期 / 教材 / 调课 / 导入导出的唯一入口。
  *
  * 备份文件模型与校验在 [ScheduleBackup]（同包）；本类只负责落库与业务编排。
+ *
+ * iOS 移植 S4（2026-11-24）搬进 `shared/commonMain`，三处平台依赖换了形状：
+ * `Graph.appScope` → 构造参数 [scope]（`:app` 传进来，仍是同一个应用级作用域）；
+ * `ScheduleBaselineStore` → 共享层接口 [ScheduleBaseline]（实现仍在 `:app`，要 Context+File）；
+ * `db.withTransaction` → [inTransaction]（`withTransaction` 只在 Room 的 Android 变体里）。
  */
 class ScheduleRepository(
     private val db: JuwDatabase,
     private val prefs: DisplayPrefsStore,
+    /**
+     * 共享热流（[displayPrefs]）用的作用域。由 `:app` 的 `Graph.appScope` 注入——
+     * 那个作用域挂着崩溃上报的 `CoroutineExceptionHandler`，`commonMain` 自己造一个
+     * 就等于让共享流的异常绕过上报（两套作用域是这次刻意避免的东西）。
+     */
+    private val scope: CoroutineScope,
     /** 调课检测的基线快照（DESIGN §4.17）：导入/合并成功时推进，检查时与教务比对。 */
-    private val baselineStore: ScheduleBaselineStore? = null,
+    private val baselineStore: ScheduleBaseline? = null,
 ) {
 
     private val json = CourseJsonFormat
@@ -280,7 +290,7 @@ class ScheduleRepository(
         prefs.themePalette,
     ) { base, palette -> base.copy(themePalette = palette) }
         .distinctUntilChanged()
-        .shareIn(scope = Graph.appScope, started = SharingStarted.WhileSubscribed(5_000), replay = 1)
+        .shareIn(scope = scope, started = SharingStarted.WhileSubscribed(5_000), replay = 1)
 
     /**
      * 触感开关的轻流：[edu.jxslu.schedule.ui.common.rememberAppHaptics] 的 60+ 调用点
@@ -774,12 +784,11 @@ class ScheduleRepository(
                 timetableId = entity.id,
                 term = entity.term,
                 startDate = config?.startDate
-                    ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-                    ?.toKotlinLocalDate(),
+                    ?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
                 totalWeeks = config?.totalWeeks ?: 0,
             )
         }
-        val picked = CurrentTimetableRules.pick(candidates, today.toKotlinLocalDate(), preferredTerm) ?: return false
+        val picked = CurrentTimetableRules.pick(candidates, today, preferredTerm) ?: return false
         if (prefs.currentTimetableId.first() == picked) return false
         prefs.setCurrentTimetable(picked)
         return true
@@ -926,7 +935,7 @@ class ScheduleRepository(
         val existing = getTimetableCourses(ttId)
         val withRemarks = courseRemarksCarriedOver(existing, courses)
         // clear + insert 必须同事务：中途失败（磁盘满/进程被杀）不能留下空课表
-        db.withTransaction {
+        db.inTransaction {
             db.courseDao().clearForTimetable(ttId)
             db.courseDao().insertAll(
                 withSortedNameColors(withRemarks).map { CourseEntity.fromDomain(it).copy(timetableId = ttId) },
@@ -953,7 +962,7 @@ class ScheduleRepository(
         val accepted = existing.toMutableList()
         val used = existing.map { it.colorIndex }.toMutableList()
         var added = 0
-        db.withTransaction {
+        db.inTransaction {
             for (c in courses) {
                 if (ScheduleDiff.duplicateOf(c, accepted) != null) continue
                 val colored = c.copy(colorIndex = ScheduleCalculator.nextColorIndex(used))
@@ -988,7 +997,7 @@ class ScheduleRepository(
         val existing = getTimetableCourses(ttId)
         val plan = ExamMerge.plan(existing, entries, slots, config, term)
         if (plan.isEmpty) return 0
-        db.withTransaction {
+        db.inTransaction {
             plan.updates.forEach { (_, new) ->
                 db.courseDao().upsert(CourseEntity.fromDomain(new).copy(timetableId = ttId))
             }
@@ -1053,7 +1062,7 @@ class ScheduleRepository(
 
     /** 按学期整批替换教材（教务口径的快照；事务里先清后插，防中途读到半套）。 */
     suspend fun replaceTextbooks(term: String, books: List<Textbook>) {
-        db.withTransaction {
+        db.inTransaction {
             db.textbookDao().deleteForTerm(term)
             db.textbookDao().insertAll(books.map { TextbookEntity.fromDomain(it) })
         }
@@ -1165,8 +1174,8 @@ class ScheduleRepository(
     // ------------------------------------------------------------------
 
     /** 当前基线快照（`ScheduleSync.check` 读）。未配置基线存储（构造缺省）时返回空快照。 */
-    suspend fun loadScheduleBaseline(): ScheduleBaselineStore.Snapshot =
-        baselineStore?.load() ?: ScheduleBaselineStore.Snapshot()
+    suspend fun loadScheduleBaseline(): ScheduleBaseline.Snapshot =
+        baselineStore?.load() ?: ScheduleBaseline.Snapshot()
 
     /**
      * 用「写库后的实际课表」推进基线（过滤考试条目——教务课表页抓不到考试，
@@ -1181,7 +1190,7 @@ class ScheduleRepository(
         val courses = getTimetableCourses(timetableId).filter { it.kind != CourseKind.Exam }
         // 写盘失败就**不要**清指纹与待处置差异：基线还停在旧版本，把差异清掉会让下一轮
         // 检查拿旧基线比对、把用户刚处理完的变动重新报一遍（合并时还会按旧指纹套到新课表上）。
-        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, courses, AppClock.nowMillis()))) {
+        if (!store.save(ScheduleBaseline.snapshotOf(timetableId, term, courses, AppClock.nowMillis()))) {
             return
         }
         prefs.setScheduleIgnoredFingerprint("")
@@ -1193,7 +1202,7 @@ class ScheduleRepository(
     /** 用教务抓取结果直接建基线（检查首跑 / 换学期：此刻课表未动，教务现状即「一致状态」）。 */
     suspend fun saveScheduleBaseline(timetableId: Long, term: String, courses: List<Course>) {
         val store = baselineStore ?: return
-        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, courses, AppClock.nowMillis()))) {
+        if (!store.save(ScheduleBaseline.snapshotOf(timetableId, term, courses, AppClock.nowMillis()))) {
             return
         }
         prefs.setScheduleIgnoredFingerprint("")
@@ -1204,7 +1213,7 @@ class ScheduleRepository(
         val store = baselineStore ?: return
         if (store.load().timetableId == timetableId) {
             // 同一条纪律：清差异要跟「基线真的清掉了」绑在一起
-            if (store.save(ScheduleBaselineStore.Snapshot())) {
+            if (store.save(ScheduleBaseline.Snapshot())) {
                 prefs.setSchedulePendingChanges(null)
             }
         }
@@ -1244,7 +1253,7 @@ class ScheduleRepository(
             return
         }
         val after = ScheduleDiff.baselineAfter(current.courses.map { it.toCourse() }, entries)
-        if (!store.save(ScheduleBaselineStore.snapshotOf(timetableId, term, after, AppClock.nowMillis()))) {
+        if (!store.save(ScheduleBaseline.snapshotOf(timetableId, term, after, AppClock.nowMillis()))) {
             return
         }
         prefs.setScheduleIgnoredFingerprint("")
@@ -1294,7 +1303,7 @@ class ScheduleRepository(
         acceptedIndexes: Set<Int>,
         overrides: List<ScheduleOverride> = emptyList(),
         acceptedOverrides: Set<Int> = emptySet(),
-    ): LocalApplyResult = db.withTransaction {
+    ): LocalApplyResult = db.inTransaction {
         val (report, ttId) = applyChangeSet(changes, acceptedIndexes)
         // 去重：同一条覆盖被勾两次（模型重复给 / 用户手滑）不该写两行——
         // `date_overrides` 没有唯一索引，裸插就是两份，撤销还只删得掉一份
@@ -1332,7 +1341,7 @@ class ScheduleRepository(
         changes: List<ScheduleDiff.Change>,
         acceptedIndexes: Set<Int>,
         timetableId: Long? = null,
-    ): Pair<ApplyReport, Long> = db.withTransaction {
+    ): Pair<ApplyReport, Long> = db.inTransaction {
         val ttId = timetableId ?: currentTimetableId.first()
         var current = getTimetableCourses(ttId)
         var applied = 0
@@ -1421,12 +1430,12 @@ class ScheduleRepository(
      */
     suspend fun undoApplied(entries: List<AppliedEntry>, timetableId: Long? = null): Int {
         if (entries.isEmpty()) return 0
-        return db.withTransaction {
+        return db.inTransaction {
             val ttId = timetableId ?: currentTimetableId.first()
             // 目标课表已删除（用户先删了课表再撤销）：反向写会向不存在的 timetableId
             // 塞孤儿行——任何界面都查不到、也没有清理路径。整批按「跳过」处理，
             // 正常路径由调用方（AI 页 / 记录页）先一步拒绝并说清。
-            if (db.timetableDao().getById(ttId) == null) return@withTransaction entries.size
+            if (db.timetableDao().getById(ttId) == null) return@inTransaction entries.size
             val current = getTimetableCourses(ttId)
             val plan = ScheduleUndo.plan(entries, current)
             plan.actions.forEach { action ->
@@ -1453,7 +1462,7 @@ class ScheduleRepository(
         timetableId: Long? = null,
     ): Int {
         if (entries.isEmpty() && overrideIds.isEmpty()) return 0
-        return db.withTransaction {
+        return db.inTransaction {
             val skipped = undoApplied(entries, timetableId)
             if (overrideIds.isNotEmpty()) db.dateOverrideDao().deleteByIds(overrideIds)
             skipped
@@ -1479,7 +1488,7 @@ class ScheduleRepository(
         timetableId: Long? = null,
     ): TweakPlan {
         val ttId = timetableId ?: currentTimetableId.first()
-        return db.withTransaction {
+        return db.inTransaction {
             val courses = getTimetableCourses(ttId)
             val plan = CourseTweaker.plan(courses, mode, fromWeek, fromDay, toWeek, toDay)
             if (plan.deleteIds.isNotEmpty()) db.courseDao().deleteByIds(plan.deleteIds)
@@ -1657,7 +1666,7 @@ class ScheduleRepository(
      * 目标选择与覆盖/合并由 UI 弹窗强制确定（DESIGN §4.9），本方法只负责校验与写库。
      * 文件携带成绩段时**整体替换**现有成绩（先清后插，DESIGN §4.3）；空段/缺段不动成绩。
      *
-     * **整个写库是一个事务**（2026-11-06 审计 D3）。此前是 6 段各自 `withTransaction`，
+     * **整个写库是一个事务**（2026-11-06 审计 D3）。此前是 6 段各自 `inTransaction`，
      * 中途失败（磁盘满 / 进程被杀 / 课程写入抛异常）会留下「成绩已换、课表没换」的半套
      * 状态，而调用方只看到「导入失败」。现在任一段抛异常 = 全部回滚，UI 的失败提示与
      * 实际状态一致。事务里**只有 DAO 调用**：网络与文件 IO 都不进来——
@@ -1711,7 +1720,7 @@ class ScheduleRepository(
         var restoredOverrides = 0
         var addedByMerge = 0
 
-        db.withTransaction {
+        db.inTransaction {
             // ---- 成绩（DESIGN §4.15）：按学期整表替换 ----
             if (validated.scores.isNotEmpty()) {
                 db.scoreDao().deleteAll()
@@ -1807,8 +1816,9 @@ class ScheduleRepository(
             // 传**已解析的 ttId** 而不是 `timetableId`：后者为 null 时两个方法内部会
             // `currentTimetableId.first()`，那是 Room Flow + DataStore 的合流——
             // 在事务里收集会跑到别的线程上，是死锁面。ttId 在事务外已经解析过了。
-            // mergeCourses / replaceAllCourses 内部也开 `withTransaction`；Room 的
-            // `withTransaction` 支持嵌套（复用外层的事务上下文），这里不会真起第二个事务。
+            // mergeCourses / replaceAllCourses 内部也开 `inTransaction`；两端实现都支持嵌套
+            // （Android 落 Room 的 `withTransaction`，它复用外层事务上下文；iOS 的
+            //  `inTransaction` 自己带嵌套闸门），这里不会真起第二个事务。
             if (merge) {
                 addedByMerge = mergeCourses(domain, ttId)
             } else {

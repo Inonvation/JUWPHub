@@ -2,8 +2,6 @@ package edu.jxslu.schedule.data.repo
 
 import android.content.Context
 import edu.jxslu.schedule.data.local.JsonFileStore
-import edu.jxslu.schedule.domain.ScheduleCourseRow
-import kotlinx.serialization.Serializable
 
 /**
  * 课表基线快照（DESIGN §4.17，2026-10-04 重立）：「上次与教务达成一致时的课表状态」，
@@ -17,21 +15,12 @@ import kotlinx.serialization.Serializable
  * **允许存空列表**（一门课没有的学期是教务的合法状态，空基线才能在下学期正确报出
  * 「教务新增了 N 门课」）——但**只由「可信的成功路径」写入**：写库成功、抓取解析成功。
  * 文件坏了按「没有基线」处理，下轮检查重建，不影响主链路。只存课表条目，不存任何凭证。
+ *
+ * iOS 移植 S4（2026-11-24）：[ScheduleRepository] 搬进了 `shared/commonMain`，它要读 / 推进
+ * 基线，而落盘离不开 `Context` + `File`。所以读写的**形状**抽成共享层接口
+ * [ScheduleBaseline]（`Snapshot` / `snapshotOf` 一并搬过去），本类只剩实现。
  */
-class ScheduleBaselineStore(context: Context) {
-
-    @Serializable
-    data class Snapshot(
-        /**
-         * 基线归属的课表。变动检测只对**term 最大的那张课表**做（2026-11-19 起，
-         * 此前是「当前活跃课表」），id 不匹配 = 首跑。
-         */
-        val timetableId: Long = 0,
-        /** 基线的学年学期（如 2026-2027-1）；与抓取学期不一致 = 换学期，按首跑处理。 */
-        val term: String = "",
-        val courses: List<ScheduleCourseRow> = emptyList(),
-        val savedAt: Long = 0,
-    )
+class ScheduleBaselineStore(context: Context) : ScheduleBaseline {
 
     /**
      * 落盘交给共享实现（2026-11-06 审计 C2）。**用同步版**：`load`/`save` 是同步 API，
@@ -40,26 +29,18 @@ class ScheduleBaselineStore(context: Context) {
      * **文件名不能改**（`schedule_baseline.json`）：改名等于用户丢掉基线，下次检查按首跑重建、
      * 静默吞掉一轮「教务改了什么」。
      */
-    private val store = JsonFileStore(context, SNAPSHOT_FILE, Snapshot.serializer())
+    private val store = JsonFileStore(context, SNAPSHOT_FILE, ScheduleBaseline.Snapshot.serializer())
 
-    fun load(): Snapshot = store.readBlocking() ?: Snapshot()
+    override fun load(): ScheduleBaseline.Snapshot = store.readBlocking() ?: ScheduleBaseline.Snapshot()
 
     /**
      * 落盘并返回是否成功。**调用方必须看返回值**：基线没写进去、却把「已阅指纹」
      * 和「待处置差异」清掉，下一轮检查会拿旧基线比对，把用户刚处理完的变动
      * 重新报一遍（合并时还会按旧指纹套到新课表上）。
      */
-    fun save(snapshot: Snapshot): Boolean = store.writeBlocking(snapshot)
+    override fun save(snapshot: ScheduleBaseline.Snapshot): Boolean = store.writeBlocking(snapshot)
 
     companion object {
         private const val SNAPSHOT_FILE = "schedule_baseline.json"
-
-        fun snapshotOf(timetableId: Long, term: String, courses: List<edu.jxslu.schedule.domain.Course>, savedAt: Long) =
-            Snapshot(
-                timetableId = timetableId,
-                term = term,
-                courses = courses.map(ScheduleCourseRow::of),
-                savedAt = savedAt,
-            )
     }
 }
