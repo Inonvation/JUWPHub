@@ -317,11 +317,15 @@ iosApp/            薄壳：Xcode 工程、SwiftUI 入口、WidgetKit 扩展、I
 | `com.google.zxing.*` | JVM 库 | 中性 `BarcodeMatrix` + `expect/actual`（Android 用 zxing，iOS 用 CoreImage） |
 | 跨模块读公开属性后智能转换 | 同模块才行 | `item.task == true` 这类显式比较（P2 搬 UI 时会大量出现） |
 
-**还剩 3 个文件留在 `app/.../domain`**：`QzxyBillStats` / `QzxySessionLink` / `WenquRules`。
-它们各自 import 了 `data.qzxy.QzxyBill`、`data.qzxy.QzxySession`、`data.wenqu.WenquActivity`，
-属**分层倒置**（域层反过来依赖 data 层的 wire model）。要先把那几个 model 与 `data/qiekj` 的
-`LenientString*` 序列化器纯数据化才能搬，列为 P1。`AutoSyncRules` 属于同一类问题，
-2026-11-24 已经先行归位到 `domain/`。
+**domain 层已全部搬完**（含最后一组卡在分层倒置上的 `QzxyBillStats` / `QzxySessionLink` /
+`WenquRules`）。办法不是改规则，而是**把被它们反向依赖的 wire model 一起搬**：
+`data/qzxy` 的 `QzxyModels` / `QzxySession` / `QzxyApiConfig`、`data/wenqu` 的 `WenquModels`、
+`data/qiekj` 的 `QiekjJson`（含 `LenientString*` 序列化器）——这些本来就只有 `kotlinx.serialization`
+依赖，是纯数据。
+
+**包名保持不变**（`edu.jxslu.schedule.data.qzxy` 等），`:app` 侧零 import 改动。代价是 `:shared`
+里出现 `data.*` 包：这是有意的，wire model 本来就该两端共用；判断标准是「它有没有平台 API」，
+不是「它在哪个目录」。`app/.../domain` 目录已删除，护栏脚本收成单根 + 去掉允许清单。
 
 **这道门禁是可以本地验证的**（这是 P0 最关键的一条工程事实）：`.\gradlew
 :shared:metadataCommonMainClasses` 用 Kotlin **公共**标准库编译 `commonMain`，看不见 JDK——

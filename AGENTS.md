@@ -282,15 +282,14 @@ MainActivity
 └─ 独立窗口：Settings / JwImport（含 Browse 与 TeachingEval）/ Transcript / XgForm /
    PowerBankPay / Onboarding / SubpageActivity（二级页，路由枚举见 SubpageScreen）
 
-shared/       KMP 共享逻辑（iOS 移植 P0 起）：commonMain 已装**域层主体**（128 个文件：课程/作息/
-              学期/成绩/考试/调课/笔记作业/单车/水控/AI prompt/天气/百宝箱/报修/选课/协议规则），
+shared/       KMP 共享逻辑（iOS 移植 P0 起）：commonMain 已装 **domain 层全部** + qzxy/wenqu/qiekj
+              的 wire model（136 个文件；包名保留原样，所以 `data.qzxy.*` 也会出现在这里，是有意的）。
               androidMain / iosMain 只放 expect/actual 的平台实现（条码、定点小数）。
               **commonMain 必须零 JVM 专有 API**，判据是 `:shared:metadataCommonMainClasses`。
-              新写 commonMain 代码前先看 `design/ios-port.md` 的「JVM 默认导入陷阱」那张表
-data/         Android 平台实现（Room / Retrofit / DataStore / 通知 / 蓝牙 …）
-domain/       仅剩 3 个待搬文件（QzxyBillStats / QzxySessionLink / WenquRules，卡在
-              data 层 wire model 的分层倒置上，P1 处理）。**新代码往 `shared/src/commonMain/
-              kotlin/edu/jxslu/schedule/domain/` 写**，别往这里放
+              新写 commonMain 代码前先看 `design/ios-port.md` 的「JVM 默认导入陷阱」表。
+              `app/.../domain` 目录已删除——**新域层代码写进 `shared/src/commonMain/kotlin/
+              edu/jxslu/schedule/domain/`**
+data/         Android 平台实现（Room / Retrofit / DataStore / 通知 / 蓝牙 …）；wire model 已部分上移
 data/local    Room v21（表清单见「工程实况」；迁移只加不删，实体索引必须与迁移对齐）
 data/repo     ScheduleRepository（备份模型在 ScheduleBackup）+ 各业务 Repository / Sync
 data/prefs    DataStore 显示偏好（DisplayPrefsStore + 按功能拆出的扩展文件）
