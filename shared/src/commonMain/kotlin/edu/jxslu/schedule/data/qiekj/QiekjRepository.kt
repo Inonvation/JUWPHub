@@ -1,9 +1,5 @@
 package edu.jxslu.schedule.data.qiekj
 
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
-import edu.jxslu.schedule.data.net.AppHttp
-import edu.jxslu.schedule.data.session.SessionExpiryStore
-import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.domain.DiagnosisResult
 import edu.jxslu.schedule.domain.PromotionLine
 import edu.jxslu.schedule.domain.UnlockResult
@@ -15,11 +11,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
-import retrofit2.Retrofit
-import java.io.File
 
 class NotLoggedInException(message: String = "请先登录") : Exception(message)
 
@@ -33,53 +24,55 @@ class NotLoggedInException(message: String = "请先登录") : Exception(message
  * 轮询遇到 sync 无 data（设备侧结算关闭会话，2026-10-09 实测）按「会话已结束」收尾，
  * 不当致命错误，见 [noDataPollAction]。
  *
- * debug 包另挂 [QiekjDebugDumpInterceptor]，把只读查询与开水链路的响应体原文落到
+ * debug 包另挂 [qiekjDebugDumpPlugin]，把只读查询与开水链路的响应体原文落到
  * `filesDir/qiekj_debug/`（2026-10-05，为确认设备状态字段而加）。
+ *
+ * ## iOS 移植 S11（2026-11-24）：搬进 `:shared`
+ *
+ * 三处跟着换，语义都没变：
+ *
+ * 1. **传输层**：Retrofit + OkHttp → [QiekjApi]（Ktor，从 `SharedHttp.base` 派生）。
+ *    迁移前的 `HttpLoggingInterceptor`（BASIC 级）**没有对应物**——Ktor 侧要打请求行得自己
+ *    装 Logging 插件，而那条插件会把 header 一起打出来，与「token/sign 不进 Logcat」的红线冲突。
+ *    所以现在**一条请求日志都不打**，比迁移前更严（迁移前只打请求行，本来就够用）；
+ *    要补协议样本仍走 [qiekjDebugDumpPlugin] 的落盘。
+ * 2. **存储**：`QiekjTokenStore` / `QiekjOrderHistoryStore` / `SessionExpiryStore` 都是
+ *    Android 专有介质，仓库改认 [QiekjCredentialStore] / [QiekjOrderStore] /
+ *    [QiekjExpiryMarker] 三个窄接口，实现留在 `:app`（理由见 QiekjStores.kt）。
+ * 3. **调度器**：`Dispatchers.IO` 在 commonMain 里不可见（它只声明在各平台源集），
+ *    [unlockDevice] 的 `withContext` 改成 [Dispatchers.Default]。**与迁移前的唯一行为差异**：
+ *    整条开水流程（含 1 秒一次的轮询与网络挂起）跑在 Default 池上，而不是 Android 的 IO 池。
+ *    Ktor 的请求本身是挂起的、不占线程，轮询里也没有阻塞调用，Default 池够用。
  */
 class QiekjRepository(
-    private val tokenStore: QiekjTokenStore,
-    private val orderHistoryStore: QiekjOrderHistoryStore,
+    private val tokenStore: QiekjCredentialStore,
+    private val orderHistoryStore: QiekjOrderStore,
     /**
-     * debug 专用样本目录（`filesDir/qiekj_debug`，见 [QiekjDebugDumpInterceptor]）。
+     * debug 专用样本目录（`filesDir/qiekj_debug` 的绝对路径，见 [qiekjDebugDumpPlugin]）。
      * release 传 null，一个字节都不落盘。
      */
-    private val debugDumpDir: File? = null,
-    /** 「登录状态已过期」留痕（见 [SessionExpiryStore]）：失效当场写、进页消费。 */
-    private val expiry: SessionExpiryStore? = null,
+    private val debugDumpDir: String? = null,
+    /** 「登录状态已过期」留痕（见 [QiekjExpiryMarker]）：失效当场写、进页消费。 */
+    private val expiry: QiekjExpiryMarker? = null,
 ) {
     private val api: QiekjApi
     /** 签到专用：Version=1.123.0 + 官方 `&` 拼接；与开水链路的 1.60.3 无分隔签名隔离。 */
     private val pointsApi: QiekjApi
 
     init {
-        // BASIC 级日志只打请求行不打 header，token/sign 不会进 Logcat（DESIGN 5 隐私要求）
-        val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
-        // 共享池派生：只叠自己的头部注入与日志拦截器
-        val client = AppHttp.withInterceptors(
-            QiekjHeaderInterceptor(tokenProvider = { tokenStore.readToken() }),
-            logging,
-            *listOfNotNull(debugDumpDir?.let { QiekjDebugDumpInterceptor(it) }).toTypedArray(),
-        ).newBuilder().build()
-        api = buildApi(client)
-        val pointsClient = AppHttp.withInterceptors(
-            QiekjHeaderInterceptor(
-                tokenProvider = { tokenStore.readToken() },
-                version = QiekjApiConfig.POINTS_VERSION,
-                signPathSeparator = "&",
-            ),
-            logging,
-            *listOfNotNull(debugDumpDir?.let { QiekjDebugDumpInterceptor(it) }).toTypedArray(),
-        ).newBuilder().build()
-        pointsApi = buildApi(pointsClient)
+        // 两条链路各一个 client（与迁移前「两个 OkHttp 派生 client」一一对应）：
+        // 共享池派生，只叠自己的头部注入（头部在 QiekjApi 里按请求装配）与可选采样插件
+        api = QiekjApi.create(
+            tokenProvider = { tokenStore.readToken() },
+            debugDumpDir = debugDumpDir,
+        )
+        pointsApi = QiekjApi.create(
+            tokenProvider = { tokenStore.readToken() },
+            version = QiekjApiConfig.POINTS_VERSION,
+            signPathSeparator = "&",
+            debugDumpDir = debugDumpDir,
+        )
     }
-
-    private fun buildApi(client: OkHttpClient): QiekjApi =
-        Retrofit.Builder()
-            .baseUrl(QiekjApiConfig.BASE_URL)
-            .client(client)
-            .addConverterFactory(QiekjJson.json.asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(QiekjApi::class.java)
 
     // ── 登录态 ──
 
@@ -101,7 +94,7 @@ class QiekjRepository(
     /** 落盘 token 并翻转登录态。只在**已确认 token 有效**时调用，见 [validateToken]。 */
     fun saveToken(token: String) {
         tokenStore.saveToken(token)
-        expiry?.clear(SessionService.Qiekj)
+        expiry?.clearExpired()
         _loggedIn.value = true
     }
 
@@ -111,7 +104,7 @@ class QiekjRepository(
     fun logout() {
         tokenStore.clear()
         orderHistoryStore.clearAll()
-        expiry?.clear(SessionService.Qiekj)
+        expiry?.clearExpired()
         _loggedIn.value = false
     }
 
@@ -122,7 +115,7 @@ class QiekjRepository(
     fun markExpired() {
         tokenStore.clear()
         orderHistoryStore.clearAll()
-        expiry?.mark(SessionService.Qiekj)
+        expiry?.markExpired()
         _loggedIn.value = false
     }
 
@@ -276,7 +269,7 @@ class QiekjRepository(
         usePoints: Boolean,
         stopSignal: UnlockStopSignal? = null,
         onStep: suspend (String) -> Unit,
-    ): UnlockResult = withContext(Dispatchers.IO) {
+    ): UnlockResult = withContext(Dispatchers.Default) {
         val token = requireToken()
         val goodsId = device.effectiveGoodsId ?: error("设备缺少 goodsId")
 
