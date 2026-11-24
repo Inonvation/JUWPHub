@@ -159,6 +159,9 @@ class IosServices : AppServices {
 
     override fun homeworkRepository(): HomeworkRepository = HomeworkRepository(juwDatabase())
 
+    /** 收件箱（本地表）：今日页收件箱卡与收件箱页共用的那一份，见字段 [inbox]。 */
+    override fun inboxRepository(): InboxRepository = inbox
+
     // ---- 一卡通 / 寝室电费（S14，2026-11-25） ----
     //
     // 两个仓库非空：数据层已经是纯 Ktor + 本地表，iOS 直接建得起来。

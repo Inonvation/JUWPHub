@@ -22,28 +22,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.SubpageActivity
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.local.InboxMessageEntity
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.DormRepairRecord
 import edu.jxslu.schedule.domain.DormRepairRules
 import edu.jxslu.schedule.domain.InboxKind
+import edu.jxslu.schedule.domain.TextFmt
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.formatDormRepairTime
 import edu.jxslu.schedule.ui.common.heroToneAccent
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.toHeroTone
 import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.inbox.inboxKindIcon
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
 /**
@@ -65,27 +61,42 @@ import kotlinx.coroutines.launch
  * 今天没有消息时标题行里跟一行「今天没有新消息」副文（2026-10-23 用户要求：放标题旁、
  * 不在底部占独立行），列表区只剩报修行（若有）；「查看更多」入口不断——收件箱可能有
  * 更早的消息，这也是它必须常驻而不是按天显隐的原因。
+ *
+ * ## 搬进共享层时改的四处（S16，2026-11-25）
+ *
+ * 1. 仓库从 `Graph.inboxRepository(context)` 改成 [Services]（`inbox_messages` 是本地表，
+ *    两端都能读）；
+ * 2. `collectAsStateWithLifecycle` 换 `edu.jxslu.schedule.platform` 的版本（CMP 1.7.3 里
+ *    官方的 KMP 变体要 Compose 1.9）；
+ * 3. `SubpageActivity.start` 收成可空回调 [onOpenSubpage]——二级页栈是 Android 的
+ *    `Activity` 概念，iOS 侧没有；
+ * 4. `java.time` 换 [AppClock] + [TextFmt]（`HH:mm` 手拼）。
  */
 @Composable
 fun InboxTodayCard(
+    /** 各来源的行首图标。**由宿主提供**：`ui/inbox/InboxKindIcon.kt` 还在 `:app`。 */
+    kindIcon: (String) -> ImageVector,
     /** 报修当前该展示的那条（`DormRepairRules.cardRecord` 的结果）；null = 无可见记录。 */
     repair: DormRepairRecord? = null,
     onOpenInbox: () -> Unit = {},
     /** 报修行点击：进原生报修详情页（与旧独立报修卡同落点）。 */
     onOpenRepair: () -> Unit = {},
+    /**
+     * 点消息行时按 route 跳二级页；**null = 本平台还没有二级页栈**（iOS 侧就是如此），
+     * 点行只标已读、不跳页——比给一个点了没反应的入口好。
+     */
+    onOpenSubpage: ((SubpageScreen, String?) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    val repo = remember(context) { Graph.inboxRepository(context) }
+    val repo = remember { Services.current.inboxRepository() }
     val scope = rememberCoroutineScope()
     // null = Room 首帧未到；先按空态渲染，数据到了自然撑开
     val messages by repo.messages().collectAsStateWithLifecycle(initialValue = null)
 
-    val zone = ZoneId.systemDefault()
-    val today = LocalDate.now(zone)
+    val today = AppClock.today()
     // 只留今天的：列表本身最新在前，过滤保序；上一条与这一条比较的口径足够（无跨天穿插）
     val todays = messages.orEmpty().filter {
-        Instant.ofEpochMilli(it.createdAt).atZone(zone).toLocalDate() == today
+        AppClock.dateTimeOf(it.createdAt).date == today
     }
     // 标题计数 = 今天**全部**消息数（2026-10-21 二次口径修正：与预览列表同一总数，
     // 数字和列表对得上——此前只数待办类，出现过「今日 1 条」却铺着 5 行的矛盾）。
@@ -180,12 +191,12 @@ fun InboxTodayCard(
             if (index > 0) InboxListDivider()
             InboxTodayRow(
                 msg = msg,
+                kindIcon = kindIcon,
                 onClick = {
                     scope.launch { repo.markRead(msg.id) }
                     val target = SubpageScreen.entries.firstOrNull { it.name == msg.route }
-                    if (target != null) {
-                        SubpageActivity.start(context, target, focusItemId = msg.focusItemId)
-                    }
+                    // 本平台没有二级页栈时只标已读，不跳（见 onOpenSubpage 的注释）
+                    if (target != null) onOpenSubpage?.invoke(target, msg.focusItemId)
                 },
             )
         }
@@ -314,10 +325,11 @@ private fun repairDetailLine(record: DormRepairRecord): String? {
 @Composable
 private fun InboxTodayRow(
     msg: InboxMessageEntity,
+    kindIcon: (String) -> ImageVector,
     onClick: () -> Unit,
 ) {
     val unread = msg.readAt == null
-    val zone = ZoneId.systemDefault()
+    val createdAt = AppClock.dateTimeOf(msg.createdAt)
     val haptics = rememberAppHaptics()
     Row(
         modifier = Modifier
@@ -330,7 +342,7 @@ private fun InboxTodayRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = inboxKindIcon(msg.kind),
+            imageVector = kindIcon(msg.kind),
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(18.dp),
@@ -347,8 +359,7 @@ private fun InboxTodayRow(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = Instant.ofEpochMilli(msg.createdAt).atZone(zone)
-                        .format(DateTimeFormatter.ofPattern("HH:mm")),
+                    text = "${TextFmt.pad(createdAt.hour)}:${TextFmt.pad(createdAt.minute)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                 )
