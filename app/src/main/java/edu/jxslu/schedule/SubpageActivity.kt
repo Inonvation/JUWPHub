@@ -21,6 +21,7 @@ import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.jw.JwVpnDetector
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.ujing.UjingAlipay
+import edu.jxslu.schedule.domain.CainiaoQuery
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.Services
@@ -55,6 +56,7 @@ import edu.jxslu.schedule.ui.common.rememberAttachmentImageUi
 import edu.jxslu.schedule.ui.common.rememberMarkdownUi
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
+import edu.jxslu.schedule.ui.common.ShortcutLauncher
 import edu.jxslu.schedule.ui.common.washerScanIntent
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
@@ -635,7 +637,19 @@ class SubpageActivity : ComponentActivity() {
             )
             SubpageScreen.TOOLBOX_WATERMARK -> WatermarkScreen(onBack = onBack)
             SubpageScreen.TOOLBOX_STITCH -> StitchScreen(onBack = onBack)
-            SubpageScreen.TOOLBOX_CAINIAO -> CainiaoQueryScreen(onBack = onBack)
+            // 菜鸟批量查已搬进 shared/commonMain（iOS 移植 V3）：本平台能做的事只剩
+            // 「装没装菜鸟」+「按 scheme 拉起」，两句都是 Android 的，收在这个回调里。
+            // 返回 null = 已经交给系统；非 null = 给用户看的失败原因。
+            SubpageScreen.TOOLBOX_CAINIAO -> CainiaoQueryScreen(
+                onBack = onBack,
+                onOpenCainiao = { item ->
+                    if (packageManager.getLaunchIntentForPackage(CainiaoQuery.PKG) == null) {
+                        "未安装菜鸟 App"
+                    } else {
+                        ShortcutLauncher.launch(this, item)
+                    }
+                },
+            )
             SubpageScreen.QUIET_HOURS -> QuietHoursScreen(onBack = onBack)
             SubpageScreen.ACCOUNTS -> AccountsHubScreen(
                 onBack = onBack,
