@@ -19,9 +19,12 @@ import platform.CoreGraphics.CGContextFillRect
 import platform.CoreGraphics.CGContextSetGrayFillColor
 import platform.CoreGraphics.CGContextSetInterpolationQuality
 import platform.CoreGraphics.CGImageAlphaInfo
+import platform.CoreGraphics.CGRectGetMinX
+import platform.CoreGraphics.CGRectGetMinY
 import platform.CoreGraphics.CGInterpolationQuality
 import platform.CoreGraphics.CGRectMake
 import platform.CoreGraphics.CGAffineTransformMakeTranslation
+import platform.CoreGraphics.kCGInterpolationNone
 import platform.CoreImage.CIContext
 import platform.CoreImage.CIDetector
 import platform.CoreImage.CIDetectorAccuracy
@@ -30,6 +33,8 @@ import platform.CoreImage.CIDetectorTypeQRCode
 import platform.CoreImage.CIFilter
 import platform.CoreImage.CIImage
 import platform.CoreImage.CIQRCodeFeature
+import platform.CoreImage.createCGImage
+import platform.CoreImage.outputImage
 import platform.Foundation.NSData
 import platform.Foundation.NSString
 import platform.Foundation.NSUTF8StringEncoding
@@ -147,8 +152,10 @@ private fun generatorImage(filterName: String, content: String): CIImage {
         filter.setValue("M", forKey = "inputCorrectionLevel")
     }
     val output = filter.outputImage ?: error("$filterName 编不出这段内容")
-    val dx = output.extent.useContents { origin.x }
-    val dy = output.extent.useContents { origin.y }
+    // `CGRect` 是 C 结构体，`origin` 是嵌在里面的另一个结构体，取值要走 `CGRectGetMinX/Y`
+    // （拿 CValue<CGRect> 直接 `.useContents { origin.x }` 在 Kotlin/Native 上解析不了）。
+    val dx = CGRectGetMinX(output.extent)
+    val dy = CGRectGetMinY(output.extent)
     return output.imageByApplyingTransform(CGAffineTransformMakeTranslation(-dx, -dy))
 }
 
@@ -183,7 +190,8 @@ private fun rasterizeGray(
     // 底色先填白：生成器只画符号区，静区靠这一层白
     CGContextSetGrayFillColor(bitmap, 1.0, 1.0)
     CGContextFillRect(bitmap, CGRectMake(0.0, 0.0, widthPx.toDouble(), heightPx.toDouble()))
-    CGContextSetInterpolationQuality(bitmap, CGInterpolationQuality.kCGInterpolationNone)
+    // 常量在 K/N 里是 `platform.CoreGraphics` 的顶层 val，不是 enum 的成员
+    CGContextSetInterpolationQuality(bitmap, kCGInterpolationNone)
     CGContextDrawImage(
         bitmap,
         CGRectMake(
