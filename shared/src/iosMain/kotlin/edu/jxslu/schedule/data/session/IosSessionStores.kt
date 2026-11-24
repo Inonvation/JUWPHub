@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.data.session
 
-import edu.jxslu.schedule.data.ai.AiApiKeyStore
 import edu.jxslu.schedule.data.kqcx.KqcxCredentialStore
 import edu.jxslu.schedule.data.qiekj.QiekjCredentialStore
 import edu.jxslu.schedule.data.qzxy.QzxySession
@@ -232,18 +231,18 @@ internal class IosQzxySessionStore : QzxySessionStore {
 
 // ---------------------------------------------------------------- AI 调课
 
-internal class IosAiApiKeyStore : AiApiKeyStore {
+internal class IosAiApiKeyStore {
 
     private val service = IosSessionStores.AI
 
-    override fun readApiKey(): String? =
+    fun readApiKey(): String? =
         IosKeychain.get(service, KEY_API_KEY)?.takeIf { it.isNotBlank() }
 
-    override fun saveApiKey(key: String) {
+    fun saveApiKey(key: String) {
         IosKeychain.set(service, KEY_API_KEY, key.trim())
     }
 
-    override fun clear() {
+    fun clear() {
         IosKeychain.deleteAll(service)
     }
 

@@ -7,6 +7,7 @@ import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.qiekj.BalanceData
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
+import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.data.repo.ExamSync
@@ -21,9 +22,12 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
+import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
+import kotlinx.coroutines.CoroutineScope
 
 /**
  * 共享层向「各平台装配根」要服务的唯一入口（iOS 移植 M1，2026-11-25）。
@@ -223,22 +227,11 @@ interface AppServices {
      */
     fun appVersion(): String
 
-    // ---- 胖乖生活 / 开水房（iOS 移植 T2，2026-11-25） ----
+    // ---- 开水房（iOS 移植 T2，2026-11-25） ----
     //
-    // 开水页（`ui/water`）搬进共享层带出来的五个成员。仓库与状态机早在共享层，
+    // 开水页（`ui/water`）搬进共享层带出来的成员。仓库与状态机早在共享层，
     // 缺的是它读写的那几份**平台存储**与**桌面小组件**副作用。
-
-    /**
-     * 胖乖生活仓库（登录 / 余额 / 设备 / 开水 / 签到 / 账单）。
-     *
-     * **null = 本平台还没有凭证与订单快照的介质**。`QiekjRepository` 本身是纯编排，
-     * 但它要 `QiekjCredentialStore`（Android 是 `EncryptedSharedPreferences`）、
-     * `QiekjOrderStore`（Android 是普通 `SharedPreferences`，换成 JSON 文件等于让老用户
-     * 丢掉已有的 50 笔本地账单）与 [QiekjExpiryMarker]。iOS 要等 Keychain 版凭证存储
-     * （同 [yktCredentialStore] 的升级条件），在那之前开水页在 iOS 上没有入口——
-     * 不是「点了没反应」，是根本不构造这个页面。
-     */
-    fun qiekjRepository(): QiekjRepository?
+    // 仓库本身见下面的 [qiekjRepository]（与账号中心共用同一个成员）。
 
     /**
      * 「正在出水」的本机会话登记（跨窗口展示的唯一真相源）。
@@ -273,14 +266,90 @@ interface AppServices {
     fun recordGuessOrder(target: GuessTarget) {}
 
     /**
-     * 进页消费一次「登录状态已过期」标记（[SessionExpirySink] 写的那一条）。
+     * 进页消费一次「登录状态已过期」标记（[sessionExpirySink] 写的那一条）。
      *
      * 返回 true = 这一轮确实有一条待提示的标记（**消费后即清**，同一轮只提示一次）。
+     * 与 `sessionExpirySink()?.consume(id)` 是同一件事：这里是页面侧的便捷入口，
+     * 免得每个页面都写一次空判。
      *
-     * **默认 false**：iOS 侧还没有这条留痕的介质（`SessionExpirySink` 的 iOS 实现待接），
-     * 开水页因此不提示过期——那是真实结论，不是假实现。
+     * **默认 false**：本平台没接那张表时就是「没有待提示的标记」，与「没登录过」同档。
      */
     fun consumeSessionExpiry(serviceId: String): Boolean = false
+
+    // ---- 账号与登录（账号中心页，iOS 移植 S20，2026-11-25） ----
+    //
+    // 这一组全是账号中心页（`ui/me/hub/AccountsHubScreen`）搬进共享层带出来的。
+    // 分两类：本地凭证 / 会话表（可空，两端要不要保险箱各不相同）与进程级作用域（非空）。
+    // 五个第三方仓库返回可空：它们的**类型**都已在 commonMain，构造却各要一份平台凭证存储。
+
+    /**
+     * 教务 / 一卡通的凭证快照与登录闸门；**null = 本平台没有加密凭证存储**。
+     *
+     * null 时账号中心的两行按「未配置」显示（与「凭证不在」同一档）——这是真实结论，
+     * 不是假实现。
+     */
+    fun accountCredentials(): AccountCredentials?
+
+    /**
+     * 「登录状态已过期」留痕（见 `SessionExpirySink`）；**null = 本平台还没接这张表**。
+     *
+     * 账号中心用它显示「已失效」，`SessionExpiredNotice` 用它「取走并提示一次」。
+     * Android 侧转接 `Graph.sessionExpirySink`（与仓库层写的是同一份标记）。
+     */
+    fun sessionExpirySink(): SessionExpirySink?
+
+    /**
+     * 退出教务原生会话；**null = 本平台没有原生教务会话**。
+     *
+     * iOS 的登录只发生在 `WKWebView` 里，没有「OkHttp 会话」可退，所以给 null；
+     * 页面据此**跳过**这一步，其余凭证照常清（不是整块失败）。
+     */
+    fun jwSessionLogout(): JwSessionLogout?
+
+    /** AI 调课的 API Key；**null = 本平台没有加密存储**（升级条件同 [yktCredentialStore]）。 */
+    fun aiApiKeyStore(): AiApiKeyStore?
+
+    /**
+     * 胖乖生活仓库（DESIGN §4.10）；**null = 本平台还没有凭证与订单快照的介质**。
+     *
+     * `QiekjRepository` 本身是纯编排，但它要 `QiekjCredentialStore`（Android 是
+     * `EncryptedSharedPreferences`）、`QiekjOrderStore`（Android 是普通 `SharedPreferences`，
+     * 换成 JSON 文件等于让老用户丢掉已有的 50 笔本地账单）与过期标记。
+     * 开水页与账号中心都读它。
+     */
+    fun qiekjRepository(): QiekjRepository?
+
+    /** 趣智校园仓库（DESIGN §3.12）；null 的语义同 [qiekjRepository]。 */
+    fun qzxyRepository(): QzxyRepository?
+
+    /** U净 仓库（DESIGN §4.37）；null 的语义同 [qiekjRepository]。 */
+    fun ujingRepository(): UjingRepository?
+
+    /** 快趣出行会话（DESIGN §4.32）；null 的语义同 [qiekjRepository]。 */
+    fun kqcxSession(): ThirdPartySession?
+
+    /** 问渠仓库（DESIGN §3.30）；null 的语义同 [qiekjRepository]。 */
+    fun wenquRepository(): WenquRepository?
+
+    /**
+     * 进程级协程作用域（Android 是 `Graph.appScope`）。
+     *
+     * 账号中心的「清除全部凭证」必须跑完：用户点完就返回上一页时，页面自己的作用域
+     * 会随组合销毁被取消，留下一半清了一半没清的状态。所以清理挂在应用级作用域上，
+     * 只有 UI 状态切回 `Dispatchers.Main` 更新。
+     */
+    fun appScope(): CoroutineScope
+
+    /**
+     * WebView 里有没有**有效的教务会话**（只读本机 cookie，一个请求都不发）。
+     *
+     * 给账号中心判「升级用户没存凭证、但网页里还留着会话」那一档（DESIGN §3.16）；
+     * 不认这一点，状态卡会出现「说未登录、点进导入却能用」的自相矛盾。
+     *
+     * **null = 本平台判断不了**：iOS 的 cookie 只能异步读（`WKWebsiteDataStore.getAllCookies`），
+     * 而这里要在组合期同步给一个布尔。接上之后改成 suspend 或加一层缓存。
+     */
+    fun hasJwWebSession(): Boolean?
 }
 
 /**
