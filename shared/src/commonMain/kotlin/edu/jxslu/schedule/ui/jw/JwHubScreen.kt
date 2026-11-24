@@ -78,7 +78,7 @@ import kotlinx.datetime.LocalDate
  *
  * | 参数 | null 的含义 |
  * |---|---|
- * | 十二个 `onOpenXxx` | 平台没有这个二级页 → 该行 / 该快捷格消失 |
+ * | 十四个 `onOpenXxx` | 平台没有这个二级页 → 该行 / 该快捷格消失 |
  * | [onOpenWebPage] | 平台没有内置浏览窗口 → 顶栏「校园门户」图标不出现 |
  *
  * 数据不依赖平台能力：成绩 / 教材 / 课表都读 [Services.current] 给的本地表，
