@@ -29,10 +29,22 @@ interface SessionExpirySink {
 /**
  * [SessionExpirySink] 用的服务 id，逐字对齐 `:app` 的 `SessionService.id`。
  *
- * 目前只列搬进共享层的两条（问渠 / U净）；其余三条（胖乖 / 趣智 / 快趣）还留在 `:app`，
- * 它们的仓库没搬，不需要在这里出现——**用到再加**，别提前抄一份全表。
+ * 只列**已经被共享层用到**的那几条；其余（趣智 / 快趣）还留在 `:app`，它们的页面没搬，
+ * 不需要在这里出现——**用到再加**，别提前抄一份全表。
  */
 object SessionServiceIds {
     const val WENQU = "wenqu"
     const val UJING = "ujing"
+
+    /** 胖乖生活：开水页（`ui/water`）进页消费过期标记时用（iOS 移植 T2）。 */
+    const val QIEKJ = "qiekj"
 }
+
+/**
+ * 「登录状态已过期，请重新登录」的进页提示文案（iOS 移植 T2）。
+ *
+ * 逐字对齐 `:app` 的 `SessionExpiryStore.NOTICE_TEXT`——同一句话在两个模块各有一份，
+ * **改一处必须两处一起改**。共享层看不见那个类（`SessionExpiryStore` 带 `Context`），
+ * 而开水页搬进共享层后要原样显示这句话，所以在这里留一份常量。
+ */
+const val SESSION_EXPIRED_NOTICE = "登录状态已过期，请重新登录"

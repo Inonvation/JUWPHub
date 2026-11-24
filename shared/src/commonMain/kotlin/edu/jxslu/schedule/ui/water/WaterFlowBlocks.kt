@@ -171,5 +171,6 @@ internal fun waterCostBreakdownText(result: UnlockResult): String {
 internal fun waterClock(totalSeconds: Int): String {
     val m = totalSeconds / 60
     val s = totalSeconds % 60
-    return "%02d:%02d".format(m, s)
+    // commonMain 没有 `String.format`：按原 `%02d:%02d` 的口径手写定宽拼接
+    return "${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
 }

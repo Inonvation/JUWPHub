@@ -86,6 +86,8 @@ import edu.jxslu.schedule.ui.ujing.UjingHistoryScreen
 import edu.jxslu.schedule.ui.ujing.UjingOrderScreen
 import edu.jxslu.schedule.ui.ujing.UjingScreen
 import edu.jxslu.schedule.ui.water.WaterScreen
+import edu.jxslu.schedule.ui.water.WaterViewModel
+import edu.jxslu.schedule.ui.water.openQiekjRecharge
 import edu.jxslu.schedule.ui.weather.WeatherScreen
 import edu.jxslu.schedule.ui.weather.WeatherSettingsScreen
 import edu.jxslu.schedule.ui.weather.WeatherViewModel
@@ -205,7 +207,24 @@ class SubpageActivity : ComponentActivity() {
                 viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
             )
             SubpageScreen.COURSE_TWEAK -> CourseTweakScreen(onBack = onBack)
-            SubpageScreen.WATER -> WaterScreen(onBack = onBack, autoStart = autoStart)
+            SubpageScreen.WATER -> WaterScreen(
+                onBack = onBack,
+                autoStart = autoStart,
+                // ViewModel 由宿主创建（design/ios-port.md §11.2 ①）：开水页与今日页 / 侧栏
+                // 共用 `Graph.qiekj` 那一个仓库实例，否则登录态与开水流程的 Mutex 会各持一份。
+                viewModel = viewModel(
+                    factory = WaterViewModel.Factory(
+                        Graph.qiekj(this),
+                        Services.current.qiekjWateringSessions(),
+                    ),
+                ),
+                // 「签到与偏好」那张卡读的是显示偏好（自动签到开关），与设置页同一份 ViewModel
+                prefsViewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
+                // 品牌位图是宿主的素材（`app/src/main/res/drawable`），共享层拿不到 `R`
+                brandIcon = R.drawable.ic_brand_pangguai,
+                // 拉起支付宝小程序是平台动作：共享层只有深链字符串，`Intent` 留在这里
+                onOpenRecharge = { openQiekjRecharge(this) },
+            )
             SubpageScreen.KVCX -> KvcxScreen(onBack = onBack)
             SubpageScreen.KVCX_ORDERS -> KvcxOrdersScreen(onBack = onBack)
             SubpageScreen.CAMPUS_CALENDAR -> CampusCalendarScreen(onBack = onBack)

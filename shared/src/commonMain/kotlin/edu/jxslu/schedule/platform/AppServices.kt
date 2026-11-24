@@ -4,6 +4,11 @@ import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
+import edu.jxslu.schedule.data.qiekj.BalanceData
+import edu.jxslu.schedule.data.qiekj.QiekjRepository
+import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
+import edu.jxslu.schedule.data.session.SessionExpirySink
+import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
@@ -217,6 +222,65 @@ interface AppServices {
      * iOS 侧对应 `CFBundleShortVersionString`。读不到就返回空串，页面写成 `v—`。
      */
     fun appVersion(): String
+
+    // ---- 胖乖生活 / 开水房（iOS 移植 T2，2026-11-25） ----
+    //
+    // 开水页（`ui/water`）搬进共享层带出来的五个成员。仓库与状态机早在共享层，
+    // 缺的是它读写的那几份**平台存储**与**桌面小组件**副作用。
+
+    /**
+     * 胖乖生活仓库（登录 / 余额 / 设备 / 开水 / 签到 / 账单）。
+     *
+     * **null = 本平台还没有凭证与订单快照的介质**。`QiekjRepository` 本身是纯编排，
+     * 但它要 `QiekjCredentialStore`（Android 是 `EncryptedSharedPreferences`）、
+     * `QiekjOrderStore`（Android 是普通 `SharedPreferences`，换成 JSON 文件等于让老用户
+     * 丢掉已有的 50 笔本地账单）与 [QiekjExpiryMarker]。iOS 要等 Keychain 版凭证存储
+     * （同 [yktCredentialStore] 的升级条件），在那之前开水页在 iOS 上没有入口——
+     * 不是「点了没反应」，是根本不构造这个页面。
+     */
+    fun qiekjRepository(): QiekjRepository?
+
+    /**
+     * 「正在出水」的本机会话登记（跨窗口展示的唯一真相源）。
+     *
+     * **非空**：它只有 `begin` / `clear` 两个写方法，没有读侧——开水页搬进共享层后
+     * 需要的正是这两件。读侧（`watering` 流）仍归今日页 / 侧栏（都在 `:app`）。
+     * iOS 侧给的是「登记不落地」的实现：iOS 没有今日页服务卡，这条状态目前没有读者。
+     */
+    fun qiekjWateringSessions(): QiekjWateringSessions
+
+    /**
+     * 桌面胖乖开水卡：清登录态后切回未登录形态（DESIGN §3.6「开水两卡」）。
+     *
+     * **默认空实现**：桌面小组件是 `androidx.glance`（Android 专有），iOS 没有这张卡，
+     * 所以这不是「以后补」的占位，而是本平台确实没有这个副作用。
+     */
+    suspend fun refreshQiekjWaterWidget() {}
+
+    /**
+     * 桌面胖乖开水卡：把刚取到的余额推给小组件（零额外请求，后台另有 2 小时闸门兜底）。
+     *
+     * **默认空实现**：理由同 [refreshQiekjWaterWidget]。
+     */
+    suspend fun pushQiekjWaterBalance(balance: BalanceData) {}
+
+    /**
+     * 「猜你想用」记一笔（今日页卡片的排序依据）。
+     *
+     * **默认空实现**：这张卡是今日页的一部分，iOS 侧还没移植今日页，也就没有读者。
+     * Android 侧转发 `Graph.recordGuessOrder`（进程作用域里 fire-and-forget）。
+     */
+    fun recordGuessOrder(target: GuessTarget) {}
+
+    /**
+     * 进页消费一次「登录状态已过期」标记（[SessionExpirySink] 写的那一条）。
+     *
+     * 返回 true = 这一轮确实有一条待提示的标记（**消费后即清**，同一轮只提示一次）。
+     *
+     * **默认 false**：iOS 侧还没有这条留痕的介质（`SessionExpirySink` 的 iOS 实现待接），
+     * 开水页因此不提示过期——那是真实结论，不是假实现。
+     */
+    fun consumeSessionExpiry(serviceId: String): Boolean = false
 }
 
 /**
