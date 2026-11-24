@@ -1101,7 +1101,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | 凭证存储 | `IosKeychain`（CoreFoundation）+ 六个第三方存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI）已写，**iOS 编译验证卡在 runner 容量** | 一卡通 / 教务（CAS）那两套仍返回 `null`：还要「CAS 学号 + 登录闸门」两样，它们在 `:app` 的 `CredentialVault` 里 |
 | 第三方仓库 | `qiekjRepository()` / `qzxyRepository()` / `ujingRepository()` / `wenquRepository()` / `kqcxSession()` 仍返回 `null` | 所以开水房 / 趣智 / U净 / 问渠四个页面**在 iOS 上没有入口**——不是点了没反应，是路由不给。凭证那一半已经接上 Keychain，缺的是订单快照 / 收藏 / 历史那几份 `KeyValuePrefs` 落点（各写一份 `appDataDir()` JSON 即可） |
 | 支付调起 | 一卡通走「收银台 URL 进 `WKWebView`」；胖乖 / 趣智走 `alipays://` 深链 | `Info.plist` 还没有 `LSApplicationQueriesSchemes`（`alipays` / `weixin`），深链会被系统拦 |
-| App 图标与启动屏 | `Info.plist` 有意不给（链路验证包） | 侧载后桌面是默认灰图标 |
+| App 图标 | **已补**（2026-11-25）：`iosApp/JUWPHub/Assets.xcassets/AppIcon.appiconset`，1024 单尺寸 universal。用 `tools/app-icon/source.png` 的**前景层**重新合成满幅图——原图把圆角与投影烤进了像素，直接用会与 iOS 遮罩叠成双层圆角 | 启动屏仍不给（`UILaunchScreen` 空 dict = 纯色） |
 
 **iOS 上现在能进的页面**（抽屉 31 条 + 4 个底栏 Tab）：今日、课表、教务汇总、我的、笔记库 / 课程分组 / 笔记详情、
 作业库 / 待办 / 课程分组 / 作业详情、理论课表、实验课表、教材、教学日历、学籍信息、学业完成情况、

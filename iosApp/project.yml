@@ -31,6 +31,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: edu.jxslu.schedule.ios
         PRODUCT_NAME: JUWPHub
         INFOPLIST_FILE: JUWPHub/Info.plist
+        # App 图标来自 JUWPHub/Assets.xcassets（1024 单尺寸，Xcode 14+ 的 universal 口径）。
+        # 源图是 tools/app-icon/source.png 的前景层重新合成的满幅图——**不要**直接用
+        # source.png：那版把圆角与投影烤进了像素，iOS 自己还会再套一层遮罩，变成双层圆角。
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # 只发 iPhone（这个 App 没有 iPad 布局，声明成 universal 反而会被审核要求截图）
         TARGETED_DEVICE_FAMILY: "1"
         # 生成的工程在 iosApp/ 下，所以 SRCROOT = iosApp/，共享模块在上一级

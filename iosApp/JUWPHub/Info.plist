@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- 只写必需项。App 图标与启动屏先不给：这一版是链路验证包，不出现在 App Store。 -->
+	<!-- 只写必需项。App 图标在 Assets.xcassets/AppIcon.appiconset（2026-11-25 补），启动屏仍不给。 -->
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh_CN</string>
 	<key>CFBundleExecutable</key>
