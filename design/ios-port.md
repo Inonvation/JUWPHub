@@ -732,6 +732,11 @@ agent 同时改（每个 agent 只改自己那几个文件、不跑 Gradle），
 
 排队时间不受控（macOS runner 容量）：今天见过 5 秒，也见过 27 分钟。**不要把 CI 当编辑器用。**
 
+iosMain 的**语法错误**本地一条都发现不了，代价是一次完整往返（2026-11-25：合并 S17/S18 时
+`MainViewController.kt` 多留了一个 `}`，Kotlin/Native 报 `308:1 Syntax error: Expecting a
+top level declaration`，整个 iosMain 编不过，白等 6 分钟）。合并动过 iosMain 的分支后，
+先用括号平衡扫一遍再推——纯词法检查，忽略注释与字符串字面量即可，27 个文件不到 1 秒。
+
 ### P3 iOS 壳与系统扩展（3–5 周）
 
 SwiftUI 容器 + `ComposeUIViewController`；WidgetKit 读 App Group 数据；通知授权引导；Live Activity；扫码。
@@ -846,6 +851,30 @@ KMP framework 由 Xcode 的 Build Phase 调 `./gradlew :shared:embedAndSignApple
   `JUWPHub.debug.dylib`（实测 59 MB），主二进制只剩壳，侧载后容易起不来。workflow 里有断言。
 - Kotlin 侧仍链 **debug** framework（`linkDebugFrameworkIosArm64`）：它与 Xcode 的优化级别无关，
   功能等价且 CI 快。出正式分发包时再换成 `linkReleaseFrameworkIosArm64`。
+
+### 7.1 macOS runner 标签实测（2026-11-25）
+
+用 `.github/workflows/runner-probe.yml` 一次性问出来的结果，别再靠猜：
+
+| 标签 | 实际镜像 | 架构 | macOS | Xcode | 可用 |
+|---|---|---|---|---|---|
+| `macos-15` | `macos-15-arm64` | arm64 | 15.8.2 | 16.4 | ✅ 主力 |
+| `macos-26` | `macos-26-arm64` | arm64 | 26.7.2 | 26.6 | ✅ 备用池 |
+| `macos-latest` | `macos-26-arm64` | arm64 | 26.7.2 | 26.6 | ✅ 等价于 26 |
+| `macos-15-intel` | — | **x86_64** | — | — | ❌ 架构不对 |
+| `macos-14` | — | — | — | — | ❌ 该标签已无 arm64 机器 |
+
+**两种 `cancelled` 要分清**，这是本节唯一容易误判的地方：
+
+| 现象 | 含义 | 处置 |
+|---|---|---|
+| 立刻 cancelled，`steps = 0`，注解 `The configuration 'xxx-arm64-us-default' is not supported` | **标签不支持** | 换标签，重试无用 |
+| 排 15 分钟后 cancelled，`runner_name` 为空，`steps = 0` | **池容量不足** | 等一会儿重试，或换到另一个 arm64 池 |
+
+第二种在 2026-11-24 16:11Z~16:45Z 连续命中 3 次（`45424609726` / `45425989497` / `45434305047`），
+同期 GitHub 状态页报 All Systems Operational，队列深度 0——纯容量争用。当时 `macos-15` 池
+恢复后同一个 commit 立刻跑起来了。**容量不足时换 `macos-26` 是可行的备用通道**（独立池、
+arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，换过去若失败先怀疑这一层。
 
 **不做**：不上架 App Store（抓第三方数据、非官方身份，审核过不了）；不用企业签/超级签分发（违规，
 随时集体吊销）；不把证书进 CI secrets（免费证书 7 天失效，签出来对任何设备都无效）。
