@@ -7,6 +7,8 @@
 - 参考 `F:\light-life-v3.0`；Base `https://userapi.qiekj.com/`
 - 做：登录、开水、余额、订单、充值深链、每日签到；签到只作用于当前登录账号，由用户手动触发或开启「打开软件自动签到」，不绕过广告、验证码、付费与风控
 - 实现在 `data/qiekj/` + `ui/water/`；Token 走 EncryptedSharedPreferences，禁止进日志
+  （iOS 移植 S11 起：数据层在 `shared/src/commonMain/.../data/qiekj/`，走 Ktor；
+  三份存储实现仍留在 `:app`，经 `QiekjCredentialStore` / `QiekjOrderStore` / `QiekjExpiryMarker` 接入）
 - **页面骨架（2026-11-05 改版，用户要求统一组件）**：`PageScaffoldColumn("胖乖生活")` →
   身份卡（`AccountHeroCard`：Wallet01 / 手机号掩码 / 「已登录」/「Token 仅存本机 · 不进云备份」/
   眼睛 / 「充值到胖乖账户」）→ 账户资产三列（`MetricsRow` + `MetricCell`：小票 / 积分 /
@@ -109,7 +111,8 @@
   `order/detail`、`goods/endWater`、`order/list` 九个端点的
   **响应体原文**（后两个 2026-10-14 补，为确认远程关阀与服务端账单字段的返回形态；
   `trade/check_device_status` 2026-10-16 已随「在线显示」整块删除、不再采样）
-  在 debug 包落 `filesDir/qiekj_debug/`（`data/qiekj/QiekjDebugDumpInterceptor.kt`；
+  在 debug 包落 `filesDir/qiekj_debug/`（`data/qiekj/QiekjDebugDumpPlugin.kt`，Ktor 的
+  `createClientPlugin`；2026-11-24 迁移前是 OkHttp `Interceptor`，判据与文件名格式不变；
   每个端点只留最新 40 份，落盘前把 `token` / `phone` 字段替换成 `<redacted>`；
   `Graph.qiekj` 按 `BuildConfig.DEBUG` 传目录，release 一个字节都不写）。
   为什么不在仓库层落盘：`SyncData` / `DeviceItem` / `GoodsDetailsData` 只声明了少数字段，
