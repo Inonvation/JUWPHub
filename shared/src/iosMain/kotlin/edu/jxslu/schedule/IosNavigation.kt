@@ -36,6 +36,8 @@ import edu.jxslu.schedule.ui.ai.AiSettingsScreen
 import edu.jxslu.schedule.ui.ai.AiSettingsViewModel
 import edu.jxslu.schedule.ui.me.hub.AccountsHubScreen
 import edu.jxslu.schedule.ui.campus.DormRepairScreen
+import edu.jxslu.schedule.ui.toolbox.CainiaoQueryScreen
+import edu.jxslu.schedule.ui.toolbox.ToolboxScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
@@ -148,6 +150,8 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     // 生活
     IosDrawerEntry("生活", IosRoute(SubpageScreen.INBOX), "收件箱"),
     IosDrawerEntry("生活", IosRoute(SubpageScreen.DORM_REPAIR), "宿舍报修"),
+    IosDrawerEntry("生活", IosRoute(SubpageScreen.TOOLBOX), "百宝箱"),
+    IosDrawerEntry("生活", IosRoute(SubpageScreen.TOOLBOX_CAINIAO), "菜鸟批量查"),
     IosDrawerEntry("生活", IosRoute(SubpageScreen.WEATHER), "天气"),
     IosDrawerEntry("生活", IosRoute(SubpageScreen.WEATHER_SETTINGS), "天气设置"),
     // 设置
@@ -423,6 +427,14 @@ internal fun IosRouteContent(
             }
             AiHistoryScreen(viewModel = vm, onBack = pop)
         }
+
+        // ---------------------------------------------------------------- 百宝箱
+        //
+        // 列表页与菜鸟批量查在 iOS 上可用；水印与拼接是纯位图管线（`android.graphics.Bitmap`），
+        // 留在 `:app`，两个入口传 null 后那两张工具卡不渲染。
+        SubpageScreen.TOOLBOX -> ToolboxScreen(onBack = pop)
+
+        SubpageScreen.TOOLBOX_CAINIAO -> CainiaoQueryScreen(onBack = pop)
 
         else -> IosNotPortedScreen(screen = route.screen, onBack = pop)
     }
