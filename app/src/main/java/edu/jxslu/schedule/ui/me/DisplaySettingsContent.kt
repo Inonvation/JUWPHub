@@ -29,6 +29,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -43,6 +45,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.BgScale
 import edu.jxslu.schedule.domain.CourseFilter
 import edu.jxslu.schedule.domain.GridFont
@@ -57,6 +60,7 @@ import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.week.ScheduleBackgroundThumb
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
@@ -90,14 +94,24 @@ fun DisplaySettingsContent(
     val days = ScheduleCalculator.visibleDays(prefs.showSaturday, prefs.showSunday).size
 
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // 背景图文件存储仍是 `:app` 的东西（解码压缩 + 私有目录）；VM 只收文件名并管顺序
+    val bgStore = remember(context) { Graph.scheduleBackground(context) }
     val bgImporting by viewModel.bgImporting.collectAsStateWithLifecycle()
     val bgNotice by viewModel.bgNotice.collectAsStateWithLifecycle()
     var bgViewerOpen by rememberSaveable { mutableStateOf(false) }
-    // 选图走系统 Photo Picker（零权限，与笔记插图同一口径）；取消选择时 uri 为 null，静默返回
+    // 选图走系统 Photo Picker（零权限，与笔记插图同一口径）；取消时 uri 为 null，静默返回
     val bgPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
-        if (uri != null) viewModel.importScheduleBackground(context, uri)
+        if (uri == null) {
+            viewModel.finishBackgroundImport(null)
+        } else {
+            scope.launch {
+                val name = bgStore.importUri(uri)
+                viewModel.finishBackgroundImport(name, failed = name == null)
+            }
+        }
     }
     // 失败提示是瞬时的：一直挂着会把下面的滑块往下顶
     LaunchedEffect(bgNotice) {
@@ -329,6 +343,7 @@ fun DisplaySettingsContent(
                 fileName = prefs.bgImageName,
                 importing = bgImporting,
                 onPick = {
+                    viewModel.beginBackgroundImport()
                     bgPicker.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                     )
@@ -380,7 +395,7 @@ fun DisplaySettingsContent(
                     onChange = viewModel::setBgImageScale,
                 )
                 TextButton(
-                    onClick = { viewModel.removeScheduleBackground(context) },
+                    onClick = { viewModel.removeScheduleBackground() },
                     modifier = Modifier.padding(top = 2.dp),
                 ) {
                     Text(

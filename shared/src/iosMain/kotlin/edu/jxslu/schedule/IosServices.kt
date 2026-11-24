@@ -27,6 +27,7 @@ import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
 import edu.jxslu.schedule.platform.AppServices
+import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -205,6 +206,17 @@ class IosServices : AppServices {
     override fun powerRepository(): PowerRepository = powerRepo
 
     override fun powerReadingStore(): PowerReadingStore = powerReadings
+
+    /**
+     * 课表页背景图：**iOS 侧还没有实现，返回 null**（iOS 移植 S17，2026-11-25）。
+     *
+     * 升级条件：在 `iosMain` 里实现 [ScheduleBackgroundFiles]，介质换成
+     * `NSTemporaryDirectory()`/沙箱 `appDataDir()` 下的 `schedule_bg/` 目录，解码压缩用
+     * `UIImage` + `UIGraphicsImageRenderer`（对应 Android 的 `ImageImport`：
+     * 长边钳到 `ScheduleBackground.MAX_SIDE`、超 `MAX_BYTES` 重编码成 JPEG）。
+     * 在那之前显示设置面板的「背景」整组不渲染——选图入口给一个点了没反应的按钮更糟。
+     */
+    override fun scheduleBackgroundFiles(): ScheduleBackgroundFiles? = null
 
     init {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，

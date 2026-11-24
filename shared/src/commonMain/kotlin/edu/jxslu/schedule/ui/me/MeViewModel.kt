@@ -1,18 +1,14 @@
 package edu.jxslu.schedule.ui.me
 
-import android.content.ClipboardManager
-import kotlinx.datetime.toKotlinLocalDate
-import android.content.Context
-import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.ui.widget.LifeWidgetSync
+import androidx.lifecycle.viewmodel.CreationExtras
 import edu.jxslu.schedule.data.prefs.DisplayPrefs
 import edu.jxslu.schedule.data.repo.ImportPreview
 import edu.jxslu.schedule.data.repo.ImportResult
 import edu.jxslu.schedule.data.repo.ScheduleRepository
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.BgScale
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseFilter
@@ -24,9 +20,11 @@ import edu.jxslu.schedule.domain.ThemePalette
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.TimeSlotRules
 import edu.jxslu.schedule.domain.Timetable
+import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.ImportTarget
 import edu.jxslu.schedule.ui.common.importSuccessText
-import edu.jxslu.schedule.ui.common.readTextFromUri
+import edu.jxslu.schedule.ui.common.readPlainText
 import edu.jxslu.schedule.ui.common.resolveImportTarget
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -43,7 +41,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
+import kotlin.reflect.KClass
 
 data class MeUiState(
     val loading: Boolean = true,
@@ -76,8 +75,44 @@ sealed interface OneShot {
     data class ConfirmImport(val preview: ImportPreview.Ok, val text: String) : OneShot
 }
 
+/**
+ * 「我的」与显示设置的共享 ViewModel（iOS 移植 S17 从 `:app` 搬进 `commonMain`，2026-11-25）。
+ *
+ * ## 为什么它是课表显示偏好的唯一写入通道
+ *
+ * `DisplaySettingsContent`（课表页顶栏眼睛那个面板）与 `WeekViewModel` 读的是同一份
+ * `DisplayPrefs`，但**写**只有这一条链：`WeekViewModel` 只读不写显示偏好，
+ * 面板里每一根滑块都落到本类的 `setXxx`。所以本类一旦搬进共享层，iOS 的显示设置
+ * 就与 Android 走同一份写入实现，不存在「两端各写一份偏好、字段慢慢漂移」。
+ *
+ * ## 搬过来改了什么（逐条）
+ *
+ * 1. 构造只吃 [ScheduleRepository]（与 `WeekViewModel` 同口径），不碰 `Context`。
+ * 2. `java.time.LocalDate.now()` → `AppClock.today()`（`kotlinx.datetime`）。
+ * 3. **平台动作收成参数或缝**，本类里不再出现 `Context` / `Uri` / `ClipboardManager`：
+ *    - 背景图选图：[beginBackgroundImport] / [finishBackgroundImport] 由宿主动作驱动，
+ *      文件落盘（解码压缩）留在平台侧；删旧文件走 `AppServices.scheduleBackgroundFiles()`。
+ *    - 导出 / 导入 JSON：文本归本类，读写文件归调起方（与 `WeekViewModel.csvText` 同口径）。
+ *    - 剪贴板导入：走 `ui/common/Clipboard.kt` 的 `readPlainText()`。
+ * 4. 主题换色后的桌面小组件重渲染走 `AppServices.onThemePaletteChanged()`（iOS 空实现）。
+ *
+ * ## 首帧那一次阻塞读照旧
+ *
+ * 见 [firstFrame] 的 KDoc：DataStore 的第一份数据必然晚于 UI 首帧，不阻塞读一次，
+ * 开关行会先按默认值画一遍再跳。本类搬进共享层后这段逻辑一字未改。
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
+
+    /**
+     * 课表页背景图的文件删除能力；**null = 本平台没接背景图落盘**（iOS 待 UIImage 解码实现）。
+     *
+     * 用 `runCatching` 兜住「Services 还没装」：本类的 JVM 单测不装装配根。
+     * 只删旧文件——写入与解码压缩都是平台动作（见 [finishBackgroundImport]）。
+     */
+    private val backgroundFiles: ScheduleBackgroundFiles? = runCatching {
+        Services.current.scheduleBackgroundFiles()
+    }.getOrNull()
 
     /** 六源合成：combine 无类型安全重载超过 5 个，课表配置先收进一个 data class。 */
     private val configFlow = combine(
@@ -138,7 +173,7 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
     ) { config, currentTimetableId, target ->
         // 「本周」只认学期内的周次（学期外 0 = 不显示 / 不在学期内）：
         // 裸 weekNumberOf 在学期结束后会涨到 30+，设置页与教务账号页会显示「第 37 周」
-        val week = ScheduleCalculator.todayWeekOf(config.semester, LocalDate.now().toKotlinLocalDate()) ?: 0
+        val week = ScheduleCalculator.todayWeekOf(config.semester, AppClock.today()) ?: 0
         MeUiState(
             loading = false,
             semester = config.semester,
@@ -154,7 +189,7 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
             configTargetId = target.id,
             configSemester = target.semester,
             configCourseCount = target.courseCount,
-            configWeek = ScheduleCalculator.todayWeekOf(target.semester, LocalDate.now().toKotlinLocalDate()) ?: 0,
+            configWeek = ScheduleCalculator.todayWeekOf(target.semester, AppClock.today()) ?: 0,
         )
     }.stateIn(
         viewModelScope,
@@ -204,7 +239,13 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
     // **不要再加回来**：需要这个值的页面自己从 `repo` 取，别在共用的 MeViewModel 上挂
     // 只有某一页用的流（它一被实例化就付阻塞读的代价）。
 
-    // ---- 背景图（DESIGN §4.21）：选图与移除都在 VM 里跑，转屏不丢进行中的导入 ----
+    // ---- 背景图（DESIGN §4.21）：选图由平台动作驱动，落偏好与删旧文件在 VM 里跑 ----
+    //
+    // 搬迁前这三个成员都在 VM 里，因为选图（Photo Picker）与解码压缩是 Android 专有物。
+    // 现在切成「平台动作 + VM 收尾」：平台负责弹选择器、解码、压缩、落盘并给回文件名，
+    // VM 负责**顺序**（落盘已完成 → 写偏好 → 删旧文件）与「处理中」闸门。
+    // 顺序仍然只能在 VM 里保证：反过来先删旧文件再写偏好，中间失败就是偏好指向一个
+    // 不存在的文件（渲染时空白，要等下次冷启动才自愈）。
 
     private val _bgImporting = MutableStateFlow(false)
 
@@ -223,28 +264,34 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
         _bgNotice.value = null
     }
 
-    /**
-     * 选一张背景图（DESIGN §4.21）：落盘 → 写偏好 → 删旧文件。
-     * 顺序不可乱：先删旧文件再写偏好，中间失败就是偏好指向一个不存在的文件。
-     */
-    fun importScheduleBackground(context: Context, uri: Uri) {
+    /** 平台动作开始（已弹出选图器）：置「处理中」并清掉上一次的提示。 */
+    fun beginBackgroundImport() {
         if (_bgImporting.value) return
         _bgImporting.value = true
         _bgNotice.value = null
+    }
+
+    /**
+     * 平台动作收尾。
+     *
+     * - [fileName] 非空 = 新图已落盘：写偏好，再删旧文件（顺序见上）。
+     * - [fileName] 为 null 且 [failed] = 读不出来，面板里提示一句。
+     * - [fileName] 为 null 且 `!failed` = 用户取消：**静默**，只解除「处理中」——
+     *   取消不该报错，搬迁前的 Android 行为就是点取消什么都不发生。
+     */
+    fun finishBackgroundImport(fileName: String?, failed: Boolean = false) {
+        if (fileName == null) {
+            _bgImporting.value = false
+            if (failed) _bgNotice.value = "这张图读不出来，换一张试试"
+            return
+        }
         viewModelScope.launch {
             try {
-                val app = context.applicationContext
-                val store = Graph.scheduleBackground(app)
                 // 直接读一次偏好，不读 uiState：uiState 是 WhileSubscribed 的，
                 // 没有订阅者时它的 value 是默认值，旧文件名会读成 null，旧图就删不掉了
                 val previous = repo.displayPrefs.first().bgImageName
-                val name = store.importUri(uri)
-                if (name == null) {
-                    _bgNotice.value = "这张图读不出来，换一张试试"
-                    return@launch
-                }
-                repo.setBackgroundImage(name)
-                if (previous != null && previous != name) store.delete(previous)
+                repo.setBackgroundImage(fileName)
+                if (previous != null && previous != fileName) backgroundFiles?.delete(previous)
             } finally {
                 _bgImporting.value = false
             }
@@ -252,12 +299,11 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
     }
 
     /** 移除背景：先清偏好再删文件（渲染层立即回到无背景，文件删失败也只是留个孤儿，冷启动会扫掉）。 */
-    fun removeScheduleBackground(context: Context) {
+    fun removeScheduleBackground() {
         viewModelScope.launch {
-            val store = Graph.scheduleBackground(context.applicationContext)
             val name = repo.displayPrefs.first().bgImageName
             repo.setBackgroundImage(null)
-            store.delete(name)
+            backgroundFiles?.delete(name)
         }
     }
 
@@ -288,35 +334,39 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
         }
     }
 
-    fun exportJson(context: Context, uri: Uri) {
+    /**
+     * 导出课表 JSON：**文本归本类，落盘归调起方**（与 `WeekViewModel.csvText` / `jsonText`
+     * 同一口径——`ContentResolver` / `Uri` 是 Android 专有物，共享层看不见）。
+     *
+     * [write] 返回 false = 用户取消或写入失败，两种情形都只说一句「导出失败」。
+     */
+    fun exportJson(write: (text: String) -> Boolean) {
         viewModelScope.launch {
-            runCatching {
-                val json = repo.exportJson()
-                context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
-                    out.write(json.toByteArray(Charsets.UTF_8))
-                } ?: error("无法打开输出流")
-            }.onSuccess {
-                _oneShot.value = OneShot.Message("已导出课表 JSON")
-            }.onFailure {
+            val json = runCatching { repo.exportJson() }.getOrElse {
                 _oneShot.value = OneShot.Message("导出失败：${it.message}")
-            }
-        }
-    }
-
-    fun importFromUri(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            val text = readTextFromUri(context, uri)
-            if (text.isNullOrBlank()) {
-                _oneShot.value = OneShot.Message("读取文件失败")
                 return@launch
             }
-            prepareImport(text)
+            val ok = runCatching { write(json) }.getOrDefault(false)
+            _oneShot.value = if (ok) {
+                OneShot.Message("已导出课表 JSON")
+            } else {
+                OneShot.Message("导出失败：写入被取消或出错")
+            }
         }
     }
 
-    fun importFromClipboard(context: Context) {
-        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val text = cm.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
+    /** 导入一段 JSON 文本（读文件归调起方）；null / 空 = 读取失败。 */
+    fun importFromText(text: String?) {
+        if (text.isNullOrBlank()) {
+            _oneShot.value = OneShot.Message("读取文件失败")
+            return
+        }
+        viewModelScope.launch { prepareImport(text) }
+    }
+
+    /** 从剪贴板导入（剪贴板读写是 `ui/common/Clipboard.kt` 的缝，两端都有实现）。 */
+    fun importFromClipboard() {
+        val text = readPlainText()
         if (text.isNullOrBlank()) {
             _oneShot.value = OneShot.Message("剪贴板为空")
             return
@@ -438,8 +488,9 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
     fun setThemePalette(value: ThemePalette) {
         viewModelScope.launch {
             repo.setThemePalette(value)
-            // 推送点先例：写完立即重渲染（LifeWidgetSync 零网络重跑快照），桌面马上换色
-            runCatching { LifeWidgetSync.onThemePaletteChanged(Graph.appContext) }
+            // 推送点先例：写完立即重渲染（Android 侧 LifeWidgetSync 零网络重跑快照），桌面马上换色。
+            // iOS 侧没有桌面小组件，装配根给的是空实现（见 AppServices.onThemePaletteChanged）。
+            runCatching { Services.current.onThemePaletteChanged() }
         }
     }
 
@@ -508,9 +559,9 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
     private fun throttledViewPrefsWrite(write: suspend () -> Unit) {
         viewPrefsWriteJob?.cancel()
         viewPrefsWriteJob = viewModelScope.launch {
-            val now = System.currentTimeMillis()
+            val now = AppClock.nowMillis()
             if (now < viewPrefsWriteEarliest) delay(viewPrefsWriteEarliest - now)
-            viewPrefsWriteEarliest = System.currentTimeMillis() + VIEW_PREFS_WRITE_MIN_INTERVAL_MS
+            viewPrefsWriteEarliest = AppClock.nowMillis() + VIEW_PREFS_WRITE_MIN_INTERVAL_MS
             write()
         }
     }
@@ -547,7 +598,7 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
 
     fun setShowGridLines(value: Boolean) = viewModelScope.launch { repo.setShowGridLines(value) }
 
-    // ---- 课表页背景图的数值参数（DESIGN §4.21）。选图与移除见 importScheduleBackground ----
+    // ---- 课表页背景图的数值参数（DESIGN §4.21）。选图与移除见 beginBackgroundImport ----
 
     fun setBgImageOpacity(value: Float) = throttledViewPrefsWrite { repo.setBgImageOpacity(value) }
 
@@ -557,9 +608,18 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
 
     fun setBgImageScale(value: BgScale) = throttledViewPrefsWrite { repo.setBgImageScale(value) }
 
+    /**
+     * `:app` 侧 `viewModel(factory = MeViewModel.Factory(repo))` 用的工厂。
+     *
+     * **重写的是 KMP 那个签名**（`KClass` + `CreationExtras`）：`lifecycle-viewmodel:2.8.7`
+     * 的 `Factory` 在 commonMain 只声明这一个，老的 `Class<T>` 重载是 JVM 侧的兼容默认实现，
+     * 在共享层根本看不见（iOS 移植 S17 搬迁时编译器直接报 `'create' overrides nothing`）。
+     * Android 侧 `viewModel(factory = ...)` 走的也是 KClass 那条，行为不变。
+     */
     class Factory(private val repo: ScheduleRepository) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T = MeViewModel(repo) as T
+        override fun <T : ViewModel> create(modelClass: KClass<T>, extras: CreationExtras): T =
+            MeViewModel(repo) as T
     }
 
     private companion object {

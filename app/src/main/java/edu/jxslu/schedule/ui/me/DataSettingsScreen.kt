@@ -32,7 +32,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
@@ -41,6 +43,7 @@ import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.ImportTargetDialogHost
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.importPreviewNote
+import edu.jxslu.schedule.ui.common.readTextFromUri
 import edu.jxslu.schedule.ui.common.showNotice
 
 /**
@@ -60,6 +63,7 @@ fun DataSettingsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val oneShot by viewModel.oneShot.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     var showClearConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(oneShot) {
@@ -79,15 +83,26 @@ fun DataSettingsScreen(
         }
     }
 
+    // 落盘归本页：VM 只产出 JSON 文本（与 `WeekViewModel.jsonText` 同口径，共享层看不见 Uri）
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
-        if (uri != null) viewModel.exportJson(context, uri)
+        if (uri != null) {
+            viewModel.exportJson { text ->
+                runCatching {
+                    context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                        out.write(text.toByteArray())
+                    }
+                }.getOrNull() != null
+            }
+        }
     }
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
-        if (uri != null) viewModel.importFromUri(context, uri)
+        if (uri != null) {
+            scope.launch { viewModel.importFromText(readTextFromUri(context, uri)) }
+        }
     }
 
     // 根因：迁到 SubpageActivity 独立窗口后没有外层 Scaffold 垫状态栏，
@@ -142,7 +157,7 @@ fun DataSettingsScreen(
                 ) { Text("从文件导入 JSON…") }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
-                    onClick = { viewModel.importFromClipboard(context) },
+                    onClick = { viewModel.importFromClipboard() },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("从剪贴板导入") }
             }

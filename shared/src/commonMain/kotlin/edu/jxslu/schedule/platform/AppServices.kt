@@ -135,6 +135,30 @@ interface AppServices {
 
     /** 电表读数本机记录（DESIGN §3.13「用电统计」）：本地表，两端都能读写。 */
     fun powerReadingStore(): PowerReadingStore
+
+    // ---- 课表页背景图 / 主题换色（iOS 移植 S17，2026-11-25） ----
+    //
+    // 这两个是「我的」与显示设置搬进共享层带出来的。一个需要平台图像能力（可空），
+    // 一个只是通知（iOS 空实现即可）——按同一把尺子分开写，别为了对称都做成可空。
+
+    /**
+     * 课表页背景图的文件删除（DESIGN §4.21）。
+     *
+     * **null = 本平台没接背景图落盘**：iOS 侧还没有 `UIImage` 的解码压缩实现，
+     * 显示设置面板里的「背景」整组据此不渲染。Android 侧转接 `Graph.scheduleBackground`。
+     */
+    fun scheduleBackgroundFiles(): ScheduleBackgroundFiles?
+
+    /**
+     * 主题配色改动后的重渲染通知（Android 是桌面小组件的胶囊色）。
+     *
+     * **给空实现而不是可空**：这不是用户可见的入口，而是一条「改完通知一声」的副作用。
+     * iOS 没有桌面小组件（WidgetKit 那条要单独排，见 `design/ios-port.md` §1.4），
+     * 所以默认实现就是什么都不做——调用方也不用写 `?.invoke()`。
+     *
+     * `suspend`：Android 侧要重跑一次小组件快照（读库 + 拼 RemoteViews），是挂起调用。
+     */
+    suspend fun onThemePaletteChanged() {}
 }
 
 /**

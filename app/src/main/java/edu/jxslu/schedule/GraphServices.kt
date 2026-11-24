@@ -17,6 +17,8 @@ import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
 import edu.jxslu.schedule.platform.AppServices
+import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
+import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 
 /**
  * Android 侧的共享服务装配（iOS 移植 M1，2026-11-25）。
@@ -74,4 +76,29 @@ class GraphServices(private val context: Context) : AppServices {
     override fun powerRepository(): PowerRepository = Graph.powerRepository(appContext)
 
     override fun powerReadingStore(): PowerReadingStore = Graph.powerReadingStore(appContext)
+
+    // ---- 课表页背景图 / 主题换色（S17） ----
+    //
+    // 背景图只转接「删旧文件」这一件事：选图与解码压缩仍是 `:app` 的平台动作
+    // （`ScheduleBackgroundStore.importUri`），文件名由平台动作回传给 ViewModel。
+    // 写偏好与删旧文件的顺序由 ViewModel 保证，这里不掺和。
+
+    private val backgroundFiles: ScheduleBackgroundFiles by lazy {
+        val store = Graph.scheduleBackground(appContext)
+        object : ScheduleBackgroundFiles {
+            override suspend fun delete(fileName: String?) = store.delete(fileName)
+        }
+    }
+
+    override fun scheduleBackgroundFiles(): ScheduleBackgroundFiles = backgroundFiles
+
+    /**
+     * 主题配色改完通知桌面小组件重渲染（`LifeWidgetSync` 零网络重跑快照）。
+     *
+     * 与搬迁前 `MeViewModel` 里那一行**行为一致**，只是从 ViewModel 挪到了装配根——
+     * 共享层不该知道「桌面小组件」这种东西存在。
+     */
+    override suspend fun onThemePaletteChanged() {
+        LifeWidgetSync.onThemePaletteChanged(appContext)
+    }
 }
