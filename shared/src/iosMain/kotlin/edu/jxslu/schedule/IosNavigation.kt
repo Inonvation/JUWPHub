@@ -35,6 +35,7 @@ import edu.jxslu.schedule.ui.ai.AiHistoryViewModel
 import edu.jxslu.schedule.ui.ai.AiSettingsScreen
 import edu.jxslu.schedule.ui.ai.AiSettingsViewModel
 import edu.jxslu.schedule.ui.me.hub.AccountsHubScreen
+import edu.jxslu.schedule.ui.campus.DormRepairScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.exam.ExamScreen
@@ -131,6 +132,7 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     IosDrawerEntry("钱包", IosRoute(SubpageScreen.CAMPUS_STATEMENT), "消费流水"),
     // 生活
     IosDrawerEntry("生活", IosRoute(SubpageScreen.INBOX), "收件箱"),
+    IosDrawerEntry("生活", IosRoute(SubpageScreen.DORM_REPAIR), "宿舍报修"),
     IosDrawerEntry("生活", IosRoute(SubpageScreen.WEATHER), "天气"),
     // 设置
     IosDrawerEntry("设置", IosRoute(SubpageScreen.DATA_SETTINGS), "数据与备份"),
@@ -293,6 +295,17 @@ internal fun IosRouteContent(
 
         // ---------------------------------------------------------------- 设置
         SubpageScreen.DATA_SETTINGS -> DataSettingsScreen(onBack = pop, viewModel = meViewModel)
+
+        // ---------------------------------------------------------------- 宿舍报修
+        //
+        // 页面读本机快照（`dormRepairStore()`，两端同一份 JSON）；两个平台动作传 null：
+        // 「去学工报修页核对」要打开学工 WebView（iOS 还没搬），「下拉刷新」要
+        // `DormRepairSync`（带 WebView 登录态，还在 `:app`）。对应入口整行不渲染，
+        // 本机缓存照常展示。
+        SubpageScreen.DORM_REPAIR -> DormRepairScreen(
+            onBack = pop,
+            focusItemId = route.arg,
+        )
 
         // ---------------------------------------------------------------- 账号中心
         //
