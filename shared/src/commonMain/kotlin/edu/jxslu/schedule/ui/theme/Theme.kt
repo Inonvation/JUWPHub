@@ -1,14 +1,11 @@
 package edu.jxslu.schedule.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.platform.LocalContext
 import edu.jxslu.schedule.domain.ThemePalette
 
 @Composable
@@ -18,14 +15,10 @@ fun JuwTheme(
     palette: ThemePalette = ThemePalette.SkyBlue,
     content: @Composable () -> Unit,
 ) {
-    // 优先级：动态取色（Material You，Android 12+，默认关）> 内置配色 > 晴空蓝兜底
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        else -> paletteScheme(palette, darkTheme)
-    }
+    // 优先级：动态取色（Material You，默认关）> 内置配色 > 晴空蓝兜底。
+    // 动态取色是平台缝：Android 12+ 读壁纸主色，iOS 没有这套机制、返回 null 直接落到内置配色。
+    val colorScheme = (if (dynamicColor) platformDynamicColorScheme(darkTheme) else null)
+        ?: paletteScheme(palette, darkTheme)
     MaterialTheme(
         colorScheme = colorScheme,
         typography = JuwTypography,
@@ -42,3 +35,15 @@ fun JuwTheme(
         }
     }
 }
+
+/**
+ * 动态取色（Material You）的平台缝（iOS 移植 P2）。
+ *
+ * Android 12+ 用 `dynamicLightColorScheme` / `dynamicDarkColorScheme` 从壁纸取主色；
+ * iOS 没有对应机制，`actual` 恒返回 null，[JuwTheme] 就落到用户选的内置配色。
+ *
+ * 返回值可空是关键：判断「这台设备支不支持动态取色」不该由公共代码问系统版本，
+ * 那是平台自己的事。
+ */
+@Composable
+internal expect fun platformDynamicColorScheme(darkTheme: Boolean): ColorScheme?

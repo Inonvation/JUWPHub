@@ -1,13 +1,10 @@
 package edu.jxslu.schedule.ui.theme
 
-import android.provider.Settings
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
 
 /**
  * 全 App 动效口径（DESIGN §3.2「动效」）。
@@ -117,17 +114,19 @@ object Motion {
  * 用法：`if (rememberAnimationsEnabled()) { …无限动画… } else { …静止态… }`。
  * 注意**别**用它去关一次性过渡（`AnimatedVisibility` / `animateColorAsState`）——那些是
  * 状态变化的交代，关掉反而让人看不出发生了什么；系统设置的本意也是"少动"，不是"别交代"。
+ *
+ * 读取口径是平台缝（`rememberPlatformAnimationsEnabled`）：Android 读
+ * `Settings.Global.ANIMATOR_DURATION_SCALE`，iOS 读 `UIAccessibilityIsReduceMotionEnabled()`。
  */
 @Composable
-fun rememberAnimationsEnabled(): Boolean {
-    val context = LocalContext.current
-    return remember(context) {
-        runCatching {
-            Settings.Global.getFloat(
-                context.contentResolver,
-                Settings.Global.ANIMATOR_DURATION_SCALE,
-                1f,
-            ) > 0f
-        }.getOrDefault(true)
-    }
-}
+fun rememberAnimationsEnabled(): Boolean = rememberPlatformAnimationsEnabled()
+
+/**
+ * 平台侧的实现（iOS 移植 P2）。
+ *
+ * 做成 `@Composable` 而不是普通函数，是因为 Android 要拿 `LocalContext` 读 `Settings.Global`，
+ * 而且原实现是 `remember(context)`——换 Context 才重读。保留 Composable 形状才能把
+ * 「一次组合内只读一次」这个口径原样带过来，不用退化成每帧读系统属性。
+ */
+@Composable
+internal expect fun rememberPlatformAnimationsEnabled(): Boolean
