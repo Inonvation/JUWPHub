@@ -1,6 +1,8 @@
 package edu.jxslu.schedule.ui.jw
 
 import androidx.compose.foundation.background
+import kotlinx.datetime.toJavaLocalDate
+import kotlinx.datetime.toKotlinLocalDate
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -105,7 +107,7 @@ fun JwScheduleListScreen(kind: CourseKind, onBack: () -> Unit) {
     // 「本周」只认学期内的周次：学期外给 null（没有可回的周次）。
     // 用裸 weekNumberOf 的话，切到上学期课表后「回到本周」会永远挂着点不掉（同课表页，2026-11-05）
     val todayWeek = remember(semester) {
-        ScheduleCalculator.todayWeekOf(semester, LocalDate.now())
+        ScheduleCalculator.todayWeekOf(semester, LocalDate.now().toKotlinLocalDate())
     }
 
     // 周次状态：数据就绪前不定值（否则 Pager 先渲染第 1 周再跳本周，与课表页同一坑）。
@@ -161,7 +163,7 @@ fun JwScheduleListScreen(kind: CourseKind, onBack: () -> Unit) {
                 todayWeek = todayWeek,
                 totalWeeks = totalWeeks,
                 monthLabel = ScheduleOverrides.dateOf(semester, displayWeek, 1)
-                    ?.let { "${it.monthValue}月" },
+                    ?.let { "${it.monthNumber}月" },
                 onPrev = { w -> shiftPager(pagerState, w, totalWeeks, pagerScope) },
                 onNext = { w -> shiftPager(pagerState, w, totalWeeks, pagerScope) },
                 onBackToThisWeek = { w -> shiftPager(pagerState, w, totalWeeks, pagerScope) },
@@ -332,7 +334,7 @@ private fun WeekDayList(
             item(key = "d$day") {
                 DayHeader(
                     day = day,
-                    date = date,
+                    date = date?.toJavaLocalDate(),
                     isToday = isToday,
                     count = dayCourses.size,
                     suspended = suspended,
@@ -343,7 +345,7 @@ private fun WeekDayList(
                 dayCourses.isNotEmpty() -> items(dayCourses, key = { "d${day}c${it.id}" }) { course ->
                     ScheduleDayCard(course = course, slots = slots)
                 }
-                suspended -> item(key = "d${day}s") { SuspendedCard(date) }
+                suspended -> item(key = "d${day}s") { SuspendedCard(date?.toJavaLocalDate()) }
                 else -> item(key = "d${day}e") { FreeCard() }
             }
         }

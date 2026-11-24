@@ -77,6 +77,7 @@ import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.Course
+import kotlinx.datetime.toJavaLocalDate
 import edu.jxslu.schedule.domain.DormRepairRecord
 import edu.jxslu.schedule.domain.DormRepairRules
 import edu.jxslu.schedule.domain.GuessPick
@@ -607,7 +608,7 @@ fun TodayScreen(
                                 text = buildString {
                                     // 日期用 M/d 短式（2026-10-20）：同一行还要放提示句，
                                     // 「10月20日」在 360dp 上会先被挤掉周次
-                                    append("${state.date.monthValue}/${state.date.dayOfMonth}")
+                                    append("${state.date.monthNumber}/${state.date.dayOfMonth}")
                                     append(" 周${dayLabel(state.day)}")
                                     if (state.week > 0) append(" · 第 ${state.week} 周")
                                 },
@@ -1261,7 +1262,7 @@ private fun TodayContent(
                 item(key = "homework") {
                     HomeworkTodayCard(
                         pending = homework,
-                        today = state.date,
+                        today = state.date.toJavaLocalDate(),
                         onClick = onOpenHomeworkTodo,
                     )
                 }

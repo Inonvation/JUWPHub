@@ -18,6 +18,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.LocalTimeLike
 import edu.jxslu.schedule.domain.nextTodayBoundaryMinutes
 import kotlinx.coroutines.flow.first
+import kotlinx.datetime.toKotlinLocalDate
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.TimeUnit
@@ -98,7 +99,9 @@ internal object TodayWidgetRefresh {
 
         val zone = ZoneId.systemDefault()
         val triggerAtMillis: Long
-        val boundary = nextTodayBoundaryMinutes(semester, slots, courses, today, now, overrides)
+        val boundary = nextTodayBoundaryMinutes(
+            semester, slots, courses, today.toKotlinLocalDate(), now, overrides,
+        )
         if (boundary != null) {
             triggerAtMillis = today.atStartOfDay(zone).plusMinutes(boundary.toLong()).toInstant().toEpochMilli()
         } else {

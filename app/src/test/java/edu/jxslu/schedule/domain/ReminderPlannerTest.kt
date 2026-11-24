@@ -4,9 +4,9 @@ import edu.jxslu.schedule.data.DefaultData
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.LocalTime
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
 
 /**
  * 上课提醒的时刻计算（DESIGN §3.7）。
@@ -40,13 +40,13 @@ class ReminderPlannerTest {
     )
 
     private fun at(hour: Int, minute: Int): LocalDateTime =
-        LocalDateTime.of(thursday, LocalTime.of(hour, minute))
+        LocalDateTime(thursday, LocalTime(hour, minute))
 
     @Test
     fun nextReminder_isStartMinusLead() {
         val plan = nextReminderPlan(semester, slots, courses, at(7, 0), leadMinutes = 10)
         assertEquals(10 * 60 + 15, plan?.startMinutes)
-        assertEquals(LocalDateTime.of(thursday, LocalTime.of(10, 5)), plan?.triggerAt)
+        assertEquals(LocalDateTime(thursday, LocalTime(10, 5)), plan?.triggerAt)
     }
 
     @Test
@@ -94,10 +94,10 @@ class ReminderPlannerTest {
     @Test
     fun nextClassStart_isStartItself() {
         val plan = nextClassStartPlan(semester, slots, courses, at(7, 0))
-        assertEquals(LocalDateTime.of(thursday, LocalTime.of(10, 15)), plan?.startAt)
+        assertEquals(LocalDateTime(thursday, LocalTime(10, 15)), plan?.startAt)
         // 10:08：10:15 的「开始」点还在，而它的去重键与提前量点相同（前缀在存储层区分）
         val soon = nextClassStartPlan(semester, slots, courses, at(10, 8))
-        assertEquals(LocalDateTime.of(thursday, LocalTime.of(10, 15)), soon?.startAt)
+        assertEquals(LocalDateTime(thursday, LocalTime(10, 15)), soon?.startAt)
     }
 
     @Test
@@ -105,7 +105,7 @@ class ReminderPlannerTest {
         // 10:08：3-4 节的触发点 10:05 已过（闹钟丢失场景），下一个是 5-6 节
         val plan = nextReminderPlan(semester, slots, courses, at(10, 8), leadMinutes = 10)
         assertEquals(2L, plan?.course?.id)
-        assertEquals(LocalDateTime.of(thursday, LocalTime.of(13, 50)), plan?.triggerAt)
+        assertEquals(LocalDateTime(thursday, LocalTime(13, 50)), plan?.triggerAt)
     }
 
     @Test
@@ -133,7 +133,7 @@ class ReminderPlannerTest {
             customEndTime = "13:10",
         )
         val plan = nextReminderPlan(semester, slots, listOf(custom), at(7, 0), leadMinutes = 10)
-        assertEquals(LocalDateTime.of(thursday, LocalTime.of(12, 20)), plan?.triggerAt)
+        assertEquals(LocalDateTime(thursday, LocalTime(12, 20)), plan?.triggerAt)
     }
 
     @Test
@@ -145,7 +145,7 @@ class ReminderPlannerTest {
 
     @Test
     fun outOfTerm_returnsNull() {
-        val afterTerm = LocalDateTime.of(LocalDate.parse("2027-02-01"), LocalTime.of(7, 0))
+        val afterTerm = LocalDateTime(LocalDate.parse("2027-02-01"), LocalTime(7, 0))
         assertNull(nextReminderPlan(semester, slots, courses, afterTerm, 10))
     }
 
@@ -213,6 +213,6 @@ class ReminderPlannerTest {
         val plan = nextReminderPlan(semester, slots, courses + borrowed, at(7, 0), leadMinutes = 10, overrides = overrides)
         // 触发点 = 借来的课（5-6 节 14:00）− 10 分钟
         assertEquals(9L, plan?.course?.id)
-        assertEquals(LocalDateTime.of(thursday, LocalTime.of(13, 50)), plan?.triggerAt)
+        assertEquals(LocalDateTime(thursday, LocalTime(13, 50)), plan?.triggerAt)
     }
 }

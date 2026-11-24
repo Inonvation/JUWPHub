@@ -1,6 +1,8 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.plus
+import kotlinx.datetime.LocalDate
 
 /**
  * AI 调课的 prompt 组装与脱敏（DESIGN §4.39 / §4.40，2026-10-06）。
@@ -99,14 +101,14 @@ object AiSchedulePrompt {
         return buildString {
             append("今天是 ").append(today).append("（")
             if (ScheduleCalculator.isWeekInTerm(semester, week)) {
-                append("第").append(week).append("周 ").append(weekdayLabel(today.dayOfWeek.value))
+                append("第").append(week).append("周 ").append(weekdayLabel(today.dayOfWeek.ordinal + 1))
             } else {
                 append("不在学期内")
             }
             append("）\n")
             for (w in 1..semester.totalWeeks) {
-                val from = monday.plusWeeks((w - 1).toLong())
-                val to = from.plusDays(6)
+                val from = monday.plus(DatePeriod(days = (w - 1) * 7))
+                val to = from.plus(DatePeriod(days = 6))
                 append("第").append(w).append("周：").append(from).append(" ~ ").append(to).append("\n")
             }
         }.trim()
@@ -122,7 +124,7 @@ object AiSchedulePrompt {
         courses: List<Course>,
         maskTeacher: Boolean,
         semester: SemesterConfig? = null,
-        today: LocalDate = LocalDate.now(),
+        today: LocalDate = AppClock.today(),
         existingOverrides: List<ScheduleOverride> = emptyList(),
     ): String = buildString {
         append("【我的课表】\n").append(listing(courses, maskTeacher))

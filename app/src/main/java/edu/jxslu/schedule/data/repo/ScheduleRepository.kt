@@ -69,6 +69,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.datetime.toKotlinLocalDate
 import java.time.LocalDate
 
 /**
@@ -771,11 +772,13 @@ class ScheduleRepository(
             CurrentTimetableRules.Candidate(
                 timetableId = entity.id,
                 term = entity.term,
-                startDate = config?.startDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+                startDate = config?.startDate
+                    ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                    ?.toKotlinLocalDate(),
                 totalWeeks = config?.totalWeeks ?: 0,
             )
         }
-        val picked = CurrentTimetableRules.pick(candidates, today, preferredTerm) ?: return false
+        val picked = CurrentTimetableRules.pick(candidates, today.toKotlinLocalDate(), preferredTerm) ?: return false
         if (prefs.currentTimetableId.first() == picked) return false
         prefs.setCurrentTimetable(picked)
         return true

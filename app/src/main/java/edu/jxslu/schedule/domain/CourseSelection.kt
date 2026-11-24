@@ -1,8 +1,10 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.ZoneId
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toInstant
 
 /**
  * 一条选课记录（DESIGN §4.35）：教务「学生选课中心 → 选课结果查询」里的一行选课日志
@@ -118,17 +120,17 @@ object SelectionRounds {
      * 只解析到一个 → 当开始时刻、结束为 null；一个都没有 → (null, null)。
      * **解析失败不抛**：展示回退原文，提醒跳过。
      */
-    fun parseTimeRange(text: String, zone: ZoneId = ZoneId.systemDefault()): Pair<Long?, Long?> {
+    fun parseTimeRange(text: String, zone: TimeZone = TimeZone.currentSystemDefault()): Pair<Long?, Long?> {
         val dateTimes = dateTimeRe.findAll(text).mapNotNull { m ->
             runCatching {
-                LocalDateTime.of(
+                LocalDateTime(
                     m.groupValues[1].toInt(),
                     m.groupValues[2].toInt(),
                     m.groupValues[3].toInt(),
                     m.groupValues[4].toInt(),
                     m.groupValues[5].toInt(),
                     m.groupValues[6].toIntOrNull() ?: 0,
-                ).atZone(zone).toInstant().toEpochMilli()
+                ).toInstant(zone).toEpochMilliseconds()
             }.getOrNull()
         }.toList()
         if (dateTimes.size >= 2) return dateTimes[0] to dateTimes[1]
@@ -136,11 +138,11 @@ object SelectionRounds {
 
         val dates = dateRe.findAll(text).mapNotNull { m ->
             runCatching {
-                LocalDate.of(
+                LocalDate(
                     m.groupValues[1].toInt(),
                     m.groupValues[2].toInt(),
                     m.groupValues[3].toInt(),
-                ).atStartOfDay(zone).toInstant().toEpochMilli()
+                ).atStartOfDayIn(zone).toEpochMilliseconds()
             }.getOrNull()
         }.toList()
         if (dates.size >= 2) {

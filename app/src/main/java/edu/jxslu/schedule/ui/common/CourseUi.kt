@@ -47,7 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseKind
-import edu.jxslu.schedule.domain.MONTH_DAY_FORMAT
+import edu.jxslu.schedule.domain.monthDayText
 import edu.jxslu.schedule.domain.WeeksText
 import edu.jxslu.schedule.domain.compactPosition
 import edu.jxslu.schedule.domain.dayLabel
@@ -610,7 +610,7 @@ fun courseTint(courses: List<Course>, courseName: String): Color =
         ?: MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
 
 /** 时间戳 → `9月21日`（课程库「最近更新」文案口径）。 */
-fun epochMonthDay(millis: Long): String =
-    MONTH_DAY_FORMAT.format(
-        java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault()).toLocalDate(),
-    )
+fun epochMonthDay(millis: Long): String {
+    val date = java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault())
+    return monthDayText(date.monthValue, date.dayOfMonth)
+}

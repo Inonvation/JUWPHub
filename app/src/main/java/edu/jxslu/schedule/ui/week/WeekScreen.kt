@@ -826,7 +826,7 @@ private fun OverrideInfoDialog(detail: ScheduleOverrides.Detail, onDismiss: () -
         title = buildString {
             val date = detail.date
             if (date != null) {
-                append(date.monthValue).append("月").append(date.dayOfMonth).append("日 ")
+                append(date.monthNumber).append("月").append(date.dayOfMonth).append("日 ")
             }
             append("周").append(DAY_NAMES.getOrNull(detail.day - 1) ?: detail.day.toString())
             append(" · 第 ").append(detail.week).append(" 周")

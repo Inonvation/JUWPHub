@@ -1,9 +1,9 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -18,12 +18,10 @@ import org.junit.Test
 class PowerUsageTest {
 
     /** 固定时区：键与均摊都跟本地日历走，跟着机器时区飘会让断言不稳定。 */
-    private val zone = ZoneId.of("Asia/Shanghai")
-
-    private val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+    private val zone = TimeZone.of("Asia/Shanghai")
 
     private fun at(text: String): Long =
-        LocalDateTime.parse(text, fmt).atZone(zone).toInstant().toEpochMilli()
+        LocalDateTime.parse(text.replace(' ', 'T')).toInstant(zone).toEpochMilliseconds()
 
     private fun reading(
         text: String,
@@ -184,7 +182,7 @@ class PowerUsageTest {
 
     @Test
     fun `窗口是近 14 天 12 周 12 月，升序且含当前桶`() {
-        val today = LocalDate.of(2026, 9, 24)
+        val today = LocalDate(2026, 9, 24)
         val days = PowerUsage.recentKeys(PowerUsageRange.Day, today)
         assertEquals(14, days.size)
         assertEquals("2026-09-11", days.first())
@@ -346,7 +344,7 @@ class PowerUsageTest {
 
     @Test
     fun `桶标签`() {
-        val today = LocalDate.of(2026, 9, 24)
+        val today = LocalDate(2026, 9, 24)
         assertEquals("今天", PowerUsage.labelOf(PowerUsageRange.Day, "2026-09-24", today))
         assertEquals("昨天", PowerUsage.labelOf(PowerUsageRange.Day, "2026-09-23", today))
         assertEquals("09-01", PowerUsage.labelOf(PowerUsageRange.Day, "2026-09-01", today))
@@ -362,7 +360,7 @@ class PowerUsageTest {
         assertEquals("9/21", PowerUsage.axisLabel(PowerUsageRange.Week, "2026-09-21"))
         assertEquals("8", PowerUsage.axisLabel(PowerUsageRange.Month, "2026-08"))
         // 认不出的键原样回显，不抛异常
-        assertEquals("乱码", PowerUsage.labelOf(PowerUsageRange.Day, "乱码", LocalDate.of(2026, 9, 24)))
+        assertEquals("乱码", PowerUsage.labelOf(PowerUsageRange.Day, "乱码", LocalDate(2026, 9, 24)))
     }
 
     @Test

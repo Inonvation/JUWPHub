@@ -1,7 +1,8 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.minus
 import kotlinx.serialization.Serializable
 
 /**
@@ -17,8 +18,6 @@ import kotlinx.serialization.Serializable
  * 导入层据此跳过并计数提示，不静默丢弃也不落错周。
  */
 object ExamMapper {
-
-    private val dateFmt: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
     private val hhmmRe = Regex("""^(\d{1,2}):(\d{2})$""")
 
@@ -95,8 +94,8 @@ fun weekAndDay(
     val date = parseDate(dateStr) ?: return null
     val week = ScheduleCalculator.weekNumberOf(config, date)
     if (!ScheduleCalculator.isWeekInTerm(config, week)) return null
-    // Java DayOfWeek: MONDAY=1 … SUNDAY=7，与「1=周一 … 7=周日」口径一致
-    return week to date.dayOfWeek.value
+    // kotlinx 的 DayOfWeek 以周一为 0，+1 回到「1=周一 … 7=周日」口径
+    return week to (date.dayOfWeek.ordinal + 1)
 }
 
 /** 学期号格式：`2025-2026-2`（学年-学年-第几学期）。 */
@@ -117,12 +116,12 @@ fun estimatedTermStart(term: String?): LocalDate? {
     val m = termRe.matchEntire(term.trim()) ?: return null
     val y1 = m.groupValues[1].toInt()
     val anchor = if (m.groupValues[3] == "1") {
-        LocalDate.of(y1, 9, 1)
+        LocalDate(y1, 9, 1)
     } else {
-        LocalDate.of(y1 + 1, 3, 1)
+        LocalDate(y1 + 1, 3, 1)
     }
-    // 该 ISO 周的周一（dayOfWeek: 周一=1）
-    return anchor.minusDays((anchor.dayOfWeek.value - 1).toLong())
+    // 该 ISO 周的周一（kotlinx 的 DayOfWeek 以周一为 0）
+    return anchor.minus(DatePeriod(days = anchor.dayOfWeek.ordinal))
 }
 
 /**
@@ -135,13 +134,13 @@ private fun locate(dateStr: String, config: SemesterConfig?, term: String?): Pai
     }
     val start = estimatedTermStart(term) ?: return null
     val date = parseDate(dateStr) ?: return null
-    val week = ((ScheduleCalculator.startOfWeek(date).toEpochDay() -
-        ScheduleCalculator.startOfWeek(start).toEpochDay()) / 7 + 1).toInt()
-    return if (week in 1..ESTIMATED_MAX_WEEKS) week to date.dayOfWeek.value else null
+    val week = ((ScheduleCalculator.startOfWeek(date).toEpochDays() -
+        ScheduleCalculator.startOfWeek(start).toEpochDays()) / 7 + 1).toInt()
+    return if (week in 1..ESTIMATED_MAX_WEEKS) week to (date.dayOfWeek.ordinal + 1) else null
 }
 
 private fun parseDate(dateStr: String): LocalDate? = try {
-    LocalDate.parse(dateStr.trim(), dateFmt)
+    LocalDate.parse(dateStr.trim())
 } catch (_: Exception) {
     null
 }

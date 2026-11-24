@@ -67,7 +67,7 @@ import edu.jxslu.schedule.ui.common.showNotice
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
-import edu.jxslu.schedule.domain.MONTH_DAY_FORMAT
+import edu.jxslu.schedule.domain.monthDayText
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowDownDouble
@@ -276,7 +276,7 @@ fun CourseTweakScreen(
     }
 }
 
-private fun dateText(date: LocalDate): String = date.format(MONTH_DAY_FORMAT)
+private fun dateText(date: LocalDate): String = monthDayText(date.monthValue, date.dayOfMonth)
 
 /** 一张日期卡：标题、日期、周次与星期；不在学期内时整卡标红。 */
 @Composable

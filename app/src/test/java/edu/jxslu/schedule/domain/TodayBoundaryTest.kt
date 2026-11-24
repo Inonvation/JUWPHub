@@ -4,7 +4,7 @@ import edu.jxslu.schedule.data.DefaultData
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 /**
  * 小组件边界闹钟的时刻计算。

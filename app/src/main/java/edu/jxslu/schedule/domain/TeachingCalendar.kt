@@ -1,7 +1,9 @@
 package edu.jxslu.schedule.domain
 
-import java.time.DayOfWeek
-import java.time.LocalDate
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.DayOfWeek
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.minus
 
 /**
  * 教学日历（DESIGN §4.42）：教务「教学日历查询」页的抽取值——只取用户要的那一件事：
@@ -49,13 +51,13 @@ object TeachingCalendarRules {
     fun week1Monday(term: String, satMonth: Int, satDay: Int): LocalDate? {
         val (y1, y2) = termYears(term) ?: return null
         val expectedYear = if (term.endsWith("-2")) y2 else y1
-        val saturday = runCatching { LocalDate.of(expectedYear, satMonth, satDay) }.getOrNull()
+        val saturday = runCatching { LocalDate(expectedYear, satMonth, satDay) }.getOrNull()
             ?: return null
         if (saturday.dayOfWeek != DayOfWeek.SATURDAY) return null
-        val monday = saturday.minusDays(5)
+        val monday = saturday.minus(DatePeriod(days = 5))
         val inWindow = when {
-            term.endsWith("-1") -> monday.year == y1 && monday.monthValue in 7..12
-            term.endsWith("-2") -> monday.year == y2 && monday.monthValue in 1..6
+            term.endsWith("-1") -> monday.year == y1 && monday.monthNumber in 7..12
+            term.endsWith("-2") -> monday.year == y2 && monday.monthNumber in 1..6
             else -> false
         }
         return monday.takeIf { inWindow }

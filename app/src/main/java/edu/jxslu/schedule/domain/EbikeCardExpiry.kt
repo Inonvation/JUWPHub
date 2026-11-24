@@ -1,11 +1,13 @@
 package edu.jxslu.schedule.domain
 
-import java.time.Instant
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atTime
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.toInstant
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * 骑行卡券（[KqcxAuth.AssetCoupon]）临近到期的提醒口径（DESIGN §4.32）。
@@ -30,20 +32,21 @@ object EbikeCardExpiry {
         "到期后骑行按快趣规则计费（前 15 分钟免费以骑行套餐卡为准）。" +
             "续费或购买新卡请在快趣官方渠道（微信小程序）完成。"
 
-    private val DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-    private val DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    private val DATE_TIME_SEPARATOR = 'T'
 
     /**
      * 解析 `endTime` 为 epoch 毫秒。两种形态都收：
      * 带时分秒的按原值；**只给到日期**的按当天 `23:59:59` 收尾（「有效期至某天」= 那天结束前）。
      * 空串 / 解析失败返回 null（缺数据不下断言，与电量那套容错同一口径）。
      */
-    fun parseEndAt(raw: String?, zone: ZoneId = ZoneId.systemDefault()): Long? {
+    fun parseEndAt(raw: String?, zone: TimeZone = TimeZone.currentSystemDefault()): Long? {
         val text = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val dateTime = runCatching { LocalDateTime.parse(text, DATE_TIME_FORMAT) }
-            .recoverCatching { LocalDate.parse(text, DATE_FORMAT).atTime(23, 59, 59) }
+        // 快趣给的是 `yyyy-MM-dd HH:mm:ss`（空格分隔），kotlinx 只认 ISO 的 `T`，
+        // 先换分隔符再解析；只给日期时按当天 23:59:59 收尾。
+        val dateTime = runCatching { LocalDateTime.parse(text.replace(' ', DATE_TIME_SEPARATOR)) }
+            .recoverCatching { LocalDate.parse(text).atTime(23, 59, 59) }
             .getOrNull() ?: return null
-        return dateTime.atZone(zone).toInstant().toEpochMilli()
+        return dateTime.toInstant(zone).toEpochMilliseconds()
     }
 
     /** 是否落在「到期前一天」窗口内：未过期且剩余不超过 [WINDOW_MS]。 */
@@ -63,14 +66,14 @@ object EbikeCardExpiry {
     fun remainingText(
         endAtMillis: Long,
         nowMillis: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): String {
-        val today = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
-        val endDate = Instant.ofEpochMilli(endAtMillis).atZone(zone).toLocalDate()
-        val days = ChronoUnit.DAYS.between(today, endDate)
+        val today = Instant.fromEpochMilliseconds(nowMillis).toLocalDateTime(zone).date
+        val endDate = Instant.fromEpochMilliseconds(endAtMillis).toLocalDateTime(zone).date
+        val days = today.daysUntil(endDate)
         return when {
-            days <= 0L -> "今天到期"
-            days == 1L -> "明天到期"
+            days <= 0 -> "今天到期"
+            days == 1 -> "明天到期"
             else -> "还剩 $days 天"
         }
     }
@@ -94,11 +97,11 @@ object EbikeCardExpiry {
     fun reminderLines(
         coupons: List<KqcxAuth.AssetCoupon>,
         nowMillis: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): List<String> = coupons.mapNotNull { coupon ->
         val raw = coupon.endAt?.trim().orEmpty()
         val endAt = parseEndAt(raw, zone) ?: return@mapNotNull null
-        val date = Instant.ofEpochMilli(endAt).atZone(zone).toLocalDate()
+        val date = Instant.fromEpochMilliseconds(endAt).toLocalDateTime(zone).date
         "· ${coupon.titleText} · ${coupon.deviceLabel}：有效期至 $date（${remainingText(endAt, nowMillis, zone)}）"
     }
 }

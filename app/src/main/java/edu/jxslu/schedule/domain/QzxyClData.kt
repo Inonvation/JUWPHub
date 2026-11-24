@@ -1,9 +1,9 @@
 package edu.jxslu.schedule.domain
 
-import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import okio.ByteString.Companion.decodeBase64
 
 /**
  * 上传消费数据后服务端返回的 `clData`（DESIGN §4.30）。
@@ -86,8 +86,8 @@ object QzxyClData {
         QzxyFrame.hexToBytes(text)
             ?.takeIf { it.size % BLOCK_SIZE == 0 }
             ?.let { return it }
-        return runCatching { Base64.getDecoder().decode(text) }
-            .getOrNull()
+        return text.decodeBase64()
+            ?.toByteArray()
             ?.takeIf { it.size % BLOCK_SIZE == 0 }
     }
 

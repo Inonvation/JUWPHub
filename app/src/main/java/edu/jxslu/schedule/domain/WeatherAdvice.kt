@@ -1,6 +1,8 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDateTime
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.plus
 import kotlin.math.roundToInt
 
 /**
@@ -84,7 +86,7 @@ object WeatherAdvice {
         )?.let { return listOf(it) }
 
         val index = referenceDayIndex(now)
-        val date = now.toLocalDate().plusDays(index.toLong())
+        val date = now.date.plus(DatePeriod(days = index))
         // 只有「讲今天」才用实时码判「正在下雨」；讲明天时实时码与主题无关
         val weather = snapshot.day(index)?.let { day ->
             val emoji = WeatherCodes.emoji(day.code, isDay = index == 0 && snapshot.current.isDay)
@@ -92,7 +94,7 @@ object WeatherAdvice {
         }
         val schedule = ScheduleTips.dayTipFor(
             date = date,
-            today = now.toLocalDate(),
+            today = now.date,
             semester = semester,
             slots = slots,
             courses = courses,

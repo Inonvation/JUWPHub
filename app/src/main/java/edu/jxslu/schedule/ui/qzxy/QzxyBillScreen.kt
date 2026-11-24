@@ -28,6 +28,7 @@ import edu.jxslu.schedule.data.qzxy.QzxyBill
 import edu.jxslu.schedule.domain.BillRange
 import edu.jxslu.schedule.domain.billMoneyText
 import edu.jxslu.schedule.domain.groupBillsByDay
+import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.domain.parseBillCents
 import edu.jxslu.schedule.domain.parseBillTime
 import edu.jxslu.schedule.ui.common.AppCard
@@ -220,7 +221,7 @@ private fun BillRow(bill: QzxyBill) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = time?.let { "%02d:%02d".format(it.hour, it.minute) }
+                text = time?.let { "${TextFmt.pad(it.hour)}:${TextFmt.pad(it.minute)}" }
                     ?: (bill.consumeDate ?: "时间未知"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),

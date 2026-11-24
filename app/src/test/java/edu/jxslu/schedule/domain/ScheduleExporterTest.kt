@@ -4,7 +4,7 @@ import edu.jxslu.schedule.data.DefaultData
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 /**
  * 课表导出（DESIGN §4.12）：事件展开与 Google 日历 CSV。

@@ -69,6 +69,7 @@ import edu.jxslu.schedule.data.qzxy.QzxyBluetoothScanner
 import edu.jxslu.schedule.data.qzxy.QzxyDeviceInfo
 import edu.jxslu.schedule.data.qzxy.QzxyScannedDevice
 import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.domain.Money
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.entrySummary
 import edu.jxslu.schedule.domain.QzxyWatering
@@ -107,7 +108,6 @@ import me.rerere.hugeicons.stroke.InformationCircle
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.WalletAdd01
-import java.math.BigDecimal
 
 /**
  * 趣智校园开热水页（DESIGN §3.18）。
@@ -586,8 +586,8 @@ private fun PhoneEye(shown: Boolean, onToggle: () -> Unit) {
 @Composable
 private fun BalanceSection(state: QzxyUiState) {
     val total = state.bills
-        .mapNotNull { bill -> bill.consumeMoney?.trim()?.toBigDecimalOrNull() }
-        .fold(BigDecimal.ZERO, BigDecimal::add)
+        .mapNotNull { bill -> Money.parse(bill.consumeMoney) }
+        .fold(Money.ZERO) { acc, value -> acc + value }
     val balanceText = when {
         state.balance != null -> "¥${state.balance?.text}"
         state.balanceLoaded -> "—"

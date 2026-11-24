@@ -70,11 +70,12 @@ import me.rerere.hugeicons.stroke.Sunrise
 import me.rerere.hugeicons.stroke.Temperature
 import me.rerere.hugeicons.stroke.Umbrella
 import me.rerere.hugeicons.stroke.Wind
+import edu.jxslu.schedule.domain.AppClock
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.daysUntil
 import java.time.Instant
-import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.ZoneId
-import java.time.temporal.ChronoUnit
 import kotlin.math.roundToInt
 
 /**
@@ -208,7 +209,7 @@ private fun WeatherContent(
     loadedAtMs: Long,
     stale: Boolean,
 ) {
-    val now = LocalDateTime.now()
+    val now = AppClock.nowDateTime()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -303,9 +304,9 @@ private fun HourlyCard(snapshot: WeatherSnapshot, now: LocalDateTime) {
     // 「现在」= 不晚于此刻的**最后一个**整点：拿的是半小时前的缓存时也标得对。
     // 一条都不匹配（设备时区 / 时钟与接口口径不一致）时退回第一条——接口给的第一个
     // 小时就是取数那一刻的当前小时，退回它比不标更接近事实。
-    val currentHour = now.withMinute(0).withSecond(0).withNano(0)
+    val currentHour = LocalDateTime(now.year, now.monthNumber, now.dayOfMonth, now.hour, 0)
     val nowIndex = snapshot.hourly
-        .indexOfLast { !it.time.isAfter(currentHour) }
+        .indexOfLast { it.time <= currentHour }
         .takeIf { it >= 0 } ?: 0
     AppCard {
         Text("未来 24 小时", style = MaterialTheme.typography.titleSmall)
@@ -367,7 +368,7 @@ private fun DailyCard(snapshot: WeatherSnapshot) {
     AppCard {
         Text("未来 7 天", style = MaterialTheme.typography.titleSmall)
         Spacer(Modifier.height(8.dp))
-        val today = LocalDate.now()
+        val today = AppClock.today()
         snapshot.daily.forEachIndexed { index, day ->
             if (index > 0) Spacer(Modifier.height(12.dp))
             DailyRow(day, today, weekMin, weekMax)
@@ -453,12 +454,12 @@ private fun TempRangeBar(
 
 /** 日期 → 今天 / 明天 / 后天 / 周X。按**日期**判而不是按下标，跨天刷新时不会错位。 */
 private fun dayNameOf(date: LocalDate, today: LocalDate): String {
-    val diff = ChronoUnit.DAYS.between(today, date)
+    val diff = today.daysUntil(date)
     return when (diff) {
-        0L -> "今天"
-        1L -> "明天"
-        2L -> "后天"
-        else -> "周" + dayLabel(date.dayOfWeek.value)
+        0 -> "今天"
+        1 -> "明天"
+        2 -> "后天"
+        else -> "周" + dayLabel(date.dayOfWeek.ordinal + 1)
     }
 }
 

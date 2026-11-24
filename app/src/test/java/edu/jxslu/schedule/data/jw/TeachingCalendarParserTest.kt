@@ -1,6 +1,6 @@
 package edu.jxslu.schedule.data.jw
 
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -98,7 +98,7 @@ class TeachingCalendarParserTest {
     @Test
     fun `秋学期解析出第 1 周周一`() {
         val cal = TeachingCalendarParser.parse(page(), "2099-2100-1")
-        assertEquals(LocalDate.of(2099, 9, 7), cal?.startDate)
+        assertEquals(LocalDate(2099, 9, 7), cal?.startDate)
         assertEquals("2099-2100-1", cal?.term)
     }
 
@@ -110,7 +110,7 @@ class TeachingCalendarParserTest {
             page(selected = "2099-2100-2", footer = "2099-2100-2", week1 = week1),
             "2099-2100-2",
         )
-        assertEquals(LocalDate.of(2100, 2, 22), cal?.startDate)
+        assertEquals(LocalDate(2100, 2, 22), cal?.startDate)
     }
 
     @Test
@@ -121,7 +121,7 @@ class TeachingCalendarParserTest {
             page(selected = "2054-2055-1", footer = "2054-2055-1", week1 = week1),
             "2054-2055-1",
         )
-        assertEquals(LocalDate.of(2054, 8, 31), cal?.startDate)
+        assertEquals(LocalDate(2054, 8, 31), cal?.startDate)
     }
 
     @Test
@@ -155,7 +155,7 @@ class TeachingCalendarParserTest {
             page(selected = null, footer = "2099-2100-1"),
             "2099-2100-1",
         )
-        assertEquals(LocalDate.of(2099, 9, 7), cal?.startDate)
+        assertEquals(LocalDate(2099, 9, 7), cal?.startDate)
     }
 
     @Test

@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.domain
 
-import java.security.MessageDigest
-import java.util.Locale
+import okio.ByteString.Companion.encodeUtf8
 
 /**
  * 趣智校园登录凭证的两个本地推导算法（DESIGN §4.30）。
@@ -17,7 +16,7 @@ object QzxyCredential {
 
     /** 密码传输格式：MD5 → 后 10 位 → 大写。官方 App 与两个参考实现口径一致。 */
     fun passwordValue(password: String): String =
-        md5Hex(password).uppercase(Locale.ROOT).takeLast(10)
+        md5Hex(password).uppercase().takeLast(10)
 
     /** 短信验证码接口的 secret，仅由手机号推导。 */
     fun smsSecret(phone: String): String {
@@ -25,8 +24,5 @@ object QzxyCredential {
         return md5Hex(phone.substring(0, 3) + phone.substring(7, 11) + "klcx")
     }
 
-    fun md5Hex(input: String): String =
-        MessageDigest.getInstance("MD5")
-            .digest(input.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    fun md5Hex(input: String): String = input.encodeUtf8().md5().hex()
 }

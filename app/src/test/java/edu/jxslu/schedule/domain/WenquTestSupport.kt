@@ -1,14 +1,15 @@
 package edu.jxslu.schedule.domain
 
 import edu.jxslu.schedule.data.wenqu.WenquActivity
-import java.time.LocalDateTime
-import java.time.ZoneId
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 
 internal val hour = 60 * 60 * 1000L
-internal val zone = ZoneId.of("Asia/Shanghai")
+internal val zone = TimeZone.of("Asia/Shanghai")
 
 internal fun at(y: Int, m: Int, d: Int, h: Int, min: Int): Long =
-    LocalDateTime.of(y, m, d, h, min).atZone(zone).toInstant().toEpochMilli()
+    LocalDateTime(y, m, d, h, min).toInstant(zone).toEpochMilliseconds()
 
 /** 可报名的基线：招募中 + 未满 + 没报过 + 在报名窗口内 + 没被限制。 */
 internal fun blockReason(

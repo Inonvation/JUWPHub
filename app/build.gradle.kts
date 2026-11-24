@@ -115,6 +115,11 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        // kotlinx-datetime（2026-11-24，iOS 移植 P-1）：0.8.0 起 `Instant` / `Clock` 改由
+        // kotlin.time 提供，在 Kotlin 2.1.21 上仍是实验 API，每次用都要 opt-in。
+        // 日期迁移会涉及几十个文件，逐个加 `@OptIn` 只会淹没真正的改动，所以在模块级打开；
+        // Kotlin 2.2 稳定之后再删掉这行。
+        freeCompilerArgs += "-opt-in=kotlin.time.ExperimentalTime"
     }
     buildFeatures {
         compose = true
@@ -166,6 +171,10 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // 时间（2026-11-24，iOS 移植 P-1）：`java.time` 在 Kotlin/Native 上不存在，domain 正逐批
+    // 换到 kotlinx-datetime。选 0.8.0 是因为它依赖 kotlin-stdlib 2.1.20，与项目的 Kotlin
+    // 2.1.21 同一条线；`DateTimeFormatter` 在它这里**没有**等价物，自定义格式要手写。
+    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     // 胖乖 Token 加密存储（DESIGN 4.16 决策 2）：EncryptedSharedPreferences，密钥在 Android Keystore

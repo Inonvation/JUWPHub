@@ -1,10 +1,13 @@
+@file:OptIn(ExperimentalUuidApi::class)
+
 package edu.jxslu.schedule.domain
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import java.util.UUID
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * 免扰时段（quiet hours，DESIGN §3.7）：一个每天重复的墙上时钟区间。
@@ -56,7 +59,7 @@ object QuietWindows {
         ),
     )
 
-    fun newId(): String = UUID.randomUUID().toString()
+    fun newId(): String = Uuid.random().toString()
 
     private val format = Json { ignoreUnknownKeys = true }
 
@@ -130,6 +133,6 @@ object QuietWindows {
     /** 当天分钟 → `HH:mm`。 */
     fun clockText(minuteOfDay: Int): String {
         val m = ((minuteOfDay % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY
-        return "%02d:%02d".format(m / 60, m % 60)
+        return TextFmt.clock(m)
     }
 }

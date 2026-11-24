@@ -22,7 +22,7 @@ import edu.jxslu.schedule.domain.PowerUsageRange
 import edu.jxslu.schedule.domain.PowerUsageSummary
 import edu.jxslu.schedule.ui.common.NoticeTone
 import java.time.YearMonth
-import java.time.ZoneId
+import kotlinx.datetime.TimeZone
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -244,7 +244,7 @@ class PowerBillViewModel(
                 recharges = recharges,
                 range = state.usage.range,
                 nowMs = System.currentTimeMillis(),
-                zone = ZoneId.systemDefault(),
+                zone = TimeZone.currentSystemDefault(),
             )
         }
         _uiState.update { it.copy(usage = it.usage.copy(summary = summary)) }

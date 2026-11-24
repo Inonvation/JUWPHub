@@ -529,7 +529,11 @@ object KqcxAuth {
         val minutes = Math.ceil(totalSeconds.coerceAtLeast(0) / 60.0).toLong()
         val h = minutes / 60
         val m = minutes % 60
-        return if (h > 0) "00:%02d:%02d".format(h, m) else "00:%02d".format(m)
+        return if (h > 0) {
+            "00:${TextFmt.pad(h)}:${TextFmt.pad(m)}"
+        } else {
+            "00:${TextFmt.pad(m)}"
+        }
     }
 }
 

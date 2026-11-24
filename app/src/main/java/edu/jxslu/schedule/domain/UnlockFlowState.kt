@@ -75,24 +75,22 @@ sealed interface UnlockFlowState {
  * 小票（tokenCoin）是账户余额，优先取 promotionList type=4 的抵扣额，缺失时回退
  * 服务端 [UnlockResult.tokenCoinDiscount]；两者都没有返回 null（无法解析不猜）。
  */
-fun ticketPaidAmount(result: UnlockResult): java.math.BigDecimal? =
-    result.ticketCost.toBigDecimalOrNull()
-        ?: result.tokenCoinDiscount?.toBigDecimalOrNull()
+fun ticketPaidAmount(result: UnlockResult): Money? =
+    Money.parse(result.ticketCost) ?: Money.parse(result.tokenCoinDiscount)
 
 /**
  * 现金实付金额（在线支付口径）。服务端 `realPrice`（即 `payPrice`）是权威来源；
  * 缺失/不可解析时回退「原价 - 小票 - 积分 - 其他优惠」，夹到 0；原价也不可解析返回 null。
  */
-fun cashPaidAmount(result: UnlockResult): java.math.BigDecimal? {
-    result.realPrice?.toBigDecimalOrNull()?.let { return it }
-    val origin = result.originPrice.toBigDecimalOrNull() ?: return null
-    val integral = result.integralCost.toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO
-    val ticket = ticketPaidAmount(result) ?: java.math.BigDecimal.ZERO
+fun cashPaidAmount(result: UnlockResult): Money? {
+    Money.parse(result.realPrice)?.let { return it }
+    val origin = Money.parse(result.originPrice) ?: return null
+    val integral = Money.parse(result.integralCost) ?: Money.ZERO
+    val ticket = ticketPaidAmount(result) ?: Money.ZERO
     val other = result.otherPromotions
-        .mapNotNull { it.discountAmount?.toBigDecimalOrNull() }
-        .fold(java.math.BigDecimal.ZERO) { acc, value -> acc.add(value) }
-    return origin.subtract(integral).subtract(ticket).subtract(other)
-        .coerceAtLeast(java.math.BigDecimal.ZERO)
+        .mapNotNull { it.discountAmount?.let(Money::parse) }
+        .fold(Money.ZERO) { acc, value -> acc + value }
+    return (origin - integral - ticket - other).coerceAtLeast(Money.ZERO)
 }
 
 /**
@@ -101,12 +99,10 @@ fun cashPaidAmount(result: UnlockResult): java.math.BigDecimal? {
  * 历史教训（2026-09-20）：曾把 `tokenCoinDiscount` 读成「平台自动优惠」，直接以服务端
  * `realPrice`（现金口径，小票全额支付时为 0.00）当花费展示，于是每天每单都显示
  * 「实付 ¥0.00」——而用户的小票余额实际被扣了钱。积分抵扣与其他优惠是省钱项，不计入花费。
- * 金额一律 BigDecimal 精确运算（0.12-0.11 用 Double 得 0.0099… 再舍入会错成 0.00）。
+ * 金额一律整数「分」运算（[Money]；0.12-0.11 用 Double 得 0.0099… 再舍入会错成 0.00）。
  */
 fun calculateActualCost(result: UnlockResult): String {
-    val ticket = ticketPaidAmount(result) ?: java.math.BigDecimal.ZERO
+    val ticket = ticketPaidAmount(result) ?: Money.ZERO
     val cash = cashPaidAmount(result) ?: return result.originPrice
-    return cash.add(ticket)
-        .setScale(2, java.math.RoundingMode.HALF_UP)
-        .toPlainString()
+    return (cash + ticket).text()
 }

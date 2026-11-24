@@ -2,6 +2,8 @@ package edu.jxslu.schedule.data.jw
 
 import edu.jxslu.schedule.domain.TeachingCalendar
 import edu.jxslu.schedule.domain.TeachingCalendarRules
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.plus
 
 /**
  * 教学日历解析（DESIGN §4.42）：`/jsxsd/jxzl/jxzl_query?xnxq01id=<学期>` 的服务端渲染
@@ -43,7 +45,7 @@ object TeachingCalendarParser {
         ) ?: return null
         // 交叉校验：周一/周二格必须与推导出的日号一致（页面结构变了就不会齐）
         if (cells[1].toIntOrNull() != monday.dayOfMonth) return null
-        if (cells[2].toIntOrNull() != monday.plusDays(1).dayOfMonth) return null
+        if (cells[2].toIntOrNull() != monday.plus(DatePeriod(days = 1)).dayOfMonth) return null
         return TeachingCalendar(startDate = monday, term = requestedTerm)
     }
 

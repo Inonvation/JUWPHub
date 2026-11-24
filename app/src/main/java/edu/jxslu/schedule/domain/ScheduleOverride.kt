@@ -1,6 +1,8 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
 import kotlinx.serialization.Serializable
 
 /**
@@ -104,7 +106,7 @@ object ScheduleOverrides {
         val week = runCatching { ScheduleCalculator.weekNumberOf(semester, date) }.getOrNull()
             ?: return null
         if (!ScheduleCalculator.isWeekInTerm(semester, week)) return null
-        return Slot(week, date.dayOfWeek.value)
+        return Slot(week, date.dayOfWeek.ordinal + 1)
     }
 
     /** 槽位 → 日期（表头日期、覆盖文案用）。唯一实现在 [ScheduleCalculator.dateOf]。 */
@@ -189,12 +191,12 @@ object ScheduleOverrides {
             OverrideKind.SUSPENDED -> {
                 val start = parseOrNull(override.fromDate) ?: return false
                 val end = parseOrNull(override.toDate) ?: start
-                if (end.isBefore(start)) return slotOf(semester, start) == slot
+                if (end < start) return slotOf(semester, start) == slot
                 var date = start
                 var count = 0
-                while (!date.isAfter(end) && count < MAX_RANGE_DAYS) {
+                while (date <= end && count < MAX_RANGE_DAYS) {
                     if (slotOf(semester, date) == slot) return true
-                    date = date.plusDays(1)
+                    date = date.plus(DatePeriod(days = 1))
                     count++
                 }
                 false
@@ -241,7 +243,7 @@ object ScheduleOverrides {
 
     private fun shortDate(value: String): String {
         val date = parseOrNull(value) ?: return value
-        return "${date.monthValue}月${date.dayOfMonth}日"
+        return "${date.monthNumber}月${date.dayOfMonth}日"
     }
 
     private fun weekdayLabel(day: Int): String = when (day) {
@@ -262,15 +264,15 @@ object ScheduleOverrides {
     private inline fun eachDate(from: String, to: String, action: (LocalDate) -> Unit) {
         val start = parseOrNull(from) ?: return
         val end = parseOrNull(to) ?: start
-        if (end.isBefore(start)) {
+        if (end < start) {
             action(start)
             return
         }
         var date = start
         var count = 0
-        while (!date.isAfter(end) && count < MAX_RANGE_DAYS) {
+        while (date <= end && count < MAX_RANGE_DAYS) {
             action(date)
-            date = date.plusDays(1)
+            date = date.plus(DatePeriod(days = 1))
             count++
         }
     }

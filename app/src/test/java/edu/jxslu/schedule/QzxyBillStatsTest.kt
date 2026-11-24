@@ -13,7 +13,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 /**
  * 趣智消费记录的时间段筛选 / 分组 / 金额口径（2026-11-05）。
@@ -23,7 +23,7 @@ import java.time.LocalDate
  */
 class QzxyBillStatsTest {
 
-    private val today = LocalDate.of(2026, 11, 5) // 周四
+    private val today = LocalDate(2026, 11, 5) // 周四
 
     private fun bill(date: String, money: String?, desc: String = "热水消费") = QzxyBill(
         orderNo = "o-$date-$desc",

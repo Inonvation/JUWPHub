@@ -1,8 +1,8 @@
 package edu.jxslu.schedule.domain
 
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 /** 「最近导出」里的一条记录。只带展示与排序要用的字段，不持有 File（纯逻辑层不碰文件系统）。 */
 data class TranscriptEntry(
@@ -79,14 +79,15 @@ object TranscriptHistory {
         if (keep <= 0) entries.map { it.name } else sortNewestFirst(entries).drop(keep).map { it.name }
 
     /** 列表里的时间文案。时区可注入，方便单测钉死结果。 */
-    fun timeLabel(millis: Long, zone: ZoneId = ZoneId.systemDefault()): String =
-        Instant.ofEpochMilli(millis).atZone(zone).format(TIME_FORMATTER)
+    fun timeLabel(millis: Long, zone: TimeZone = TimeZone.currentSystemDefault()): String {
+        val t = Instant.fromEpochMilliseconds(millis).toLocalDateTime(zone)
+        return "${TextFmt.pad(t.year, 4)}-${TextFmt.pad(t.monthNumber)}-${TextFmt.pad(t.dayOfMonth)} " +
+            "${TextFmt.pad(t.hour)}:${TextFmt.pad(t.minute)}"
+    }
 
     /** 体积文案（口径见 [SizeText]）。 */
     fun sizeLabel(bytes: Long): String = SizeText.format(bytes)
 
     /** 文件名末尾的 `-yyyyMMdd-HHmm`（与 `defaultFileName` 的格式一一对应）。 */
     private val STAMP_RE = Regex("""-\d{8}-\d{4}$""")
-
-    private val TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 }

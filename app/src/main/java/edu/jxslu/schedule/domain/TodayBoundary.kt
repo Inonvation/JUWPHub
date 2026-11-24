@@ -1,6 +1,6 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 /**
  * 今天下一个「上课 / 下课 / 小节切换」时刻（自午夜起的分钟数）；今天没有剩余边界时返回 null。
@@ -28,7 +28,7 @@ fun nextTodayBoundaryMinutes(
     if (semester == null) return null
     val week = ScheduleCalculator.weekNumberOf(semester, today)
     if (!ScheduleCalculator.isWeekInTerm(semester, week)) return null
-    val day = today.dayOfWeek.value
+    val day = today.dayOfWeek.ordinal + 1
     val nowMinutes = now.toMinutes()
     return ScheduleCalculator.coursesOnDay(
         courses,

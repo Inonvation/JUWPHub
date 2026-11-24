@@ -36,9 +36,12 @@ import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.BarChartItem
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.NoticeTone
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
+import edu.jxslu.schedule.domain.TextFmt
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toKotlinLocalDate
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * 缴费账单页的「用电统计」分页（DESIGN §3.13）。
@@ -206,7 +209,7 @@ private fun UsageSummaryCard(
                     BarChartItem(
                         key = bucket.key,
                         value = bucket.usedKwh.toFloat(),
-                        title = PowerUsage.labelOf(range, bucket.key, today),
+                        title = PowerUsage.labelOf(range, bucket.key, today.toKotlinLocalDate()),
                         axisLabel = when (index) {
                             0 -> axisText(range, bucket.key)
                             buckets.lastIndex -> "${axisText(range, bucket.key)}（今）"
@@ -217,7 +220,7 @@ private fun UsageSummaryCard(
                 selectedKey = selectedKey,
                 header = "用电量（度）",
                 selectedText = selectedBucket?.let { bucket ->
-                    val head = "${PowerUsage.labelOf(range, bucket.key, today)} · " +
+                    val head = "${PowerUsage.labelOf(range, bucket.key, today.toKotlinLocalDate())} · " +
                         "${PowerUsage.kwhText(bucket.usedKwh)} 度"
                     bucket.usedYuan?.let { yuan -> "$head · ≈ ${PowerBill.amountText(PowerModels.fen(yuan))}" } ?: head
                 },
@@ -258,7 +261,7 @@ private fun UsageBucketRow(range: PowerUsageRange, bucket: PowerUsageBucket, sel
     ) {
         Column(Modifier.weight(1f)) {
             Text(
-                text = PowerUsage.labelOf(range, bucket.key, today),
+                text = PowerUsage.labelOf(range, bucket.key, today.toKotlinLocalDate()),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
             )
@@ -357,6 +360,7 @@ private fun axisText(range: PowerUsageRange, key: String): String {
 }
 
 private fun readTimeText(epochMs: Long): String = runCatching {
-    Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault())
-        .let { "%02d-%02d %02d:%02d".format(it.monthValue, it.dayOfMonth, it.hour, it.minute) }
+    val t = Instant.fromEpochMilliseconds(epochMs).toLocalDateTime(TimeZone.currentSystemDefault())
+    "${TextFmt.pad(t.monthNumber)}-${TextFmt.pad(t.dayOfMonth)} " +
+        "${TextFmt.pad(t.hour)}:${TextFmt.pad(t.minute)}"
 }.getOrDefault("—")

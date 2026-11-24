@@ -1,9 +1,9 @@
 package edu.jxslu.schedule.domain
 
+import kotlinx.datetime.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
-import java.time.LocalDate
 
 /**
  * 课表导出为图片（[ScheduleShare]）：文件名 / 周次日期范围。
@@ -24,17 +24,17 @@ class ScheduleShareTest {
         // 完整一周
         assertEquals(
             "10/5 – 10/11",
-            ScheduleShare.weekRangeText(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 11)),
+            ScheduleShare.weekRangeText(LocalDate(2026, 10, 5), LocalDate(2026, 10, 11)),
         )
         // 关掉周末：末列是周五
         assertEquals(
             "10/5 – 10/9",
-            ScheduleShare.weekRangeText(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 9)),
+            ScheduleShare.weekRangeText(LocalDate(2026, 10, 5), LocalDate(2026, 10, 9)),
         )
         // 只关周日：末列是周六（按「周一 + 6 天」硬算会错成 10/11）
         assertEquals(
             "10/5 – 10/10",
-            ScheduleShare.weekRangeText(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 10)),
+            ScheduleShare.weekRangeText(LocalDate(2026, 10, 5), LocalDate(2026, 10, 10)),
         )
     }
 
@@ -42,18 +42,18 @@ class ScheduleShareTest {
     fun `week range crosses month and year boundaries`() {
         assertEquals(
             "9/28 – 10/4",
-            ScheduleShare.weekRangeText(LocalDate.of(2026, 9, 28), LocalDate.of(2026, 10, 4)),
+            ScheduleShare.weekRangeText(LocalDate(2026, 9, 28), LocalDate(2026, 10, 4)),
         )
         assertEquals(
             "12/28 – 1/3",
-            ScheduleShare.weekRangeText(LocalDate.of(2026, 12, 28), LocalDate.of(2027, 1, 3)),
+            ScheduleShare.weekRangeText(LocalDate(2026, 12, 28), LocalDate(2027, 1, 3)),
         )
     }
 
     @Test
     fun `week range is null without semester dates`() {
-        assertNull(ScheduleShare.weekRangeText(null, LocalDate.of(2026, 10, 11)))
-        assertNull(ScheduleShare.weekRangeText(LocalDate.of(2026, 10, 5), null))
+        assertNull(ScheduleShare.weekRangeText(null, LocalDate(2026, 10, 11)))
+        assertNull(ScheduleShare.weekRangeText(LocalDate(2026, 10, 5), null))
         assertNull(ScheduleShare.weekRangeText(null, null))
     }
 }

@@ -1,6 +1,6 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -250,7 +250,7 @@ class ScheduleOverridesTest {
         assertEquals(listOf("高等数学"), detail.originalCourses.map { it.name })
         assertTrue(detail.effectiveCourses.isEmpty())
         assertEquals("国庆放假", detail.note)
-        assertEquals(java.time.LocalDate.parse("2026-09-21"), detail.date)
+        assertEquals(LocalDate.parse("2026-09-21"), detail.date)
     }
 
     @Test

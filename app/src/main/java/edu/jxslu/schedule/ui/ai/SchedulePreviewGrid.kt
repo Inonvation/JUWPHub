@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.ai
 
 import androidx.compose.foundation.background
+import kotlinx.datetime.toJavaLocalDate
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -32,10 +33,8 @@ import edu.jxslu.schedule.domain.ScheduleOverride
 import edu.jxslu.schedule.domain.ScheduleOverrides
 import edu.jxslu.schedule.domain.SemesterConfig
 import edu.jxslu.schedule.ui.common.courseColor
-import java.time.format.DateTimeFormatter
 
 private val WEEKDAY_LABELS = listOf("一", "二", "三", "四", "五", "六", "日")
-private val DAY_MONTH = DateTimeFormatter.ofPattern("M/d")
 
 /**
  * AI 调课的**课表前后对照预览**（DESIGN §3.25 方案 B，2026-10-06）。
@@ -108,7 +107,7 @@ fun SchedulePreviewGrid(
                                 when {
                                     suspended -> "放假"
                                     followed -> "补课"
-                                    else -> date?.format(DAY_MONTH).orEmpty()
+                                    else -> date?.let { "${it.monthNumber}/${it.dayOfMonth}" }.orEmpty()
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = when {

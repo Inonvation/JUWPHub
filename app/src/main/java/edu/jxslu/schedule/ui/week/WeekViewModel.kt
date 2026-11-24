@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.week
 
 import android.content.Context
+import kotlinx.datetime.toKotlinLocalDate
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -225,7 +226,7 @@ class WeekViewModel(
                 val slots = config.slots
                 val prefs = config.prefs
                 // 学期外给 null：裸周次（学期结束后 30+）不能当「本周」，见 WeekUiState.todayWeek
-                val todayWeek = ScheduleCalculator.todayWeekOf(semester, today)
+                val todayWeek = ScheduleCalculator.todayWeekOf(semester, today.toKotlinLocalDate())
                 val visible = loaded.filter { prefs.courseFilter.matches(it.kind) }
                 WeekUiState(
                     loading = false,
@@ -283,7 +284,7 @@ class WeekViewModel(
             // 周次必须在 ready 置位（对外发第一帧）之前定好，否则首帧仍是第 1 周。
             // 学期外（todayWeekOf 给 null）没有「本周」可落，停在默认的第 1 周。
             val semester = repo.semester.first()
-            ScheduleCalculator.todayWeekOf(semester, todayProvider())?.let { weekFlow.value = it }
+            ScheduleCalculator.todayWeekOf(semester, todayProvider().toKotlinLocalDate())?.let { weekFlow.value = it }
             ready.value = true
         }
     }

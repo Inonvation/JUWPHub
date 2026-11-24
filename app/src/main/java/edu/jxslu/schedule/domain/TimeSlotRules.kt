@@ -75,6 +75,6 @@ object TimeSlotRules {
         val h = parts[0].toIntOrNull() ?: return t
         val m = parts[1].toIntOrNull() ?: return t
         if (h !in 0..23 || m !in 0..59) return t
-        return "%02d:%02d".format(h, m)
+        return "${TextFmt.pad(h)}:${TextFmt.pad(m)}"
     }
 }

@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.power.PowerEntryState
+import edu.jxslu.schedule.domain.Money
 import edu.jxslu.schedule.ui.common.AmountHeroText
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
@@ -140,9 +141,8 @@ private fun AmountStep(
 ) {
     var amount by rememberSaveable { mutableStateOf("") }
     var confirm by remember { mutableStateOf(false) }
-    val parsed = amount.toBigDecimalOrNull()
-    val valid = parsed != null && parsed >= java.math.BigDecimal("0.01") &&
-        parsed <= java.math.BigDecimal("500.00")
+    val parsed = Money.parse(amount)
+    val valid = parsed != null && parsed >= Money.ofFen(1) && parsed <= Money.ofFen(50_000)
 
     // 说明文案默认中性灰（2026-11-06：渠道已删，支付方式在收银台网页里选）。
     Text(

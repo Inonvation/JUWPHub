@@ -5,15 +5,18 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
-import java.time.DayOfWeek
-import java.time.Instant
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.temporal.TemporalAdjusters
-import java.util.Base64
-import java.util.Locale
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.DayOfWeek
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atTime
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
+import kotlinx.datetime.toInstant
+import kotlinx.datetime.toLocalDateTime
+import okio.ByteString.Companion.decodeBase64
 
 /**
  * 问渠实践教育平台的纯逻辑（DESIGN §4.45）：续期时机、验证码冷却、输入校验、展示口径。
@@ -201,7 +204,7 @@ object WenquRules {
         applyEndTime: String,
         blacklisted: Boolean,
         now: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): String {
         if (blacklisted) return "当前账号被限制报名"
         if (applied) return "已报名"
@@ -243,7 +246,7 @@ object WenquRules {
         applied: Boolean,
         applyEndTime: String,
         now: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): Boolean {
         if (applied) return true
         when (status) {
@@ -276,15 +279,15 @@ object WenquRules {
     fun closingSortKey(
         applyEndTime: String,
         now: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): Long {
         val end = stampMillis(applyEndTime, zone)
         return if (end != null && end >= now) end else Long.MAX_VALUE
     }
 
     /** 平台时间戳的年份（记录按年份分组用）；认不出回 null。 */
-    fun stampYear(raw: String, zone: ZoneId = ZoneId.systemDefault()): Int? =
-        stampMillis(raw, zone)?.let { Instant.ofEpochMilli(it).atZone(zone).year }
+    fun stampYear(raw: String, zone: TimeZone = TimeZone.currentSystemDefault()): Int? =
+        stampMillis(raw, zone)?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(zone).year }
 
     /**
      * 命中关键词在 [text] 里的所有位置（给卡片做**命中高亮**）。
@@ -373,21 +376,22 @@ object WenquRules {
      * 只有日期时按当天 00:00。**认不出回 null**——调用方按「排最后」处理，不猜时间
      * （同 `SelectionRounds.parseTimeRange` 的纪律）。
      */
-    fun stampMillis(raw: String, zone: ZoneId = ZoneId.systemDefault()): Long? {
+    fun stampMillis(raw: String, zone: TimeZone = TimeZone.currentSystemDefault()): Long? {
         val text = raw.trim()
         if (text.isEmpty()) return null
         return runCatching {
-            // 只有日期时补 00:00——`LocalDateTime.parse` 吃不下没有时刻的串（实测抛
-            // `Unable to obtain LocalDateTime`），所以两条路分开走
-            val withTime = text.length > 10
-            val pattern = if (withTime) "yy-MM-dd HH:mm" else "yy-MM-dd"
-            val formatter = DateTimeFormatter.ofPattern(pattern, Locale.ROOT)
-            val local = if (withTime) {
-                LocalDateTime.parse(text, formatter)
-            } else {
-                LocalDate.parse(text, formatter).atStartOfDay()
-            }
-            local.atZone(zone).toInstant().toEpochMilli()
+            // 平台给的是两位年份 `yy-MM-dd HH:mm`；kotlinx 只认四位年份的 ISO，
+            // 这里手工拆字段再组装，年份按 2000+yy 还原（与 java.time `yy` 的口径一致）。
+            val blocks = text.split(' ')
+            val dateParts = blocks[0].split('-')
+            val timeParts = blocks.getOrNull(1)?.split(':')
+            LocalDateTime(
+                dateParts[0].toInt() + 2000,
+                dateParts[1].toInt(),
+                dateParts[2].toInt(),
+                timeParts?.getOrNull(0)?.toInt() ?: 0,
+                timeParts?.getOrNull(1)?.toInt() ?: 0,
+            ).toInstant(zone).toEpochMilliseconds()
         }.getOrNull()
     }
 
@@ -499,7 +503,7 @@ object WenquRules {
         status: Int,
         endTime: String,
         now: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): Int {
         if (status == 3) return status
         val end = stampMillis(endTime, zone) ?: return status
@@ -548,8 +552,9 @@ object WenquRules {
         val payload = token.split('.').getOrNull(1)?.takeIf { it.isNotBlank() } ?: return 0L
         return runCatching {
             val padded = payload + "=".repeat((4 - payload.length % 4) % 4)
-            val text = String(Base64.getUrlDecoder().decode(padded), Charsets.UTF_8)
-            json.parseToJsonElement(text).jsonObject["exp"]?.jsonPrimitive?.longOrNull?.times(1000L)
+            val bytes = padded.decodeBase64()?.toByteArray() ?: return@runCatching null
+            json.parseToJsonElement(bytes.decodeToString()).jsonObject["exp"]
+                ?.jsonPrimitive?.longOrNull?.times(1000L)
         }.getOrNull() ?: 0L
     }
 
@@ -611,17 +616,17 @@ object WenquRules {
         start: String,
         end: String,
         now: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): String {
         val range = timeRange(start, end)
         if (range.isEmpty()) return ""
         val startDate = stampMillis(start, zone)
-            ?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }
+            ?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(zone).date }
             ?: return range
-        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+        val today = Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
         val prefix = when (startDate) {
             today -> "今天"
-            today.plusDays(1) -> "明天"
+            today.plus(DatePeriod(days = 1)) -> "明天"
             else -> return range
         }
         // timeRange 的输出以日期开头（同一天 `MM-dd HH:mm–HH:mm`、跨天 `MM-dd HH:mm – MM-dd HH:mm`），
@@ -724,35 +729,43 @@ object WenquRules {
     fun nextWeeklyAlertPoint(
         now: Long,
         offsetMinutes: Int,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): WeeklyAlertPoint {
         val offset = coerceWeeklyOffsetMinutes(offsetMinutes)
         val sunday = nextOrSameSunday(now, zone)
         val point = weeklyPointOn(sunday, offset, zone)
-        return if (point.remindAt <= now) weeklyPointOn(sunday.plusWeeks(1), offset, zone) else point
+        return if (point.remindAt <= now) {
+            weeklyPointOn(sunday.plus(DatePeriod(days = 7)), offset, zone)
+        } else {
+            point
+        }
     }
 
     /** 最近一个**已经到点**的提醒点（[WeeklyAlertPoint.remindAt] ≤ now）。 */
     fun lastWeeklyAlertPoint(
         now: Long,
         offsetMinutes: Int,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): WeeklyAlertPoint {
         val offset = coerceWeeklyOffsetMinutes(offsetMinutes)
         val sunday = nextOrSameSunday(now, zone)
         val point = weeklyPointOn(sunday, offset, zone)
-        return if (point.remindAt > now) weeklyPointOn(sunday.minusWeeks(1), offset, zone) else point
+        return if (point.remindAt > now) {
+            weeklyPointOn(sunday.minus(DatePeriod(days = 7)), offset, zone)
+        } else {
+            point
+        }
     }
 
     /** 该提醒点属于哪一周的哪次发布（给通知正文用：`今天 12:00`）。 */
-    fun weeklyPublishLabel(publishAt: Long, now: Long, zone: ZoneId = ZoneId.systemDefault()): String {
-        val publish = Instant.ofEpochMilli(publishAt).atZone(zone)
-        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-        val time = publish.format(DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT))
-        val day = if (publish.toLocalDate() == today) {
+    fun weeklyPublishLabel(publishAt: Long, now: Long, zone: TimeZone = TimeZone.currentSystemDefault()): String {
+        val publish = Instant.fromEpochMilliseconds(publishAt).toLocalDateTime(zone)
+        val today = Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
+        val time = "${TextFmt.pad(publish.hour)}:${TextFmt.pad(publish.minute)}"
+        val day = if (publish.date == today) {
             "今天"
         } else {
-            "${publish.monthValue} 月 ${publish.dayOfMonth} 日"
+            "${publish.monthNumber} 月 ${publish.dayOfMonth} 日"
         }
         return "$day $time"
     }
@@ -854,17 +867,16 @@ object WenquRules {
      */
     fun grabPublishAt(
         armedAt: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
         pinnedOpenAt: Long = 0L,
     ): Long {
         if (pinnedOpenAt > armedAt) return pinnedOpenAt
-        val zoned = Instant.ofEpochMilli(armedAt).atZone(zone)
+        val zoned = Instant.fromEpochMilliseconds(armedAt).toLocalDateTime(zone)
         if (zoned.dayOfWeek != DayOfWeek.SUNDAY) return 0L
-        return zoned.toLocalDate()
+        return zoned.date
             .atTime(WEEKLY_ALERT_HOUR, WEEKLY_ALERT_MINUTE)
-            .atZone(zone)
-            .toInstant()
-            .toEpochMilli()
+            .toInstant(zone)
+            .toEpochMilliseconds()
     }
 
     /**
@@ -940,7 +952,7 @@ object WenquRules {
         keyword: String,
         blacklisted: Boolean,
         now: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
         pinnedId: Long = 0L,
     ): WenquActivity? {
         if (keyword.isBlank() && pinnedId <= 0L) return null
@@ -1057,14 +1069,14 @@ object WenquRules {
         phoneNow - serverOffsetMs >= opensAt + PREREG_END_AFTER_MS
 
     /** 预报名状态行 / 确认弹窗的时刻文案：`今天 12:00` / `明天 12:00` / `10 月 18 日 12:00`。 */
-    fun preregOpenLabel(opensAt: Long, now: Long, zone: ZoneId = ZoneId.systemDefault()): String {
-        val at = Instant.ofEpochMilli(opensAt).atZone(zone)
-        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-        val time = at.format(DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT))
-        val day = when (at.toLocalDate()) {
+    fun preregOpenLabel(opensAt: Long, now: Long, zone: TimeZone = TimeZone.currentSystemDefault()): String {
+        val at = Instant.fromEpochMilliseconds(opensAt).toLocalDateTime(zone)
+        val today = Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
+        val time = "${TextFmt.pad(at.hour)}:${TextFmt.pad(at.minute)}"
+        val day = when (at.date) {
             today -> "今天"
-            today.plusDays(1) -> "明天"
-            else -> "${at.monthValue} 月 ${at.dayOfMonth} 日"
+            today.plus(DatePeriod(days = 1)) -> "明天"
+            else -> "${at.monthNumber} 月 ${at.dayOfMonth} 日"
         }
         return "$day $time"
     }
@@ -1145,9 +1157,24 @@ object WenquRules {
         val text = raw?.trim().orEmpty()
         if (text.isEmpty()) return null
         return runCatching {
-            Instant.from(DateTimeFormatter.RFC_1123_DATE_TIME.parse(text)).toEpochMilli()
+            // RFC 1123 形如 `Thu, 16 Oct 2026 03:20:05 GMT`。kotlinx 没有现成解析器，
+            // 去掉逗号后按空格切成六段（星期 / 日 / 月 / 年 / 时刻 / GMT）。
+            val parts = text.replace(",", "").split(' ').filter { it.isNotEmpty() }
+            require(parts.size == 6 && parts[5] == "GMT") { "不是 RFC 1123 格式" }
+            val month = HTTP_MONTHS.indexOf(parts[2]) + 1
+            val clock = parts[4].split(':')
+            LocalDateTime(
+                parts[3].toInt(), month, parts[1].toInt(),
+                clock[0].toInt(), clock[1].toInt(), clock[2].toInt(),
+            ).toInstant(TimeZone.UTC).toEpochMilliseconds()
         }.getOrNull()
     }
+
+    /** RFC 1123 的月份英文缩写（下标 + 1 = 月份）。 */
+    private val HTTP_MONTHS = listOf(
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    )
 
     /**
      * 服务器钟与手机钟的偏移（毫秒，服务器 − 手机）。[serverAt] 是 `Date` 头的时刻，
@@ -1157,15 +1184,17 @@ object WenquRules {
         serverAt - (sentAt + receivedAt) / 2L
 
     /** 今天（含）之后的第一个周日。 */
-    private fun nextOrSameSunday(now: Long, zone: ZoneId): LocalDate =
-        Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-            .with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
+    private fun nextOrSameSunday(now: Long, zone: TimeZone): LocalDate {
+        val today = Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
+        // kotlinx 的 DayOfWeek 以周一为 0、周日为 6；周日当天算 0 天
+        val delta = (DayOfWeek.SUNDAY.ordinal - today.dayOfWeek.ordinal + 7) % 7
+        return today.plus(DatePeriod(days = delta))
+    }
 
-    private fun weeklyPointOn(sunday: LocalDate, offsetMinutes: Int, zone: ZoneId): WeeklyAlertPoint {
+    private fun weeklyPointOn(sunday: LocalDate, offsetMinutes: Int, zone: TimeZone): WeeklyAlertPoint {
         val publishAt = sunday.atTime(WEEKLY_ALERT_HOUR, WEEKLY_ALERT_MINUTE)
-            .atZone(zone)
-            .toInstant()
-            .toEpochMilli()
+            .toInstant(zone)
+            .toEpochMilliseconds()
         return WeeklyAlertPoint(
             publishAt = publishAt,
             remindAt = publishAt - offsetMinutes * 60_000L,

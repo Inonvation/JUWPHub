@@ -90,6 +90,7 @@ import edu.jxslu.schedule.ui.common.showNotice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.toKotlinLocalDate
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
@@ -307,8 +308,8 @@ fun ScheduleShareScreen(
                     week = previewWeek,
                     totalWeeks = totalWeeks,
                     rangeText = ScheduleShare.weekRangeText(
-                        weekDate(state.semester, previewWeek, visibleDays.firstOrNull() ?: 1),
-                        weekDate(state.semester, previewWeek, visibleDays.lastOrNull() ?: 7),
+                        weekDate(state.semester, previewWeek, visibleDays.firstOrNull() ?: 1)?.toKotlinLocalDate(),
+                        weekDate(state.semester, previewWeek, visibleDays.lastOrNull() ?: 7)?.toKotlinLocalDate(),
                     ),
                     enabled = !busy,
                     onChange = { week = it },
@@ -572,8 +573,8 @@ private fun ShareBoard(
                 timetableName = state.timetableName,
                 week = week,
                 rangeText = ScheduleShare.weekRangeText(
-                    weekDate(state.semester, week, visibleDays.firstOrNull() ?: 1),
-                    weekDate(state.semester, week, visibleDays.lastOrNull() ?: 7),
+                    weekDate(state.semester, week, visibleDays.firstOrNull() ?: 1)?.toKotlinLocalDate(),
+                    weekDate(state.semester, week, visibleDays.lastOrNull() ?: 7)?.toKotlinLocalDate(),
                 ),
             )
             Spacer(Modifier.height(BoardHeaderGap))

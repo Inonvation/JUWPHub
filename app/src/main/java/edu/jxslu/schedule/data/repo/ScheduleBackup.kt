@@ -696,7 +696,7 @@ internal fun validateBackup(export: CourseExport): BackupCheck {
             ?: return BackupCheck.Error("${label}的起始日期格式不正确：${o.fromDate}")
         val to = runCatching { ScheduleCalculator.parseDate(o.toDate) }.getOrNull()
             ?: return BackupCheck.Error("${label}的结束日期格式不正确：${o.toDate}")
-        if (to.isBefore(from)) {
+        if (to < from) {
             return BackupCheck.Error("${label}的结束日期（${o.toDate}）早于起始日期（${o.fromDate}）")
         }
         if (OverrideKind.entries.none { it.name == o.kind }) {

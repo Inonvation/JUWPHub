@@ -6,7 +6,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import java.util.Locale
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.min
@@ -718,8 +717,8 @@ object BikeNearby {
     /** 距离文案：1 公里以内给整米，超过给一位小数的公里。 */
     fun formatDistance(meters: Int): String = when {
         meters < 1000 -> "$meters 米"
-        // 固定 Locale.US：系统 Locale 为部分欧洲语言时默认格式会给成「1,9 公里」
-        else -> String.format(Locale.US, "%.1f 公里", meters / 1000.0)
+        // 小数点固定为 `.`（TextFmt.decimals 走 Locale.ROOT）：欧洲语言系统默认会给成「1,9 公里」
+        else -> TextFmt.decimals(meters / 1000.0, 1) + " 公里"
     }
 
     // ---- 内部 ----

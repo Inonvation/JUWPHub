@@ -251,7 +251,7 @@ object EbikeFreeRide {
     /** 倒计时文案 `mm:ss`；超过一小时不会出现（15 分钟上限），直接分钟兜底。 */
     fun formatRemaining(totalSeconds: Int): String {
         val safe = max(0, totalSeconds)
-        return "%d:%02d".format(safe / 60, safe % 60)
+        return "${safe / 60}:${TextFmt.pad(safe % 60)}"
     }
 
     /** 计时是否仍有效（未到点）。到点后 UI 不再显示计时条。 */

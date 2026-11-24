@@ -62,7 +62,7 @@ object UpdateCheck {
     }
 
     private fun toManifest(dto: ManifestDto): UpdateManifest? {
-        val apk = dto.apk.ifBlank { APK_NAME_TEMPLATE.format(dto.version) }
+        val apk = dto.apk.ifBlank { APK_NAME_TEMPLATE.replace("%s", dto.version) }
         // 版本号与 APK 文件名都过白名单：文件名只用来拼下载链接，防注入怪 URL
         if (!VERSION_RE.matches(dto.version)) return null
         if (!APK_NAME_RE.matches(apk)) return null

@@ -9,6 +9,7 @@ import edu.jxslu.schedule.domain.CalendarSyncDefaults
 import edu.jxslu.schedule.domain.ScheduleExporter.CourseEvent
 import edu.jxslu.schedule.domain.ScheduleExporter.teacherDescription
 import kotlinx.coroutines.Dispatchers
+import kotlinx.datetime.toInstant
 import kotlinx.coroutines.withContext
 
 /**
@@ -191,8 +192,14 @@ object CalendarSyncer {
             if (event.position.isNotBlank()) {
                 put(CalendarContract.Events.EVENT_LOCATION, event.position)
             }
-            put(CalendarContract.Events.DTSTART, event.start.toEpochMilli())
-            put(CalendarContract.Events.DTEND, event.end.toEpochMilli())
+            put(
+                CalendarContract.Events.DTSTART,
+                event.start.toInstant(kotlinx.datetime.TimeZone.currentSystemDefault()).toEpochMilliseconds(),
+            )
+            put(
+                CalendarContract.Events.DTEND,
+                event.end.toInstant(kotlinx.datetime.TimeZone.currentSystemDefault()).toEpochMilliseconds(),
+            )
             put(CalendarContract.Events.EVENT_TIMEZONE, java.util.TimeZone.getDefault().id)
             put(CalendarContract.Events.AVAILABILITY, CalendarContract.Events.AVAILABILITY_BUSY)
         }

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.data.repo.ScheduleRepository
+import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.SemesterConfig
@@ -194,7 +195,7 @@ class CourseTweakViewModel(
     private fun slice(config: TweakConfig, date: LocalDate): DaySlice {
         val day = date.dayOfWeek.value
         val semester = config.semester
-        val week = semester?.let { ScheduleCalculator.weekNumberOf(it, date) }
+        val week = semester?.let { ScheduleCalculator.weekNumberOf(it, date.toKotlinLocalDate()) }
             ?.takeIf { ScheduleCalculator.isWeekInTerm(semester, it) }
         val courses = if (week == null) {
             emptyList()

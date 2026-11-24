@@ -62,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.Homework
+import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.dueDetailLabel
 import edu.jxslu.schedule.domain.imageRefs
 import edu.jxslu.schedule.domain.removeImageRef
@@ -151,7 +152,7 @@ fun HomeworkDetailScreen(
     // 「保存并继续新建」后再次聚焦正文：focusTick 变化触发 LaunchedEffect
     var focusTick by remember { mutableStateOf(0) }
     val today = LocalDate.now()
-    val dueText = dueDate?.let { dueDetailLabel(it, today) } ?: "未设置"
+    val dueText = dueDate?.let { dueDetailLabel(it.toKotlinLocalDate(), today.toKotlinLocalDate()) } ?: "未设置"
 
     // 从预览点铅笔进编辑后主动聚焦正文（光标在末尾），省一次点击；
     // loaded 守卫：载入中编辑器还没组合，requestFocus 会抛 FocusRequester not initialized

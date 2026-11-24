@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.homeworkDisplayTitle
+import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.pendingHomework
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
@@ -78,7 +79,7 @@ fun HomeworkTodoScreen(
     val today = LocalDate.now()
     // 默认全展开：collapsed 集合记录用户手动收起的课程（与「默认展开」语义对齐）
     val collapsed = remember { mutableStateMapOf<String, Boolean>() }
-    val pending = remember(all) { all?.let { pendingHomework(it, today) } }
+    val pending = remember(all) { all?.let { pendingHomework(it, today.toKotlinLocalDate()) } }
     val listState = rememberLazyListState()
     val revealSpacePx = rememberRevealSpacePx()
     var viewer by remember { mutableStateOf<String?>(null) }

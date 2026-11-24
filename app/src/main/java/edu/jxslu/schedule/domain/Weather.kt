@@ -1,7 +1,7 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
-import java.time.LocalDateTime
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
 
 /**
  * 天气快照（DESIGN §3.29）：Open-Meteo 一次 `/v1/forecast` 请求的解析结果。

@@ -26,6 +26,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import edu.jxslu.schedule.domain.Money
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.YktPayment
 import edu.jxslu.schedule.ui.common.AmountHeroText
@@ -74,9 +75,8 @@ fun RechargeSheet(
     var confirmStep by remember { mutableStateOf(false) }
     var toElectric by rememberSaveable { mutableStateOf(false) }
 
-    val parsed = amount.toBigDecimalOrNull()
-    val valid = parsed != null && parsed >= java.math.BigDecimal("0.01") &&
-        parsed <= java.math.BigDecimal("500.00")
+    val parsed = Money.parse(amount)
+    val valid = parsed != null && parsed >= Money.ofFen(1) && parsed <= Money.ofFen(50_000)
 
     // 键盘遮挡与退场时序都收在 ImeAwareModalBottomSheet 里（`skipPartiallyExpanded = true`；
     // 退场走「先收键盘、键盘收完再滑走」两段，理由与实测见 ui/common/SheetDismissIme.kt 注释）。

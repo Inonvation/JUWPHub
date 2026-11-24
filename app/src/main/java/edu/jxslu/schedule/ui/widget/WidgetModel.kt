@@ -14,6 +14,7 @@ import edu.jxslu.schedule.domain.clockOf
 import edu.jxslu.schedule.domain.compactPosition
 import edu.jxslu.schedule.domain.dayLabel
 import edu.jxslu.schedule.domain.sectionRange
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -492,7 +493,7 @@ fun WidgetSnapshot.forSize(metrics: WidgetMetrics): WidgetModel {
  */
 fun buildWidgetSnapshot(state: TodayState, week: WidgetWeek? = null): WidgetSnapshot {
     val header = buildString {
-        append("${state.date.monthValue}月${state.date.dayOfMonth}日")
+        append("${state.date.monthNumber}月${state.date.dayOfMonth}日")
         append(" 周${dayLabel(state.day)}")
         if (state.week > 0) append(" · 第 ${state.week} 周")
     }
@@ -592,8 +593,9 @@ private fun buildFocus(state: TodayState): WidgetFocus {
 }
 
 /** 当天 [minutesOfDay] 的绝对时刻（epoch 毫秒）：桌面 Chronometer 的目标时刻。 */
-private fun epochMillisAt(date: LocalDate, minutesOfDay: Int): Long =
-    date.atStartOfDay(ZoneId.systemDefault()).plusMinutes(minutesOfDay.toLong()).toInstant().toEpochMilli()
+private fun epochMillisAt(date: kotlinx.datetime.LocalDate, minutesOfDay: Int): Long =
+    date.atStartOfDayIn(kotlinx.datetime.TimeZone.currentSystemDefault()).toEpochMilliseconds() +
+        minutesOfDay * 60_000L
 
 /**
  * 4×4 摘要行：正在上 / 下一节一行，或明日接棒时明天第一节。

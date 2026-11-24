@@ -1,6 +1,6 @@
 package edu.jxslu.schedule.domain
 
-import java.security.MessageDigest
+import okio.ByteString.Companion.toByteString
 
 /**
  * 校园卡「安全键盘」字形映射与密码构造（DESIGN §3.10 / §4.19）。纯 JVM，无 Android 依赖。
@@ -42,8 +42,7 @@ object YktKeyboard {
     const val MAX_PASSWORD_LENGTH = 16
 
     /** 字形 PNG 字节的全量 MD5（hex 小写）。 */
-    fun md5Hex(bytes: ByteArray): String =
-        MessageDigest.getInstance("MD5").digest(bytes).joinToString("") { "%02x".format(it) }
+    fun md5Hex(bytes: ByteArray): String = bytes.toByteString().md5().hex()
 
     /**
      * 由本次键盘响应构建「数字 → 密文字符」映射（字节入参：先算 MD5 再查表）。

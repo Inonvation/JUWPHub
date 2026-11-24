@@ -21,6 +21,7 @@ import edu.jxslu.schedule.domain.YktArrival
 import edu.jxslu.schedule.domain.BalanceAlertSource
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
+import edu.jxslu.schedule.domain.Money
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.ui.common.NoticeFeedback
@@ -587,11 +588,7 @@ class CampusCardViewModel(
     }
 
     /** "12.50" → 1250 分；调用前已经 RechargeSheet 校验过，异常值返回 0（只影响流水判定精度）。 */
-    private fun parsedFenOf(yuan: String): Long =
-        yuan.toBigDecimalOrNull()
-            ?.multiply(java.math.BigDecimal(100))
-            ?.toLong()
-            ?: 0L
+    private fun parsedFenOf(yuan: String): Long = Money.parse(yuan)?.fen ?: 0L
 
     /**
      * 到账轮询：5 秒一轮余额检测（用户要求的高频口径）+ 每 3 轮（15 秒）一次流水增量。

@@ -1,11 +1,11 @@
 package edu.jxslu.schedule.domain
 
-import java.security.MessageDigest
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlin.random.Random
+import kotlin.time.Clock
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import okio.ByteString.Companion.encodeUtf8
 
 /**
  * 校园卡 / 电费充值共用的前端签名算法（两套平台的前端 JS 常量与拼接口径一致）。
@@ -64,9 +64,15 @@ object CampusPaySign {
     }
 
     /** `yyyyMMddHHmmssSSS`（本地时区；前端 `new Date()` 拼接口径）。 */
-    fun buildTimestamp(now: Long = System.currentTimeMillis()): String {
-        val ldt = LocalDateTime.ofInstant(Instant.ofEpochMilli(now), ZoneId.systemDefault())
-        return ldt.format(DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS"))
+    fun buildTimestamp(now: Long = Clock.System.now().toEpochMilliseconds()): String {
+        val t = Instant.fromEpochMilliseconds(now).toLocalDateTime(TimeZone.currentSystemDefault())
+        return TextFmt.pad(t.year, 4) +
+            TextFmt.pad(t.monthNumber) +
+            TextFmt.pad(t.dayOfMonth) +
+            TextFmt.pad(t.hour) +
+            TextFmt.pad(t.minute) +
+            TextFmt.pad(t.second) +
+            TextFmt.pad(t.nanosecond / 1_000_000, 3)
     }
 
     /** 11 位小写字母数字（前端 `Math.random().toString(36).substring(2)` 口径）。 */
@@ -75,7 +81,5 @@ object CampusPaySign {
         return buildString { repeat(11) { append(alphabet[random.nextInt(alphabet.length)]) } }
     }
 
-    private fun sha256Hex(text: String): String =
-        MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+    private fun sha256Hex(text: String): String = text.encodeUtf8().sha256().hex()
 }

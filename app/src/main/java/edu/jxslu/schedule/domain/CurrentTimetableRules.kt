@@ -1,6 +1,8 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
 
 /**
  * 「当前课表」按日期自动选定（DESIGN §4.17）。
@@ -43,6 +45,6 @@ object CurrentTimetableRules {
         if (candidate.term.isNullOrBlank()) return false
         val start = candidate.startDate ?: return false
         val weeks = candidate.totalWeeks.coerceIn(1, 30)
-        return !today.isBefore(start) && today.isBefore(start.plusWeeks(weeks.toLong()))
+        return today >= start && today < start.plus(DatePeriod(days = weeks * 7))
     }
 }

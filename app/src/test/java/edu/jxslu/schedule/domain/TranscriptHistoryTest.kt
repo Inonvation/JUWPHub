@@ -1,11 +1,12 @@
 package edu.jxslu.schedule.domain
 
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.ZoneId
-import java.time.ZonedDateTime
 
 /**
  * 「最近导出」的文件名解析与保留策略（DESIGN §4.25）。
@@ -84,8 +85,8 @@ class TranscriptHistoryTest {
 
     @Test
     fun formatsTimeAndSize() {
-        val zone = ZoneId.of("Asia/Shanghai")
-        val millis = ZonedDateTime.of(2026, 9, 24, 19, 28, 0, 0, zone).toInstant().toEpochMilli()
+        val zone = TimeZone.of("Asia/Shanghai")
+        val millis = LocalDateTime(2026, 9, 24, 19, 28, 0).toInstant(zone).toEpochMilliseconds()
         assertEquals("2026-09-24 19:28", TranscriptHistory.timeLabel(millis, zone))
 
         // 格式化细节在 SizeTextTest，这里只钉委托没断

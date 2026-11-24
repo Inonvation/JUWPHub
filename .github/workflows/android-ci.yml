@@ -53,6 +53,12 @@ jobs:
         shell: pwsh
         run: ./scripts/check-motion-literals.ps1
 
+      # iOS 移植护栏（2026-11-24）：domain/ 将来要整体搬进 KMP commonMain，
+      # 那里没有 JVM。允许清单在脚本里，清完一条就从清单删一条。
+      - name: domain 可移植性检查（iOS 端口用）
+        shell: pwsh
+        run: ./scripts/check-domain-portability.ps1
+
       - name: 单元测试
         run: ./gradlew :app:testDebugUnitTest
 

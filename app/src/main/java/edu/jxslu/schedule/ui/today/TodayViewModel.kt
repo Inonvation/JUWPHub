@@ -8,6 +8,10 @@ import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.domain.Course
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.plus
+import kotlinx.datetime.toKotlinLocalDate
+import kotlinx.datetime.toKotlinLocalDateTime
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.GuessPick
 import edu.jxslu.schedule.domain.GuessPickStabilizer
@@ -145,7 +149,7 @@ class TodayViewModel(
                     semester = semester,
                     slots = slots,
                     courses = courses,
-                    today = todayProvider(),
+                    today = todayProvider().toKotlinLocalDate(),
                     now = LocalTimeLike.now(),
                     overrides = overrides,
                 )
@@ -169,7 +173,7 @@ class TodayViewModel(
      */
     val homeworkPending: StateFlow<PendingHomework> =
         combine(homeworkRepo.observePending(), tick) { list, _ ->
-            pendingHomework(list, todayProvider())
+            pendingHomework(list, todayProvider().toKotlinLocalDate())
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EMPTY)
 
     /**
@@ -242,10 +246,11 @@ class TodayViewModel(
         } else {
             null
         }
+        val appNow = now.toKotlinLocalDateTime()
         if (snapshot != null) {
             return WeatherAdvice.segments(
                 snapshot = snapshot,
-                now = now,
+                now = appNow,
                 semester = inputs.semester,
                 slots = inputs.slots,
                 courses = inputs.courses,
@@ -253,10 +258,10 @@ class TodayViewModel(
             )
         }
         // 天气开关关着就不发请求（DESIGN §3.29 口径），但课表句照出（零网络）
-        val date = now.toLocalDate().plusDays(WeatherAdvice.referenceDayIndex(now).toLong())
+        val date = appNow.date.plus(DatePeriod(days = WeatherAdvice.referenceDayIndex(appNow)))
         return ScheduleTips.dayTipFor(
             date = date,
-            today = now.toLocalDate(),
+            today = appNow.date,
             semester = inputs.semester,
             slots = inputs.slots,
             courses = inputs.courses,

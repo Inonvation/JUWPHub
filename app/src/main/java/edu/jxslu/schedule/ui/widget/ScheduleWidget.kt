@@ -47,6 +47,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.MainActivity
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.LocalTimeLike
+import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.buildTodayState
 import edu.jxslu.schedule.domain.dayLabel
 import edu.jxslu.schedule.ui.common.courseColor
@@ -143,7 +144,7 @@ internal object WidgetSnapshotStore {
             semester = semester,
             slots = slots,
             courses = courses,
-            today = today,
+            today = today.toKotlinLocalDate(),
             now = now,
             overrides = overrides,
         )

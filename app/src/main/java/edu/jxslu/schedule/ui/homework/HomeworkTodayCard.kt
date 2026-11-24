@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.PendingHomework
+import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.dueLabel
 import edu.jxslu.schedule.ui.common.AppCardRow
 import me.rerere.hugeicons.HugeIcons
@@ -70,7 +71,7 @@ fun HomeworkTodayCard(
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val parts = buildList {
-                    pending.nextDue?.let { due -> dueLabel(due, today)?.let { add("最近截止 $it") } }
+                    pending.nextDue?.let { due -> dueLabel(due, today.toKotlinLocalDate())?.let { add("最近截止 $it") } }
                     if (pending.overdue > 0) add("${pending.overdue} 项已过期")
                     if (isEmpty()) add("未设截止日期")
                 }

@@ -35,7 +35,7 @@ object YktRechargeSign {
     fun signOf(params: Map<String, String>): String = CampusPaySign.signOf(params)
 
     /** `yyyyMMddHHmmssSSS`（本地时区；前端 `new Date()` 拼接口径）。 */
-    fun buildTimestamp(now: Long = System.currentTimeMillis()): String =
+    fun buildTimestamp(now: Long = kotlin.time.Clock.System.now().toEpochMilliseconds()): String =
         CampusPaySign.buildTimestamp(now)
 
     /** 随机小写字母数字串（前端 `Math.random().toString(36).substring(2)` 口径，11 位）。 */

@@ -67,6 +67,7 @@ import edu.jxslu.schedule.data.qiekj.DeviceItem
 import edu.jxslu.schedule.data.qiekj.OrderHistoryItem
 import edu.jxslu.schedule.data.qiekj.ServerOrderItem
 import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.domain.Money
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.UnlockFlowState
 import edu.jxslu.schedule.domain.UnlockResult
@@ -98,7 +99,6 @@ import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.me.MeViewModel
-import java.math.BigDecimal
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -1233,7 +1233,7 @@ internal fun OrderDetailDialog(item: UnlockResult, onDismiss: () -> Unit) {
         DetailRow("原价", "¥${item.originPrice}")
         // 账单构成（DESIGN §4.10 账单口径）：小票是账户余额，扣了就是花了；
         // 「现金支付 ¥0.00」只代表没走在线支付，不叫「实付 0」
-        ticketPaidAmount(item)?.takeIf { it > BigDecimal.ZERO }
+        ticketPaidAmount(item)?.takeIf { it > Money.ZERO }
             ?.let { DetailRow("小票支付", MoneyFormat.fromYuan(it)) }
         if (item.integralCost != "-") DetailRow("积分抵扣", item.integralCost)
         item.otherPromotions.forEach { p ->

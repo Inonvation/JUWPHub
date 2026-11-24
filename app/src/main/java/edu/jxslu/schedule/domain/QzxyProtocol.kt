@@ -198,7 +198,7 @@ object QzxyProtocol {
         val success: Boolean,
         val errorCode: Int?,
     ) {
-        val functionCodeHex: String get() = "%02x".format(functionCode)
+        val functionCodeHex: String get() = TextFmt.hex2(functionCode)
 
         /** 错误码中文名；成功时给 `-`。 */
         val errorText: String get() = errorCode?.let(::errorCodeText) ?: "-"

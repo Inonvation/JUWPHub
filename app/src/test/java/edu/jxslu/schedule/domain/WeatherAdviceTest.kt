@@ -4,8 +4,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.LocalDate
-import java.time.LocalDateTime
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalDateTime as KDateTime
 
 /**
  * 今日页顶栏天气提示的契约（DESIGN §3.29）：
@@ -24,7 +25,7 @@ class WeatherAdviceTest {
         uv: Double? = 3.0,
         wind: Double? = 10.0,
     ) = WeatherDay(
-        date = LocalDate.of(2026, 10, 12),
+        date = LocalDate(2026, 10, 12),
         code = code,
         tempMaxC = max,
         tempMinC = min,
@@ -57,11 +58,11 @@ class WeatherAdviceTest {
      * 10-12 周一：课文按周一排（[course] 的 day 默认 1）。
      * 18:00 后讲 10-13 周二——「明天」那一路的课表也取得到（否则会静默退化成只有天气句）。
      */
-    private fun at(hour: Int, minute: Int = 0): LocalDateTime =
-        LocalDateTime.of(2026, 10, 12, hour, minute)
+    private fun at(hour: Int, minute: Int = 0): KDateTime =
+        KDateTime(2026, 10, 12, hour, minute)
 
     /** 只取天气句：没有课表句 / 快下课句时，[WeatherAdvice.segments] 的第一条就是它。 */
-    private fun weatherOf(snapshot: WeatherSnapshot, now: LocalDateTime): String? =
+    private fun weatherOf(snapshot: WeatherSnapshot, now: KDateTime): String? =
         WeatherAdvice.segments(snapshot, now).firstOrNull()?.text
 
     // ---- 18:00 分界 ----
@@ -328,7 +329,7 @@ class WeatherAdviceTest {
     @Test
     fun `逐小时降水判据`() {
         fun h(code: Int, prob: Int? = 0) = WeatherHour(
-            time = LocalDateTime.of(2026, 10, 13, 9, 0),
+            time = LocalDateTime(2026, 10, 13, 9, 0),
             tempC = 20.0,
             precipProbability = prob,
             code = code,

@@ -3,9 +3,9 @@ package edu.jxslu.schedule.domain
 import edu.jxslu.schedule.data.DefaultData
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.LocalTime
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
 
 /**
  * 上课倒计时卡片（灵动岛，DESIGN §3.7，2026-10-29）的纯函数口径。
@@ -28,10 +28,10 @@ class LiveClassUpdateTest {
         course: Course = course(),
     ) = ReminderPlan(
         course = course,
-        date = startAt.toLocalDate(),
+        date = startAt.date,
         startMinutes = startAt.hour * 60 + startAt.minute,
         startAt = startAt,
-        triggerAt = startAt.minusMinutes(leadMinutes),
+        triggerAt = AppClock.plusMinutes(startAt, -leadMinutes.toInt()),
     )
 
     private fun course(
@@ -53,7 +53,7 @@ class LiveClassUpdateTest {
     )
 
     private fun at(hour: Int, minute: Int, second: Int = 0): LocalDateTime =
-        LocalDateTime.of(LocalDate.parse("2026-09-17"), LocalTime.of(hour, minute, second))
+        LocalDateTime(LocalDate.parse("2026-09-17"), LocalTime(hour, minute, second))
 
     // ---- 剩余分钟数（芯片「剩 N 分」）----
 

@@ -1,6 +1,6 @@
 package edu.jxslu.schedule.domain
 
-import java.security.MessageDigest
+import okio.ByteString.Companion.encodeUtf8
 
 /**
  * 胖乖（轻乖生活）请求签名。
@@ -16,10 +16,7 @@ import java.security.MessageDigest
  */
 object QiekjSign {
 
-    fun sha256Hex(input: String): String =
-        MessageDigest.getInstance("SHA-256")
-            .digest(input.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+    fun sha256Hex(input: String): String = input.encodeUtf8().sha256().hex()
 
     /** 参考实现 light-life HeaderInterceptor.sign：字段序与拼接方式不可调换。 */
     fun sign(

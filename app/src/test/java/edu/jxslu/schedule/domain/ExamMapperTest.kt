@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.domain
 
 import edu.jxslu.schedule.data.DefaultData
+import kotlinx.datetime.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -134,9 +135,9 @@ class ExamMapperTest {
     @Test
     fun estimatedTermStartFollowsCalendarConvention() {
         // 第 1 学期：含 9 月 1 日那一周的周一（2026-09-01 是周二 → 2026-08-31）
-        assertEquals(java.time.LocalDate.of(2026, 8, 31), ExamMapper.estimatedTermStart("2026-2027-1"))
+        assertEquals(LocalDate(2026, 8, 31), ExamMapper.estimatedTermStart("2026-2027-1"))
         // 第 2 学期：含 3 月 1 日那一周的周一（2026-03-01 是周日 → 2026-02-23）
-        assertEquals(java.time.LocalDate.of(2026, 2, 23), ExamMapper.estimatedTermStart("2025-2026-2"))
+        assertEquals(LocalDate(2026, 2, 23), ExamMapper.estimatedTermStart("2025-2026-2"))
         // 学期号无法识别
         assertNull(ExamMapper.estimatedTermStart("2025-2026-3"))
         assertNull(ExamMapper.estimatedTermStart("bad"))

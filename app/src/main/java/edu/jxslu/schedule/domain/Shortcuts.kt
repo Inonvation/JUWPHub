@@ -1,9 +1,12 @@
+@file:OptIn(ExperimentalUuidApi::class)
+
 package edu.jxslu.schedule.domain
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import java.util.UUID
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * 一条快捷方式。目标三种填法（互不排斥，按 [resolveLaunchPlan] 的优先级折算）：
@@ -258,7 +261,7 @@ object Shortcuts {
 /** 列表的纯函数操作：存储层与 ViewModel 都只是搬运，判定逻辑集中在这里（可 JVM 测）。 */
 object ShortcutOps {
 
-    fun newCustomId(): String = "custom-${UUID.randomUUID()}"
+    fun newCustomId(): String = "custom-${Uuid.random()}"
 
     /** 追加一条自定义条目；是否超 [Shortcuts.MAX_COUNT] 由调用方先判（UI 要提前禁用按钮）。 */
     fun add(items: List<ShortcutItem>, item: ShortcutItem): List<ShortcutItem> = items + item

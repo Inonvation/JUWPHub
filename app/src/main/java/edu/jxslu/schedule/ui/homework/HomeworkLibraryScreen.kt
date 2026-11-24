@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.Course
+import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.Homework
 import edu.jxslu.schedule.domain.courseHomeworkOrder
 import edu.jxslu.schedule.domain.homeworkDisplayTitle
@@ -156,7 +157,7 @@ fun HomeworkLibraryScreen(
                         } else {
                             "全部完成 · 共 ${group.total} 项"
                         },
-                        items = courseHomeworkOrder(courseItems, today),
+                        items = courseHomeworkOrder(courseItems, today.toKotlinLocalDate()),
                         today = today,
                         courses = courses,
                         expanded = expanded[group.courseName] == true,

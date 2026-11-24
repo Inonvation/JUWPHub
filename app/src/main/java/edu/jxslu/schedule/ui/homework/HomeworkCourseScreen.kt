@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.Homework
+import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.courseHomeworkOrder
 import edu.jxslu.schedule.domain.homeworkDisplayTitle
 import edu.jxslu.schedule.ui.common.AppCard
@@ -104,7 +105,7 @@ fun HomeworkCourseScreen(
             }
 
             else -> {
-                val ordered = courseHomeworkOrder(items, today)
+                val ordered = courseHomeworkOrder(items, today.toKotlinLocalDate())
                 val pending = ordered.filter { !it.done }
                 val done = ordered.filter { it.done }
                 LazyColumn(

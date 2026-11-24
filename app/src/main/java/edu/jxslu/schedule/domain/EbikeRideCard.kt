@@ -1,9 +1,9 @@
 package edu.jxslu.schedule.domain
 
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * 开锁前的「没有可用骑行卡」判定（2026-10-22 用户要求）。
@@ -21,9 +21,6 @@ object EbikeRideCard {
         "开锁下单后会按快趣规则计费，前 15 分钟免费也以骑行套餐卡为准；" +
             "续卡或买卡请在快趣小程序完成。"
 
-    /** 「今日不再提醒」的日期键形态。 */
-    private val DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-
     /**
      * 这张卡还能不能用：**到期时间已知且已过 = 不可用**；剩余次数为 0 = 不可用。
      *
@@ -34,7 +31,7 @@ object EbikeRideCard {
     fun isUsable(
         coupon: KqcxAuth.AssetCoupon,
         nowMillis: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): Boolean {
         val endAt = EbikeCardExpiry.parseEndAt(coupon.endAt, zone)
         if (endAt != null && endAt <= nowMillis) return false
@@ -45,7 +42,7 @@ object EbikeRideCard {
     fun hasUsableCard(
         coupons: List<KqcxAuth.AssetCoupon>,
         nowMillis: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): Boolean = coupons.any { isUsable(it, nowMillis, zone) }
 
     /**
@@ -55,7 +52,7 @@ object EbikeRideCard {
     fun warningText(
         coupons: List<KqcxAuth.AssetCoupon>,
         nowMillis: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): String? {
         if (hasUsableCard(coupons, nowMillis, zone)) return null
         val reason = when {
@@ -69,16 +66,18 @@ object EbikeRideCard {
     }
 
     /** 「今日不再提醒」的日期键（本地日历日；跨天自然失效，不需要额外清理）。 */
-    fun dayKey(nowMillis: Long, zone: ZoneId = ZoneId.systemDefault()): String =
-        Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate().format(DAY_FORMAT)
+    fun dayKey(nowMillis: Long, zone: TimeZone = TimeZone.currentSystemDefault()): String {
+        val d = Instant.fromEpochMilliseconds(nowMillis).toLocalDateTime(zone).date
+        return "${TextFmt.pad(d.year, 4)}-${TextFmt.pad(d.monthNumber)}-${TextFmt.pad(d.dayOfMonth)}"
+    }
 
     private fun latestExpiryText(
         coupons: List<KqcxAuth.AssetCoupon>,
-        zone: ZoneId,
+        zone: TimeZone,
     ): String {
         val latest = coupons.mapNotNull { EbikeCardExpiry.parseEndAt(it.endAt, zone) }.maxOrNull()
             ?: return "有效期已过"
-        val date: LocalDate = Instant.ofEpochMilli(latest).atZone(zone).toLocalDate()
+        val date: LocalDate = Instant.fromEpochMilliseconds(latest).toLocalDateTime(zone).date
         return "有效期至 $date"
     }
 }

@@ -1,8 +1,10 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.ZoneId
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toInstant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -11,13 +13,13 @@ import org.junit.Test
 /** 选课轮的容错时间解析、状态判定与提醒点（DESIGN §4.35）。用固定时区，结果与机器时区无关。 */
 class SelectionRoundsTest {
 
-    private val zone = ZoneId.of("Asia/Shanghai")
+    private val zone = TimeZone.of("Asia/Shanghai")
 
     private fun at(y: Int, mo: Int, d: Int, h: Int, mi: Int): Long =
-        LocalDateTime.of(y, mo, d, h, mi).atZone(zone).toInstant().toEpochMilli()
+        LocalDateTime(y, mo, d, h, mi).toInstant(zone).toEpochMilliseconds()
 
     private fun dayStart(y: Int, mo: Int, d: Int): Long =
-        LocalDate.of(y, mo, d).atStartOfDay(zone).toInstant().toEpochMilli()
+        LocalDate(y, mo, d).atStartOfDayIn(zone).toEpochMilliseconds()
 
     // ---- 时间解析 ----
 

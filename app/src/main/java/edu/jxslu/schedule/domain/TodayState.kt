@@ -1,6 +1,8 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
 
 /**
  * 「下一节」焦点卡准入窗口（分钟）。
@@ -33,7 +35,7 @@ data class TodayState(
     val week: Int = 0,
     val day: Int = 1,
     /** 今天的日期，顶栏「9月18日 周四」用 */
-    val date: LocalDate = LocalDate.now(),
+    val date: LocalDate = AppClock.today(),
     val inTerm: Boolean = false,
     /**
      * 学期已配置，但今天已过最后一周（学期结束 / 当前课表是旧学期的课表）。
@@ -139,7 +141,7 @@ fun buildTodayState(
 ): TodayState {
     // 日期覆盖（调休 / 停课，§4.40）在这里摊平一次，今天与明天共用同一张表
     val plan = ScheduleOverrides.plan(overrides, semester)
-    val day = today.dayOfWeek.value
+    val day = today.dayOfWeek.ordinal + 1
     // 「本周」只认学期内的周次（null = 今天不在学期内，含未配置学期）。
     // 裸周次在学期结束后会一路涨到 30+，只能用来判断「学期已结束」，不能进界面：
     // 顶栏此前会显示「第 37 周」、课表页的「回到本周」也永远点不掉（2026-11-05 用户报障）。
@@ -186,8 +188,8 @@ fun buildTodayState(
         addAll(remaining)
     }
 
-    val tomorrow = today.plusDays(1)
-    val tomorrowDay = tomorrow.dayOfWeek.value
+    val tomorrow = today.plus(DatePeriod(days = 1))
+    val tomorrowDay = tomorrow.dayOfWeek.ordinal + 1
     // 明天同口径：只在明天也落在学期内时给周次（0 = 明天不在学期内）
     val tomorrowWeek = ScheduleCalculator.todayWeekOf(semester, tomorrow) ?: 0
     val tomorrowInTerm = tomorrowWeek > 0

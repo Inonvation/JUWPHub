@@ -1,6 +1,9 @@
+@file:OptIn(ExperimentalUuidApi::class)
+
 package edu.jxslu.schedule.domain
 
-import java.util.UUID
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -45,7 +48,7 @@ object SelectionWishes {
     /** 合法的优先级档位（对话框循环切换用）。 */
     val PRIORITIES: List<Int> = listOf(PRIORITY_LOW, PRIORITY_MEDIUM, PRIORITY_HIGH)
 
-    fun newId(): String = UUID.randomUUID().toString()
+    fun newId(): String = Uuid.random().toString()
 
     private val format = Json { ignoreUnknownKeys = true }
 

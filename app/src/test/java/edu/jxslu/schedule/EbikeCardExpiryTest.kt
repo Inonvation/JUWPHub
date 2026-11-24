@@ -2,13 +2,14 @@ package edu.jxslu.schedule
 
 import edu.jxslu.schedule.domain.EbikeCardExpiry
 import edu.jxslu.schedule.domain.KqcxAuth
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.LocalDateTime
-import java.time.ZoneId
 
 /**
  * 骑行卡券临近到期提醒（[EbikeCardExpiry]）：`endTime` 解析、24 小时窗口边界、
@@ -19,10 +20,10 @@ import java.time.ZoneId
  */
 class EbikeCardExpiryTest {
 
-    private val zone: ZoneId = ZoneId.of("Asia/Shanghai")
+    private val zone: TimeZone = TimeZone.of("Asia/Shanghai")
 
     private fun at(y: Int, mo: Int, d: Int, h: Int = 0, mi: Int = 0, s: Int = 0): Long =
-        LocalDateTime.of(y, mo, d, h, mi, s).atZone(zone).toInstant().toEpochMilli()
+        LocalDateTime(y, mo, d, h, mi, s).toInstant(zone).toEpochMilliseconds()
 
     private fun coupon(endAt: String?, title: String = "无限次数卡") =
         KqcxAuth.AssetCoupon(

@@ -1,6 +1,6 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 /**
  * 课表导出为图片（DESIGN §4.12）的纯逻辑：文件名、周次日期范围。
@@ -9,6 +9,10 @@ import java.time.LocalDate
  * 与 `ScheduleExporter` 同一纪律：日期算术落在 domain，不反向引用 ui 包。
  * 板的网格几何（列宽 / 行高）**不在这里**：2026-10-10 起与课表页同源，
  * 走 `ui/week` 的 `buildGridLayout`（见 `shareBoardGridHeightDp` 与 ScheduleShareScreen 的注释）。
+ *
+ * 2026-11-24（iOS 移植 P-1 第 7 批）：日期类型换成 kotlinx-datetime 的 [LocalDate]。
+ * `DateTimeFormatter` 在 kotlinx-datetime 里没有等价物，`M/d` 这种格式直接手写——
+ * 换来的是这一层不再依赖 `java.time`。
  */
 object ScheduleShare {
 
@@ -24,6 +28,6 @@ object ScheduleShare {
      */
     fun weekRangeText(start: LocalDate?, end: LocalDate?): String? {
         if (start == null || end == null) return null
-        return "${start.format(SHORT_DAY_FORMAT)} – ${end.format(SHORT_DAY_FORMAT)}"
+        return "${start.monthNumber}/${start.dayOfMonth} – ${end.monthNumber}/${end.dayOfMonth}"
     }
 }

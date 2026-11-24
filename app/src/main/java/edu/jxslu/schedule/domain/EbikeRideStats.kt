@@ -164,11 +164,8 @@ object EbikeRideStats {
         val summary = summarize(orders)
         val perMonthOrders = summary.overtimeOrders.toDouble() / months
         val perMonthCents = summary.overtimeCents.toDouble() / months
-        return "覆盖 %d 个月：月均 %.1f 次超时、约 %s。".format(
-            months,
-            perMonthOrders,
-            moneyText(perMonthCents.toLong()),
-        )
+        return "覆盖 $months 个月：月均 ${TextFmt.decimals(perMonthOrders, 1)} 次超时、" +
+            "约 ${moneyText(perMonthCents.toLong())}。"
     }
 
     /** `endAt` 的 `yyyy-MM` 前缀；格式不认识就返回 null（不编月份）。 */

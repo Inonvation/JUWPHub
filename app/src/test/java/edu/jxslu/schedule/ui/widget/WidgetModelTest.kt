@@ -8,6 +8,7 @@ import edu.jxslu.schedule.domain.LocalTimeLike
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.SemesterConfig
 import edu.jxslu.schedule.domain.buildTodayState
+import kotlinx.datetime.toKotlinLocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -54,7 +55,7 @@ class WidgetModelTest {
     )
 
     private fun stateAt(time: LocalTimeLike, courses: List<Course>, day: LocalDate = thursday) =
-        buildTodayState(semester, slots, courses, day, time)
+        buildTodayState(semester, slots, courses, day.toKotlinLocalDate(), time)
 
     /** [day] 当天 [minutes] 的绝对时刻，与 WidgetModel 的 epoch 口径一致。 */
     private fun epochAt(day: LocalDate, minutes: Int): Long =
@@ -228,7 +229,7 @@ class WidgetModelTest {
         val state = buildTodayState(
             semester, slots,
             listOf(course(1, 3, 4), course(2, 1, 2, day = 5)),
-            thursday, LocalTimeLike(20, 0),
+            thursday.toKotlinLocalDate(), LocalTimeLike(20, 0),
         )
         val snapshot = buildWidgetSnapshot(state)
 
@@ -247,7 +248,7 @@ class WidgetModelTest {
     @Test
     fun tomorrowEmpty_givesRestHintOnStatusLine() {
         val state = buildTodayState(
-            semester, slots, listOf(course(1, 3, 4)), LocalDate.parse("2026-09-13"),
+            semester, slots, listOf(course(1, 3, 4)), LocalDate.parse("2026-09-13").toKotlinLocalDate(),
             LocalTimeLike(20, 0),
         ) // 9/13 是周日，且周日无课
         val snapshot = buildWidgetSnapshot(state)
@@ -265,7 +266,7 @@ class WidgetModelTest {
         val state = buildTodayState(
             semester, slots,
             listOf(course(1, 1, 2), course(2, 3, 4, day = 5), course(3, 5, 6, day = 5)),
-            thursday, LocalTimeLike(20, 0),
+            thursday.toKotlinLocalDate(), LocalTimeLike(20, 0),
         )
         val snapshot = buildWidgetSnapshot(state)
         val model = snapshot.forSize(widgetMetricsFor(250, 110))
@@ -291,7 +292,7 @@ class WidgetModelTest {
     @Test
     fun outOfTerm_showsVacationHintWithoutRows() {
         val state = buildTodayState(
-            semester, slots, listOf(course(1, 3, 4)), LocalDate.parse("2027-02-01"),
+            semester, slots, listOf(course(1, 3, 4)), LocalDate.parse("2027-02-01").toKotlinLocalDate(),
             LocalTimeLike(10, 0),
         )
         val snapshot = buildWidgetSnapshot(state)
@@ -466,7 +467,7 @@ class WidgetModelTest {
         val handoff = buildTodayState(
             semester, slots,
             listOf(course(1, 1, 2), course(2, 3, 4, day = 5)),
-            thursday, LocalTimeLike(20, 0),
+            thursday.toKotlinLocalDate(), LocalTimeLike(20, 0),
         ).let { buildWidgetSnapshot(it) }
         assertTrue(handoff.summary!!.startsWith("明天 10:15 课2"))
     }

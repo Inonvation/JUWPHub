@@ -1,6 +1,8 @@
 package edu.jxslu.schedule.ui.jw
 
 import androidx.compose.foundation.background
+import kotlinx.datetime.toJavaLocalDate
+import kotlinx.datetime.toKotlinLocalDate
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -63,7 +65,7 @@ fun TeachingCalendarScreen(onBack: () -> Unit) {
     val formatter = remember { DateTimeFormatter.ofPattern("MM-dd") }
     val weeks = remember(config) { config?.let(::weekRanges).orEmpty() }
     val currentWeek = config?.let {
-        ScheduleCalculator.weekNumberOf(it, LocalDate.now()).takeIf { week ->
+        ScheduleCalculator.weekNumberOf(it, LocalDate.now().toKotlinLocalDate()).takeIf { week ->
             ScheduleCalculator.isWeekInTerm(it, week)
         }
     }
@@ -153,7 +155,7 @@ private data class WeekRange(
 
 private fun weekRanges(config: SemesterConfig): List<WeekRange> {
     val start = runCatching { ScheduleCalculator.parseDate(config.startDate) }.getOrNull()
-        ?.let(ScheduleCalculator::startOfWeek) ?: return emptyList()
+        ?.let(ScheduleCalculator::startOfWeek)?.toJavaLocalDate() ?: return emptyList()
     return (1..config.totalWeeks).map { week ->
         val monday = start.plusWeeks((week - 1).toLong())
         WeekRange(week = week, start = monday, end = monday.plusDays(6))

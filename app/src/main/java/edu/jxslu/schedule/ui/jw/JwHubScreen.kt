@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.jw
 
 import androidx.compose.foundation.background
+import kotlinx.datetime.toKotlinLocalDate
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -472,7 +473,7 @@ private fun rememberJwHubStats(): JwHubStats {
         val textbooks = if (bookCount == 0) "暂无教材" else "$bookCount 本"
 
         val week = semester?.let { cfg ->
-            ScheduleCalculator.weekNumberOf(cfg, today).takeIf { it in 1..cfg.totalWeeks }
+            ScheduleCalculator.weekNumberOf(cfg, today.toKotlinLocalDate()).takeIf { it in 1..cfg.totalWeeks }
         }
         val sections = week
             ?.let { ScheduleCalculator.coursesInWeek(courses, it) }

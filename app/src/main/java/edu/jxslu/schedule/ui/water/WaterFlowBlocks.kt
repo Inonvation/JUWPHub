@@ -19,12 +19,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.domain.Money
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.UnlockResult
 import edu.jxslu.schedule.domain.calculateActualCost
 import edu.jxslu.schedule.domain.cashPaidAmount
 import edu.jxslu.schedule.domain.ticketPaidAmount
-import java.math.BigDecimal
 
 /**
  * 开水流程「待机 / 预检 / 出水 / 结算」四块的公共实现（2026-11-13）。
@@ -157,10 +157,10 @@ internal fun WaterSettlementBlock(result: UnlockResult, onShowDetail: () -> Unit
 /** 结算明细副行（DESIGN §4.10 账单口径，成功卡与面板共用这一份）。 */
 internal fun waterCostBreakdownText(result: UnlockResult): String {
     val parts = buildList {
-        ticketPaidAmount(result)?.takeIf { it > BigDecimal.ZERO }
+        ticketPaidAmount(result)?.takeIf { it > Money.ZERO }
             ?.let { add("小票支付 ${MoneyFormat.fromYuan(it)}") }
         result.integralCost.takeIf { it != "-" }?.let { add("积分抵扣 $it") }
-        cashPaidAmount(result)?.takeIf { it > BigDecimal.ZERO }?.let { cash ->
+        cashPaidAmount(result)?.takeIf { it > Money.ZERO }?.let { cash ->
             add("${result.payTypeName ?: "现金"} ${MoneyFormat.fromYuan(cash)}")
         }
     }

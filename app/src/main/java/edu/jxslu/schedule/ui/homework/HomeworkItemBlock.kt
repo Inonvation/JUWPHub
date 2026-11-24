@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.Homework
+import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.dueLabel
 import edu.jxslu.schedule.domain.homeworkDisplay
 import edu.jxslu.schedule.ui.common.MarkdownView
@@ -58,7 +59,7 @@ internal fun HomeworkItemBlock(
 ) {
     val haptics = rememberAppHaptics()
     val display = remember(homework.detail) { homeworkDisplay(homework.detail) }
-    val label = dueLabel(homework.dueDate, today)
+    val label = dueLabel(homework.dueDate?.toKotlinLocalDate(), today.toKotlinLocalDate())
     val overdue = homework.dueDate?.isBefore(today) == true && !homework.done
     val onSurface = MaterialTheme.colorScheme.onSurface
 

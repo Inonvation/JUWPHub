@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.domain
 
 import edu.jxslu.schedule.data.DefaultData
+import kotlinx.datetime.toKotlinLocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -58,7 +59,7 @@ class TodayStateTest {
     )
 
     private fun stateAt(time: LocalTimeLike, courses: List<Course> = thursdayCourses + fridayCourses) =
-        buildTodayState(semester, slots, courses, thursday, time)
+        buildTodayState(semester, slots, courses, thursday.toKotlinLocalDate(), time)
 
     @Test
     fun beforeFirstClass_farAway_nextIsNullButListKeepsAll() {
@@ -318,7 +319,7 @@ class TodayStateTest {
         // 2026-09-20 是周日（第 3 周最后一天），明天周一属于第 4 周
         val sunday = LocalDate.parse("2026-09-20")
         val mondayCourse = course(9, "周一早课", day = 1, startSection = 1, endSection = 2)
-        val s = buildTodayState(semester, slots, listOf(mondayCourse), sunday, LocalTimeLike(20, 0))
+        val s = buildTodayState(semester, slots, listOf(mondayCourse), sunday.toKotlinLocalDate(), LocalTimeLike(20, 0))
         assertEquals(4, s.tomorrowWeek)
         assertEquals(1, s.tomorrowDay)
         assertEquals(listOf("周一早课"), s.tomorrowCourses.map { it.name })
@@ -333,7 +334,7 @@ class TodayStateTest {
             semester,
             slots,
             thursdayCourses,
-            beforeTerm,
+            beforeTerm.toKotlinLocalDate(),
             LocalTimeLike(10, 30),
         )
         assertFalse(s.inTerm)
@@ -356,7 +357,7 @@ class TodayStateTest {
     fun afterTerm_weekIsZeroAndFlagged() {
         // 学期 2026-08-31 起 20 周 → 第 20 周 2027-01-11..01-17，之后都算学期外
         val afterEnd = LocalDate.parse("2027-03-01")
-        val s = buildTodayState(semester, slots, thursdayCourses, afterEnd, LocalTimeLike(10, 30))
+        val s = buildTodayState(semester, slots, thursdayCourses, afterEnd.toKotlinLocalDate(), LocalTimeLike(10, 30))
         assertFalse(s.inTerm)
         assertTrue(s.afterTerm)
         assertEquals(0, s.week)
@@ -372,7 +373,7 @@ class TodayStateTest {
             semester,
             slots,
             emptyList(),
-            LocalDate.parse("2027-01-15"),
+            LocalDate.parse("2027-01-15").toKotlinLocalDate(),
             LocalTimeLike(9, 0),
         )
         assertTrue(s.inTerm)

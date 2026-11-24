@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.week
 
 import androidx.compose.foundation.background
+import kotlinx.datetime.toJavaLocalDate
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,7 +49,7 @@ import edu.jxslu.schedule.ui.common.GridCellStyle
 import edu.jxslu.schedule.ui.common.GridCourseCard
 import edu.jxslu.schedule.ui.common.SingleSectionCard
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
-import edu.jxslu.schedule.domain.SHORT_DAY_FORMAT
+import edu.jxslu.schedule.domain.shortDayText
 import java.time.LocalDate
 
 /** 色块在格子里的内缩。只留 1dp：WakeUp 风格的紧凑感来自「块几乎填满格子」，此前 3dp×2 加上行距显得松散。 */
@@ -264,7 +265,7 @@ internal fun WeekPage(
                     Text(
                         // 日期恒在；放假 / 补课降级成不占位的单字标记（详情在点开的弹窗里）
                         text = buildString {
-                            append(date?.format(SHORT_DAY_FORMAT) ?: "—")
+                            append(date?.let { shortDayText(it.monthValue, it.dayOfMonth) } ?: "—")
                             when {
                                 suspended -> append("假")
                                 followed -> append("补")
@@ -529,4 +530,4 @@ internal fun EmptyScheduleHint(
 }
 
 internal fun weekDate(semester: SemesterConfig?, week: Int, day: Int): LocalDate? =
-    ScheduleCalculator.dateOf(semester, week, day)
+    ScheduleCalculator.dateOf(semester, week, day)?.toJavaLocalDate()

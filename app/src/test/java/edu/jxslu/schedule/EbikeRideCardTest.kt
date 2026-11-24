@@ -2,12 +2,12 @@ package edu.jxslu.schedule
 
 import edu.jxslu.schedule.domain.EbikeRideCard
 import edu.jxslu.schedule.domain.KqcxAuth
+import kotlinx.datetime.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.ZoneOffset
 
 /**
  * 开锁前「有没有可用骑行卡」的口径（2026-10-22 用户要求）。
@@ -17,7 +17,7 @@ import java.time.ZoneOffset
  */
 class EbikeRideCardTest {
 
-    private val zone = ZoneOffset.UTC
+    private val zone = TimeZone.UTC
 
     /** 2026-10-22 12:00:00 UTC。 */
     private val now = 1_792_670_400_000L

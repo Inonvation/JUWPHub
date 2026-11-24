@@ -5,7 +5,11 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.LocalDate
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate as KDate
+import kotlinx.datetime.LocalDateTime as KDateTime
+import kotlinx.datetime.plus
+import kotlinx.datetime.toKotlinLocalDate
 import java.time.LocalDateTime
 
 /**
@@ -41,10 +45,10 @@ class ScheduleTipsTest {
     )
 
     /** 2026-10-13 周二（第 6 周）。 */
-    private val tuesday = LocalDate.of(2026, 10, 13)
+    private val tuesday = KDate(2026, 10, 13)
 
     /** 2026-10-14 周三（第 6 周）。 */
-    private val wednesday = LocalDate.of(2026, 10, 14)
+    private val wednesday = KDate(2026, 10, 14)
 
     private fun courseOf(
         id: Long,
@@ -85,11 +89,11 @@ class ScheduleTipsTest {
         }
 
     private fun dayTip(
-        date: LocalDate,
+        date: KDate,
         courses: List<Course>,
         overrides: List<ScheduleOverride> = emptyList(),
         /** 真正的今天；默认与参考日相同（措辞说「今天」）。 */
-        today: LocalDate = date,
+        today: KDate = date,
     ) = ScheduleTips.dayTipFor(
         date = date,
         today = today,
@@ -100,18 +104,18 @@ class ScheduleTipsTest {
     )
 
     private fun hour(time: String, code: Int = 0, prob: Int? = 0) = WeatherHour(
-        time = LocalDateTime.parse(time),
+        time = KDateTime.parse(time),
         tempC = 20.0,
         precipProbability = prob,
         code = code,
     )
 
     /** 2026-10-13 的某个时刻。 */
-    private fun at(hour: Int, minute: Int) = LocalDateTime.of(2026, 10, 13, hour, minute)
+    private fun at(hour: Int, minute: Int) = KDateTime(2026, 10, 13, hour, minute)
 
     private fun dismissal(
         courses: List<Course>,
-        now: LocalDateTime,
+        now: KDateTime,
         hourly: List<WeatherHour>,
     ) = ScheduleTips.dismissalTipFor(
         semester = semester,
@@ -342,7 +346,7 @@ class ScheduleTipsTest {
     fun `不在学期内不提示`() {
         assertNull(
             dayTip(
-                LocalDate.of(2026, 8, 10), // 开学前
+                KDate(2026, 8, 10), // 开学前
                 tuesdayMorning("教学南大楼(南B206)", "教学北大楼(北B306)"),
             ),
         )
@@ -415,22 +419,22 @@ class ScheduleTipsTest {
     @Test
     fun `参考日措辞跟着日期关系走`() {
         // 固定用学期内的一天（第 6 周周二），避免学期外 assumeTrue 静默跳过整条用例。
-        val today = LocalDate.of(2026, 10, 13)
-        val tomorrow = today.plusDays(1)
+        val today = KDate(2026, 10, 13)
+        val tomorrow = today.plus(DatePeriod(days = 1))
         val todayWeek = ScheduleCalculator.weekNumberOf(semester, today)
         val tomorrowWeek = ScheduleCalculator.weekNumberOf(semester, tomorrow)
         assertTrue("固定日期必须在学期内", ScheduleCalculator.isWeekInTerm(semester, todayWeek))
         assertTrue("固定日期必须在学期内", ScheduleCalculator.isWeekInTerm(semester, tomorrowWeek))
         val courses = listOf(
-            courseOf(1, today.dayOfWeek.value, 1, 2, "教学南大楼(南B206)", weeks = setOf(todayWeek)),
-            courseOf(2, today.dayOfWeek.value, 3, 4, "教学南大楼(南C303)", weeks = setOf(todayWeek)),
+            courseOf(1, today.dayOfWeek.ordinal + 1, 1, 2, "教学南大楼(南B206)", weeks = setOf(todayWeek)),
+            courseOf(2, today.dayOfWeek.ordinal + 1, 3, 4, "教学南大楼(南C303)", weeks = setOf(todayWeek)),
         )
         val todayText = dayTip(today, courses, today = today)?.text.orEmpty()
         assertTrue("实际=$todayText", todayText.startsWith("🧭 今天"))
         // 参考日 = 明天（同一学期周内，明天星期几就排星期几的课），措辞换成「明天」
         val tomorrowCourses = listOf(
-            courseOf(1, tomorrow.dayOfWeek.value, 1, 2, "教学南大楼(南B206)", weeks = setOf(tomorrowWeek)),
-            courseOf(2, tomorrow.dayOfWeek.value, 3, 4, "教学南大楼(南C303)", weeks = setOf(tomorrowWeek)),
+            courseOf(1, tomorrow.dayOfWeek.ordinal + 1, 1, 2, "教学南大楼(南B206)", weeks = setOf(tomorrowWeek)),
+            courseOf(2, tomorrow.dayOfWeek.ordinal + 1, 3, 4, "教学南大楼(南C303)", weeks = setOf(tomorrowWeek)),
         )
         val tomorrowText = dayTip(tomorrow, tomorrowCourses, today = today)?.text.orEmpty()
         assertTrue("实际=$tomorrowText", tomorrowText.startsWith("🧭 明天"))
@@ -560,7 +564,7 @@ class ScheduleTipsTest {
         // 变体按天交替：10-12（dayOfYear/2=142）与 10-13（/2=143）取到不同变体。
         // 两天都落在第 6 周，课文各按自己那天的星期排
         val a = dayTip(
-            LocalDate.of(2026, 10, 12),
+            KDate(2026, 10, 12),
             listOf(
                 courseOf(1, 1, 1, 2, "教学南大楼(南B206)"),
                 courseOf(2, 1, 3, 4, "教学北大楼(北B306)"),

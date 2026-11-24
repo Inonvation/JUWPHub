@@ -47,7 +47,7 @@ object EbikeCardSavings {
     fun computeFromCoupons(
         coupons: List<KqcxAuth.AssetCoupon>,
         nowMillis: Long,
-        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+        zone: kotlinx.datetime.TimeZone = kotlinx.datetime.TimeZone.currentSystemDefault(),
     ): Result? {
         val usable = coupons.filter { coupon ->
             !coupon.unlimited &&

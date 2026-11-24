@@ -1,12 +1,14 @@
 package edu.jxslu.schedule.domain
 
 import edu.jxslu.schedule.data.qzxy.QzxyBill
-import java.math.BigDecimal
-import java.math.RoundingMode
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.time.temporal.TemporalAdjusters
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
+import kotlinx.datetime.toInstant
 
 /**
  * 趣智消费记录的时间段筛选与按日分组（2026-11-05，用户要求「参考一卡通账单支持按日周月」）。
@@ -36,8 +38,6 @@ data class BillDayGroup(
     val totalCents: Long,
 )
 
-private val BILL_DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-
 /**
  * 解析账单时间；服务端给的是 `yyyy-MM-dd HH:mm:ss`，也接受只到分钟/只到日的形态。
  *
@@ -48,30 +48,30 @@ fun parseBillTime(raw: String?): LocalDateTime? {
     val text = raw?.trim().orEmpty()
     if (text.length < 10) return null
     val date = runCatching { LocalDate.parse(text.substring(0, 10)) }.getOrNull() ?: return null
-    if (text.length < 16) return date.atStartOfDay()
-    val normalized = text.substring(0, 19).padEnd(19, '0')
-    return runCatching { LocalDateTime.parse(normalized, BILL_DATE_TIME) }.getOrNull()
-        ?: date.atStartOfDay()
+    val startOfDay = LocalDateTime(date.year, date.monthNumber, date.dayOfMonth, 0, 0)
+    if (text.length < 16) return startOfDay
+    // 服务端用空格分隔，kotlinx 只认 ISO 的 `T`
+    val normalized = text.substring(0, 19).padEnd(19, '0').replace(' ', 'T')
+    return runCatching { LocalDateTime.parse(normalized) }.getOrNull() ?: startOfDay
 }
 
-fun parseBillDate(raw: String?): LocalDate? = parseBillTime(raw)?.toLocalDate()
+fun parseBillDate(raw: String?): LocalDate? = parseBillTime(raw)?.date
 
 /** `"0.80"` → 80；缺省/脏值 → 0（不抛，页面照常显示这一行）。 */
-fun parseBillCents(raw: String?): Long {
-    val text = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return 0L
-    val value = text.toBigDecimalOrNull() ?: return 0L
-    return value.movePointRight(2).setScale(0, RoundingMode.HALF_UP).toLong()
-}
+fun parseBillCents(raw: String?): Long = Money.parse(raw)?.fen ?: 0L
 
 /** 某一时段的起止（左闭右开）；`ALL` 没有边界，返回 null。 */
-fun billRangeBounds(range: BillRange, today: LocalDate = LocalDate.now()): Pair<LocalDate, LocalDate>? =
+fun billRangeBounds(range: BillRange, today: LocalDate = AppClock.today()): Pair<LocalDate, LocalDate>? =
     when (range) {
-        BillRange.TODAY -> today to today.plusDays(1)
+        BillRange.TODAY -> today to today.plus(DatePeriod(days = 1))
         BillRange.WEEK -> {
-            val monday = today.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
-            monday to monday.plusDays(7)
+            val monday = today.minus(DatePeriod(days = today.dayOfWeek.ordinal))
+            monday to monday.plus(DatePeriod(days = 7))
         }
-        BillRange.MONTH -> today.withDayOfMonth(1) to today.withDayOfMonth(1).plusMonths(1)
+        BillRange.MONTH -> {
+            val first = LocalDate(today.year, today.monthNumber, 1)
+            first to first.plus(DatePeriod(months = 1))
+        }
         BillRange.ALL -> null
     }
 
@@ -83,13 +83,13 @@ fun billRangeBounds(range: BillRange, today: LocalDate = LocalDate.now()): Pair<
 fun filterBills(
     bills: List<QzxyBill>,
     range: BillRange,
-    today: LocalDate = LocalDate.now(),
+    today: LocalDate = AppClock.today(),
 ): List<QzxyBill> {
     val bounds = billRangeBounds(range, today) ?: return bills
     val (from, to) = bounds
     return bills.filter { bill ->
         val date = parseBillDate(bill.consumeDate) ?: return@filter false
-        !date.isBefore(from) && date.isBefore(to)
+        date >= from && date < to
     }
 }
 
@@ -100,7 +100,7 @@ fun filterBills(
  */
 fun groupBillsByDay(
     bills: List<QzxyBill>,
-    today: LocalDate = LocalDate.now(),
+    today: LocalDate = AppClock.today(),
 ): List<BillDayGroup> {
     val buckets = LinkedHashMap<LocalDate?, MutableList<QzxyBill>>()
     for (bill in bills) {
@@ -108,7 +108,13 @@ fun groupBillsByDay(
     }
     val groups = buckets.map { (date, rows) ->
         val sorted = rows.sortedWith(
-            compareByDescending<QzxyBill> { parseBillTime(it.consumeDate) ?: LocalDateTime.MIN },
+            // 时间不可解析的排在该组末尾：用毫秒键代替 `LocalDateTime.MIN`
+            compareByDescending<QzxyBill> { bill ->
+                parseBillTime(bill.consumeDate)
+                    ?.toInstant(TimeZone.currentSystemDefault())
+                    ?.toEpochMilliseconds()
+                    ?: Long.MIN_VALUE
+            },
         )
         BillDayGroup(
             key = date?.toString() ?: UNKNOWN_DAY_KEY,
@@ -128,8 +134,8 @@ const val UNKNOWN_DAY_KEY: String = ""
 
 private fun dayLabel(date: LocalDate, today: LocalDate): String = when (date) {
     today -> "今天"
-    today.minusDays(1) -> "昨天"
-    else -> "${date.monthValue} 月 ${date.dayOfMonth} 日"
+    today.minus(DatePeriod(days = 1)) -> "昨天"
+    else -> "${date.monthNumber} 月 ${date.dayOfMonth} 日"
 }
 
 fun sumCents(bills: List<QzxyBill>): Long = bills.sumOf { parseBillCents(it.consumeMoney) }
@@ -143,7 +149,7 @@ fun billMoneyText(cents: Long): String = MoneyFormat.fromFen(cents)
  * 只统计**本月**（不是当前选中时段）——入口卡出现在趣智主页，那里没有时段概念，
  * 说「本月」才不会让人以为那是全部。
  */
-fun entrySummary(bills: List<QzxyBill>, today: LocalDate = LocalDate.now()): String {
+fun entrySummary(bills: List<QzxyBill>, today: LocalDate = AppClock.today()): String {
     val monthBills = filterBills(bills, BillRange.MONTH, today)
     return if (monthBills.isEmpty()) {
         "本月暂无"

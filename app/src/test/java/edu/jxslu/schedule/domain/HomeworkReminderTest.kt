@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.datetime.LocalDate as KDate
+import kotlinx.datetime.LocalDateTime as KDateTime
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -30,8 +32,11 @@ class HomeworkReminderTest {
         done = done,
     )
 
-    private fun at(date: LocalDate, hour: Int, minute: Int): LocalDateTime =
-        LocalDateTime.of(date, LocalTime.of(hour, minute))
+    private fun at(date: LocalDate, hour: Int, minute: Int): KDateTime =
+        KDateTime(date.year, date.monthValue, date.dayOfMonth, hour, minute)
+
+    /** 截止日（kotlinx 形态）：断言 `plan` 字段时用。 */
+    private val dueK = KDate(2026, 9, 22)
 
     // ---- 提醒点是什么 ----
 
@@ -39,8 +44,8 @@ class HomeworkReminderTest {
     fun tomorrowPoint_isPreviousDay20() {
         // 截止日前一天 20:30：正在「明天截止」的有效窗口内
         val plan = homeworkReminderPlan(homework(), at(due.minusDays(1), 20, 30))
-        assertEquals(LocalDate.parse("2026-09-21"), plan?.noticeDate)
-        assertEquals(LocalDateTime.of(LocalDate.parse("2026-09-21"), LocalTime.of(20, 0)), plan?.triggerAt)
+        assertEquals(KDate.parse("2026-09-21"), plan?.noticeDate)
+        assertEquals(KDateTime(2026, 9, 21, 20, 0), plan?.triggerAt)
         assertEquals(HomeworkReminderPlan.Kind.Tomorrow, plan?.kind)
         assertEquals("明天截止", plan?.kind?.label)
     }
@@ -48,8 +53,8 @@ class HomeworkReminderTest {
     @Test
     fun todayPoint_isDueDay20() {
         val plan = homeworkReminderPlan(homework(), at(due, 20, 30))
-        assertEquals(due, plan?.noticeDate)
-        assertEquals(LocalDateTime.of(due, LocalTime.of(20, 0)), plan?.triggerAt)
+        assertEquals(dueK, plan?.noticeDate)
+        assertEquals(KDateTime(2026, 9, 22, 20, 0), plan?.triggerAt)
         assertEquals(HomeworkReminderPlan.Kind.Today, plan?.kind)
         assertEquals("今天截止", plan?.kind?.label)
     }
@@ -125,7 +130,7 @@ class HomeworkReminderTest {
         val sooner = homework(id = 3, dueDate = LocalDate.parse("2026-09-23"))
         val plan = nextHomeworkReminder(listOf(later, sooner), at(due, 8, 0))
         assertEquals(3L, plan?.homework?.id)
-        assertEquals(LocalDateTime.of(due, LocalTime.of(20, 0)), plan?.triggerAt)
+        assertEquals(KDateTime(2026, 9, 22, 20, 0), plan?.triggerAt)
         assertEquals(HomeworkReminderPlan.Kind.Tomorrow, plan?.kind)
     }
 
@@ -141,7 +146,7 @@ class HomeworkReminderTest {
         )
         assertEquals(12L, plan?.homework?.id)
         assertEquals(HomeworkReminderPlan.Kind.Today, plan?.kind)
-        assertEquals(LocalDateTime.of(due, LocalTime.of(20, 0)), plan?.triggerAt)
+        assertEquals(KDateTime(2026, 9, 22, 20, 0), plan?.triggerAt)
     }
 
     @Test

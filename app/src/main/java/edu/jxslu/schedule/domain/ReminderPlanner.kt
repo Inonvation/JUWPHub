@@ -1,8 +1,13 @@
 package edu.jxslu.schedule.domain
 
-import java.time.Duration
-import java.time.LocalDate
-import java.time.LocalDateTime
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.atTime
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
+import kotlinx.datetime.toKotlinLocalDate
 import kotlin.math.abs
 
 /**
@@ -47,7 +52,7 @@ data class ReminderPlan(
  * 芯片上永远不会出现「剩 0 分 / 剩 -1 分」。
  */
 fun ReminderPlan.minutesLeft(now: LocalDateTime): Long {
-    val seconds = Duration.between(now, startAt).seconds
+    val seconds = AppClock.secondsBetween(now, startAt)
     if (seconds <= 0L) return 1L
     return (seconds + 59L) / 60L
 }
@@ -60,9 +65,9 @@ fun ReminderPlan.minutesLeft(now: LocalDateTime): Long {
  * 必须说同一件事。提前量为 0（理论上不出现）按走完处理，避免除零。
  */
 fun ReminderPlan.progressPercent(now: LocalDateTime): Int {
-    val total = Duration.between(triggerAt, startAt).seconds
+    val total = AppClock.secondsBetween(triggerAt, startAt)
     if (total <= 0L) return 100
-    val elapsed = Duration.between(triggerAt, now).seconds
+    val elapsed = AppClock.secondsBetween(triggerAt, now)
     return ((elapsed * 100L) / total).coerceIn(0L, 100L).toInt()
 }
 
@@ -87,27 +92,29 @@ private fun upcomingPlans(
     if (semester == null) return emptyList()
     val plan = ScheduleOverrides.plan(overrides, semester)
     val result = mutableListOf<ReminderPlan>()
-    var date = now.toLocalDate()
+    var date = now.date
     repeat(maxDaysAhead) {
         val week = ScheduleCalculator.weekNumberOf(semester, date)
         if (ScheduleCalculator.isWeekInTerm(semester, week)) {
-            for (course in ScheduleCalculator.coursesOnDay(courses, week, date.dayOfWeek.value, plan)) {
+            for (course in ScheduleCalculator.coursesOnDay(courses, week, date.dayOfWeek.ordinal + 1, plan)) {
                 val start = ScheduleCalculator.courseStartMinutes(slots, course) ?: continue
-                val startAt = date.atStartOfDay().plusMinutes(start.toLong())
-                val withinGrace = gracePastMinutes > 0L && !startAt.isBefore(
-                    now.minusMinutes(gracePastMinutes),
+                val startAt = LocalDateTime(
+                    date.year, date.monthNumber, date.dayOfMonth,
+                    start / 60, start % 60,
                 )
-                if (!startAt.isAfter(now) && !withinGrace) continue
+                val withinGrace = gracePastMinutes > 0L &&
+                    AppClock.secondsBetween(startAt, now) <= gracePastMinutes * 60
+                if (startAt <= now && !withinGrace) continue
                 result += ReminderPlan(
                     course = course,
                     date = date,
                     startMinutes = start,
                     startAt = startAt,
-                    triggerAt = startAt.minusMinutes(leadMinutes.toLong()),
+                    triggerAt = AppClock.plusMinutes(startAt, -leadMinutes),
                 )
             }
         }
-        date = date.plusDays(1)
+        date = date.plus(DatePeriod(days = 1))
     }
     return result.sortedBy { it.startAt }
 }
@@ -125,7 +132,7 @@ fun dueReminderPlan(
     overrides: List<ScheduleOverride> = emptyList(),
 ): ReminderPlan? = upcomingPlans(
     semester, slots, courses, now, leadMinutes, maxDaysAhead = 1, overrides = overrides,
-).firstOrNull { it.startAt <= now.plusMinutes(leadMinutes.toLong()) }
+).firstOrNull { it.startAt <= AppClock.plusMinutes(now, leadMinutes) }
 
 /**
  * 「现在就该提醒上课开始了」的课：上课时刻已到（含整点）、还没越过上课后
@@ -148,7 +155,7 @@ fun dueClassStartPlan(
     gracePastMinutes = CLASS_START_WINDOW_MINUTES,
     overrides = overrides,
 ).firstOrNull {
-    it.startAt <= now && now < it.startAt.plusMinutes(CLASS_START_WINDOW_MINUTES)
+    it.startAt <= now && now < AppClock.plusMinutes(it.startAt, CLASS_START_WINDOW_MINUTES.toInt())
 }
 
 /**
@@ -165,7 +172,7 @@ fun nextReminderPlan(
     maxDaysAhead: Int = 14,
     overrides: List<ScheduleOverride> = emptyList(),
 ): ReminderPlan? = upcomingPlans(semester, slots, courses, now, leadMinutes, maxDaysAhead, overrides = overrides)
-    .firstOrNull { it.triggerAt.isAfter(now) }
+    .firstOrNull { it.triggerAt > now }
 
 /** 「开始上课」提醒的有效期窗口（上课后多少分钟内仍发），越过即跳过不补。 */
 private const val CLASS_START_WINDOW_MINUTES = 15L
@@ -183,7 +190,7 @@ fun nextClassStartPlan(
     overrides: List<ScheduleOverride> = emptyList(),
 ): ReminderPlan? = upcomingPlans(
     semester, slots, courses, now, leadMinutes = 0, maxDaysAhead, overrides = overrides,
-).firstOrNull { it.startAt.isAfter(now) }
+).firstOrNull { it.startAt > now }
 
 /** 作业提醒的固定触发时刻（时）：两个提醒点都在 20:00（DESIGN §3.11）。 */
 private const val HOMEWORK_REMIND_HOUR = 20
@@ -226,8 +233,8 @@ private fun homeworkReminderPoints(homework: Homework, due: LocalDate): List<Hom
     listOf(
         HomeworkReminderPlan(
             homework = homework,
-            noticeDate = due.minusDays(1),
-            triggerAt = due.minusDays(1).atTime(HOMEWORK_REMIND_HOUR, 0),
+            noticeDate = due.minus(DatePeriod(days = 1)),
+            triggerAt = due.minus(DatePeriod(days = 1)).atTime(HOMEWORK_REMIND_HOUR, 0),
             kind = HomeworkReminderPlan.Kind.Tomorrow,
         ),
         HomeworkReminderPlan(
@@ -249,10 +256,10 @@ private fun homeworkReminderPoints(homework: Homework, due: LocalDate): List<Hom
  */
 fun homeworkReminderPlan(homework: Homework, now: LocalDateTime): HomeworkReminderPlan? {
     if (homework.done) return null
-    val due = homework.dueDate ?: return null
-    if (due.isBefore(now.toLocalDate())) return null
+    val due = homework.dueDate?.toKotlinLocalDate() ?: return null
+    if (due < now.date) return null
     return homeworkReminderPoints(homework, due).firstOrNull { plan ->
-        !now.isBefore(plan.triggerAt) && now.isBefore(plan.noticeDate.plusDays(1).atStartOfDay())
+        now >= plan.triggerAt && now < plan.noticeDate.plus(DatePeriod(days = 1)).atTime(0, 0)
     }
 }
 
@@ -278,11 +285,11 @@ fun homeworkReminderGroup(items: List<Homework>, now: LocalDateTime): List<Homew
  * 排一个太远的闹钟没有意义。无截止日期/已逾期/已完成的作业没有未来的触发点，自然被排除。
  */
 fun nextHomeworkReminder(items: List<Homework>, now: LocalDateTime): HomeworkReminderPlan? {
-    val horizon = now.toLocalDate().plusDays(HOMEWORK_HORIZON_DAYS)
+    val horizon = now.date.plus(DatePeriod(days = HOMEWORK_HORIZON_DAYS.toInt()))
     return items.mapNotNull { homework ->
         if (homework.done) return@mapNotNull null
-        val due = homework.dueDate ?: return@mapNotNull null
-        if (due.isAfter(horizon)) return@mapNotNull null
-        homeworkReminderPoints(homework, due).firstOrNull { it.triggerAt.isAfter(now) }
+        val due = homework.dueDate?.toKotlinLocalDate() ?: return@mapNotNull null
+        if (due > horizon) return@mapNotNull null
+        homeworkReminderPoints(homework, due).firstOrNull { it.triggerAt > now }
     }.minByOrNull { it.triggerAt }
 }

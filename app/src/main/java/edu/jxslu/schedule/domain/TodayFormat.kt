@@ -1,7 +1,5 @@
 package edu.jxslu.schedule.domain
 
-import java.time.format.DateTimeFormatter
-
 /**
  * 课程文案格式化：**今日页与桌面小组件共用同一份**。
  *
@@ -9,13 +7,17 @@ import java.time.format.DateTimeFormatter
  * 需要完全相同的 `第3-4节` / `10:15` / `@南B208 · 陈磊` 口径。若各写一遍，
  * 两边迟早会在「自定义时间课怎么显示」「地点要不要 @」这类细节上分叉。
  * 同时 domain 侧不得引用 ui 包，故整体下移到 domain（纯字符串运算，零 Android 依赖）。
+ *
+ * 2026-11-24（iOS 移植 P-1 第 17 批）：原来的两个 `DateTimeFormatter` 常量换成纯字符串函数
+ * （入参是月份与日号）——`DateTimeFormatter` 在 kotlinx-datetime 里没有等价物，
+ * 而这两个格式只用到「几月几日」，拆成整数入参后 java.time 与 kotlinx 的调用方都能用。
  */
 
 /** `9月18日`：今日页标题与调课页日期标签共用（此前各页私写 formatter，口径会漂）。 */
-val MONTH_DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("M月d日")
+fun monthDayText(month: Int, day: Int): String = "${month}月${day}日"
 
 /** `9/18`：课表网格日期表头（单列窄，放不下「9月18日」）。 */
-val SHORT_DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("M/d")
+fun shortDayText(month: Int, day: Int): String = "$month/$day"
 
 /** `第3-4节` / `第5节`。传整门课，避免调用点各自拼 start/end。 */
 fun sectionRange(course: Course): String {
@@ -29,8 +31,7 @@ fun clockOf(slots: List<TimeSlot>, course: Course): String =
     ScheduleCalculator.courseStartMinutes(slots, course)?.let(::minutesToClock) ?: "--:--"
 
 /** `615` → `10:15`。 */
-fun minutesToClock(minutes: Int): String =
-    "%02d:%02d".format(minutes / 60, minutes % 60)
+fun minutesToClock(minutes: Int): String = TextFmt.clock(minutes)
 
 /** `10:15–11:40 · @南B208 · 陈磊`；缺项自动省略，全缺给空串。 */
 fun metaLine(slots: List<TimeSlot>, course: Course): String {

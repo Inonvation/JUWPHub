@@ -4,7 +4,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.LocalDate
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
 
 /**
  * 作业中心的排序 / 汇总 / 截止文案（DESIGN §3.11）。
@@ -24,7 +27,7 @@ class HomeworkCenterTest {
     ) = Homework(
         id = id,
         courseName = "高等数学",
-        dueDate = due?.let(LocalDate::parse),
+        dueDate = due?.let(java.time.LocalDate::parse),
         done = done,
         createdAt = created,
         updatedAt = created,
@@ -186,9 +189,9 @@ class HomeworkCenterTest {
     fun dueLabel_branches() {
         assertNull(dueLabel(null, today))
         assertEquals("今天", dueLabel(today, today))
-        assertEquals("明天", dueLabel(today.plusDays(1), today))
-        assertEquals("已过期 1 天", dueLabel(today.minusDays(1), today))
-        assertEquals("已过期 30 天", dueLabel(today.minusDays(30), today))
+        assertEquals("明天", dueLabel(today.plus(DatePeriod(days = 1)), today))
+        assertEquals("已过期 1 天", dueLabel(today.minus(DatePeriod(days = 1)), today))
+        assertEquals("已过期 30 天", dueLabel(today.minus(DatePeriod(days = 30)), today))
         assertEquals("10月12日", dueLabel(LocalDate.parse("2026-10-12"), today))
     }
 
@@ -200,8 +203,8 @@ class HomeworkCenterTest {
     fun dueDetailLabel_noDuplicateDateAndWeekday() {
         val t = LocalDate.parse("2026-09-21") // 周一
         assertEquals("今天 · 9月21日", dueDetailLabel(t, t))
-        assertEquals("明天 · 9月22日", dueDetailLabel(t.plusDays(1), t))
-        assertEquals("已过期 2 天 · 9月19日", dueDetailLabel(t.minusDays(2), t))
+        assertEquals("明天 · 9月22日", dueDetailLabel(t.plus(DatePeriod(days = 1)), t))
+        assertEquals("已过期 2 天 · 9月19日", dueDetailLabel(t.minus(DatePeriod(days = 2)), t))
         assertEquals("11月21日 · 周六", dueDetailLabel(LocalDate.parse("2026-11-21"), t))
         assertEquals("10月12日 · 周一", dueDetailLabel(LocalDate.parse("2026-10-12"), t))
         // 同一个日期只会出现一次

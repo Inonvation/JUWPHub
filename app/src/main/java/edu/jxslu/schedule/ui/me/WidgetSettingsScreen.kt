@@ -59,6 +59,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.LocalTimeLike
+import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.buildTodayState
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
@@ -712,7 +713,7 @@ private fun rememberPreviewSnapshot(): State<WidgetSnapshot?> {
                     val prefs = repo.displayPrefs.first()
                     val today = LocalDate.now()
                     val now = LocalTimeLike.now()
-                    val state = buildTodayState(semester, slots, courses, today, now, overrides)
+                    val state = buildTodayState(semester, slots, courses, today.toKotlinLocalDate(), now, overrides)
                     val week = if (state.inTerm) state.week else 1
                     val highlight = state.focus?.day
                         ?: state.tomorrowDay.takeIf { state.tomorrowVisible }

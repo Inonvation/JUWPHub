@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.jw
 
 import androidx.compose.foundation.layout.Column
+import kotlinx.datetime.toKotlinLocalDate
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,7 +61,7 @@ fun StudentInfoScreen(onBack: () -> Unit) {
 
     var refreshing by remember { mutableStateOf(false) }
     val currentWeek = semester?.let {
-        ScheduleCalculator.weekNumberOf(it, LocalDate.now()).takeIf { week ->
+        ScheduleCalculator.weekNumberOf(it, LocalDate.now().toKotlinLocalDate()).takeIf { week ->
             ScheduleCalculator.isWeekInTerm(it, week)
         }
     }

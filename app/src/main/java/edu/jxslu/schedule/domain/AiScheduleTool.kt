@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.domain
 
+import kotlinx.datetime.LocalDate
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -381,7 +382,7 @@ object AiScheduleTool {
         }
     }
 
-    private fun parseDateOrNull(value: String): java.time.LocalDate? =
+    private fun parseDateOrNull(value: String): LocalDate? =
         runCatching { ScheduleCalculator.parseDate(value) }.getOrNull()
 
     /**

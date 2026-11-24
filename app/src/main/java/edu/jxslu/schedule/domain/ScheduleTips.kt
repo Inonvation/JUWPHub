@@ -1,7 +1,8 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
-import java.time.LocalDateTime
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.toKotlinLocalDateTime
 
 /**
  * 天气提示行里的「课表句」（DESIGN §3.29，2026-10-12；2026-10-20 收口成「一条只讲一件事」）。
@@ -69,7 +70,7 @@ object ScheduleTips {
             ?: return null
         if (!ScheduleCalculator.isWeekInTerm(semester, week)) return null
         val plan = ScheduleOverrides.plan(overrides, semester)
-        val dayCourses = ScheduleCalculator.coursesOnDay(courses, week, date.dayOfWeek.value, plan)
+        val dayCourses = ScheduleCalculator.coursesOnDay(courses, week, date.dayOfWeek.ordinal + 1, plan)
         // 措辞按「参考日是不是今天」定：18:00 前讲今天、18:00 起讲明天
         val label = if (date == today) "今天" else "明天"
         return dayTip(label, dayCourses, slots, date)
@@ -89,17 +90,17 @@ object ScheduleTips {
         slots: List<TimeSlot>,
         courses: List<Course>,
         overrides: List<ScheduleOverride> = emptyList(),
-        now: LocalDateTime = LocalDateTime.now(),
+        now: LocalDateTime = AppClock.nowDateTime(),
         hourly: List<WeatherHour> = emptyList(),
     ): TodayTip? {
         if (semester == null) return null
-        val today = now.toLocalDate()
+        val today = now.date
         val week = runCatching { ScheduleCalculator.weekNumberOf(semester, today) }.getOrNull()
             ?: return null
         if (!ScheduleCalculator.isWeekInTerm(semester, week)) return null
         val plan = ScheduleOverrides.plan(overrides, semester)
         val dayCourses =
-            ScheduleCalculator.coursesOnDay(courses, week, today.dayOfWeek.value, plan)
+            ScheduleCalculator.coursesOnDay(courses, week, today.dayOfWeek.ordinal + 1, plan)
         return dismissalTip(dayCourses, slots, now, today, hourly)
     }
 
@@ -237,7 +238,7 @@ object ScheduleTips {
         date: LocalDate,
         hourly: List<WeatherHour>,
     ): TodayTip? {
-        if (date != now.toLocalDate()) return null
+        if (date != now.date) return null
         val nowMinutes = now.hour * 60 + now.minute
         val due = dayCourses
             .mapNotNull { course ->
@@ -270,7 +271,7 @@ object ScheduleTips {
     private fun rainAfter(hourly: List<WeatherHour>, date: LocalDate, endMinutes: Int): Boolean {
         val endHour = endMinutes / 60
         return hourly.any { hour ->
-            hour.time.toLocalDate() == date &&
+            hour.time.date == date &&
                 hour.time.hour in (endHour - 1)..(endHour + 1) &&
                 WeatherCodes.willPrecipitate(hour)
         }

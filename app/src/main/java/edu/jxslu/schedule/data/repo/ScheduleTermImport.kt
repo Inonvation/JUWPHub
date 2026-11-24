@@ -15,6 +15,9 @@ import edu.jxslu.schedule.domain.SemesterConfig
 import edu.jxslu.schedule.domain.TermNaming
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.plus
+import kotlinx.datetime.toJavaLocalDate
 import java.time.LocalDate
 
 /**
@@ -302,7 +305,9 @@ class ScheduleTermImport(
         // 毕业 / 长期休学：最后一个学期结束 180 天后不再探测，免得永久每 24 小时打两次教务。
         // 手动导入新学期会把 max term 推上去，探测自动恢复。
         val latestStart = ExamMapper.estimatedTermStart(latest.term)
-        if (latestStart != null && today().isAfter(latestStart.plusWeeks(20).plusDays(180))) {
+        if (latestStart != null &&
+            today().isAfter(latestStart.plus(DatePeriod(days = 20 * 7 + 180)).toJavaLocalDate())
+        ) {
             return ProbeResult.Skipped("最后一个学期已结束超过 180 天")
         }
         if (target in prefs.scheduleDismissedTerms()) {

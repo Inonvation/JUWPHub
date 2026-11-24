@@ -1,6 +1,8 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.toKotlinLocalDate
 
 /**
  * 未完成作业的口径（DESIGN §3.11）：排序、计数、截止文案全在这里，纯函数可 JVM 测
@@ -57,7 +59,7 @@ fun sortPendingHomework(items: List<Homework>, today: LocalDate): List<Homework>
 
 private fun dueRank(homework: Homework, today: LocalDate): Int = when {
     homework.dueDate == null -> 2
-    homework.dueDate.isBefore(today) -> 0
+    homework.dueDate.toKotlinLocalDate() < today -> 0
     else -> 1
 }
 
@@ -68,9 +70,9 @@ fun pendingHomework(all: List<Homework>, today: LocalDate): PendingHomework {
     val due = pending.mapNotNull { it.dueDate }
     return PendingHomework(
         items = sortPendingHomework(pending, today),
-        overdue = due.count { it.isBefore(today) },
-        nextDue = due.filter { !it.isBefore(today) }.minOrNull(),
-        earliestDue = due.minOrNull(),
+        overdue = due.count { it.toKotlinLocalDate() < today },
+        nextDue = due.filter { it.toKotlinLocalDate() >= today }.minOrNull()?.toKotlinLocalDate(),
+        earliestDue = due.minOrNull()?.toKotlinLocalDate(),
     )
 }
 
@@ -94,12 +96,12 @@ fun courseHomeworkOrder(all: List<Homework>, today: LocalDate): List<Homework> {
  */
 fun dueLabel(due: LocalDate?, today: LocalDate): String? {
     if (due == null) return null
-    val days = due.toEpochDay() - today.toEpochDay()
+    val days = today.daysUntil(due)
     return when {
-        days == 0L -> "今天"
-        days == 1L -> "明天"
-        days < 0L -> "已过期 ${-days} 天"
-        else -> MONTH_DAY_FORMAT.format(due)
+        days == 0 -> "今天"
+        days == 1 -> "明天"
+        days < 0 -> "已过期 ${-days} 天"
+        else -> monthDayText(due.monthNumber, due.dayOfMonth)
     }
 }
 
@@ -114,8 +116,8 @@ fun dueLabel(due: LocalDate?, today: LocalDate): String? {
  * - 其余 → `11月21日 · 周六`
  */
 fun dueDetailLabel(due: LocalDate, today: LocalDate): String {
-    val formatted = MONTH_DAY_FORMAT.format(due)
-    val weekday = "周${dayLabel(due.dayOfWeek.value)}"
+    val formatted = monthDayText(due.monthNumber, due.dayOfMonth)
+    val weekday = "周${dayLabel(due.dayOfWeek.ordinal + 1)}"
     val label = dueLabel(due, today) ?: formatted
     return if (label == formatted) "$formatted · $weekday" else "$label · $formatted"
 }

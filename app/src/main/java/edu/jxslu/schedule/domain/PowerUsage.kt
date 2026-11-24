@@ -1,12 +1,14 @@
 package edu.jxslu.schedule.domain
 
-import java.time.DayOfWeek
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.temporal.ChronoUnit
-import java.time.temporal.TemporalAdjusters
-import java.util.Locale
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * 寝室电费的**用电量**推算（DESIGN §3.13「用电统计」，2026-09-24）。
@@ -129,8 +131,8 @@ object PowerUsage {
     // ------------------------------------------------------------------
 
     /** 时刻 → 自然日键 `2026-09-24`。 */
-    fun dayKeyOf(epochMs: Long, zone: ZoneId = ZoneId.systemDefault()): String =
-        Instant.ofEpochMilli(epochMs).atZone(zone).toLocalDate().toString()
+    fun dayKeyOf(epochMs: Long, zone: TimeZone = TimeZone.currentSystemDefault()): String =
+        Instant.fromEpochMilliseconds(epochMs).toLocalDateTime(zone).date.toString()
 
     /** 自然日键 → 所属桶的键（周桶取那一周的周一）。 */
     fun bucketKeyOf(range: PowerUsageRange, dayKey: String): String {
@@ -147,9 +149,9 @@ object PowerUsage {
         count: Int = windowOf(range),
     ): List<String> = (count - 1 downTo 0).map { offset ->
         when (range) {
-            PowerUsageRange.Day -> today.minusDays(offset.toLong()).toString()
-            PowerUsageRange.Week -> mondayOf(today).minusWeeks(offset.toLong()).toString()
-            PowerUsageRange.Month -> monthKeyOf(today.withDayOfMonth(1).minusMonths(offset.toLong()))
+            PowerUsageRange.Day -> today.minus(DatePeriod(days = offset)).toString()
+            PowerUsageRange.Week -> mondayOf(today).minus(DatePeriod(days = offset * 7)).toString()
+            PowerUsageRange.Month -> monthKeyOf(today.minus(DatePeriod(months = offset)))
         }
     }
 
@@ -157,7 +159,7 @@ object PowerUsage {
     fun labelOf(range: PowerUsageRange, key: String, today: LocalDate): String = when (range) {
         PowerUsageRange.Day -> when (key) {
             today.toString() -> "今天"
-            today.minusDays(1).toString() -> "昨天"
+            today.minus(DatePeriod(days = 1)).toString() -> "昨天"
             else -> key.substringAfter('-', key).takeIf { it.length == 5 } ?: key
         }
 
@@ -165,7 +167,7 @@ object PowerUsage {
             if (key == mondayOf(today).toString()) "本周" else "${shortDateLabel(key)} 起"
 
         PowerUsageRange.Month ->
-            if (key == monthKeyOf(today.withDayOfMonth(1))) "本月" else monthLabelOf(key)
+            if (key == monthKeyOf(today)) "本月" else monthLabelOf(key)
     }
 
     /** 柱状图两端的短标签（日 → `24`，周 → `9/21`，月 → `8`）。 */
@@ -254,7 +256,7 @@ object PowerUsage {
     fun days(
         segments: List<PowerUsageSegment>,
         recharges: List<PowerRechargePoint>,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): List<PowerUsageDay> {
         val kwh = HashMap<String, Double>()
         val yuan = HashMap<String, Double>()
@@ -318,20 +320,20 @@ object PowerUsage {
         recharges: List<PowerRechargePoint>,
         range: PowerUsageRange,
         nowMs: Long,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: TimeZone = TimeZone.currentSystemDefault(),
     ): PowerUsageSummary {
         val roomReadings = readingsOfLatestRoom(readings)
         val segments = segments(roomReadings, recharges)
         val days = days(segments, recharges, zone)
         val inWindow = bucketize(days, range).associateBy { it.key }
-        val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+        val today = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
         val buckets = recentKeys(range, today).map { key ->
             inWindow[key] ?: PowerUsageBucket(key = key, usedKwh = 0.0, usedYuan = 0.0, rechargeFen = 0L)
         }
         val firstDate = roomReadings.firstOrNull()
-            ?.let { Instant.ofEpochMilli(it.epochMs).atZone(zone).toLocalDate() }
+            ?.let { Instant.fromEpochMilliseconds(it.epochMs).toLocalDateTime(zone).date }
         val lastDate = roomReadings.lastOrNull()
-            ?.let { Instant.ofEpochMilli(it.epochMs).atZone(zone).toLocalDate() }
+            ?.let { Instant.fromEpochMilliseconds(it.epochMs).toLocalDateTime(zone).date }
         return PowerUsageSummary(
             buckets = buckets,
             latest = roomReadings.lastOrNull(),
@@ -339,7 +341,7 @@ object PowerUsage {
             spanDays = if (firstDate == null || lastDate == null) {
                 0
             } else {
-                ChronoUnit.DAYS.between(firstDate, lastDate).toInt()
+                firstDate.daysUntil(lastDate)
             },
             totalKwh = buckets.sumOf { it.usedKwh },
             totalYuan = if (buckets.any { it.usedYuan == null }) {
@@ -352,16 +354,16 @@ object PowerUsage {
         )
     }
 
-    /** 度数文案（固定 Locale.US，免得系统语言把小数点换成逗号）。 */
-    fun kwhText(kwh: Double): String = String.format(Locale.US, "%.2f", kwh)
+    /** 度数文案（[TextFmt.decimals] 走 Locale.ROOT，免得系统语言把小数点换成逗号）。 */
+    fun kwhText(kwh: Double): String = TextFmt.decimals(kwh, 2)
 
     // ------------------------------------------------------------------
 
     private fun mondayOf(date: LocalDate): LocalDate =
-        date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        date.minus(DatePeriod(days = date.dayOfWeek.ordinal))
 
     private fun monthKeyOf(date: LocalDate): String =
-        "%04d-%02d".format(date.year, date.monthValue)
+        "${TextFmt.pad(date.year, 4)}-${TextFmt.pad(date.monthNumber)}"
 
     private fun monthLabelOf(key: String): String {
         val (year, month) = key.split("-").takeIf { it.size == 2 } ?: return key
@@ -379,17 +381,17 @@ object PowerUsage {
     }
 
     /** 一段跨过的自然日与各自的重叠毫秒；段落在同一天时给整段重量。 */
-    private fun splitByDay(startMs: Long, endMs: Long, zone: ZoneId): List<Pair<String, Long>> {
-        val startDate = Instant.ofEpochMilli(startMs).atZone(zone).toLocalDate()
-        val endDate = Instant.ofEpochMilli(endMs).atZone(zone).toLocalDate()
+    private fun splitByDay(startMs: Long, endMs: Long, zone: TimeZone): List<Pair<String, Long>> {
+        val startDate = Instant.fromEpochMilliseconds(startMs).toLocalDateTime(zone).date
+        val endDate = Instant.fromEpochMilliseconds(endMs).toLocalDateTime(zone).date
         val out = ArrayList<Pair<String, Long>>()
         var date = startDate
-        while (!date.isAfter(endDate)) {
-            val dayStart = date.atStartOfDay(zone).toInstant().toEpochMilli()
-            val dayEnd = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        while (date <= endDate) {
+            val dayStart = date.atStartOfDayIn(zone).toEpochMilliseconds()
+            val dayEnd = date.plus(DatePeriod(days = 1)).atStartOfDayIn(zone).toEpochMilliseconds()
             val overlap = minOf(endMs, dayEnd) - maxOf(startMs, dayStart)
             if (overlap > 0) out += date.toString() to overlap
-            date = date.plusDays(1)
+            date = date.plus(DatePeriod(days = 1))
         }
         if (out.isEmpty()) out += startDate.toString() to 1L
         return out

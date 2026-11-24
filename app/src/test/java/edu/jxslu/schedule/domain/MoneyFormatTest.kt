@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.domain
 
-import java.math.BigDecimal
 import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -35,11 +34,11 @@ class MoneyFormatTest {
     }
 
     @Test
-    fun yuanBigDecimal() {
-        // 12.345 在 Decimal 下能准确舍入；Double 下可能是 12.34（见 yuanText 的 KDoc）
-        assertEquals("¥12.35", MoneyFormat.fromYuan(BigDecimal("12.345")))
-        assertEquals("¥12.34", MoneyFormat.fromYuan(BigDecimal("12.344")))
-        assertEquals("¥0.00", MoneyFormat.fromYuan(BigDecimal.ZERO))
+    fun yuanMoney() {
+        // 12.345 按 HALF_UP 折到分能准确进位；Double 下可能是 12.34（见 yuanText 的 KDoc）
+        assertEquals("¥12.35", MoneyFormat.fromYuan(Money.parse("12.345")!!))
+        assertEquals("¥12.34", MoneyFormat.fromYuan(Money.parse("12.344")!!))
+        assertEquals("¥0.00", MoneyFormat.fromYuan(Money.ZERO))
     }
 
     @Test

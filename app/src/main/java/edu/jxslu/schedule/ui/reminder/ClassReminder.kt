@@ -32,6 +32,8 @@ import edu.jxslu.schedule.data.prefs.ReminderKeyKind
 import edu.jxslu.schedule.data.repo.PendingLaunch
 import edu.jxslu.schedule.data.repo.PendingNotification
 import edu.jxslu.schedule.domain.ReminderPlan
+import kotlinx.datetime.toJavaLocalDateTime
+import kotlinx.datetime.toKotlinLocalDateTime
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.dueReminderPlan
@@ -122,7 +124,9 @@ object ClassReminder {
                 // 灵动岛倒计时卡片（2026-10-29）：提前量窗口内每分钟边界醒一次，
                 // 刷新芯片上的剩余分钟数与进度条。**单独一枚非精确闹钟**（2026-11-06），
                 // 不再挤进下面这枚精确闹钟——理由见 [scheduleLiveTick]。
-                livePlan = dueReminderPlan(semester, slots, courses, now, lead, overrides)
+                livePlan = dueReminderPlan(
+                    semester, slots, courses, now.toKotlinLocalDateTime(), lead, overrides,
+                )
                 liveTickAt = livePlan
                     ?.takeIf { ReminderNotifications.liveTickNeeded(context, repo, it) }
                     ?.let { nextMinuteBoundary(now) }
@@ -133,7 +137,7 @@ object ClassReminder {
                         semester = semester,
                         slots = slots,
                         courses = courses,
-                        now = now,
+                        now = now.toKotlinLocalDateTime(),
                         leadMinutes = lead,
                         overrides = overrides,
                     )?.triggerAt,
@@ -141,7 +145,7 @@ object ClassReminder {
                         semester = semester,
                         slots = slots,
                         courses = courses,
-                        now = now,
+                        now = now.toKotlinLocalDateTime(),
                         overrides = overrides,
                     )?.startAt,
                 ).minOrNull()
@@ -155,7 +159,7 @@ object ClassReminder {
             val homeworkTriggerAt = if (repo.homeworkReminderEnabled.first()) {
                 nextHomeworkReminder(
                     items = Graph.homeworkRepository(context).observePending().first(),
-                    now = now,
+                    now = now.toKotlinLocalDateTime(),
                 )?.triggerAt
             } else null
             val triggerAt = listOfNotNull(classTriggerAt, homeworkTriggerAt).minOrNull()
@@ -163,7 +167,7 @@ object ClassReminder {
                 manager.cancel(pending)
                 return
             }
-            val triggerAtMillis = triggerAt
+            val triggerAtMillis = triggerAt.toJavaLocalDateTime()
                 .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
             // 系统级精确闹钟：到点即触发，不受 Doze/省电推迟，无需特殊权限。
             // showIntent 交给系统时钟的闹钟页：用户点状态栏那枚闹钟图标时落到「下一个闹钟列表」，
@@ -382,7 +386,7 @@ internal object ReminderNotifications {
         // （两触发点相差一个提前量，通常分处两轮），也可能同时命中（闹钟被推迟跨过两点）。
         // 先算「上课开始」（更晚的点）：它的窗口不依赖提前量，先判可避免 lead=0 时
         // 两个窗口重叠导致的重复计算。
-        val startDue = dueClassStartPlan(semester, slots, courses, now, overrides)
+        val startDue = dueClassStartPlan(semester, slots, courses, now.toKotlinLocalDateTime(), overrides)
         val startKey = startDue?.dedupKey
         // 通知强提醒（2026-10-06，通用设置）：默认关，开了才在发出后直接震动
         val strongVibration = repo.strongReminderVibration.first()
@@ -400,7 +404,7 @@ internal object ReminderNotifications {
                     category = NotificationCompat.CATEGORY_EVENT,
                     title = "上课 · ${startDue.course.name}",
                     text = notificationLine(slots, startDue.course),
-                    eventAt = startDue.startAt.atZone(zone).toInstant().toEpochMilli(),
+                    eventAt = startDue.startAt.toJavaLocalDateTime().atZone(zone).toInstant().toEpochMilli(),
                     enqueuedAt = System.currentTimeMillis(),
                     vibrate = strongVibration,
                     launch = PendingLaunch(kind = PendingLaunch.Kind.MAIN_PLAIN, requestCode = 0),
@@ -425,7 +429,10 @@ internal object ReminderNotifications {
         syncLiveUpdate(
             context = context,
             repo = repo,
-            plan = dueReminderPlan(semester, slots, courses, now, leadMinutes = lead, overrides = overrides),
+            plan = dueReminderPlan(
+                semester, slots, courses, now.toKotlinLocalDateTime(),
+                leadMinutes = lead, overrides = overrides,
+            ),
             slots = slots,
             strongVibration = strongVibration,
         )
@@ -478,7 +485,7 @@ internal object ReminderNotifications {
                 // 不带相对时间（「20 分钟后上课」在补发时刻可能是假信息）
                 title = plan.course.name,
                 text = liveClassLine(slots, plan.course),
-                eventAt = plan.startAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                eventAt = plan.startAt.toJavaLocalDateTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
                 enqueuedAt = System.currentTimeMillis(),
                 vibrate = strongVibration,
                 launch = PendingLaunch(kind = PendingLaunch.Kind.MAIN_PLAIN, requestCode = 0),
@@ -580,7 +587,7 @@ internal object ReminderNotifications {
         now: LocalDateTime,
     ): Notification {
         val zone = ZoneId.systemDefault()
-        val startAtMillis = plan.startAt.atZone(zone).toInstant().toEpochMilli()
+        val startAtMillis = plan.startAt.toJavaLocalDateTime().atZone(zone).toInstant().toEpochMilli()
         val nowMillis = now.atZone(zone).toInstant().toEpochMilli()
         val text = liveClassLine(slots, plan.course)
         return NotificationCompat.Builder(context, CHANNEL_ID)
@@ -597,12 +604,12 @@ internal object ReminderNotifications {
             .setShowWhen(true)
             .setUsesChronometer(true)
             .setChronometerCountDown(true)
-            .setStyle(NotificationCompat.ProgressStyle().setProgress(plan.progressPercent(now)))
+            .setStyle(NotificationCompat.ProgressStyle().setProgress(plan.progressPercent(now.toKotlinLocalDateTime())))
             // 兜底：核对链路全挂（闹钟丢失 + App 被冻结）时也别让岛永远挂着
             .setTimeoutAfter((startAtMillis - nowMillis).coerceAtLeast(0L) + LIVE_GRACE_MILLIS)
             .setContentIntent(mainContentIntent(context))
             .setRequestPromotedOngoing(true)
-            .setShortCriticalText(liveChipText(plan.course.position, plan.minutesLeft(now)))
+            .setShortCriticalText(liveChipText(plan.course.position, plan.minutesLeft(now.toKotlinLocalDateTime())))
             .build()
     }
 
@@ -669,7 +676,10 @@ internal object ReminderNotifications {
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         val now = LocalDateTime.now()
         // 汇总口径（DESIGN §3.11）：本次处于有效期内的提醒点；有「今天截止」优先发那一组
-        val group = homeworkReminderGroup(Graph.homeworkRepository(context).observePending().first(), now)
+        val group = homeworkReminderGroup(
+        Graph.homeworkRepository(context).observePending().first(),
+        now.toKotlinLocalDateTime(),
+    )
         if (group.isEmpty()) return
         val alreadySent = repo.homeworkRemindedKeys()
         val fresh = group.filter { it.dedupKey !in alreadySent }
@@ -692,7 +702,7 @@ internal object ReminderNotifications {
                     category = NotificationCompat.CATEGORY_REMINDER,
                     title = "${plan.kind.label} · ${plan.homework.courseName}",
                     text = homeworkDisplayTitle(plan.homework.detail),
-                    eventAt = plan.triggerAt.atZone(zone).toInstant().toEpochMilli(),
+                    eventAt = plan.triggerAt.toJavaLocalDateTime().atZone(zone).toInstant().toEpochMilli(),
                     enqueuedAt = System.currentTimeMillis(),
                     vibrate = strongVibration,
                     launch = PendingLaunch(
@@ -720,7 +730,8 @@ internal object ReminderNotifications {
                     category = NotificationCompat.CATEGORY_REMINDER,
                     title = "${fresh.size} 项作业$kindLabel",
                     text = body,
-                    eventAt = fresh.minOf { it.triggerAt }.atZone(zone).toInstant().toEpochMilli(),
+                    eventAt = fresh.minOf { it.triggerAt }.toJavaLocalDateTime()
+                        .atZone(zone).toInstant().toEpochMilli(),
                     enqueuedAt = System.currentTimeMillis(),
                     vibrate = strongVibration,
                     launch = PendingLaunch(

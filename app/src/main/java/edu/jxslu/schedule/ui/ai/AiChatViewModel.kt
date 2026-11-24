@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.toKotlinLocalDate
 
 /**
  * AI 调课 · 单页工作单的状态容器（DESIGN §3.25 / §4.39 / §4.40，2026-10-07 v2 重构）。
@@ -440,7 +441,7 @@ class AiChatViewModel(
                         courses = rows,
                         maskTeacher = maskTeacher.value,
                         semester = sem,
-                        today = todayProvider(),
+                        today = todayProvider().toKotlinLocalDate(),
                         existingOverrides = existingOverrides,
                     ),
                     effort = AiScheduleClient.Effort.fromWire(thinkingEffort.value),

@@ -1,10 +1,7 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.time.format.DateTimeFormatterBuilder
-import java.util.Locale
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
 
 /**
  * 课表导出（DESIGN §4.12）：把课程 × 周次展开成具体日期事件 + 生成 Google 日历导入 CSV。
@@ -62,8 +59,8 @@ object ScheduleExporter {
                 teacher = course.teacher,
                 position = course.position,
                 date = date,
-                start = date.atTime(startMinutes / 60, startMinutes % 60),
-                end = date.atTime(endMinutes / 60, endMinutes % 60),
+                start = LocalDateTime(date.year, date.monthNumber, date.dayOfMonth, startMinutes / 60, startMinutes % 60),
+                end = LocalDateTime(date.year, date.monthNumber, date.dayOfMonth, endMinutes / 60, endMinutes % 60),
             )
 
         val events = buildList {
@@ -98,13 +95,16 @@ object ScheduleExporter {
     internal const val CSV_HEADER =
         "Subject,Start Date,Start Time,End Date,End Time,All Day Event,Description,Location"
 
-    private val dateFormatter: DateTimeFormatter =
-        DateTimeFormatter.ofPattern("M/d/yyyy", Locale.US)
+    /** `M/d/yyyy`：Google 导入模板要求的日期格式（月日不补零、年份四位）。 */
+    private fun dateText(date: LocalDate): String =
+        "${date.monthNumber}/${date.dayOfMonth}/${date.year}"
 
     /** `h:mm AM/PM`，如 `10:15 AM`；Google 导入模板不接受 24 小时制。 */
-    private val timeFormatter: DateTimeFormatter = DateTimeFormatterBuilder()
-        .appendPattern("h:mm a")
-        .toFormatter(Locale.US)
+    private fun timeText(value: LocalDateTime): String {
+        val hour12 = if (value.hour % 12 == 0) 12 else value.hour % 12
+        val suffix = if (value.hour < 12) "AM" else "PM"
+        return "$hour12:${TextFmt.pad(value.minute)} $suffix"
+    }
 
     /**
      * 生成 Google 日历导入 CSV（DESIGN §4.12）。
@@ -117,10 +117,10 @@ object ScheduleExporter {
             append(CSV_HEADER).append("\r\n")
             for (e in events) {
                 append(csvField(e.name)).append(',')
-                append(e.date.format(dateFormatter)).append(',')
-                append(e.start.format(timeFormatter)).append(',')
-                append(e.date.format(dateFormatter)).append(',')
-                append(e.end.format(timeFormatter)).append(',')
+                append(dateText(e.date)).append(',')
+                append(timeText(e.start)).append(',')
+                append(dateText(e.date)).append(',')
+                append(timeText(e.end)).append(',')
                 append("FALSE").append(',')
                 append(csvField(teacherDescription(e.teacher))).append(',')
                 append(csvField(e.position))

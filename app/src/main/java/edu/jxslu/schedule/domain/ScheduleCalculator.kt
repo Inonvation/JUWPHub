@@ -1,18 +1,21 @@
 package edu.jxslu.schedule.domain
 
-import java.time.DayOfWeek
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
 
 /** 轻量时刻，便于 JVM 单测 */
 data class LocalTimeLike(val hour: Int, val minute: Int) {
     fun toMinutes(): Int = hour * 60 + minute
 
     companion object {
-        fun from(t: LocalTime): LocalTimeLike = LocalTimeLike(t.hour, t.minute)
-        fun now(): LocalTimeLike = from(LocalTime.now())
+        fun now(): LocalTimeLike = Clock.System.now()
+            .toLocalDateTime(TimeZone.currentSystemDefault())
+            .let { LocalTimeLike(it.hour, it.minute) }
     }
 }
 
@@ -22,7 +25,6 @@ enum class CoursePhase { Upcoming, Ongoing, Ended, Unknown }
  * 周次 / 节次计算。周次以 SemesterConfig.startDate 所在周的周一为第 1 周。
  */
 object ScheduleCalculator {
-    private val dateFmt: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
     /**
      * 大节分组（闭区间）：第一二节 / 第三四节 / 第五六节 / 第七八节 / 第九十十一节。
@@ -39,13 +41,13 @@ object ScheduleCalculator {
     fun bigSectionLabel(section: Int): String? =
         BIG_SECTIONS.firstOrNull { section in it }?.let { "第${it.first}-${it.last}节" }
 
-    fun parseDate(value: String): LocalDate = LocalDate.parse(value, dateFmt)
+    fun parseDate(value: String): LocalDate = LocalDate.parse(value)
 
-    fun startOfWeek(date: LocalDate): LocalDate = date.with(DayOfWeek.MONDAY)
+    fun startOfWeek(date: LocalDate): LocalDate = date.minus(DatePeriod(days = date.dayOfWeek.ordinal))
 
     fun weekNumberOf(config: SemesterConfig, date: LocalDate): Int {
         val startMonday = startOfWeek(parseDate(config.startDate))
-        return ChronoUnit.WEEKS.between(startMonday, startOfWeek(date)).toInt() + 1
+        return ((startOfWeek(date).toEpochDays() - startMonday.toEpochDays()) / 7).toInt() + 1
     }
 
     /** 周次是否落在学期内（1..totalWeeks）。所有「在不在学期内」的判定都走这里。 */
@@ -74,7 +76,7 @@ object ScheduleCalculator {
     fun dateOf(startMonday: LocalDate, week: Int, day: Int): LocalDate? {
         if (week < 1 || day !in 1..7) return null
         return runCatching {
-            startMonday.plusWeeks((week - 1).toLong()).plusDays((day - 1).toLong())
+            startMonday.plus(DatePeriod(days = (week - 1) * 7 + (day - 1)))
         }.getOrNull()
     }
 

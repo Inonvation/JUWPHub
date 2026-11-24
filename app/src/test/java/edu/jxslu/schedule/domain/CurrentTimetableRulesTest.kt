@@ -1,6 +1,8 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -30,45 +32,45 @@ class CurrentTimetableRulesTest {
 
     @Test
     fun picksTableWhoseSpanCoversToday() {
-        assertEquals(1L, CurrentTimetableRules.pick(listOf(autumn, spring), LocalDate.of(2025, 10, 1), null))
-        assertEquals(2L, CurrentTimetableRules.pick(listOf(autumn, spring), LocalDate.of(2026, 4, 1), null))
+        assertEquals(1L, CurrentTimetableRules.pick(listOf(autumn, spring), LocalDate(2025, 10, 1), null))
+        assertEquals(2L, CurrentTimetableRules.pick(listOf(autumn, spring), LocalDate(2026, 4, 1), null))
     }
 
     @Test
     fun spanIsHalfOpen() {
-        assertTrue(CurrentTimetableRules.covers(autumn, LocalDate.of(2025, 9, 1)))
+        assertTrue(CurrentTimetableRules.covers(autumn, LocalDate(2025, 9, 1)))
         // 20 周后的那天已是区间外
-        assertFalse(CurrentTimetableRules.covers(autumn, LocalDate.of(2025, 9, 1).plusWeeks(20)))
+        assertFalse(CurrentTimetableRules.covers(autumn, LocalDate(2025, 9, 1).plus(DatePeriod(days = 140))))
     }
 
     @Test
     fun overlappingSpansPreferNewerTerm() {
         // 下学期提前开课，与上学期重叠在 2025-12-15：新学期（term 更大）优先
         val early = table(3, "2025-2026-2", "2025-12-01")
-        assertEquals(3L, CurrentTimetableRules.pick(listOf(autumn, early), LocalDate.of(2025, 12, 15), null))
+        assertEquals(3L, CurrentTimetableRules.pick(listOf(autumn, early), LocalDate(2025, 12, 15), null))
     }
 
     @Test
     fun holidayFallsBackToPreferredTerm() {
         // 2026-08-01 在两张表之外：退回教务当前学期那张
-        assertEquals(1L, CurrentTimetableRules.pick(listOf(autumn, spring), LocalDate.of(2026, 8, 1), "2025-2026-1"))
-        assertNull(CurrentTimetableRules.pick(listOf(autumn, spring), LocalDate.of(2026, 8, 1), "2026-2027-1"))
-        assertNull(CurrentTimetableRules.pick(listOf(autumn, spring), LocalDate.of(2026, 8, 1), null))
+        assertEquals(1L, CurrentTimetableRules.pick(listOf(autumn, spring), LocalDate(2026, 8, 1), "2025-2026-1"))
+        assertNull(CurrentTimetableRules.pick(listOf(autumn, spring), LocalDate(2026, 8, 1), "2026-2027-1"))
+        assertNull(CurrentTimetableRules.pick(listOf(autumn, spring), LocalDate(2026, 8, 1), null))
     }
 
     /** 手建表（term 为空）即使日期落在它的区间内也不参与——否则会把用户自建的表顶成当前表。 */
     @Test
     fun handMadeTableWithoutTermNeverWins() {
         val handMade = table(9, null, "2025-09-01")
-        assertEquals(1L, CurrentTimetableRules.pick(listOf(handMade, autumn), LocalDate.of(2025, 10, 1), null))
-        assertNull(CurrentTimetableRules.pick(listOf(handMade), LocalDate.of(2025, 10, 1), null))
+        assertEquals(1L, CurrentTimetableRules.pick(listOf(handMade, autumn), LocalDate(2025, 10, 1), null))
+        assertNull(CurrentTimetableRules.pick(listOf(handMade), LocalDate(2025, 10, 1), null))
     }
 
     /** 学科配置缺失（没配过开学日）时只走 preferred 分支，不按默认开学日瞎命中。 */
     @Test
     fun missingStartDateSkipsDateMatch() {
         val noStart = table(5, "2026-2027-1", null)
-        assertEquals(5L, CurrentTimetableRules.pick(listOf(noStart), LocalDate.of(2026, 9, 10), "2026-2027-1"))
-        assertNull(CurrentTimetableRules.pick(listOf(noStart), LocalDate.of(2026, 9, 10), null))
+        assertEquals(5L, CurrentTimetableRules.pick(listOf(noStart), LocalDate(2026, 9, 10), "2026-2027-1"))
+        assertNull(CurrentTimetableRules.pick(listOf(noStart), LocalDate(2026, 9, 10), null))
     }
 }
