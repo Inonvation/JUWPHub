@@ -1,15 +1,5 @@
 package edu.jxslu.schedule.domain
 
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.BinaryBitmap
-import com.google.zxing.DecodeHintType
-import com.google.zxing.EncodeHintType
-import com.google.zxing.MultiFormatReader
-import com.google.zxing.ReaderException
-import com.google.zxing.RGBLuminanceSource
-import com.google.zxing.common.HybridBinarizer
-import com.google.zxing.qrcode.QRCodeWriter
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -19,7 +9,8 @@ import kotlinx.serialization.json.Json
  * 车身码 = 普通链接二维码 `https://www.kvcoogo.com/ebike?id=<完整车号>`；微信扫码后
  * 命中运营方「扫普通链接二维码打开小程序」规则，**完整 URL 经 `q` 参数透传给小程序**，
  * 小程序自行解析 id 加载车辆。因此只要前缀不变、改 id 依然命中——App 内输入尾部
- * 车号拼 URL 出码即可。本文件只做纯 JVM 的拼装与矩阵生成，不含任何 UI 与网络。
+ * 车号拼 URL 出码即可。本文件只做拼装与位阵生成，不含 UI 与网络；真正的编码 / 解码
+ * 走 [encodeQrMatrix] / [decodeQrMatrix] 的平台实现（iOS 移植，2026-11-24 搬进 commonMain）。
  */
 object EbikeQr {
 
@@ -120,7 +111,7 @@ object EbikeQr {
      * - 带 `id=` 参数的 URL（官方车身码 / 他人分享链接）：取 id 参数再过 [resolveCarNum]；
      * - 其它内容（名片码、小程序码、别的站点链接）：null，调用方给"未识别到有效车号"提示。
      *
-     * 纯 JVM 可测（`EbikeQrTest`），与出码口径共用 [resolveCarNum] 一处校验。
+     * 不含平台 API，可测（`EbikeQrTest`），与出码口径共用 [resolveCarNum] 一处校验。
      */
     fun parseScannedCarNum(raw: String): String? {
         val content = raw.trim()
@@ -137,30 +128,16 @@ object EbikeQr {
      * 两个与相机预览那条路不同的口径，都是被「只解一次」逼出来的：
      * - `TRY_HARDER` 开着——预览解码每秒几十帧、这帧不行还有下一帧，相册只有这一张，
      *   多花一点时间换更全的采样与重试是划算的；
-     * - 候选格式只留二维码——车身码是 QR，放一维条码进来只是把尝试次数摊薄。
+     * - 候选格式只留二维码——车身码是 QR，放一维码进来只是把尝试次数摊薄。
      *
-     * 参数是 ARGB 像素 + 尺寸：取像素（Bitmap）留在 UI 层，本函数纯 JVM，测试直接喂
+     * 两个口径都落在 [decodeQrMatrix] 的 `actual` 里（Android 是 zxing，iOS 是 `CIDetector`）。
+     * 参数是 ARGB 像素 + 尺寸：取像素（Bitmap）留在 UI 层，本函数不含平台 API，测试直接喂
      * [qrMatrix] 渲染出的像素（`EbikeQrTest`）。EXIF 旋转不用管——QR 的定位图案对任意
      * 旋转都能检出（相机那一路本来就靠这个）。解不出（拍糊 / 裁掉了定位图案 / 不是码）
      * 返回 null，调用方留在取景页让用户换一张。
      */
-    fun decodeFromPixels(pixels: IntArray, width: Int, height: Int): String? {
-        if (width <= 0 || height <= 0 || pixels.size < width * height) return null
-        val binary = BinaryBitmap(HybridBinarizer(RGBLuminanceSource(width, height, pixels)))
-        val reader = MultiFormatReader().apply {
-            setHints(
-                mapOf(
-                    DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),
-                    DecodeHintType.TRY_HARDER to true,
-                ),
-            )
-        }
-        return try {
-            reader.decodeWithState(binary).text
-        } catch (_: ReaderException) {
-            null
-        }
-    }
+    fun decodeFromPixels(pixels: IntArray, width: Int, height: Int): String? =
+        decodeQrMatrix(pixels, width, height, tryHarder = true)
 
     /**
      * 输入框原始文本 → 规整输入（只留数字，上限 [INPUT_MAX_LENGTH] 位）。
@@ -232,17 +209,8 @@ object EbikeQr {
      * 白边 1 模块（zxing 约定：margin 是模块数不是像素，1 已满足扫码器的静区要求，
      * UI 展示时再由外层容器给视觉留白）。
      */
-    fun qrMatrix(url: String): com.google.zxing.common.BitMatrix =
-        QRCodeWriter().encode(
-            url,
-            BarcodeFormat.QR_CODE,
-            QR_SIZE_PX,
-            QR_SIZE_PX,
-            mapOf(
-                EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
-                EncodeHintType.MARGIN to 1,
-            ),
-        )
+    fun qrMatrix(url: String): BarcodeMatrix =
+        encodeQrMatrix(url, QR_SIZE_PX, marginModules = 1)
 
     /**
      * 把刚生成的车号并入最近历史（存**完整车号**）：倒序去重、上限 [RECENT_LIMIT]。

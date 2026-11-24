@@ -12,7 +12,7 @@ import java.io.File
 /**
  * 共享单车二维码的位图落盘（DESIGN §3.9 / §4.18）。
  *
- * 矩阵生成在 `domain/EbikeQr`（JVM 可测）；着色渲染已抽到
+ * 矩阵生成在 `:shared` 的 `domain/EbikeQr`（两平台共用）；着色渲染已抽到
  * `ui/common/CodeBitmaps`（与校园卡付款码共用，DESIGN §4.19），本对象只做 MediaStore 写入
  * 与「扫完即焚」的删除执行。
  */
@@ -23,13 +23,6 @@ object EbikeQrBitmaps {
         data class Saved(val pendingKey: String) : SaveResult
         data class Failed(val message: String) : SaveResult
     }
-
-    /**
-     * BitMatrix → Bitmap。黑白两色取当前主题的前景/背景（深色主题出「深底白码」：
-     * 微信扫一扫对反色码兼容良好，且与页面观感一致）。委托共用实现。
-     */
-    fun render(matrix: com.google.zxing.common.BitMatrix, dark: Boolean): Bitmap =
-        edu.jxslu.schedule.ui.common.CodeBitmaps.render(matrix, dark)
 
     /**
      * 保存到系统相册（`Pictures/JUWPHub`；旧图留在 `Pictures/水贝贝`，不迁移）。

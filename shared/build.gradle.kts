@@ -48,6 +48,16 @@ kotlin {
             // 同一个 `LocalDate` 会在 classpath 上出现两份，症状是莫名其妙的重载解析失败。
             api("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
             api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+            // 签名/凭证用的是 okio 的 ByteString + md5/sha256（跨平台，Kotlin/Native 上也有）。
+            // 版本锁 3.6.0 是 okhttp 4.12.0 自己带的那一版：`domain/` 搬进来以后这是**直接**依赖，
+            // 必须显式声明（原先只是 okhttp 的传递依赖，`:shared` 拿不到）。
+            api("com.squareup.okio:okio:3.6.0")
+        }
+
+        androidMain.dependencies {
+            // 条码生成/识别（Barcode.android.kt）。zxing 是纯 Java jar，只有 Android 侧用；
+            // 版本与 `:app` 里声明的一致，避免同一个 Matrix 类出现两份。
+            implementation("com.google.zxing:core:3.5.3")
         }
     }
 }

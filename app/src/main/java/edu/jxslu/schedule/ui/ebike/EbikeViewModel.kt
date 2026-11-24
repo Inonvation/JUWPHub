@@ -14,6 +14,7 @@ import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeRemoteRide
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.ThemeMode
+import edu.jxslu.schedule.ui.common.CodeBitmaps
 import edu.jxslu.schedule.ui.common.NoticeTone
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -354,7 +355,7 @@ class EbikeViewModel(
             val dark = runCatching { prefs.themeMode.first() == ThemeMode.Dark }
                 .getOrDefault(snapshot.dark)
             val bitmap = withContext(Dispatchers.Default) {
-                EbikeQrBitmaps.render(EbikeQr.qrMatrix(url), dark)
+                CodeBitmaps.render(EbikeQr.qrMatrix(url), dark)
             }
             _uiState.update {
                 it.copy(generatedBitmap = bitmap, generatedBikeId = carNum, generatedSaved = false)

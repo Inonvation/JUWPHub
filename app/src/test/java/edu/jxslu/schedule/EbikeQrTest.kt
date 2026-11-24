@@ -1,5 +1,6 @@
 package edu.jxslu.schedule
 
+import edu.jxslu.schedule.domain.BarcodeMatrix
 import edu.jxslu.schedule.domain.EbikeQr
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,7 +11,7 @@ import org.junit.Test
 
 /**
  * 共享单车骑行二维码（DESIGN §3.9 / §4.18）：URL 拼装、车号校验、输入规整、
- * BitMatrix 参数、最近车号序列化 roundtrip 与旧格式兼容读取。
+ * 位阵参数、最近车号序列化 roundtrip 与旧格式兼容读取。
  *
  * 2026-09-23 车号口径由「尾部 3 位」改为「完整车号」：输入框接受两种形态
  * （1~3 位尾部 / 6~12 位完整车号），拼 URL 只认完整车号。
@@ -98,7 +99,7 @@ class EbikeQrTest {
     // ---- decodeFromPixels：相册图片的二维码解码（2026-09-30） ----
 
     /** [EbikeQr.qrMatrix] 的位阵 → ARGB 像素（黑模块 0xFF000000、白底 0xFFFFFFFF）。 */
-    private fun matrixPixels(matrix: com.google.zxing.common.BitMatrix): IntArray =
+    private fun matrixPixels(matrix: BarcodeMatrix): IntArray =
         IntArray(matrix.width * matrix.height) { i ->
             val x = i % matrix.width
             val y = i / matrix.width
