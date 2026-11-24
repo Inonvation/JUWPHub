@@ -118,9 +118,9 @@ actual fun rememberFileSaver(
 /**
  * SAF `Uri` → UTF-8 文本；打不开或读取失败回 `null`。
  *
- * 与 `:app/.../ui/common/UriText.kt` 的 `readTextFromUri` 逐字同义（那边还有「我的 → 课表数据」
- * 一个调用方，所以不能直接删）。跨模块也共用不了那一份：`:shared` 看不见 `:app`——
- * 两边各留一份是模块边界决定的，不是又抄了一遍。
+ * 这里曾是 `:app/.../ui/common/UriText.kt` 的第二份拷贝（`:shared` 看不见 `:app`，模块边界
+ * 决定了当时只能各留一份）。iOS 移植 S17 把「我的 → 课表数据」也搬进共享层之后，
+ * 那个调用方改用本文件这条缝，`:app` 那份已经删掉——现在全仓只有这一份实现。
  */
 private suspend fun readUriText(context: Context, uri: Uri): String? =
     withContext(Dispatchers.IO) {

@@ -6,7 +6,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.ui.common.LaunchGate
+import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.SettingsScreen
 
 /**
@@ -30,9 +32,14 @@ class SettingsActivity : ComponentActivity() {
             // 主题/字体缩放走全 App 同一个根（JuwRoot 自带预报名仪表板），
             // 否则设置窗口会绕过深浅色与固定字号（2026-10-22 审计）
             JuwRoot {
+                // ViewModel 由宿主创建（design/ios-port.md §11.2 ①）：共享页面里没有 viewModel()
+                val meViewModel: MeViewModel = viewModel(
+                    factory = MeViewModel.Factory(Graph.repository(this)),
+                )
                 SettingsScreen(
                     onOpen = { screen -> SubpageActivity.start(this, screen) },
                     onBack = { finish() },
+                    viewModel = meViewModel,
                 )
             }
         }

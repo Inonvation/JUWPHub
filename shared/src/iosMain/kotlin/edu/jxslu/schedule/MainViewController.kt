@@ -5,10 +5,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -20,6 +26,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,6 +53,9 @@ import edu.jxslu.schedule.ui.jw.TeachingCalendarScreen
 import edu.jxslu.schedule.ui.jw.TextbookScreen
 import edu.jxslu.schedule.ui.life.PowerBillScreen
 import edu.jxslu.schedule.ui.life.PowerBillViewModel
+import edu.jxslu.schedule.ui.me.DisplaySettingsContent
+import edu.jxslu.schedule.ui.me.MeViewModel
+import edu.jxslu.schedule.ui.me.SettingsScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.selection.SelectionScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
@@ -102,6 +113,9 @@ private fun IosRoot(services: IosServices) {
         var jwSub by remember { mutableStateOf<IosJwSubPage?>(null) }
         // 详情页（笔记 / 作业）还在 :app，iOS 点条目时给一句确定的话，不留「点了没反应」
         var hint by remember { mutableStateOf<String?>(null) }
+        // 「我的」与课表显示设置共用同一个 VM 实例（Android 侧是 Activity 作用域，两边等价）。
+        // iOS 没有配置变更重建，`remember` 的生命周期就是这一屏；见 design/ios-port.md §11.2 ①。
+        val meViewModel = remember { MeViewModel(services.scheduleRepository()) }
         if (jwOpen) {
             JwLoginScreen(services = services, onClose = { jwOpen = false })
         } else {
@@ -124,6 +138,16 @@ private fun IosRoot(services: IosServices) {
                                 viewModel = viewModel,
                                 // 空态的「去导入课表」→ 教务登录页（M2 第一步：先把登录页跑起来）
                                 onOpenJwImport = { jwOpen = true },
+                                // 显示设置面板（S17 搬进共享层）：顶栏那只眼睛从此在 iOS 上也有入口。
+                                // 面板里的「背景」整组不出现——iOS 还没有 UIImage 解码实现，
+                                // 装配根的 scheduleBackgroundFiles() 返回 null。
+                                displaySettings = { headerMinDp, dismiss ->
+                                    IosDisplaySettingsOverlay(
+                                        viewModel = meViewModel,
+                                        headerMinDp = headerMinDp,
+                                        onDismiss = dismiss,
+                                    )
+                                },
                                 // 其余平台动作在 iOS 侧都还没有实现，留空即可——
                                 // 传 null / 空 lambda 的入口本来就不渲染（见 WeekScreen 头部参数表）。
                             )
@@ -171,6 +195,14 @@ private fun IosRoot(services: IosServices) {
                                 )
                             }
                         }
+                        // 「我的」：设置首页（S17 搬进共享层）。二级页栈是 Android 的
+                        // `SubpageActivity`，iOS 侧还没有，所以每个入口先给一句确定的话。
+                        IosPage.Me -> SettingsScreen(
+                            onOpen = { screen ->
+                                hint = "「${screen.name}」还在 Android 侧，下一批搬过来"
+                            },
+                            viewModel = meViewModel,
+                        )
                         // 笔记库（S13 搬进共享层）：仓库是本地 Room 表，iOS 直接可读。
                         // `images` 传 null = 本平台还没有附件图解码，缩略图整行不出现；
                         // 详情页仍在 :app，条目点开先给提示（见 [hint]）。
@@ -276,8 +308,75 @@ private fun IosRoot(services: IosServices) {
 }
 
 /**
+ * iOS 侧的显示设置覆盖面板（S17，2026-11-25）。
+ *
+ * 与 Android 的 `DisplaySettingsOverlay`（`:app`）是**同一个面板的两种壳**：
+ * 里面都是共享层的 `DisplaySettingsContent`，改的全是同一份 `DisplayPrefs`。
+ *
+ * 壳为什么不能共用：Android 那份挂着 `PredictiveBackHandler`（`androidx.activity`）与
+ * `LocalConfiguration`，两者在 `commonMain` 不可见，而且 iOS 没有「系统返回手势」这回事。
+ *
+ * 这一版只做「盖住下半屏 + 点遮罩关闭 + 完成按钮」：拖拽调高（把手）与预测性返回是
+ * Android 的交互习惯，iOS 用户预期的是「弹层铺到底、点外部关闭」，硬搬反而别扭。
+ * 面板里「背景」整组不出现——iOS 还没有 `UIImage` 解码实现（见 `IosServices`）。
+ */
+@Composable
+private fun IosDisplaySettingsOverlay(
+    viewModel: MeViewModel,
+    headerMinDp: Float,
+    onDismiss: () -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        // 遮罩：点它就关（与 Android 同一手感：无波纹点击）
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.32f))
+                .clickable(
+                    onClickLabel = "关闭显示设置",
+                    role = Role.Button,
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = onDismiss,
+                ),
+        )
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .fillMaxHeight(0.7f),
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 3.dp,
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 12.dp, top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "显示设置",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("完成") }
+                }
+                DisplaySettingsContent(
+                    viewModel = viewModel,
+                    headerMinDp = headerMinDp,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+/**
  * iOS 侧目前能进的一级页面（S13 起有笔记 / 作业 / 选课；S18 起有教务；
- * S19 起有收件箱与天气；S20 起有电费与流水）。
+ * S19 起有收件箱与天气；S20 起有电费与流水；S17 起有「我的」）。
  *
  * 为什么用枚举而不是导航库：iOS 侧还没有二级页栈（`SubpageActivity` 那一套是 Android 的），
  * 这一版只要能切页就够验证「共享页面在 iOS 上真的画得出来」。等详情页搬完再换真正的路由。
@@ -286,6 +385,8 @@ private enum class IosPage(val label: String) {
     Week("课表"),
     // 教务 Tab 的入口汇总页；与 Android 底栏同序（课表之后就是教务）。
     Jw("教务"),
+    /** 「我的」= 设置首页（S17 起在共享层）。 */
+    Me("我的"),
     Notes("笔记"),
     Homework("作业"),
     Selection("选课"),

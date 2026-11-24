@@ -20,15 +20,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.BuildConfig
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.R
 import edu.jxslu.schedule.SubpageScreen
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.SettingItem
@@ -47,19 +42,34 @@ import edu.jxslu.schedule.ui.icon.AppIcons
  *
  * 进页仍会做一次「班级为空就补抓」的 ProfileSync（闸门在 `ProfileSyncRules`，
  * 每天最多一次、失败静默）——左侧栏那行身份（姓名 / 班级）靠它填。
+ *
+ * ## iOS 移植 S17（2026-11-25）：从 `:app` 搬进共享层
+ *
+ * 这一页是「我的」那一栏的根，搬过来的目的是让 iOS 也有一份设置入口。搬迁时只换了两件
+ * 平台物，其余行与顺序一字未改：
+ *
+ * - `BuildConfig.VERSION_NAME` → `AppServices.appVersion()`（`:app` 的构建产物，共享层看不见）
+ * - `Graph.displayPrefs` / `Graph.profileSync` → `AppServices` 的同名成员
+ * - `stringResource(R.string.settings_title)` → 字面量「设置」（本仓只发中文）
+ * - `rememberResumeTick` 跟着上移到 `ui/common/ResumeTick.kt`（expect/actual）
+ *
+ * 二级页入口仍走 [onOpen]：iOS 侧还没有二级页栈，宿主传一句提示（`design/ios-port.md` §11.2 ⑦）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    /** 二级页入口；iOS 侧没有二级页栈，宿主传一句「还在 Android 侧」的提示即可。 */
     onOpen: (SubpageScreen) -> Unit,
+    /**
+     * 「我的」与显示设置的共享 ViewModel，**由宿主创建**（Android `viewModel {}`、
+     * iOS `remember {}`）——`commonMain` 里没有 `viewModel()` 这个 Composable，
+     * 见 `design/ios-port.md` §11.1。
+     */
+    viewModel: MeViewModel,
     /** 从侧栏齿轮进来时给返回箭头（独立窗口，恒有）。 */
     onBack: (() -> Unit)? = null,
-    viewModel: MeViewModel = viewModel(
-        factory = MeViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -73,7 +83,9 @@ fun SettingsScreen(
                         }
                     }
                 },
-                title = { Text(stringResource(R.string.settings_title)) },
+                // 文案与 `app/src/main/res/values/strings.xml` 的 settings_title 一字不差；
+                // 共享层没有 R，而本仓只发中文，所以直接写死
+                title = { Text("设置") },
             )
         },
     ) { padding ->
@@ -91,7 +103,7 @@ fun SettingsScreen(
                 .padding(bottom = LocalBottomBarClearance.current),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val prefsStore = remember { Graph.displayPrefs(context) }
+            val prefsStore = remember { Services.current.displayPrefs() }
             val resumeTick = rememberResumeTick()
             val profileClass by remember {
                 prefsStore.profileClass
@@ -101,7 +113,7 @@ fun SettingsScreen(
             val pendingCount = remember(pendingChanges) { pendingChanges?.groupCount() ?: 0 }
             LaunchedEffect(resumeTick) {
                 if (profileClass.isBlank()) {
-                    runCatching { Graph.profileSync(context).syncOnce() }
+                    runCatching { Services.current.profileSync().syncOnce() }
                 }
             }
 
@@ -220,7 +232,7 @@ fun SettingsScreen(
             SettingsSection(title = "关于") {
                 SettingItem(
                     title = "关于与更新",
-                    subtitle = "版本 v${BuildConfig.VERSION_NAME} · 检查更新 · 自动检查",
+                    subtitle = "版本 v${Services.current.appVersion()} · 检查更新 · 自动检查",
                     icon = AppIcons.InformationCircle,
                     onClick = { onOpen(SubpageScreen.ABOUT_UPDATE) },
                 )

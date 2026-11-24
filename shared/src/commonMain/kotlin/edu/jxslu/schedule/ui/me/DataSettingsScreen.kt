@@ -1,7 +1,5 @@
 package edu.jxslu.schedule.ui.me
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -11,8 +9,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,36 +26,50 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
+import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.ImportTargetDialogHost
+import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.importPreviewNote
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
+import edu.jxslu.schedule.ui.platform.rememberFileSaver
+import edu.jxslu.schedule.ui.platform.rememberTextFilePicker
+import kotlinx.coroutines.launch
 
 /**
  * 课表数据子页：导出 / 导入 JSON、剪贴板导入、清空。
  *
  * 从「我的 → 课表数据」进入（DESIGN §3.3），不再摊在设置主页上。
+ *
+ * ## iOS 移植 S17（2026-11-25）搬进 `commonMain`
+ *
+ * 选文件 / 另存原先靠 SAF 的 `rememberLauncherForActivityResult`，现在走
+ * `ui/platform/FilePickers.kt` 的 expect/actual：Android 仍是 SAF，iOS 是
+ * `UIDocumentPickerViewController`（另存落沙箱 `exports/`）。因此本页两端都在。
+ * JSON 文本仍由 `MeViewModel` 产出，读写文件归这两条缝——共享层看不见 `Uri`。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DataSettingsScreen(
     onBack: () -> Unit,
-    viewModel: MeViewModel = viewModel(
-        factory = MeViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
+    /**
+     * 「我的」与显示设置的共享 ViewModel，**由宿主创建**（Android `viewModel {}`、
+     * iOS `remember {}`），见 `design/ios-port.md` §11.1。
+     */
+    viewModel: MeViewModel,
 ) {
-    val context = LocalContext.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val oneShot by viewModel.oneShot.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     var showClearConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(oneShot) {
@@ -79,16 +89,19 @@ fun DataSettingsScreen(
         }
     }
 
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json"),
-    ) { uri ->
-        if (uri != null) viewModel.exportJson(context, uri)
+    // 落盘归两条平台缝：VM 只产出 / 接收 JSON 文本（与 `WeekViewModel.jsonText` 同口径，
+    // 共享层看不见 Uri）。`false` / `null` 都是「用户取消或读写失败」，两端的文案一致。
+    val jsonSaver = rememberFileSaver("application/json") { saved ->
+        scope.launch {
+            snackbar.showNotice(
+                AppNoticeVisuals(
+                    if (saved) "已导出课表 JSON" else "导出失败：写入被取消或出错",
+                    tone = if (saved) NoticeTone.Success else NoticeTone.Error,
+                ),
+            )
+        }
     }
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri != null) viewModel.importFromUri(context, uri)
-    }
+    val pickJsonFile = rememberTextFilePicker { text -> viewModel.importFromText(text) }
 
     // 根因：迁到 SubpageActivity 独立窗口后没有外层 Scaffold 垫状态栏，
     // windowInsets 归零（嵌 NavHost 时期防双倍空白的老规避）会让顶栏顶进状态栏；
@@ -99,7 +112,7 @@ fun DataSettingsScreen(
                 title = { Text("课表数据") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
                     }
                 },
             )
@@ -123,26 +136,32 @@ fun DataSettingsScreen(
             ) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
-                    onClick = { exportLauncher.launch("juw_courses.json") },
+                    onClick = {
+                        scope.launch {
+                            // 读库失败与写入失败是两回事，各给一句：前者是「数据读不出来」，
+                            // 后者是「用户取消或磁盘写不进」（后者的提示由 saver 回调给）
+                            val text = runCatching { viewModel.exportJsonText() }.getOrElse { error ->
+                                snackbar.showNotice(
+                                    AppNoticeVisuals(
+                                        "导出失败：${error.message}",
+                                        tone = NoticeTone.Error,
+                                    ),
+                                )
+                                return@launch
+                            }
+                            jsonSaver("juw_courses.json", text)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("导出 JSON…") }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
-                    onClick = {
-                        importLauncher.launch(
-                            arrayOf(
-                                "application/json",
-                                "text/plain",
-                                "application/octet-stream",
-                                "*/*",
-                            ),
-                        )
-                    },
+                    onClick = { pickJsonFile() },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("从文件导入 JSON…") }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
-                    onClick = { viewModel.importFromClipboard(context) },
+                    onClick = { viewModel.importFromClipboard() },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("从剪贴板导入") }
             }
@@ -173,7 +192,7 @@ fun DataSettingsScreen(
             // 原先这里手拼的文案说合并模式也「整体替换笔记」，与行为相反（2026-11-06 复核）。
             note = importPreviewNote(confirm.preview),
             defaultMerge = false,
-            repo = Graph.repository(context),
+            repo = Services.current.scheduleRepository(),
             onConfirm = { target, merge -> viewModel.confirmImport(target, merge) },
             onDismiss = { viewModel.cancelPendingImport() },
         )

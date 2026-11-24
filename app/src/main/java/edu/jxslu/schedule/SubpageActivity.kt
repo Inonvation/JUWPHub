@@ -12,6 +12,7 @@ import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.me.CalendarSettingsScreen
+import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
 import edu.jxslu.schedule.ui.me.JwAccountScreen
 import edu.jxslu.schedule.ui.me.ReminderSettingsScreen
@@ -198,7 +199,11 @@ class SubpageActivity : ComponentActivity() {
     ) {
         when (screen) {
             SubpageScreen.TIMETABLE_MANAGE -> TimetableManageScreen(onBack = onBack)
-            SubpageScreen.DATA_SETTINGS -> DataSettingsScreen(onBack = onBack)
+            SubpageScreen.DATA_SETTINGS -> DataSettingsScreen(
+                onBack = onBack,
+                // ViewModel 由宿主创建（design/ios-port.md §11.2 ①）
+                viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
+            )
             SubpageScreen.COURSE_TWEAK -> CourseTweakScreen(onBack = onBack)
             SubpageScreen.WATER -> WaterScreen(onBack = onBack, autoStart = autoStart)
             SubpageScreen.KVCX -> KvcxScreen(onBack = onBack)
@@ -375,7 +380,11 @@ class SubpageActivity : ComponentActivity() {
                 onOpenStatement = { SubpageActivity.start(this, SubpageScreen.CAMPUS_STATEMENT) },
             )
             SubpageScreen.JW_ACCOUNT -> JwAccountScreen(onBack = onBack)
-            SubpageScreen.TIMETABLE_HUB -> TimetableHubScreen(onBack = onBack)
+            SubpageScreen.TIMETABLE_HUB -> TimetableHubScreen(
+                onBack = onBack,
+                // ViewModel 由宿主创建（design/ios-port.md §11.2 ①）
+                viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
+            )
             SubpageScreen.SCHEDULE_CHANGES -> ScheduleChangesScreen(
                 onBack = onBack,
                 onOpenHistory = { SubpageActivity.start(this, SubpageScreen.AI_HISTORY) },
@@ -403,6 +412,8 @@ class SubpageActivity : ComponentActivity() {
                 )
             SubpageScreen.APPEARANCE_SETTINGS -> AppearanceSettingsScreen(
                 onBack = onBack,
+                // ViewModel 由宿主创建（design/ios-port.md §11.2 ①）
+                viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
             )
             // 天气（DESIGN §3.29）：详情与设置各自独立窗口，与其它二级页同规格。
             // 详情页（S19 搬进共享层）的 ViewModel 由宿主建：`viewModel { }` 保留配置变更
