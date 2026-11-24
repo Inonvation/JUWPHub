@@ -910,3 +910,38 @@ KMP framework 由 Xcode 的 Build Phase 调 `./gradlew :shared:embedAndSignApple
 3. **iOS 系统日历写入**：`onSyncCalendar` 没有实现，分享弹层里那一行不出现。
 4. 今日页：`TodayScreen` 1493 行，挂着 `ActiveServiceCard`（1175 行，依赖尚未移植的单车 /
    趣智 / U净 / 一卡通服务），要等那些服务搬完再动。
+### 10.4 充值与支付在 iOS 上的边界（2026-11-25 核查）
+
+四块充值**都不是 App 自己收钱**，都是把用户交给外部支付工具。因此可移植性取决于
+外部 App 的 URL scheme 在 iOS 上是否存在，而不是取决于我们的代码。
+
+| 充值 | Android 实际机制 | iOS 结论 |
+|---|---|---|
+| 一卡通 | `POST /charge/order/thirdOrder` → 302 收银台 URL；另有「直拉微信」捷径：`wx.tenpay.com/.../checkmweb?prepay_id=…` 的中间页里取 `weixin://wap/pay?prepayid=…`，`ACTION_VIEW` 拉起 | **能，但不照搬捷径**（见下） |
+| 胖乖生活 | 支付宝小程序深链 `alipays://platformapi/startapp?appId=2018072460764274&page=user/recharge/buyGold/…` | 能，零成本 |
+| 趣智校园 | 支付宝小程序深链 `alipays://platformapi/startapp?appId=2018090661238647&page=pages/recharge/recharge` | 能，零成本 |
+| 寝室电费 | 聚合收银台：从 `paymentcashierStr` 的 HTML 表单解析出 `/pay?ticket=…`，浏览器打开 | 能（`java.net.URLEncoder` 要换掉） |
+
+**一卡通在 iOS 上必须走兜底那条。** `weixin://wap/pay?prepayid=…` 是微信 H5 支付深链，
+商户域名与 referer 要匹配；Android 的直拉链路保留了正确来源，iOS 从原生 App 直接
+`openURL` 拉起很可能被微信拒（「商家参数格式有误」）。正确做法是把收银台 URL
+（`/payment?orderid=…&token=<JWT>`）放进 `WKWebView` 打开，让页面自己跳 `weixin://`。
+我们已经有 `ui/web/WebContentView` 这条缝，直接复用。
+
+**Info.plist 必须声明 `LSApplicationQueriesSchemes`**：`alipays`、`weixin`。
+少了这两条，`canOpenURL` 恒回 false，表现为「点了充值没反应」而不是报错。
+
+**待补的缝**：把「打开外部 URL / 自定义 scheme」收成平台能力
+（`expect fun openExternalUrl(url: String): Boolean`），Android 走 `ACTION_VIEW`，
+iOS 走 `UIApplication.openURL` + scheme 白名单检查。一卡通、胖乖、趣智、电费四处共用。
+
+### 10.5 胖乖迁完后刻意留在 `:app` 的三份存储
+
+| 文件 | 为什么没搬 |
+|---|---|
+| `QiekjTokenStore` | 介质是 `EncryptedSharedPreferences`（Android Keystore）。iOS 实现必然是 Keychain，与 Android 无共用代码——立接口（`QiekjCredentialStore`）比立 expect/actual 干净 |
+| `QiekjOrderHistoryStore` | 介质是普通 `SharedPreferences`。改成 `JsonFileStore` 等于换介质，老用户设备上最多 50 笔本地账单当场读不出来 |
+| `QiekjWateringStore` | 只被 `ui/water` / `ui/today`（都在 `:app`）消费，搬过去是给共享层加一份没人读的状态 |
+
+结论：`AppServices` 里**不需要** `qiekjRepository()`，因为它的消费者还都在 `:app`。
+等 iOS 接上 Keychain 版凭证存储再补，那时返回可空（null = 本平台还没接）。
