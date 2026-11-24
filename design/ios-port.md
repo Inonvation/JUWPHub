@@ -429,6 +429,33 @@ KSP 按 target 加：`kspAndroid` / `kspIosArm64` / `kspIosSimulatorArm64`；sch
 
 验收：Android 全页面截图比对无差异；iOS 模拟器进今日页与课表页。
 
+**已落地（2026-11-24，第一批）**：`:shared` 接上 Compose Multiplatform **1.7.3**（`ui` / `material3` /
+`foundation`，加 `org.jetbrains.kotlin.plugin.compose`），`ui/theme` 的 4 个纯文件
+（`Color` / `Type` / `SemanticColors` / `Palettes`）搬进 `commonMain`，`commonMain` 元数据编译通过。
+这条管道能在 Windows 上验，和 domain 那次一样。
+
+三个实测结论，写下来省得重踩：
+
+1. **CMP 版本必须锁 1.7.3，不能上 1.8.x**。`dependencies` 实跑的结果是
+   `androidx.compose.ui` 1.7.6、`runtime` 1.7.8（Glance 1.2.0 抬的）、`material3` 1.3.1，
+   都还在 1.7 / 1.3 线上——也就是 Android 侧只吃了两个补丁版本（ui 1.7.4→1.7.6、
+   material3 1.3.0→1.3.1），没有换大版本。上 1.8 会把整条 androidx.compose 抬一个大版本，
+   Glance 与全部既有 UI 都得重新验，那是另一笔账。
+2. **CMP 的 Android 变体会重定向到同名 `androidx.compose.*` 产物**，所以不存在「两份类」，
+   也不需要改任何 import（`androidx.compose.material3.*` 照旧）。这是敢直接在 `:shared` 引
+   CMP 而不用切全仓坐标的原因。
+3. **`internal` 会再犯一次**。`Palettes.kt` 的 `paletteScheme` / `paletteSwatch`、
+   `SemanticColors.kt` 的 `ProvideSemanticColors` 原本是 `internal`，调用方留在 `:app`
+   就看不见了。P0 搬 domain 时踩过同样的坑（`KvcxZones.capped`、`ScheduleExporter.teacherDescription`）。
+   **批量搬 UI 之前先 grep `^\s*internal `**，一次列清楚比逐个撞编译错误快得多。
+
+**下一批要做的两处缝**（`Theme.kt` / `Motion.kt` 还留在 `:app`，就是卡在这）：
+
+| Android 依赖 | 位置 | 缝的形状 |
+|---|---|---|
+| `android.os.Build.VERSION.SDK_INT >= 31` + `dynamicLightColorScheme(LocalContext.current)` | `Theme.kt` | `expect @Composable fun dynamicSchemeOrNull(dark: Boolean): ColorScheme?`，Android 返回动态取色、iOS 恒返回 null（回落用户选的 palette） |
+| `Settings.Global.ANIMATOR_DURATION_SCALE` | `Motion.kt` | `expect fun systemAnimationsEnabled(): Boolean`，iOS 读 `UIAccessibilityIsReduceMotionEnabled` |
+
 ### P3 iOS 壳与系统扩展（3–5 周）
 
 SwiftUI 容器 + `ComposeUIViewController`；WidgetKit 读 App Group 数据；通知授权引导；Live Activity；扫码。

@@ -108,6 +108,7 @@ Get-ChildItem -Recurse -Include *.md,*.kt | Select-String -Pattern '<旧说法>'
 | 图标用法 | `import me.rerere.hugeicons.stroke.*` + `HugeIcons.Calendar01` 等；查名用本地 JAR，勿猜 |
 | 高德地图 SDK | `com.amap.api:3dmap:10.0.600`（Maven Central，jar 里是 `lib/<abi>/*.so` 老布局，AGP 会解包）。**主底图**（2026-11-17）。两个 .so 合计 32MB：`jniLibs.useLegacyPackaging = true` 压缩，`ndk.abiFilters` 只留 `arm64-v8a`，release 16.1MB（CI 有体积护栏）。R8 必须 keep `com.amap.api.**`，否则 release 地图空白 |
 | Glance | `androidx.glance:glance-appwidget:1.2.0`（桌面小组件）；传递抬 compose runtime 至 1.7.8 |
+| Compose Multiplatform | **`org.jetbrains.compose.*:1.7.3`，只在 `:shared`**（iOS 移植 P2 起；`:app` 仍用 androidx BOM 2024.10.00）。**别升到 1.8.x**：那会把 Android 侧的 androidx.compose 整条抬一个大版本，Glance 1.2.0 与全部既有 UI 都得重验。实测解析结果（2026-11-24）：`androidx.compose.ui` 1.7.6、`runtime` 1.7.8（Glance 抬的）、`material3` 1.3.1——都在 1.7/1.3 线上。CMP 的 Android 变体会重定向到同名 `androidx.compose.*` 产物，所以**不会出现两份类**，也没有 import 改动 |
 | 样例课 | **已移除**；课表默认空，从教务 WebView 导入 |
 | 包名 | release = `edu.jxslu.schedule`；debug = `edu.jxslu.schedule.debug`（两者签名不同，**必须**靠后缀区分） |
 
@@ -282,8 +283,9 @@ MainActivity
 └─ 独立窗口：Settings / JwImport（含 Browse 与 TeachingEval）/ Transcript / XgForm /
    PowerBankPay / Onboarding / SubpageActivity（二级页，路由枚举见 SubpageScreen）
 
-shared/       KMP 共享逻辑（iOS 移植 P0 起）：commonMain 已装 **domain 层全部** + qzxy/wenqu/qiekj
-              的 wire model（136 个文件；包名保留原样，所以 `data.qzxy.*` 也会出现在这里，是有意的）。
+shared/       KMP 共享逻辑（iOS 移植 P0/P2 起）：commonMain 已装 **domain 层全部** + qzxy/wenqu/qiekj
+              的 wire model + `ui/theme` 的四个纯 Compose 文件（140 个文件；包名保留原样，
+              所以 `data.qzxy.*` 也会出现在这里，是有意的）。已接 Compose Multiplatform 1.7.3。
               androidMain / iosMain 只放 expect/actual 的平台实现（条码、定点小数）。
               **commonMain 必须零 JVM 专有 API**，判据是 `:shared:metadataCommonMainClasses`。
               新写 commonMain 代码前先看 `design/ios-port.md` 的「JVM 默认导入陷阱」表。
