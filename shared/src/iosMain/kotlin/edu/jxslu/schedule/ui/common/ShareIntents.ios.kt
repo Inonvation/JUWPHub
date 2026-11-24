@@ -8,6 +8,7 @@ import platform.CoreGraphics.CGRectMake
 import platform.Foundation.NSURL
 import platform.UIKit.UIActivityViewController
 import platform.UIKit.UIViewController
+import platform.UIKit.popoverPresentationController
 
 /**
  * [sharePlainText] / [shareFile] 的 iOS 实现（iOS 移植 P2，2026-11-24）：`UIActivityViewController`。
