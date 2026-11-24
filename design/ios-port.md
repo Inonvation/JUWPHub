@@ -787,7 +787,8 @@ SwiftUI 容器 + `ComposeUIViewController`；WidgetKit 读 App Group 数据；�
 - 产物：`JUWPHub-<version>-unsigned.ipa`
 - 重签：Sideloadly / 爱思助手 / SideStore，用自己 Apple ID
 - 免费账号 7 天、同时 3 个 App；付费账号 ¥688/年管 1 年
-- Bundle ID 固定 `edu.jxslu.schedule`（iOS 高德 key 绑它），debug 变体 `edu.jxslu.schedule.debug`
+- Bundle ID 固定 `edu.jxslu.schedule.ios`（`iosApp/project.yml` 的 `PRODUCT_BUNDLE_IDENTIFIER`；
+  iOS 高德 key 要绑这个全串）。Android 侧仍是 `edu.jxslu.schedule` / `.debug`，两端不同串不影响共存。
 - iOS 高德 key 与 Android 两把分开申请，落 `keystore.properties` 的 `amapKeyIos`
 
 ```yaml
@@ -894,7 +895,7 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 
 1. **P-1 第一批**：时间源 + 金额收口（改造项 1、2），改完跑全量单测。
 2. **P-1 第二批**：网络收口 + 会话纯函数化（3、4）——这一步决定后续会不会翻车。
-3. **并行**：申请 iOS 高德 key（绑 `edu.jxslu.schedule`），不占工时。
+3. **并行**：申请 iOS 高德 key（绑 `edu.jxslu.schedule.ios`），不占工时。
 4. 之后按 §4 的 P0 起骨架。
 
 ## 10. M1 / M2 现状（2026-11-25）
