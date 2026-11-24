@@ -75,6 +75,13 @@ kotlin {
             api("org.jetbrains.compose.ui:ui:1.7.3")
             api("org.jetbrains.compose.material3:material3:1.7.3")
             api("org.jetbrains.compose.foundation:foundation:1.7.3")
+            // `androidx.compose.material.icons.Icons.*`：`:app` 里有 14 个图标、58 个文件在用它。
+            // 这是**坐标问题不是缝**——icons 本身是纯 ImageVector 数据，CMP 有同名产物。
+            // 只用 core（Add/Check/Close/Delete/Refresh/Search/Settings/Share/ArrowBack…），
+            // 不引 extended：那是个几十 MB 的包，为一个 `FileDownload` 不值得。
+            // 注：`FileDownload` / `History` 若不在 core 里，就换成 AppIcons 里的等价图标，
+            // 由搬运那批文件的人现场判断——别为了一个图标把 extended 拉进来。
+            api("org.jetbrains.compose.material:material-icons-core:1.7.3")
             // Ktor 3（iOS 移植 P1 第一个试点模块）：OkHttp 与 Retrofit 都是 JVM 库，iOS 上没有；
             // Ktor 的 core 在 commonMain，引擎按平台各自声明（Android 仍走 OkHttp，iOS 走 Darwin）。
             // 版本选 3.0.3 是配现有的 kotlinx-coroutines 1.9.0（3.1+ 要 1.10.x），

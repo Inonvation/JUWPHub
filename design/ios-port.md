@@ -655,6 +655,33 @@ agent 同时改（每个 agent 只改自己那几个文件、不跑 Gradle），
 **别先做**：`material.icons`（58 文件，换坐标会动版本线）与位图簇（一次四缝同时上）。
 上面「`common` 应该最后动」的判断已被这批修正：**无平台依赖的那一半必须最先动**，它解锁 100+ 个引用方。
 
+### iOS 验证的成本与纪律（2026-11-24 实测）
+
+一次成功构建的真实分解（run 45386070556，排队 5 秒是运气）：
+
+| 步骤 | 耗时 | 能否省 |
+|---|---|---|
+| Gradle 编译 + 链接 `Shared.framework` | **166 s** | **不能**。改了 shared 的 Kotlin，klib 与 framework 必须重编重链 |
+| 恢复 `~/.konan` 缓存 + Gradle 缓存 | 35 s | 已是缓存命中态；冷缓存 +2–4 分钟 |
+| checkout / JDK / Android SDK | 9 s | 不能 |
+| `xcodebuild`（Release，不签名） | 16 s | 能（`ios-compile.yml` 不打包） |
+| 打包 + 上传 artifact | 5 s | 同上 |
+| 收尾 post steps | 48 s | 不能 |
+
+四条纪律，都是为了少跑那 166 秒：
+
+1. **合并后一次验，别改一点验一点**。`:app`（Android）编译是秒级，iOS 侧是 4–5 分钟起步，
+   频率差两个数量级。今天为了一处 `when` 穷尽性白等过一轮。
+2. **能放 commonMain 的代码一律别放 iosMain**。commonMain 有本地门禁
+   （`:shared:metadataCommonMainClasses`，6–18 秒，Windows 上就能跑）；iosMain 只能等 CI。
+   数据库自检条就是按这条从 iosMain 搬回 commonMain 的：界面与状态机可本地验，平台侧只留直线调用。
+3. **日常迭代走 `ios-compile.yml`**（PR / 手工触发，不打包、不传 artifact），只在要装机时才跑
+   `ios-ipa.yml`。
+4. **依赖改动攒在一起改**。`~/.konan` 缓存 key 含 `build.gradle.kts` 的哈希，动一次依赖就冷一次；
+   `material.icons` 这类坐标能一次补齐就别分三批。
+
+排队时间不受控（macOS runner 容量）：今天见过 5 秒，也见过 27 分钟。**不要把 CI 当编辑器用。**
+
 ### P3 iOS 壳与系统扩展（3–5 周）
 
 SwiftUI 容器 + `ComposeUIViewController`；WidgetKit 读 App Group 数据；通知授权引导；Live Activity；扫码。
