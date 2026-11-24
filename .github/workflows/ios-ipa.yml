@@ -43,16 +43,15 @@ permissions:
 
 jobs:
   build-ipa:
-    # 2026-11-25 改 macos-14：macos-15 的 arm64 池连续 3 次排 15 分钟拿不到 runner
-    # （run 45424609726 / 45425989497 / 45434305047，job 结论 `cancelled`、
-    # `runner_name` 为空、`steps` 为 0，即一个步骤都没跑）。GitHub 状态页当时报
-    # All Systems Operational，所以这是池容量问题，不是代码问题。
+    # 必须是 arm64 机器：`-arch arm64` 与 `:shared:linkDebugFrameworkIosArm64` 都依赖它。
+    # 本仓库是公开仓库，`macos-15` 分配的就是 arm64。
     #
-    # 为什么 macos-14 仍然出得了 arm64 包：本仓库是公开仓库，`macos-14` 标签在公开仓库
-    # 上分配的就是 arm64（Apple Silicon）机器；私有仓库才会落到 x64。`-arch arm64` 与
-    # `:shared:linkDebugFrameworkIosArm64` 都依赖这一点，换机器前先确认仓库仍公开。
-    # macos-14 镜像默认 Xcode 16.x，Kotlin 2.1.21 支持；xcodegen 缺了下面那步会 brew 装。
-    runs-on: macos-14
+    # 试过并失败的路：`macos-14`（2026-11-25）—— 秒退，check-run 注解为
+    # `The configuration 'macos-14-arm64-us-default' is not supported`，
+    # 即该标签在本仓库已没有 arm64 机器。**不支持的标签不会排队，而是立刻 cancelled、
+    # steps=0**，与容量不足的「排满 15 分钟再 cancelled」现象相同、原因不同，
+    # 区分办法见 `.github/workflows/runner-probe.yml`。
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4

@@ -1,0 +1,40 @@
+# 探针：哪些 macOS runner 标签在本仓库真能拿到机器（2026-11-25）
+#
+# 为什么需要它：`macos-14` 直接秒退，check-run 注解写着
+# `The configuration 'macos-14-arm64-us-default' is not supported` ——
+# 不支持的标签不会「排队等待」，而是**立刻 cancelled、steps=0**，与容量不足
+# （排 15 分钟才 cancelled）是同一种 `cancelled` 结论、完全不同的原因。
+# 靠跑真构建来区分这两者，一次浪费 15 分钟；用这个探针只要几十秒。
+#
+# 用法：`gh workflow run runner-probe.yml`，然后看各 job 的结论。
+#   - success  → 该标签可用，`uname -m` 那行给出架构（arm64 才能出 device 包）
+#   - cancelled + steps=0 → 该标签不被支持
+#   - cancelled + 有步骤跑过 → 是容量问题，稍后重试
+#
+# 只做诊断，不进任何构建路径；结论写进 `design/ios-port.md` 后可以删掉本文件。
+
+name: Runner Probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-15, macos-14, macos-15-intel, macos-latest]
+    # 不支持的标签会把 job 判成 cancelled，别让它连坐其它候选
+    continue-on-error: true
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: 报架构与工具链
+        run: |
+          uname -m
+          sw_vers
+          xcodebuild -version
+          echo "PROBE_OK ${{ matrix.os }}"
