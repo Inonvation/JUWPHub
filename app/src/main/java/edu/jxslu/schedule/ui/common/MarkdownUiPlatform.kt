@@ -14,12 +14,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.imageRefs
 
 /**
- * Markdown 渲染栈的 Android 平台槽（iOS 移植 S21，2026-11-25）。
+ * Markdown 渲染栈的 Android 平台槽（iOS 移植 S21，2026-11-25；V4 收口 2026-11-25）。
  *
  * 渲染器本体 [MarkdownContent] 与公式排版 [MathText] 已搬进 `shared/commonMain`；
  * 留在 `:app` 的只有**附件图解码**（`BitmapFactory` 降采样 + 按字节计的 LRU，见
@@ -28,31 +30,14 @@ import edu.jxslu.schedule.domain.imageRefs
  *
  * | 入口 | 用在哪 | 槽 |
  * |---|---|---|
- * | [MarkdownView] | 笔记 / 作业详情页正文（满宽真图） | [MarkdownImageUi] |
- * | [rememberMarkdownUi] | 列表页正文（`MarkdownUi` 槽，固定缩略图档位） | [MarkdownImageUi] |
- * | [MarkdownEditorBottomBar] | 编辑态底栏（附件条 + 格式工具条） | `AttachmentStrip` |
+ * | [rememberMarkdownImageUi] | 详情页正文（满宽真图，走共享的 [MarkdownContent]） | [MarkdownImageUi] |
+ * | [rememberMarkdownUi] | 列表页正文（固定缩略图档位） | [MarkdownImageUi] |
+ * | [rememberMarkdownEditorUi] | 详情页编辑态（附件条 + 工具条 + 选图 + 删文件） | [MarkdownEditorUi] |
  *
- * **名字为什么是 `MarkdownView` 而不是共享层的 `MarkdownContent`**：详情页（`NoteDetailScreen`
- * 457 行 / `HomeworkDetailScreen` 741 行）还留在 `:app`，它们直接调 `MarkdownView`；
- * 共享层的渲染器只能换个名字，否则同一个包里两个同名函数。
+ * **原来还有一个 `MarkdownView`**：那是详情页留在 `:app` 时给它们的同名封装（共享层的渲染器
+ * 只能换个名字，否则同一个包里两个同名函数）。V4 把两页搬进共享层后它没有调用方了，
+ * 已删除——详情页现在直接调 `MarkdownContent` + [rememberMarkdownImageUi]。
  */
-@Composable
-fun MarkdownView(
-    markdown: String,
-    modifier: Modifier = Modifier,
-    imageStyle: MdImageStyle = MdImageStyle.FullWidth,
-    onImageClick: ((String) -> Unit)? = null,
-    onLinkClick: ((String) -> Unit)? = null,
-) {
-    MarkdownContent(
-        markdown = markdown,
-        modifier = modifier,
-        imageStyle = imageStyle,
-        onImageClick = onImageClick,
-        onLinkClick = onLinkClick,
-        images = rememberMarkdownImageUi(),
-    )
-}
 
 /**
  * 共享层的作业 / 笔记列表只认 `MarkdownUi`；真身 [MarkdownContent] 依赖附件图槽。
@@ -82,11 +67,43 @@ fun rememberMarkdownUi(): MarkdownUi {
 
 /** 附件图槽的 Android 装配：满宽真图走 [AttachmentImage]，列表档位走 [AttachmentThumbnailRow]。 */
 @Composable
-private fun rememberMarkdownImageUi(): MarkdownImageUi = remember {
+fun rememberMarkdownImageUi(): MarkdownImageUi = remember {
     MarkdownImageUi(
         fullWidth = { fileName, onClick -> AttachmentImage(fileName = fileName, onClick = onClick) },
         thumbnailRow = { fileNames, onOpen -> AttachmentThumbnailRow(fileNames = fileNames, onOpen = onOpen) },
     )
+}
+
+/**
+ * 详情页编辑态槽的 Android 装配（V4，2026-11-25）：附件条 + 格式工具条 + 选图 + 删文件。
+ *
+ * 三件都落在 `Graph.attachmentStore` 的同一个目录上（`filesDir/notes_img/`），所以收成一个
+ * [MarkdownEditorUi] 交出去；共享层的详情页只认这个对象，不认 `AttachmentStore`。
+ */
+@Composable
+fun rememberMarkdownEditorUi(): MarkdownEditorUi {
+    val context = LocalContext.current
+    val store = remember(context) { Graph.attachmentStore(context) }
+    return remember(store) {
+        MarkdownEditorUi(
+            bottomBar = { value, onValueChange, onNotice, onRemoveImage, onOpenImage ->
+                // 选图 → 压缩落盘 → 光标处插引用：Photo Picker（零权限），装配原样复用
+                val pickImages = rememberImageInserter(
+                    value = value,
+                    onValueChange = onValueChange,
+                    onNotice = onNotice,
+                )
+                MarkdownEditorBottomBar(
+                    value = value,
+                    onValueChange = onValueChange,
+                    onPickImages = pickImages,
+                    onRemoveImage = onRemoveImage,
+                    onOpenImage = onOpenImage,
+                )
+            },
+            deleteFiles = { names -> store.delete(names) },
+        )
+    }
 }
 
 /**

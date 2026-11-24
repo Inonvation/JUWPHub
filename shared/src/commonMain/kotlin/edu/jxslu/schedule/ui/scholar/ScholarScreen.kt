@@ -770,8 +770,7 @@ private fun CourseSearchField(query: String, onQueryChange: (String) -> Unit) {
 }
 
 /** 学分数值展示：整数不带小数点，小数最多两位（79.0 → 79，24.25 → 24.25）。 */
-private fun trimNum(value: Double): String =
-    TextFmt.decimals(value, 2).trimEnd('0').trimEnd('.').ifEmpty { "0" }
+private fun trimNum(value: Double): String = TextFmt.trim(value)
 
 private val PASS_BG = androidx.compose.ui.graphics.Color(0x1A34A853)
 private val PASS_FG = androidx.compose.ui.graphics.Color(0xFF1E8E3E)

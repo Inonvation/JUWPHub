@@ -488,5 +488,4 @@ private fun termText(term: Int): String {
 }
 
 /** 数值展示：整数不带小数点，小数最多两位（161.0 → 161，23.75 → 23.75）。 */
-private fun trimNum(value: Double): String =
-    TextFmt.decimals(value, 2).trimEnd('0').trimEnd('.').ifEmpty { "0" }
+private fun trimNum(value: Double): String = TextFmt.trim(value)

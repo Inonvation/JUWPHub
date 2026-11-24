@@ -52,6 +52,8 @@ import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.campus.postYktPaymentInbox
 import edu.jxslu.schedule.ui.common.rememberAttachmentImageUi
+import edu.jxslu.schedule.ui.common.rememberMarkdownEditorUi
+import edu.jxslu.schedule.ui.common.rememberMarkdownImageUi
 import edu.jxslu.schedule.ui.common.rememberMarkdownUi
 import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.SessionExpiredNotice
@@ -741,11 +743,17 @@ class SubpageActivity : ComponentActivity() {
                 },
                 images = rememberAttachmentImageUi(),
             )
+            // 笔记详情已搬进 shared/commonMain（iOS 移植 V4）：附件图 / 正文渲染 / 编辑底栏 /
+            // 外链四件平台能力由本侧注入，共享层只认可空参数。
             SubpageScreen.NOTE_DETAIL -> NoteDetailScreen(
                 courseName = courseName.orEmpty(),
                 noteId = itemId,
                 startEditing = startEditing,
                 onBack = onBack,
+                markdownImages = rememberMarkdownImageUi(),
+                images = rememberAttachmentImageUi(),
+                editor = rememberMarkdownEditorUi(),
+                onOpenLink = { url -> openLink(this, url) },
             )
             // 作业：课程库 → 课程列表 → 详情/编辑 + 作业中心
             // 库 / 课程列表 / 作业中心已在 shared/commonMain（iOS 移植 S13）；附件图、Markdown
@@ -783,11 +791,18 @@ class SubpageActivity : ComponentActivity() {
                 onOpenLink = { url -> openLink(this, url) },
                 onHomeworkChanged = { ClassReminder.enqueueCheck(this) },
             )
+            // 作业详情已搬进 shared/commonMain（iOS 移植 V4）：与上面三页同一组平台参数，
+            // 另加编辑底栏（`rememberMarkdownEditorUi`）。
             SubpageScreen.HOMEWORK_DETAIL -> HomeworkDetailScreen(
                 courseName = courseName.orEmpty(),
                 homeworkId = itemId,
                 startEditing = startEditing,
                 onBack = onBack,
+                markdownImages = rememberMarkdownImageUi(),
+                images = rememberAttachmentImageUi(),
+                editor = rememberMarkdownEditorUi(),
+                onOpenLink = { url -> openLink(this, url) },
+                onHomeworkChanged = { ClassReminder.enqueueCheck(this) },
             )
             SubpageScreen.HOMEWORK_TODO -> HomeworkTodoScreen(
                 onBack = onBack,

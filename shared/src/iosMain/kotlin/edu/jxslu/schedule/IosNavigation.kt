@@ -41,6 +41,7 @@ import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
 import edu.jxslu.schedule.ui.exam.ExamSettingsScreen
 import edu.jxslu.schedule.ui.homework.HomeworkCourseScreen
+import edu.jxslu.schedule.ui.homework.HomeworkDetailScreen
 import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
 import edu.jxslu.schedule.ui.homework.HomeworkTodoScreen
 import edu.jxslu.schedule.ui.icon.AppIcons
@@ -54,6 +55,7 @@ import edu.jxslu.schedule.ui.life.PowerBillViewModel
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.notes.NoteCourseScreen
+import edu.jxslu.schedule.ui.notes.NoteDetailScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.score.ScoreSettingsScreen
@@ -87,10 +89,18 @@ import edu.jxslu.schedule.ui.weather.WeatherViewModel
  *
  * ## 参数
  *
- * 少数页面要一个字符串参数（`NOTES_COURSE` / `HOMEWORK_COURSE` 要课程名）。路由条目因此是
- * [IosRoute]（screen + 可选 arg），不是裸枚举。
+ * 少数页面要一个字符串参数（`NOTES_COURSE` / `HOMEWORK_COURSE` 要课程名），详情页还要
+ * 条目 id 与「进页即编辑」两个参数。路由条目因此是 [IosRoute]（screen + 可选 arg + 两个
+ * 详情页参数），不是裸枚举。
  */
-internal data class IosRoute(val screen: SubpageScreen, val arg: String? = null)
+internal data class IosRoute(
+    val screen: SubpageScreen,
+    val arg: String? = null,
+    /** 详情页的条目 id（0 = 新建）。 */
+    val itemId: Long = 0L,
+    /** 详情页进页即进编辑态（列表里的铅笔入口）。 */
+    val startEditing: Boolean = false,
+)
 
 /**
  * 抽屉分组，顺序与 Android 左侧栏一致（身份 / 钱包 / 生活 / 江水生活 / 学习 / 设置）。
@@ -167,8 +177,8 @@ internal fun IosRouteContent(
         // ---------------------------------------------------------------- 学习
         SubpageScreen.NOTES -> NoteLibraryScreen(
             onBack = pop,
-            onOpenNote = { courseName, _, _ ->
-                push(IosRoute(SubpageScreen.NOTES_COURSE, courseName))
+            onOpenNote = { courseName, id, startEditing ->
+                push(IosRoute(SubpageScreen.NOTE_DETAIL, courseName, id, startEditing))
             },
             // null = 本平台还没有附件图解码（见 IosServices 的说明），缩略图整行不出现
             images = null,
@@ -177,15 +187,26 @@ internal fun IosRouteContent(
         SubpageScreen.NOTES_COURSE -> NoteCourseScreen(
             courseName = route.arg.orEmpty(),
             onBack = pop,
-            // 笔记详情页还在 :app（Markdown 栈已搬，但详情页的编辑接线没搬）
-            onOpenNote = { _, _ -> },
+            onOpenNote = { id, startEditing ->
+                push(IosRoute(SubpageScreen.NOTE_DETAIL, route.arg, id, startEditing))
+            },
             images = null,
+        )
+
+        // 笔记详情（V4 搬进共享层）：正文渲染、附件图、编辑底栏、外链四件平台能力
+        // iOS 都还没有 → 全传 null。表现是：正文按纯文本排版（图片位置给一行说明）、
+        // 编辑态没有附件条与工具条、链接不可点、点图不响应。文字读写是真的能用。
+        SubpageScreen.NOTE_DETAIL -> NoteDetailScreen(
+            courseName = route.arg.orEmpty(),
+            noteId = route.itemId,
+            startEditing = route.startEditing,
+            onBack = pop,
         )
 
         SubpageScreen.HOMEWORK -> HomeworkLibraryScreen(
             onBack = pop,
-            onOpenHomework = { courseName, _, _ ->
-                push(IosRoute(SubpageScreen.HOMEWORK_COURSE, courseName))
+            onOpenHomework = { courseName, id, startEditing ->
+                push(IosRoute(SubpageScreen.HOMEWORK_DETAIL, courseName, id, startEditing))
             },
             images = null,
             markdown = null,
@@ -193,8 +214,8 @@ internal fun IosRouteContent(
 
         SubpageScreen.HOMEWORK_TODO -> HomeworkTodoScreen(
             onBack = pop,
-            onOpenHomework = { courseName, _, _ ->
-                push(IosRoute(SubpageScreen.HOMEWORK_COURSE, courseName))
+            onOpenHomework = { courseName, id, startEditing ->
+                push(IosRoute(SubpageScreen.HOMEWORK_DETAIL, courseName, id, startEditing))
             },
             onOpenLibrary = { push(IosRoute(SubpageScreen.HOMEWORK)) },
             images = null,
@@ -204,9 +225,21 @@ internal fun IosRouteContent(
         SubpageScreen.HOMEWORK_COURSE -> HomeworkCourseScreen(
             courseName = route.arg.orEmpty(),
             onBack = pop,
-            onOpenHomework = { _, _ -> },
+            onOpenHomework = { id, startEditing ->
+                push(IosRoute(SubpageScreen.HOMEWORK_DETAIL, route.arg, id, startEditing))
+            },
             images = null,
             markdown = null,
+        )
+
+        // 作业详情（V4 搬进共享层）：与笔记详情同一组 null——平台能力都还没有。
+        // 另加 `onHomeworkChanged = null`：iOS 没有截止提醒排程（通知 + BGTask），
+        // 改完只落库，不重排提醒。截止日期与完成勾选本身是真的能存。
+        SubpageScreen.HOMEWORK_DETAIL -> HomeworkDetailScreen(
+            courseName = route.arg.orEmpty(),
+            homeworkId = route.itemId,
+            startEditing = route.startEditing,
+            onBack = pop,
         )
 
         SubpageScreen.THEORY_SCHEDULE -> JwScheduleListScreen(

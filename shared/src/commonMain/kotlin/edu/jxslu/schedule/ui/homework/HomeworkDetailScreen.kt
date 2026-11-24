@@ -1,8 +1,5 @@
 package edu.jxslu.schedule.ui.homework
 
-import android.content.Intent
-import android.net.Uri
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -54,38 +51,36 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Homework
 import edu.jxslu.schedule.domain.dueDetailLabel
 import edu.jxslu.schedule.domain.imageRefs
 import edu.jxslu.schedule.domain.removeImageRef
-import edu.jxslu.schedule.startActivityOutsideApp
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.AttachmentImageUi
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.EmptyHint
-import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.LoadingHint
-import edu.jxslu.schedule.ui.common.MarkdownEditorBottomBar
+import edu.jxslu.schedule.ui.common.MarkdownContent
 import edu.jxslu.schedule.ui.common.MarkdownEditorField
-import edu.jxslu.schedule.ui.common.MarkdownView
+import edu.jxslu.schedule.ui.common.MarkdownEditorUi
+import edu.jxslu.schedule.ui.common.MarkdownImageUi
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
-import edu.jxslu.schedule.ui.common.rememberImageInserter
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.reminder.ClassReminder
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.DayOfWeek
@@ -102,10 +97,23 @@ import kotlinx.datetime.toLocalDateTime
  * 编辑态 = 满屏写作布局：截止 chips + 完成勾选固定在顶部，正文输入框占满剩余高度
  * （内部滚动），附件条与格式工具条放在 `Scaffold.bottomBar` 并 `imePadding()`——
  * 长文写到下半段时工具条仍在键盘上缘。
- * 预览态 = 截止/完成卡 + `MarkdownView` 渲染；截止与完成是离散状态，改动即落库，
+ * 预览态 = 截止/完成卡 + Markdown 正文渲染；截止与完成是离散状态，改动即落库，
  * 只有正文需要显式保存。
  * 保存语义与笔记一致：保存 = 落库 + 切回预览 + 「已保存」+ 留在本页；返回时才退出。
  * 删除与「保存并继续新建」收进溢出菜单。
+ *
+ * ## 平台能力全在参数里（iOS 移植 V4，2026-11-25）
+ *
+ * 与作业库 / 课程页同一组可空参数（见 `HomeworkLibraryScreen`），另加编辑态那一组
+ * （[editor]：附件条底栏 + 选图 + 删文件）。另外两件：
+ *
+ * | 参数 | null 的含义 |
+ * |---|---|
+ * | [onOpenLink] | 本平台打不开外链 → 链接不可点 |
+ * | [onHomeworkChanged] | 本平台没有截止提醒排程 → 改完只落库，不重排提醒 |
+ *
+ * `ClassReminder.enqueueCheck`（`AlarmManager` + 通知）与 `Graph.attachmentStore` 都在 `:app`，
+ * 共享层拿不到；正文渲染走 [MarkdownContent]，位图绘制交给 [markdownImages]。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -114,12 +122,21 @@ fun HomeworkDetailScreen(
     homeworkId: Long,
     startEditing: Boolean = false,
     onBack: () -> Unit,
+    /** 正文附件图的绘制槽；null = 本平台画不出附件图。 */
+    markdownImages: MarkdownImageUi? = null,
+    /** 附件图能力（缩略图 + 全屏查看器）；null = 本平台没有。 */
+    images: AttachmentImageUi? = null,
+    /** 编辑态底栏与附件文件删除；null = 本平台没有附件图落盘。 */
+    editor: MarkdownEditorUi? = null,
+    /** 打开正文链接，返回是否成功；null = 链接不可点。 */
+    onOpenLink: ((url: String) -> Boolean)? = null,
+    /** 正文 / 截止 / 完成落库后重排截止提醒；null = 本平台没有提醒排程。 */
+    onHomeworkChanged: (() -> Unit)? = null,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val repo = remember { Graph.homeworkRepository(context) }
-    val noteRepo = remember { Graph.noteRepository(context) }
-    val store = remember { Graph.attachmentStore(context) }
+    val repo = remember { Services.current.homeworkRepository() }
+    val noteRepo = remember { Services.current.noteRepository() }
+    val appScope = remember { Services.current.appScope() }
     val snackbar = remember { SnackbarHostState() }
     val haptics = rememberAppHaptics()
     val showNotice: (String, NoticeTone) -> Unit = { message, tone ->
@@ -142,7 +159,6 @@ fun HomeworkDetailScreen(
     // 「保存并继续新建」后与路由里的旧 homeworkId 脱钩：进程回收再恢复时不能把旧条目重新灌进来
     var detached by rememberSaveable { mutableStateOf(false) }
     var loaded by remember { mutableStateOf(homeworkId == 0L) }
-    var viewer by remember { mutableStateOf<String?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
     var showDiscard by remember { mutableStateOf(false) }
@@ -196,6 +212,20 @@ fun HomeworkDetailScreen(
     /** 保存/删除进行中：不挡的话双击「保存」会对新建作业插两条（original 还没回写，两次 base.id 都是 0）。 */
     var busy by remember { mutableStateOf(false) }
 
+    /**
+     * 删掉「本次从正文移除、且全库已无引用」的附件文件（DESIGN §4.20）。
+     *
+     * 差集在共享层算（`imageRefs` 是 domain 的纯函数），落盘删除交给 [editor]；
+     * `null` 说明本平台没有附件目录，跳过即可。
+     */
+    suspend fun deleteUnreferenced(candidates: Set<String>) {
+        val ui = editor ?: return
+        val referenced = (noteRepo.allBodies() + repo.allDetails())
+            .flatMap { imageRefs(it) }
+            .toSet()
+        ui.deleteFiles(candidates - referenced)
+    }
+
     /** 保存：正文归库，随后清理「本次移除且已无任何引用」的附件文件（DESIGN §4.20）。 */
     fun save(onSaved: () -> Unit = {}) {
         if (busy) return
@@ -213,7 +243,7 @@ fun HomeworkDetailScreen(
         val newDetail = detail.text
         val due = dueDate
         // 与 repo.save 的 createdAt 戳记条件保持一致：已有行保旧值、新行盖「现在」
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         busy = true
         scope.launch {
             try {
@@ -235,8 +265,7 @@ fun HomeworkDetailScreen(
                 }
                 val removed = imageRefs(base.detail) - imageRefs(newDetail)
                 if (removed.isNotEmpty()) {
-                    val referenced = store.referencedNames(noteRepo.allBodies() + repo.allDetails())
-                    store.deleteIfUnreferenced(removed, referenced)
+                    deleteUnreferenced(removed)
                 }
                 // 回写基线与首存 id/创建时间（与笔记详情同口径）：保存后若留在本页再存，
                 // 走更新同一行而不是拿 original==null / savedId==0 再插一条。
@@ -254,7 +283,7 @@ fun HomeworkDetailScreen(
                 savedId = original!!.id
                 createdAt = original!!.createdAt
                 // 作业落库会改变"下一个提醒点"：立即重排（与设置变更同口径）
-                ClassReminder.enqueueCheck(context)
+                onHomeworkChanged?.invoke()
                 onSaved()
             } finally {
                 busy = false
@@ -286,12 +315,12 @@ fun HomeworkDetailScreen(
         dueEpochDay = newDue?.toEpochDays() ?: NO_DUE
         val base = original ?: return
         if (base.id <= 0) return
-        original = base.copy(dueDate = newDue, updatedAt = System.currentTimeMillis())
+        original = base.copy(dueDate = newDue, updatedAt = AppClock.nowMillis())
         showNotice("截止日期已保存", NoticeTone.Success)
         // 用进程级作用域：改完立刻返回时，写库不会被页面销毁取消
-        Graph.appScope.launch {
+        appScope.launch {
             repo.setDueDate(base.id, newDue)
-            ClassReminder.enqueueCheck(context)
+            onHomeworkChanged?.invoke()
         }
     }
 
@@ -300,15 +329,15 @@ fun HomeworkDetailScreen(
         done = newDone
         val base = original ?: return
         if (base.id <= 0) return
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         original = base.copy(done = newDone, doneAt = if (newDone) now else null, updatedAt = now)
         showNotice(
             if (newDone) "已完成，已自动保存" else "已取消完成，已自动保存",
             NoticeTone.Success,
         )
-        Graph.appScope.launch {
+        appScope.launch {
             repo.setDone(base.id, newDone)
-            ClassReminder.enqueueCheck(context)
+            onHomeworkChanged?.invoke()
         }
     }
 
@@ -321,10 +350,9 @@ fun HomeworkDetailScreen(
                 repo.delete(item.id)
                 val removed = imageRefs(item.detail)
                 if (removed.isNotEmpty()) {
-                    val referenced = store.referencedNames(noteRepo.allBodies() + repo.allDetails())
-                    store.deleteIfUnreferenced(removed, referenced)
+                    deleteUnreferenced(removed)
                 }
-                ClassReminder.enqueueCheck(context)
+                onHomeworkChanged?.invoke()
                 onBack()
             } finally {
                 busy = false
@@ -333,14 +361,7 @@ fun HomeworkDetailScreen(
     }
 
     // 与笔记详情同口径：dirty 已把空表单挡掉，新建写完按返回也要弹确认（防静默丢内容）
-    BackHandler(enabled = dirty) { showDiscard = true }
-
-    // 图片插入：Photo Picker → 私有目录 → 光标处插引用（零权限，DESIGN §4.20）
-    val pickImages = rememberImageInserter(
-        value = detail,
-        onValueChange = { detail = it },
-        onNotice = showNotice,
-    )
+    AppBackHandler(enabled = dirty) { showDiscard = true }
 
     Scaffold(
         snackbarHost = { AppSnackbarHost(snackbar) },
@@ -434,15 +455,15 @@ fun HomeworkDetailScreen(
             )
         },
         bottomBar = {
-            if (editing) {
-                MarkdownEditorBottomBar(
-                    value = detail,
-                    onValueChange = { detail = it },
-                    onPickImages = pickImages,
-                    onRemoveImage = { name ->
-                        detail = TextFieldValue(removeImageRef(detail.text, name))
-                    },
-                    onOpenImage = { viewer = it },
+            // null = 本平台没有附件图落盘：底栏整块不渲染（格式工具条与附件条一起消失）
+            val bar = editor?.bottomBar
+            if (editing && bar != null) {
+                bar(
+                    detail,
+                    { detail = it },
+                    showNotice,
+                    { name -> detail = TextFieldValue(removeImageRef(detail.text, name)) },
+                    { name -> images?.openViewer(name) },
                 )
             }
         },
@@ -503,21 +524,22 @@ fun HomeworkDetailScreen(
                         )
                     }
                 } else {
-                    MarkdownView(
+                    // 正文渲染：解析 / 排版 / 点击命中在共享层，位图绘制交给 markdownImages。
+                    // onImageClick 为 null = 本平台没有全屏查看器，图不可点（不是点了没反应）。
+                    MarkdownContent(
                         markdown = detail.text,
                         modifier = Modifier.fillMaxWidth(),
-                        onImageClick = { viewer = it },
-                        onLinkClick = { url ->
-                            if (!openLink(context, url)) showNotice("打不开这个链接", NoticeTone.Warning)
+                        onImageClick = images?.let { ui -> { name: String -> ui.openViewer(name) } },
+                        onLinkClick = onOpenLink?.let { open ->
+                            { url: String ->
+                                if (!open(url)) showNotice("打不开这个链接", NoticeTone.Warning)
+                            }
                         },
+                        images = markdownImages,
                     )
                 }
             }
         }
-    }
-
-    viewer?.let { fileName ->
-        ImageViewerDialog(fileName = fileName, onDismiss = { viewer = null })
     }
 
     if (showDatePicker) {
@@ -760,9 +782,3 @@ private fun DueChipButton(
 
 /** 未设置截止日期在可保存状态里的哨兵值（Int.MIN_VALUE，正常 epochDay 不会取到）。 */
 private const val NO_DUE = Long.MIN_VALUE
-
-/** 详情里打开链接的兜底（与笔记页同口径）。 */
-internal fun openLink(context: android.content.Context, url: String): Boolean =
-    runCatching {
-        context.startActivityOutsideApp(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-    }.isSuccess
