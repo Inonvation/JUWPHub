@@ -10,6 +10,7 @@ import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
+import edu.jxslu.schedule.data.repo.DormRepairStore
 import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.data.repo.ExamSync
@@ -428,6 +429,23 @@ interface AppServices {
      * 直调，搬不动也不该搬）。
      */
     fun ujingReminder(): UjingReminder?
+
+    // ---- 今日页（iOS 移植 V1，2026-11-25） ----
+    //
+    // 今日页搬进共享层带出来的**唯一**一个新成员。其余依赖按 `design/ios-port.md`
+    // §11.2 ④ 收成页面侧的可空槽位（服务卡 / 趣智面板 / 扫码 / 二级页栈），不在这里。
+
+    /**
+     * 宿舍报修进度快照（DESIGN §4.49，今日页收件箱卡里的报修状态行）。
+     *
+     * **非空**：`DormRepairStore` 是 `MirroredJsonStore`（`appDataDir()` 下一份 JSON，
+     * S7 起已在 commonMain，构造器不再吃 `Context`），两端都建得起来、读写同一份格式。
+     * 页面自己订阅 `snapshot` 并算「在途优先 / 3 天内完成」那一行。
+     *
+     * 注意它只给**快照**：拉取（`DormRepairSync`，带 WebView 登录态）还在 `:app`，
+     * 页面下拉刷新那一下通过 `onRefreshDormRepair` 回调交给宿主。
+     */
+    fun dormRepairStore(): DormRepairStore
 }
 
 /**

@@ -13,6 +13,7 @@ import edu.jxslu.schedule.data.qiekj.QiekjWateringSession
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
+import edu.jxslu.schedule.data.repo.DormRepairStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
@@ -336,4 +337,13 @@ class GraphServices(private val context: Context) : AppServices {
     }
 
     override fun ujingReminder(): UjingReminder = ujingReminderSink
+    // ---- 今日页（V1） ----
+
+    /**
+     * 宿舍报修进度快照：转给 `Graph.dormRepairStore` 的现有单例。
+     *
+     * 必须是同一个实例——今日页的报修状态行与报修详情页读的是同一份 JSON，
+     * 各造一个等于「详情页刚点了完成并隐藏、今日页那行还在」。
+     */
+    override fun dormRepairStore(): DormRepairStore = Graph.dormRepairStore(appContext)
 }

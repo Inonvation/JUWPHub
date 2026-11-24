@@ -12,6 +12,7 @@ import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
+import edu.jxslu.schedule.data.repo.DormRepairStore
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
@@ -458,6 +459,22 @@ class IosServices : AppServices {
      * Android 的 cancel / revoke 两个动作。在那之前订单卡与 15 秒轮询照常，只是没有「洗好提醒」。
      */
     override fun ujingReminder(): UjingReminder? = null
+    // ---- 今日页（V1，2026-11-25） ----
+
+    /**
+     * 宿舍报修进度快照：**非空**，两端同源。
+     *
+     * `DormRepairStore` 是 `MirroredJsonStore`（`appDataDir()` 下一份 JSON），
+     * S7 起已在 commonMain，构造器不吃 `Context`，iOS 侧建得起来。
+     *
+     * 注意只有**快照**能读：拉取那条链（`DormRepairSync` + 学工 WebView 登录态）还在
+     * `:app`，所以 iOS 侧今日页的报修行只会显示「已经落在这个 JSON 里的记录」，
+     * 永远不会有新记录——等于那行不出现。升级条件：把 `DormRepairSync` 搬到共享层
+     * （它要的是 WebView cookie，iOS 侧 `IosWebCookieSource` 已经能读）。
+     */
+    private val dormRepair: DormRepairStore by lazy { DormRepairStore() }
+
+    override fun dormRepairStore(): DormRepairStore = dormRepair
 
     init {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，

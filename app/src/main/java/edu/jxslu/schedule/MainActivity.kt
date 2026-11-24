@@ -82,8 +82,10 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import edu.jxslu.schedule.data.prefs.DisplayPrefs
 import edu.jxslu.schedule.data.repo.AppShellPrefs
@@ -135,6 +137,9 @@ import edu.jxslu.schedule.ui.theme.JuwTheme
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import edu.jxslu.schedule.ui.today.TodayScreen
+import edu.jxslu.schedule.ui.today.TodayViewModel
+import edu.jxslu.schedule.ui.today.rememberBrandIconPainter
+import edu.jxslu.schedule.ui.today.rememberTodayHostSlots
 import edu.jxslu.schedule.ui.water.WaterViewModel
 import edu.jxslu.schedule.ui.widget.TodayWidgetRefresh
 import edu.jxslu.schedule.data.qzxy.QzxyBluetoothScanner
@@ -1549,7 +1554,57 @@ internal fun JuwApp(
                     popExitTransition = { tabExit() },
                 ) {
                     composable(Routes.TODAY) {
+                        // 今日页已搬进 :shared（iOS 移植 V1）。ViewModel 由宿主创建
+                        // （design/ios-port.md §11.2 ①），四项服务 / 趣智面板 / 扫码 / 二级页栈
+                        // 按槽位注入——那些包搬不动，见 ui/today/TodayHost.kt 的 KDoc。
+                        val todayVm: TodayViewModel = viewModel {
+                            TodayViewModel(
+                                repo = Graph.repository(context),
+                                homeworkRepo = Graph.homeworkRepository(context),
+                                weatherRepo = Graph.weatherRepository(context),
+                                // 「猜你想用」：有在案骑行时排除快趣（服务卡就在推荐卡上方，
+                                // 别把同一件事说两遍）。取不到控制器（地图 SDK 初始化失败等）
+                                // 时按「没有骑行」处理，推荐照常工作。
+                                // 冷启动的落盘提示也算「有骑行」（`rideHint`，2026-11-18）：
+                                // 否则第一帧会先推一次快趣、订单回包到了再换卡，推荐卡在进页后自己跳一次。
+                                kvcxRideActive = runCatching { Graph.kvcxRide(context) }
+                                    .getOrNull()
+                                    ?.let { controller ->
+                                        combine(
+                                            controller.state
+                                                .map { it.ride != null }
+                                                .distinctUntilChanged(),
+                                            controller.rideHint,
+                                        ) { riding, hint -> riding || hint }
+                                    }
+                                    ?: flowOf(false),
+                                // 快趣使用方式 / 免费计时起点：VM 首帧同步读真值，见 TodayViewModel.ebikeFirstFrame。
+                                // 页面不再各自订阅 DataStore 冷流——那正是「切 Tab 时服务卡晚一帧、
+                                // 整列卡片跳一下」的来路。
+                                ebikePrefs = Graph.displayPrefs(context),
+                            )
+                        }
+                        val todaySlots = rememberTodayHostSlots(
+                            todayViewModel = todayVm,
+                            waterViewModel = waterViewModel,
+                            qzxyViewModel = qzxyViewModel,
+                            onOpenEbike = { SubpageActivity.start(context, SubpageScreen.RIDE) },
+                            onOpenWater = { SubpageActivity.start(context, SubpageScreen.WATER) },
+                            onOpenQzxy = { SubpageActivity.start(context, SubpageScreen.QZXY) },
+                            onOpenUjing = { SubpageActivity.start(context, SubpageScreen.UJING) },
+                            // 开水面板失败态「详情」的出口（DESIGN §3.18）：
+                            // 带当前设备地址过去，诊断页据此选中同一台
+                            onOpenQzxyDebug = { address ->
+                                SubpageActivity.start(
+                                    context,
+                                    SubpageScreen.QZXY_DEBUG,
+                                    focusItemId = address,
+                                )
+                            },
+                        )
+                        val todayScope = rememberCoroutineScope()
                         TodayScreen(
+                            viewModel = todayVm,
                             // 教务导入是独立 Activity：新窗口覆盖，底层课表布局不动
                             onOpenJwImport = {
                                 JwImportActivity.start(context)
@@ -1615,21 +1670,28 @@ internal fun JuwApp(
                             onOpenQzxy = { SubpageActivity.start(context, SubpageScreen.QZXY) },
                             // 「猜你想用」推荐问渠（DESIGN §3.33）：进问渠 · 志愿服务页
                             onOpenWenqu = { SubpageActivity.start(context, SubpageScreen.WENQU) },
-                            // 开水面板失败态「详情」的出口（DESIGN §3.18）：
-                            // 带当前设备地址过去，诊断页据此选中同一台
-                            onOpenQzxyDebug = { address ->
-                                SubpageActivity.start(
-                                    context,
-                                    SubpageScreen.QZXY_DEBUG,
-                                    focusItemId = address,
-                                )
-                            },
-                            qzxyViewModel = qzxyViewModel,
                             // 左侧栏：汉堡在今日页顶栏，切换开关（2026-10-20）
                             onOpenDrawer = {
                                 // 用 isVisible 而不是 isOpen：展开动画途中再点一次要能收回，
                                 // isOpen 要等动画播完才翻。
                                 if (drawer.isVisible) drawer.close() else drawer.open()
+                            },
+                            // ── 槽位（Android 侧全部填满；iOS 侧是 null）──
+                            serviceCards = todaySlots.serviceCards,
+                            qzxyPanel = todaySlots.qzxyPanel,
+                            onScanCode = todaySlots.onScanCode,
+                            // 品牌位图：五张 `ic_brand_*` 是 Android 资源，共享层拿不到
+                            brandIcon = { target -> rememberBrandIconPainter(target) },
+                            // 收件箱卡点消息行 → 二级页（`SubpageActivity` 是 Android 的窗口概念）
+                            onOpenSubpage = { screen, focus ->
+                                SubpageActivity.start(context, screen, focusItemId = focus)
+                            },
+                            // 宿舍报修进度（DESIGN §4.49）：下拉时顺带刷新，不阻塞课表刷新。
+                            // 拉取链（`DormRepairSync`，要学工 WebView 登录态）还在 `:app`。
+                            onRefreshDormRepair = {
+                                todayScope.launch {
+                                    runCatching { Graph.dormRepairSync(context).refresh() }
+                                }
                             },
                         )
                     }

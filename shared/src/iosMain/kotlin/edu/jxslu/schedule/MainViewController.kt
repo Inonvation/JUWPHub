@@ -48,6 +48,8 @@ import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.SettingsScreen
 import edu.jxslu.schedule.ui.theme.JuwTheme
+import edu.jxslu.schedule.ui.today.TodayScreen
+import edu.jxslu.schedule.ui.today.TodayViewModel
 import edu.jxslu.schedule.ui.web.WebContentView
 import edu.jxslu.schedule.ui.web.WebViewController
 import edu.jxslu.schedule.ui.week.WeekScreen
@@ -59,7 +61,7 @@ import platform.UIKit.UIViewController
 private fun IosRoot(services: IosServices) {
     JuwTheme {
         var jwOpen by remember { mutableStateOf(false) }
-        var tab by remember { mutableStateOf(IosTab.Week) }
+        var tab by remember { mutableStateOf(IosTab.Today) }
         // 二级页栈：Android 是 SubpageActivity 的任务栈，iOS 用一份列表顶上（见 IosNavigation.kt）
         val stack = remember { mutableStateListOf<IosRoute>() }
         var drawerOpen by remember { mutableStateOf(false) }
@@ -94,6 +96,59 @@ private fun IosRoot(services: IosServices) {
                         )
                     } else {
                         when (tab) {
+                            // 今日 Tab（V1 搬进共享层）：主屏。课程 / 作业 / 收件箱 /
+                            // 猜你想用 / 开水面板都在共享层，直接可用；
+                            // 四项服务卡、趣智面板、扫码、品牌位图在 iOS 上没有实现，
+                            // 槽位留 null = 整块不渲染（design/ios-port.md §11.2 ④）。
+                            IosTab.Today -> {
+                                // iOS 没有配置变更重建，`remember` 的生命周期就是这一屏（§11.2 ①）
+                                val viewModel = remember {
+                                    TodayViewModel(
+                                        repo = services.scheduleRepository(),
+                                        homeworkRepo = services.homeworkRepository(),
+                                        weatherRepo = services.weatherRepository(),
+                                    )
+                                }
+                                TodayScreen(
+                                    viewModel = viewModel,
+                                    // 顶栏汉堡 → 左侧抽屉（Android 同一入口）
+                                    onOpenDrawer = { drawerOpen = true },
+                                    // 顶栏课表句 / 「当前课表不在本学期」的 CTA → 课表 Tab
+                                    onOpenWeek = { tab = IosTab.Week },
+                                    // 空态「从教务导入」→ 教务登录页（WKWebView 登录后自动抓取落库）
+                                    onOpenJwImport = { jwOpen = true },
+                                    // 其余入口一律进二级页栈；还没搬的页面落在
+                                    // `IosNotPortedScreen`（一句确定的话，不是点了没反应）。
+                                    onOpenTimetableSettings = {
+                                        stack.add(IosRoute(SubpageScreen.TIMETABLE_HUB))
+                                    },
+                                    onOpenWater = { stack.add(IosRoute(SubpageScreen.WATER)) },
+                                    onOpenQzxy = { stack.add(IosRoute(SubpageScreen.QZXY)) },
+                                    onOpenEbike = { stack.add(IosRoute(SubpageScreen.RIDE)) },
+                                    onOpenWenqu = { stack.add(IosRoute(SubpageScreen.WENQU)) },
+                                    onOpenUjing = { stack.add(IosRoute(SubpageScreen.UJING)) },
+                                    onOpenDormRepair = { stack.add(IosRoute(SubpageScreen.DORM_REPAIR)) },
+                                    onOpenInbox = { stack.add(IosRoute(SubpageScreen.INBOX)) },
+                                    onOpenWeather = { stack.add(IosRoute(SubpageScreen.WEATHER)) },
+                                    onOpenHomeworkTodo = {
+                                        stack.add(IosRoute(SubpageScreen.HOMEWORK_TODO))
+                                    },
+                                    onOpenCourseNotes = { course ->
+                                        stack.add(IosRoute(SubpageScreen.NOTES_COURSE, course.name))
+                                    },
+                                    onOpenCourseHomework = { course ->
+                                        stack.add(IosRoute(SubpageScreen.HOMEWORK_COURSE, course.name))
+                                    },
+                                    // 收件箱卡点消息行：iOS 有二级页栈，所以这个槽位填得上
+                                    onOpenSubpage = { screen, focus ->
+                                        stack.add(IosRoute(screen, focus))
+                                    },
+                                    // 扫码（onScanCode）与品牌位图（brandIcon）在 iOS 侧还没有实现，
+                                    // 留 null：U净 弹窗的扫码钮点不动、猜你想用卡片没有图标位。
+                                    // 升级条件写在 ui/today/TodaySlots.kt 的 KDoc 里。
+                                )
+                            }
+
                             IosTab.Week -> {
                                 val viewModel = remember { WeekViewModel(services.scheduleRepository()) }
                                 WeekScreen(
@@ -184,13 +239,13 @@ private fun IosRoot(services: IosServices) {
 /**
  * iOS 底栏的三个 Tab。
  *
- * Android 的底栏是「今日 / 课表 / 教务」，iOS 这一版没有今日页——`TodayScreen` 依赖
- * water / ujing / qzxy / ebike / homework / inbox / jwvw / reminder 八个包，全都在 `:app`。
- * 所以第三格换成「我的」，它是真页面（`SettingsScreen`）。
- *
- * 今日页搬完之后这里改回 Android 的原序，并把「我的」移到抽屉里（Android 就是从抽屉进的）。
+ * 2026-11-25（V1）：今日页搬进共享层后改回 Android 的原序——**今日 / 课表 / 教务**，
+ * 「我的」仍在第三格（Android 是从左侧抽屉进的，iOS 这一版还没有抽屉那一格，
+ * 见 `design/ios-port.md` §12.3 第一条）。今日页的四项服务卡 / 趣智面板 / 扫码
+ * 在 iOS 上没有实现，槽位传 `null`，对应内容整块不渲染（§11.2 ④）。
  */
 private enum class IosTab(val label: String) {
+    Today("今日"),
     Week("课表"),
     Jw("教务"),
     Me("我的"),
@@ -208,7 +263,7 @@ private enum class IosTab(val label: String) {
  * | 区域 | 内容 | 说明 |
  * |---|---|---|
  * | 主体 | 二级页栈顶（[IosRouteContent]）或三个 Tab 之一 | 栈空时显示 Tab，栈非空时显示栈顶 |
- * | 底栏 | 课表 / 教务 / 我的 + 「更多」 | 只在栈空时出现；「更多」打开左侧抽屉 |
+ * | 底栏 | 今日 / 课表 / 教务 / 我的 + 「更多」 | 只在栈空时出现；「更多」打开左侧抽屉 |
  * | 抽屉 | [IosDrawer] | 分组列出**已经搬过来**的二级页（白名单在 `IosNavigation.kt`） |
  * | 覆盖层 | [JwLoginScreen] | 点「去导入」进来的教务登录 WebView（WKWebView） |
  * | 底部 | [DbSelfTestStrip] 一行 | 读写探针，**保留是因为它是「数据链路通了」的唯一屏上证据** |
@@ -217,9 +272,9 @@ private enum class IosTab(val label: String) {
  * 所以两端不会出现「一边有入口、一边没有」。还没搬的页面落在 `IosNotPortedScreen`，
  * 看到的是确定的一句话而不是点了没反应；完整清单见 `design/ios-port.md` §12。
  *
- * 与 Android 的**已知差异**：底栏第三格是「我的」而不是「今日」——`TodayScreen` 依赖
- * water / ujing / qzxy / ebike / homework / inbox / jwvw / reminder 八个包，全在 `:app`。
- * 今日页搬完后改回 Android 的原序。
+ * 与 Android 的**已知差异**：iOS 是四格底栏（今日 / 课表 / 教务 / 我的），Android 是三格
+ * 底栏加左侧抽屉里的「我的」。今日页 2026-11-25（V1）搬进共享层后已回到首格；四项服务卡、
+ * 趣智面板与扫码在 iOS 上仍是空的（槽位 `null`），见 `design/ios-port.md` §12.3。
  *
  * 搬掉的两个旧面板：`WeekGridPreview`（样例网格）与 `LinkValidationScreen`（定点小数对照）。
  * 它们的验收目的都已达成——真网格取代样例网格，小数口径由 2419 条 JVM 单测继续钉住。
