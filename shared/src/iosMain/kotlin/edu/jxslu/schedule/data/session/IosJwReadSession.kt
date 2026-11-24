@@ -3,10 +3,14 @@ package edu.jxslu.schedule.data.session
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.net.SharedHttp
 import io.ktor.client.HttpClient
+import io.ktor.client.request.forms.FormDataContent
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
+import io.ktor.http.Parameters
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
 
@@ -24,6 +28,8 @@ import kotlinx.coroutines.CancellationException
  * |---|---|---|
  * | [ensureValid] | 看 `WebCookies` 里有没有 `JSESSIONID` | 有 = 登录过；没有 = 让人去登录页 |
  * | [fetchHtml] | 用那串 Cookie 发一次 GET | 拿回 HTML 交给共享层的解析器 |
+ * | [hasCookies] | 同一个判据，同步、不发请求 | 报修同步据此决定要不要顺带探一次会话 |
+ * | [postForm] | 用那串 Cookie 发一次表单 POST | 学工报修的「个人提交记录」是 POST 接口 |
  *
  * ## 为什么不做「自动登录填表」
  *
@@ -77,6 +83,53 @@ class IosJwReadSession(
             throw e
         } catch (e: Throwable) {
             // 网络层异常一律收敛成一句话：调用方只需要「这次没拿到 + 为什么」
+            CasFetchResult.Failed("网络异常：${e.message ?: e::class.simpleName}")
+        }
+    }
+
+    /**
+     * 进程内有没有教务会话（只读，一个请求都不发）。
+     *
+     * 判据与 [ensureValid] 同一条：`WebCookies` 里那个域的 Cookie 头带 `JSESSIONID`。
+     * 共享层的报修同步用它决定「要不要顺带走一次 CAS 探测」——iOS 侧没有可自动登录的
+     * 凭证，这里回 false 只会让它少一次必然失败的探测。
+     */
+    override fun hasCookies(): Boolean =
+        WebCookies.headerFor(JwUrls.SCHEDULE_LIST)?.contains(JSESSIONID, ignoreCase = true) == true
+
+    /**
+     * 带会话 POST 表单（学工报修的「个人提交记录」列表用它）。
+     *
+     * 与 [fetchHtml] 逐条同口径：Cookie 头照带、UA 用桌面版、失效页与网络异常都收敛成
+     * 一句原因。**没有重登重试**——iOS 侧没有凭证可重登，重试只会拿同一个失效 Cookie
+     * 再打一次；调用方按「会话已失效，请重新登录一次」提示用户。
+     */
+    override suspend fun postForm(url: String, form: List<Pair<String, String>>): CasFetchResult {
+        val cookie = WebCookies.headerFor(url)
+            ?: return CasFetchResult.Failed("没有可用的会话，请先在导入页登录")
+        return try {
+            // 表单编码交 Ktor（`FormDataContent`，与 `YktClient` / `PowerClient` 同一手法）；
+            // 不用 `submitForm` 是因为本仓已有一处 `Parameters.build` 的写法，别再引入第二种。
+            val response = http.post(url) {
+                header(HttpHeaders.Cookie, cookie)
+                header(HttpHeaders.UserAgent, DESKTOP_UA)
+                setBody(
+                    FormDataContent(
+                        Parameters.build { form.forEach { (name, value) -> append(name, value) } },
+                    ),
+                )
+            }
+            val body = response.bodyAsText()
+            when {
+                !response.status.isSuccess() ->
+                    CasFetchResult.Failed("教务返回 HTTP ${response.status.value}")
+                isLoggedOut(body) ->
+                    CasFetchResult.Failed("会话已失效，请重新登录一次")
+                else -> CasFetchResult.Ok(body)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
             CasFetchResult.Failed("网络异常：${e.message ?: e::class.simpleName}")
         }
     }

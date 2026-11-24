@@ -51,6 +51,7 @@ import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * 我的 → 校园服务 → 校历（DESIGN §4.34）。
@@ -153,7 +154,7 @@ fun CampusCalendarScreen(onBack: () -> Unit) {
             ) {
                 value = withContext(Dispatchers.IO) {
                     store.fileFor(state.localFile)
-                        ?.let { decodeFileSampled(it, targetLongSidePx = 1600) }
+                        ?.let { decodeFileSampled(File(it), targetLongSidePx = 1600) }
                         ?.asImageBitmap()
                 }
             }

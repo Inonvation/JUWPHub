@@ -40,6 +40,7 @@ import edu.jxslu.schedule.ui.week.loadScheduleBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.graphics.asImageBitmap
+import java.io.File
 
 /**
  * 图片所在的存储位置。各处的目录与解码口径不同，看图时要指明是从哪来的。
@@ -82,7 +83,8 @@ fun ImageViewerDialog(
             // 校历页点图放大永远可用，不能因为「还没联网刷下来」就点了没反应。
             // 镜像图是外部来源、尺寸不可控，降采样解码（内置资源图尺寸可控，不采样）
             ImageSource.CampusCalendar -> withContext(Dispatchers.IO) {
-                val file = Graph.campusCalendar(context).fileFor(fileName)
+                // iOS 移植 W2 起 `CampusCalendarStore.fileFor` 回绝对路径（共享层没有 File）
+                val file = Graph.campusCalendar(context).fileFor(fileName)?.let(::File)
                 val bitmap = file?.let { decodeFileSampled(it, targetLongSidePx = 2048) }
                     ?: BitmapFactory.decodeResource(context.resources, R.drawable.ic_campus_calendar)
                 bitmap?.asImageBitmap()

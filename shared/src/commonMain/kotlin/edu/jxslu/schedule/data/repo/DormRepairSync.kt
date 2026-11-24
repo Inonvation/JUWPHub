@@ -1,25 +1,27 @@
 package edu.jxslu.schedule.data.repo
 
-import android.util.Log
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.session.CasEnsureResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.data.session.bodyOrNull
 import edu.jxslu.schedule.data.session.notReadyReason
 import edu.jxslu.schedule.data.xg.DormRepairParser
-import edu.jxslu.schedule.data.xg.DormRepairWebClient
+import edu.jxslu.schedule.data.xg.DormRepairWebSource
 import edu.jxslu.schedule.data.xg.XgUrls
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.DormRepairRecord
 import edu.jxslu.schedule.domain.DormRepairRules
 import edu.jxslu.schedule.domain.DormRepairSnapshot
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.InboxKind
+import edu.jxslu.schedule.platform.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.concurrent.Volatile
 
 /**
  * 宿舍报修进度同步（DESIGN §4.49）。
@@ -28,9 +30,11 @@ import kotlinx.coroutines.withContext
  * 只查自己提交过的单子，绝不调用提交 / 审批 / 退回接口。
  *
  * 会话两级（按成本从低到高）：
- * 1. 先用 [DormRepairWebClient] 读 WebView 现成的 office 会话——不登录，刚用过报修页时
- *    一定新鲜；提交后关窗/回前台这条主路径全靠它；
- * 2. 再回退 [CasSession]（存过统一认证账号、`session_oa` 落在共享 cookie jar 的 xgxt 桶）。
+ * 1. 先用 [DormRepairWebSource] 读 WebView 现成的 office 会话——不登录，刚用过报修页时
+ *    一定新鲜；提交后关窗/回前台这条主路径全靠它。**iOS 侧为 null**（没有
+ *    `CookieManager` 可抄），直接落到下一档；
+ * 2. 再回退 [JwReadSession]（Android 是 `CasSession`：存过统一认证账号、`session_oa`
+ *    落在共享 cookie jar 的 xgxt 桶；iOS 是 `IosJwReadSession`：Cookie 来自 `WKWebView`）。
  *    自动检查的 CAS 登录受 12 小时窗口限制，避免每个冷启动都完整登一次统一认证。
  * 两条都不可用就静默 [CheckResult.Skipped]，不动旧快照。
  *
@@ -41,11 +45,12 @@ import kotlinx.coroutines.withContext
  * - 只在回到前台 / 关闭报修窗口 / 手动刷新时跑，不做后台轮询。
  */
 class DormRepairSync(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val store: DormRepairStore,
     private val inbox: InboxRepository,
-    private val webClient: DormRepairWebClient = DormRepairWebClient(),
-    private val now: () -> Long = System::currentTimeMillis,
+    /** WebView 会话那一档；**null = 本平台没有现成的 office 会话可抄**（见 [DormRepairWebSource]）。 */
+    private val webSession: DormRepairWebSource? = null,
+    private val now: () -> Long = AppClock::nowMillis,
 ) {
 
     sealed interface CheckResult {
@@ -94,7 +99,7 @@ class DormRepairSync(
         // 已有检查在跑就不排队（手动刷新才需要排队）
         return mutex.tryLocked {
             lastAttemptAt = at
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.Default) {
                 checkLocked(allowLogin = false, autoLoginDue = autoLoginDue)
             }
         } ?: CheckResult.Skipped
@@ -119,7 +124,7 @@ class DormRepairSync(
             val autoLoginDue = allowAutoLogin &&
                 snapshot.tracking &&
                 now() - snapshot.lastAutoLoginAt >= AUTO_LOGIN_INTERVAL_MS
-            withContext(Dispatchers.IO) { checkLocked(allowLogin, autoLoginDue) }
+            withContext(Dispatchers.Default) { checkLocked(allowLogin, autoLoginDue) }
         }
 
     private suspend fun checkLocked(allowLogin: Boolean, autoLoginDue: Boolean): CheckResult {
@@ -167,15 +172,16 @@ class DormRepairSync(
             )
         }
         store.save(next)
-        Log.i(TAG, "dorm repair -> ${merged.size} records, justFinished=${justFinished.size}")
+        Logger.i(TAG, "dorm repair -> ${merged.size} records, justFinished=${justFinished.size}")
         return CheckResult.Ok(store.snapshot.value, justFinished)
     }
 
     private suspend fun fetchBody(allowLogin: Boolean, autoLoginDue: Boolean): Fetch {
         // 1) 先试 WebView 现成的 office 会话：不登录、最便宜，刚用过报修页时一定新鲜。
         //    这也是自动检查的主路径——用户提交后关窗/回前台，卡片立刻能拿到新记录。
-        val fallback = webClient.fetch()
-        if (fallback is DormRepairWebClient.Result.Ok) return Fetch.Ok(fallback.body)
+        //    iOS 侧没有这一档（webSession == null），直接落到下面的 CAS 分支。
+        val fallback = webSession?.fetch() ?: DormRepairWebSource.Result.NoSession
+        if (fallback is DormRepairWebSource.Result.Ok) return Fetch.Ok(fallback.body)
 
         // 2) 再考虑 CAS：手动刷新不设限；自动检查只在「进程里已有 CAS cookie
         //    （别的同步刚登过）」或「距上次自动登录 ≥ 12 小时」时才走。
@@ -209,14 +215,14 @@ class DormRepairSync(
         }
 
         return when (fallback) {
-            is DormRepairWebClient.Result.Ok -> Fetch.Ok(fallback.body)
-            DormRepairWebClient.Result.NoSession -> when {
+            is DormRepairWebSource.Result.Ok -> Fetch.Ok(fallback.body)
+            DormRepairWebSource.Result.NoSession -> when {
                 ensure == null -> Fetch.NoSession
                 ensure is CasEnsureResult.Ready ->
                     Fetch.Failed("没取到学工报修数据（学工会话或网络异常）")
                 else -> Fetch.Failed(describeCas(ensure))
             }
-            is DormRepairWebClient.Result.Failed -> Fetch.Failed(fallback.message)
+            is DormRepairWebSource.Result.Failed -> Fetch.Failed(fallback.message)
         }
     }
 

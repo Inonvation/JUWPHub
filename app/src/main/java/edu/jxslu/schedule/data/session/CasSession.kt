@@ -14,7 +14,8 @@ import kotlinx.coroutines.sync.withLock
  *
  * iOS 移植 S4（2026-11-24）：`CasEnsureResult` / `CasFetchResult` / `bodyOrNull` /
  * `notReadyReason` 与 [JwReadSession] 已搬到 `shared/commonMain`（同包），仓库层的
- * `*Sync` 只认那个接口；本类仍是**唯一**的实现，传输与凭证闸门一字未改。
+ * `*Sync` 只认那个接口；本类仍是**Android 侧唯一**的实现（iOS 侧是 `IosJwReadSession`，
+ * 只读 `WKWebView` 的 Cookie），传输与凭证闸门一字未改。
  *
  * 三条策略：
  * 1. **可信期**：最近一次成功在 `LoginGateRules.SESSION_TRUST_MS` 内直接放行，不发请求；
@@ -59,7 +60,7 @@ class CasSession(
      * 直接走 [ensureValid]，每个冷启动都会完整登一次 CAS（教务侧脚本已经踩过风控）。
      * 调用方可以按「已有 cookie 才顺带用 CAS，否则退 WebView 会话」来避免这次登录。
      */
-    fun hasCookies(): Boolean = http.hasCookies()
+    override fun hasCookies(): Boolean = http.hasCookies()
 
     /** [ensureValid] 的实现体；调用方必须已经持有 [loginMutex]（Mutex 不可重入）。 */
     private suspend fun ensureValidLocked(): CasEnsureResult {
@@ -256,7 +257,7 @@ class CasSession(
      * （[JwHttpException.SessionInvalid]）时作废本地会话、重登**一次**、重试**一次**；
      * 其余失败带回原因。查询没有副作用，重试安全。
      */
-    suspend fun postForm(url: String, form: List<Pair<String, String>>): CasFetchResult {
+    override suspend fun postForm(url: String, form: List<Pair<String, String>>): CasFetchResult {
         val ensured = ensureValid()
         if (ensured !is CasEnsureResult.Ready) return CasFetchResult.Failed(ensured.notReadyReason())
         val first = runCatchingCancellable { http.postForm(url, form) }
