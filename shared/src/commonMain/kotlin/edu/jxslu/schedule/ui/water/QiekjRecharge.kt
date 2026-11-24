@@ -1,14 +1,7 @@
 package edu.jxslu.schedule.ui.water
 
-import edu.jxslu.schedule.startActivityOutsideApp
-
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-
 /**
- * 胖乖生活充值入口。
+ * 胖乖生活充值入口（**深链本身**，iOS 移植 T2）。
  *
  * 充值不在 `userapi.qiekj.com` 的 REST 接口里（QiekjApi 没有充值端点），而是
  * **支付宝小程序**：小程序 appId [MINI_APP_ID]，充值页 buyGold，带商家店号
@@ -20,6 +13,14 @@ import android.net.Uri
  * 埋点（chInfo / shareTimestamp / apshareid / enbsv 版本戳）后钉住业务参数。
  * page 值里的 `/` `?` `&` `=` 必须按支付宝自己生成的形态整体百分号编码——
  * `?`/`&` 不编码会被当成外层 query 截断。
+ *
+ * ## 为什么这里只有字符串，没有「打开」
+ *
+ * 「把 URL 交给系统」是平台动作：Android 走 `Intent.ACTION_VIEW`（本包在 `:app` 的
+ * `QiekjRechargeAndroid.kt`），iOS 要走 `UIApplication.openURL` 且必须先声明
+ * `LSApplicationQueriesSchemes`。所以页面把它收成可空回调
+ * （`WaterScreen(onOpenRecharge = …)`），共享层只留**能进 JVM 单测**的这部分：
+ * `QiekjRechargeTest` 钉的就是 [deepLink] 的逐字形态。
  */
 object QiekjRecharge {
 
@@ -38,21 +39,4 @@ object QiekjRecharge {
         "alipays://platformapi/startapp" +
             "?appId=$MINI_APP_ID" +
             "&page=user%2Frecharge%2FbuyGold%2FbuyGold%3F__appxPageId%3D7%26shopId%3D$SHOP_ID"
-
-    /** 深链的 [Uri] 形态，交给 [android.content.Intent]。 */
-    fun uri(): Uri = Uri.parse(deepLink())
-
-    /**
-     * 打开充值页。
-     *
-     * @return true = 已交给支付宝；false = 本机没有能处理 `alipays://` 的应用
-     *   （通常是没装支付宝）。能否解析取决于 manifest `<queries>` 里
-     *   `alipays` scheme 的声明——趣智充值时已加过，这里共用一条。
-     */
-    fun open(context: Context): Boolean = try {
-        context.startActivityOutsideApp(Intent(Intent.ACTION_VIEW, uri()))
-        true
-    } catch (_: ActivityNotFoundException) {
-        false
-    }
 }

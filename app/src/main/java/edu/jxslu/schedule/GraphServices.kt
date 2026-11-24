@@ -6,6 +6,10 @@ import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.data.qiekj.BalanceData
+import edu.jxslu.schedule.data.qiekj.QiekjRepository
+import edu.jxslu.schedule.data.qiekj.QiekjWateringSession
+import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
@@ -18,12 +22,15 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
+import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.platform.AppServices
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
 import edu.jxslu.schedule.ui.widget.LifeWidgetSync
+import edu.jxslu.schedule.ui.widget.WaterWidgetSync
 
 /**
  * Android 侧的共享服务装配（iOS 移植 M1，2026-11-25）。
@@ -125,4 +132,69 @@ class GraphServices(private val context: Context) : AppServices {
 
     /** 版本名来自 `:app` 的 `BuildConfig`——共享层看不见它，只能由装配根给。 */
     override fun appVersion(): String = BuildConfig.VERSION_NAME
+
+    // ---- 胖乖生活 / 开水房（iOS 移植 T2，2026-11-25） ----
+    //
+    // 开水页搬进共享层后要的五件事。仓库与开水流程本身早在共享层，这里只是把
+    // 「平台存储 + 桌面小组件」两样接到 `Graph` 的现有单例上。
+
+    /**
+     * 胖乖仓库：与今日页 / 侧栏的 `Graph.qiekj(context)` **同一个实例**。
+     *
+     * 必须是同一份：登录态、订单快照、开水流程的 Mutex 都在仓库里，
+     * 两个实例会让「开水页登录了、今日页卡片还是未登录」。
+     */
+    override fun qiekjRepository(): QiekjRepository = Graph.qiekj(appContext)
+
+    /**
+     * 「正在出水」登记的共享层视图。
+     *
+     * `QiekjWateringStore` 自己留在 `:app`（它同时被今日页服务卡与侧栏读，`watering` 流
+     * 只在那边用得上）；这里只把开水页需要的两个写方法转过去。读侧仍走
+     * `Graph.qiekjWatering(context).watering`，两条路指向同一个 store 实例。
+     */
+    private val qiekjWateringSessions: QiekjWateringSessions by lazy {
+        val store = Graph.qiekjWatering(appContext)
+        object : QiekjWateringSessions {
+            override fun begin(startedAtMillis: Long, deviceName: String, goodsId: String?) {
+                store.begin(
+                    QiekjWateringSession(
+                        startedAtMillis = startedAtMillis,
+                        deviceName = deviceName,
+                        goodsId = goodsId,
+                    ),
+                )
+            }
+
+            override fun clear() = store.clear()
+        }
+    }
+
+    override fun qiekjWateringSessions(): QiekjWateringSessions = qiekjWateringSessions
+
+    /** 桌面胖乖开水卡：清登录态后切回未登录形态。 */
+    override suspend fun refreshQiekjWaterWidget() {
+        WaterWidgetSync.refreshQiekjWidget(appContext)
+    }
+
+    /** 桌面胖乖开水卡：把刚取到的余额推过去（零额外请求）。 */
+    override suspend fun pushQiekjWaterBalance(balance: BalanceData) {
+        WaterWidgetSync.pushQiekjBalance(appContext, balance)
+    }
+
+    /** 「猜你想用」：与搬迁前 `WaterViewModel` 里那一行同一实现（进程作用域 fire-and-forget）。 */
+    override fun recordGuessOrder(target: GuessTarget) = Graph.recordGuessOrder(target)
+
+    /**
+     * 进页消费「登录状态已过期」标记。
+     *
+     * id → 枚举的映射放在这里而不是共享层：`SessionService` 枚举还在 `:app`
+     * （`SessionExpiryStore.kt`），共享层只认字符串 id。对不上直接抛，
+     * 不静默丢标记（与 `AndroidSessionExpirySink` 同一纪律）。
+     */
+    override fun consumeSessionExpiry(serviceId: String): Boolean {
+        val service = SessionService.entries.firstOrNull { it.id == serviceId }
+            ?: error("未知的会话服务 id: $serviceId")
+        return Graph.sessionExpiry(appContext).consume(service)
+    }
 }

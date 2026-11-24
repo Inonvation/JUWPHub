@@ -145,6 +145,7 @@ import edu.jxslu.schedule.ui.week.WeekViewModel
 import edu.jxslu.schedule.ui.week.DisplaySettingsOverlay
 import edu.jxslu.schedule.ui.week.rememberWeekScreenPlatformActions
 import edu.jxslu.schedule.ui.me.MeViewModel
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.domain.BgScale
 import edu.jxslu.schedule.domain.FontScalePolicy
 import edu.jxslu.schedule.domain.StartPage
@@ -1157,7 +1158,9 @@ internal fun JuwApp(
         viewModelStoreOwner = context as ComponentActivity,
         factory = WaterViewModel.Factory(
             Graph.qiekj(context),
-            Graph.qiekjWatering(context),
+            // 「出水中」登记的共享层视图（`QiekjWateringStore` 本体留在 `:app`，
+            // 今日页服务卡与侧栏读它的 `watering` 流，这里只写）
+            Services.current.qiekjWateringSessions(),
             // 侧栏实例不在冷启动取数：展开侧栏 / 打开面板时由宿主显式刷新
             autoLoad = false,
         ),

@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.water
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -37,7 +36,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,25 +46,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.prefs.DisplayPrefs
 import edu.jxslu.schedule.data.qiekj.DeviceItem
 import edu.jxslu.schedule.data.qiekj.OrderHistoryItem
 import edu.jxslu.schedule.data.qiekj.ServerOrderItem
-import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.data.session.SESSION_EXPIRED_NOTICE
+import edu.jxslu.schedule.data.session.SessionServiceIds
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Money
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.UnlockFlowState
@@ -75,7 +67,10 @@ import edu.jxslu.schedule.domain.QzxyPhoneMask
 import edu.jxslu.schedule.domain.calculateActualCost
 import edu.jxslu.schedule.domain.cashPaidAmount
 import edu.jxslu.schedule.domain.ticketPaidAmount
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AccountHeroCard
+import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
@@ -88,7 +83,6 @@ import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.copyPlainText
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
-import edu.jxslu.schedule.ui.common.SessionExpiredNotice
 import edu.jxslu.schedule.ui.common.SettingsDivider
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WaterUnlockButton
@@ -96,16 +90,37 @@ import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.RechargeRiskNote
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
+import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.common.rememberSheetDismisser
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.me.MeViewModel
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlinx.coroutines.launch
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 
-private val DATE_FORMAT = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
+/**
+ * 订单行的时间戳（原 `SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)`）。
+ *
+ * commonMain 没有 `java.text`，改由 [AppClock] 折成本地墙上时刻再定宽拼接；
+ * 时区仍取**系统默认**（与原实现同口径），不写死东八区。
+ */
+private fun formatOrderTime(epochMillis: Long): String {
+    val t = AppClock.dateTimeOf(epochMillis)
+    return t.monthNumber.toString().padStart(2, '0') + "-" +
+        t.dayOfMonth.toString().padStart(2, '0') + " " +
+        t.hour.toString().padStart(2, '0') + ":" +
+        t.minute.toString().padStart(2, '0')
+}
+
+/** 本月第一天 00:00 的 epoch 毫秒（原 `java.time.LocalDate.now().withDayOfMonth(1)…`）。 */
+private fun monthStartMillis(): Long {
+    val now = AppClock.nowDateTime()
+    return LocalDateTime(now.year, now.monthNumber, 1, 0, 0)
+        .toInstant(TimeZone.currentSystemDefault())
+        .toEpochMilliseconds()
+}
 
 /**
  * 胖乖生活页（DESIGN §3.4 / §4.16，页内核心动作是开水）。
@@ -116,6 +131,9 @@ private val DATE_FORMAT = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
  *
  * 交互：未登录 → 登录卡（验证码 / Token 两种）；已登录 → 余额、设备、开水、
  * 状态原地切换（Idle/进行中/成功/失败）、订单快照。错误一行主因 + 详情弹窗。
+ *
+ * 参数口径见 `design/ios-port.md` §11.2：两个 ViewModel 都是**必填参数由宿主创建**，
+ * 平台动作是可空回调（`null` = 本平台没有这项能力，对应入口整行不渲染）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,21 +141,29 @@ fun WaterScreen(
     onBack: () -> Unit = {},
     /** 小组件「去开水」直达（WaterAutoStart）：进页自动开水一次；普通入口保持 false。 */
     autoStart: Boolean = false,
-    viewModel: WaterViewModel = viewModel(
-        factory = WaterViewModel.Factory(
-            Graph.qiekj(LocalContext.current),
-            Graph.qiekjWatering(LocalContext.current),
-        ),
-    ),
+    viewModel: WaterViewModel,
     // 开水卡显示与点击方式的读写（原 WaterSettingsScreen 的 ViewModel，2026-09-20 并入）
-    prefsViewModel: MeViewModel = viewModel(
-        factory = MeViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
+    prefsViewModel: MeViewModel,
+    /**
+     * 品牌位图的资源 id（宿主的 `R.drawable.ic_brand_pangguai`）。
+     *
+     * 与 `BrandMark` 同一条缝：`R` 只有 Android 有，所以跨模块只能传这个句柄。
+     * **0 = 本平台没有这套素材**（iOS），头像位不出现，卡片其余部分照常。
+     */
+    brandIcon: Int = 0,
+    /**
+     * 「充值到胖乖账户」：拉起支付宝小程序（`alipays://` 深链，见 `QiekjRecharge`）。
+     *
+     * 返回 true = 已交给支付宝（页面据此在回到前台时重拉余额）；false = 本机没有能处理
+     * 该 scheme 的应用，页面提示「先装一个支付宝」。
+     * **null = 本平台打不开外部小程序**（iOS 侧 `LSApplicationQueriesSchemes` 尚未声明），
+     * 身份卡底部那颗充值按钮整行不渲染。
+     */
+    onOpenRecharge: (() -> Boolean)? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val prefsState by prefsViewModel.uiState.collectAsStateWithLifecycle()
     val haptics = rememberAppHaptics()
-    val context = LocalContext.current
     var showDeviceSheet by remember { mutableStateOf(false) }
     var detailItem by remember { mutableStateOf<Any?>(null) }
     var confirmLogout by remember { mutableStateOf(false) }
@@ -147,7 +173,7 @@ fun WaterScreen(
     val scope = rememberCoroutineScope()
 
     // 上次在别处判定登录过期：进页说一句为什么退回登录表单（只提示一次）
-    SessionExpiredNotice(SessionService.Qiekj, state.loggedIn, snackbar)
+    SessionExpiredNoticeForWater(state.loggedIn, snackbar)
 
     // 桌面胶囊直达：首帧触发一次（VM 内有防重入，未登录 / 流程进行中会自行跳过）
     LaunchedEffect(autoStart) {
@@ -187,25 +213,24 @@ fun WaterScreen(
             onBack()
         }
     }
-    BackHandler(enabled = flowInProgress) { requestBack() }
+    AppBackHandler(enabled = flowInProgress) { requestBack() }
 
     // 充值在支付宝里完成，回到本页（ON_RESUME）时余额要重拉，否则还显示充值前的数。
     // 与趣智页（QzxyScreen）同一套 awaiting + ON_RESUME 模式；走 refresh() 让下拉指示器跟着转。
+    // `rememberResumeTick` 只在**真的回到前台**时 +1（注册时补发的那次不算），
+    // 与原来那个 LifecycleEventObserver 的口径一致；iOS 侧恒 0，等于只在进页读一次。
     var awaitingRecharge by remember { mutableStateOf(false) }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && awaitingRecharge) {
-                awaitingRecharge = false
-                viewModel.refresh()
-            }
+    val resumeTick = rememberResumeTick()
+    LaunchedEffect(resumeTick) {
+        if (awaitingRecharge) {
+            awaitingRecharge = false
+            viewModel.refresh()
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val openRecharge: () -> Unit = {
-        if (QiekjRecharge.open(context)) {
+        val opened = onOpenRecharge?.invoke() == true
+        if (opened) {
             awaitingRecharge = true
         } else {
             scope.launch {
@@ -230,7 +255,7 @@ fun WaterScreen(
                 )
             }
         } else {
-            copyPlainText(context, "胖乖生活 Token", token)
+            copyPlainText("胖乖生活 Token", token)
             scope.launch {
                 snackbar.showNotice(
                     AppNoticeVisuals(
@@ -308,8 +333,10 @@ fun WaterScreen(
                 ) {
                     QiekjHeroCard(
                         state = state,
+                        brandIcon = brandIcon,
                         onTogglePhone = { viewModel.toggleShowPhone() },
-                        onRecharge = { confirmRecharge = true },
+                        // null = 本平台打不开支付宝小程序 → 充值按钮整行不渲染（§11.2 ④）
+                        onRecharge = onOpenRecharge?.let { { confirmRecharge = true } },
                     )
 
                     AccountMetricsSection(state = state)
@@ -421,6 +448,38 @@ fun WaterScreen(
 }
 
 // ── 登录 ──
+
+/**
+ * 进页提示：该功能在别处已判定登录过期时，给一句「登录状态已过期，请重新登录」。
+ *
+ * 标记由仓库在**判定失效的那一刻**写入（`QiekjRepository.markExpired` →
+ * `SessionExpirySink`），这里只负责消费：未登录且标记在 → 提示一次并取走标记
+ * （同一轮不重复弹）；已登录（刚重登成功）→ 顺手清掉旧标记。
+ *
+ * ## 为什么不像别的页那样调 `ui.common.SessionExpiredNotice`
+ *
+ * 那个 composable 还在 `:app`（它直接吃 `Graph.sessionExpiry(context)` 与
+ * `SessionService` 枚举，两样都在 `:app`），共享层看不见。它做的事情本身就是两行：
+ * 「已登录 → clear；未登录 → consume 一次」。这里走共享缝
+ * `AppServices.consumeSessionExpiry(serviceId)`，id 取 `SessionServiceIds.QIEKJ`
+ * （逐字对齐 `SessionService.Qiekj.id`）。
+ *
+ * **只在功能自己的页面调用**，不要在今日页的卡片里调：那会让「进这个界面」变成
+ * 「一打开 App 就弹各家的过期提示」。用户主动退出登录走仓库的 `logout()`，标记已清，
+ * 不会误报。
+ */
+@Composable
+private fun SessionExpiredNoticeForWater(loggedIn: Boolean, snackbar: SnackbarHostState) {
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(loggedIn) {
+        // 已登录 = 刚重登成功：旧标记作废（`clear` 那一路由仓库的登录成功路径负责，
+        // 这里只在未登录时消费；与 `ui.common.SessionExpiredNotice` 的 consume 分支同口径）
+        if (loggedIn) return@LaunchedEffect
+        if (Services.current.consumeSessionExpiry(SessionServiceIds.QIEKJ)) {
+            scope.postNotice(snackbar, SESSION_EXPIRED_NOTICE, NoticeTone.Warning)
+        }
+    }
+}
 
 /**
  * 登录卡（2026-10-07 卡片化）：验证码 / Token 两种方式收进同一张 SettingsSection，
@@ -547,8 +606,10 @@ private fun Disclaimer() {
 @Composable
 private fun QiekjHeroCard(
     state: WaterUiState,
+    brandIcon: Int,
     onTogglePhone: () -> Unit,
-    onRecharge: () -> Unit,
+    /** null = 本平台没有「拉起支付宝小程序」这项能力，充值按钮不渲染。 */
+    onRecharge: (() -> Unit)?,
 ) {
     val hasPhone = state.accountPhone.isNotBlank()
     val eye: (@Composable () -> Unit)? = if (hasPhone) {
@@ -557,7 +618,7 @@ private fun QiekjHeroCard(
         null
     }
     AccountHeroCard(
-        brandIcon = R.drawable.ic_brand_pangguai,
+        brandIcon = brandIcon,
         title = if (hasPhone) {
             if (state.showPhone) state.accountPhone else QzxyPhoneMask.mask(state.accountPhone)
         } else {
@@ -566,12 +627,14 @@ private fun QiekjHeroCard(
         subtitle = "Token 仅存本机 · 不进云备份",
         pill = "已登录",
         trailing = eye,
-        action = {
-            HeroActionButton(
-                text = "充值到胖乖账户",
-                icon = AppIcons.WalletAdd01,
-                onClick = onRecharge,
-            )
+        action = onRecharge?.let { open ->
+            {
+                HeroActionButton(
+                    text = "充值到胖乖账户",
+                    icon = AppIcons.WalletAdd01,
+                    onClick = open,
+                )
+            }
         },
     )
 }
@@ -600,10 +663,7 @@ private fun PhoneEye(shown: Boolean, onToggle: () -> Unit) {
 @Composable
 private fun AccountMetricsSection(state: WaterUiState) {
     val balance = state.balance
-    val monthStart = remember {
-        java.time.LocalDate.now().withDayOfMonth(1).atStartOfDay(java.time.ZoneId.systemDefault())
-            .toInstant().toEpochMilli()
-    }
+    val monthStart = remember { monthStartMillis() }
     val monthlyOrders = state.orderHistory.count { it.completedAt >= monthStart }
     SettingsSection(title = "账户资产") {
         MetricsRow(Modifier.padding(top = 6.dp)) {
@@ -1081,7 +1141,7 @@ private fun OrderListSheet(
                                 maxLines = 1,
                             )
                             Text(
-                                DATE_FORMAT.format(Date(order.completedAt)),
+                                formatOrderTime(order.completedAt),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                             )

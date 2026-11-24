@@ -3,30 +3,31 @@ package edu.jxslu.schedule.ui.water
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.CreationExtras
 import edu.jxslu.schedule.data.qiekj.BalanceData
 import edu.jxslu.schedule.data.qiekj.DeviceItem
 import edu.jxslu.schedule.data.qiekj.OrderHistoryItem
 import edu.jxslu.schedule.data.qiekj.QiekjDailySignInResult
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
-import edu.jxslu.schedule.data.qiekj.QiekjWateringSession
-import edu.jxslu.schedule.data.qiekj.QiekjWateringStore
+import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qiekj.ServerOrderItem
 import edu.jxslu.schedule.data.qiekj.TokenExpiredException
 import edu.jxslu.schedule.data.qiekj.UnlockException
 import edu.jxslu.schedule.data.qiekj.UnlockStopSignal
 import edu.jxslu.schedule.data.qiekj.UnlockStoppedException
 import edu.jxslu.schedule.data.qiekj.shouldReportFlowFailure
-import edu.jxslu.schedule.data.session.SessionExpiryStore
+import edu.jxslu.schedule.data.session.SESSION_EXPIRED_NOTICE
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.UnlockFlowState
 import edu.jxslu.schedule.domain.UnlockResult
 import edu.jxslu.schedule.domain.calculateActualCost
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.GuessTarget
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.SubpageScreen
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.ui.widget.WaterWidgetSync
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
@@ -40,6 +41,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlin.reflect.KClass
 
 data class WaterUiState(
     // ── 登录 ──
@@ -104,7 +106,11 @@ sealed interface WaterEvent {
  * - Mutex 防重入，进行中再点直接忽略；
  * - Working 阶段计时；165s（AUTO_SETTLE_SECONDS）仍在 Working → 视为服务端超时自动关阀，
  *   状态归 Idle 并刷新余额（此时轮询协程仍在后台收尾，完成后 Success 会重新落卡）；
- * - TokenExpiredException 统一清登录态并弹 Toast，不进 Failed 状态机。
+ * - TokenExpiredException 统一清登录态并弹提示，不进 Failed 状态机。
+ *
+ * 构造只吃共享层类型（[QiekjRepository] / [QiekjWateringSessions]），由宿主创建
+ * （`design/ios-port.md` §11.2 ①③）。平台副作用（桌面小组件、「猜你想用」、
+ * 收件箱、过期标记）一律走 `Services.current`。
  */
 class WaterViewModel(
     private val repo: QiekjRepository,
@@ -112,7 +118,7 @@ class WaterViewModel(
      * 「正在出水」的落盘事实（2026-10-21）：开阀成功登记、结算/失败/超时清掉。
      * 今日页服务卡与开水页各持一份 ViewModel，只有它能在两个窗口之间同步状态。
      */
-    private val wateringStore: QiekjWateringStore,
+    private val wateringStore: QiekjWateringSessions,
     /**
      * 是否在 init 里自动拉余额与设备。侧栏那份实例传 false：冷启动没人看，等侧栏展开
      * 或开水面板打开时由宿主显式刷新；页面实例保持默认 true，进页行为不变。
@@ -202,7 +208,7 @@ class WaterViewModel(
             // 桌面胖乖开水卡（DESIGN §3.6「开水两卡」）跟着切回未登录形态；
             // 登录方向的推送由 refreshBalance 成功接管，这里不重复取数
             viewModelScope.launch {
-                runCatching { WaterWidgetSync.refreshQiekjWidget(Graph.appContext) }
+                runCatching { Services.current.refreshQiekjWaterWidget() }
             }
         }
     }
@@ -224,7 +230,7 @@ class WaterViewModel(
 
     fun sendCode() = viewModelScope.launch {
         val phone = _uiState.value.phone.trim()
-        val elapsed = System.currentTimeMillis() - codeSentAt
+        val elapsed = AppClock.nowMillis() - codeSentAt
         if (elapsed < 60_000) {
             notice("验证码已发送，请 ${(60 - elapsed / 1000).toInt()} 秒后再试", NoticeTone.Warning)
             return@launch
@@ -237,7 +243,7 @@ class WaterViewModel(
             _uiState.update { it.copy(sendingCode = true) }
             repo.sendCode(phone)
         }.onSuccess {
-            codeSentAt = System.currentTimeMillis()
+            codeSentAt = AppClock.nowMillis()
             notice("验证码已发送", NoticeTone.Success)
         }.onFailure {
             notice(it.message ?: "验证码发送失败", NoticeTone.Error)
@@ -318,7 +324,7 @@ class WaterViewModel(
         cancelFlowJobs()
         repo.markExpired()
         _uiState.update { WaterUiState() }
-        notice(SessionExpiryStore.NOTICE_TEXT, NoticeTone.Warning)
+        notice(SESSION_EXPIRED_NOTICE, NoticeTone.Warning)
     }
 
     // ── 资产 / 设备 ──
@@ -334,7 +340,7 @@ class WaterViewModel(
             _uiState.update { it.copy(balance = balance, loadingBalance = false, balanceLoaded = true) }
             // 桌面胖乖开水卡（DESIGN §3.6「开水两卡」）：余额已经在手上，顺手推一次
             // （零额外请求；后台另有 2 小时闸门兜底）
-            runCatching { WaterWidgetSync.pushQiekjBalance(Graph.appContext, balance) }
+            runCatching { Services.current.pushQiekjWaterBalance(balance) }
         }.onFailure {
             _uiState.update { it.copy(loadingBalance = false, balanceLoaded = true) }
             if (it is TokenExpiredException) {
@@ -398,7 +404,7 @@ class WaterViewModel(
                     )
                 }
                 result.balance?.let { balance ->
-                    runCatching { WaterWidgetSync.pushQiekjBalance(Graph.appContext, balance) }
+                    runCatching { Services.current.pushQiekjWaterBalance(balance) }
                 }
                 notice("签到已完成", NoticeTone.Success)
             }
@@ -604,14 +610,12 @@ class WaterViewModel(
                             // 165 秒兜底从这一刻起算（与服务端关阀窗口同起点，见 unlock 注释）
                             startTimeout()
                             wateringStore.begin(
-                                QiekjWateringSession(
-                                    startedAtMillis = System.currentTimeMillis(),
-                                    deviceName = device.goodsName,
-                                    goodsId = device.effectiveGoodsId,
-                                ),
+                                startedAtMillis = AppClock.nowMillis(),
+                                deviceName = device.goodsName,
+                                goodsId = device.effectiveGoodsId,
                             )
                             // 「猜你想用」：服务端确认出水 = 一次真实订单（与打开开水页无关）
-                            Graph.recordGuessOrder(GuessTarget.QIEKJ)
+                            Services.current.recordGuessOrder(GuessTarget.QIEKJ)
                         }
                         _uiState.update { s ->
                             // 与「结束用水」撞车时以后者为准（回执在 IO 线程，标记是 volatile 的）
@@ -814,7 +818,7 @@ class WaterViewModel(
                 append("（").append(result.payTypeName).append("）")
             }
         }
-        Graph.inboxRepository(Graph.appContext).post(
+        Services.current.inboxRepository().post(
             kind = InboxKind.WATER_SESSION,
             dedupeKey = InboxKeys.WATER_PREFIX + result.orderNo.ifBlank { result.orderId },
             title = "开水已完成",
@@ -839,20 +843,26 @@ class WaterViewModel(
     }
 
     companion object {
-        /** 服务端自动关阀兜底秒数：唯一出处 `QiekjWateringSession.AUTO_CLOSE_SECONDS`。 */
-        const val AUTO_SETTLE_SECONDS = QiekjWateringSession.AUTO_CLOSE_SECONDS
+        /** 服务端自动关阀兜底秒数：唯一出处 `QiekjWateringSessions.AUTO_CLOSE_SECONDS`。 */
+        const val AUTO_SETTLE_SECONDS = QiekjWateringSessions.AUTO_CLOSE_SECONDS
 
         /** 「结束用水」按钮的出场门槛：出水满 5 秒才给（2026-10-05 用户拍板）。 */
         const val END_SESSION_MIN_SECONDS = 5
     }
 
+    /**
+     * 宿主用的工厂（Android `viewModel(factory = …)`）。
+     *
+     * 用 KMP 版的 `create(modelClass: KClass<T>, extras: CreationExtras)`：`Class<T>` 那个
+     * 重载只在 JVM 产物里，共享层看不见。与 `MeViewModel.Factory` 同一写法。
+     */
     class Factory(
         private val repo: QiekjRepository,
-        private val wateringStore: QiekjWateringStore,
+        private val wateringStore: QiekjWateringSessions,
         private val autoLoad: Boolean = true,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+        override fun <T : ViewModel> create(modelClass: KClass<T>, extras: CreationExtras): T =
             WaterViewModel(repo, wateringStore, autoLoad) as T
     }
 }

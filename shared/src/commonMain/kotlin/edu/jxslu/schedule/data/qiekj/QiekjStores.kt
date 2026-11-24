@@ -81,3 +81,41 @@ interface QiekjExpiryMarker {
     /** 登录成功 / 用户主动退出：这不算过期，不需要提示。 */
     fun clearExpired()
 }
+
+/**
+ * 「正在出水」的本机会话登记（iOS 移植 T2，2026-11-25）。
+ *
+ * 介质是 `:app` 的 `QiekjWateringStore`（普通 `SharedPreferences` + `StateFlow`），
+ * 它同时被今日页服务卡与侧栏读，所以类本身留在 `:app`；开水页搬进共享层后只需要
+ * **写**这一面，于是收成两个方法——与 [QiekjOrderStore] 同一条「接口刻意做窄」的纪律。
+ *
+ * 读侧（`watering` 流）不在这里：目前唯一的读者是今日页 / 侧栏，两者都还在 `:app`，
+ * 走 `Graph.qiekjWatering(context).watering`。等今日页搬过来时再加读侧，
+ * **不要**提前把整条流搬进共享层（那会多一份没人读的状态）。
+ *
+ * ## [AUTO_CLOSE_SECONDS] 为什么在这里
+ *
+ * 它是开水页 165 秒兜底与服务端自动关阀窗口的**唯一口径**，原来取自
+ * `QiekjWateringSession.AUTO_CLOSE_SECONDS`（`:app`）。开水页搬走后那个常量在共享层看不见，
+ * 所以在这里再声明一份；`:app` 的 `QiekjWateringSession.AUTO_CLOSE_SECONDS` 与它必须同值
+ * （那边今日页的进度条也用它），**改一处必须两处一起改**。
+ */
+interface QiekjWateringSessions {
+
+    /**
+     * 服务端确认出水时登记（流程首次进入 Working）。
+     *
+     * @param startedAtMillis 出水的起始时刻（`AppClock.nowMillis()`），跨窗口展示的唯一时间锚点。
+     * @param deviceName 设备显示名，空串表示未命名。
+     * @param goodsId 设备业务 id；null 表示服务端没给。
+     */
+    fun begin(startedAtMillis: Long, deviceName: String, goodsId: String?)
+
+    /** 结算完成 / 流程失败 / 165 秒超时收尾时清掉。重复调用是空操作。 */
+    fun clear()
+
+    companion object {
+        /** 服务端出水自动关阀的兜底秒数（与 `QiekjWateringSession.AUTO_CLOSE_SECONDS` 同值）。 */
+        const val AUTO_CLOSE_SECONDS = 165
+    }
+}

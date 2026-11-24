@@ -6,6 +6,9 @@ import edu.jxslu.schedule.data.power.PowerClient
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.data.prefs.recordGuessOrder
+import edu.jxslu.schedule.data.qiekj.QiekjRepository
+import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
@@ -29,6 +32,7 @@ import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
+import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.platform.AppServices
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
 import kotlinx.coroutines.CoroutineScope
@@ -261,6 +265,51 @@ class IosServices : AppServices {
     override fun appVersion(): String =
         (NSBundle.mainBundle.objectForInfoDictionaryKey("CFBundleShortVersionString") as? String)
             .orEmpty()
+
+    // ---- 胖乖生活 / 开水房（iOS 移植 T2，2026-11-25） ----
+
+    /**
+     * 胖乖仓库：**iOS 侧还没有实现，返回 null**。
+     *
+     * `QiekjRepository` 本身是纯编排，但构造要三份平台存储：凭证（Android 是
+     * `EncryptedSharedPreferences`）、订单快照（普通 `SharedPreferences`，换介质等于让老用户
+     * 丢掉已有的 50 笔本地账单）、过期标记。iOS 侧一件都还没有。
+     *
+     * 升级条件：用 Keychain 实现 `QiekjCredentialStore`（`kSecClassGenericPassword`，
+     * 与 [yktCredentialStore] 同一套口径），订单快照与过期标记各给一份
+     * `appDataDir()` 下的 JSON / 偏好实现，然后把 `QiekjRepository(...)` 建在这里。
+     * **在那之前不要**退回 `NSUserDefaults` 存 token：明文存凭证比不存更糟。
+     *
+     * 后果是开水页在 iOS 上没有入口（`IosPage` 里也没有这一项）——不是「点了没反应」。
+     */
+    override fun qiekjRepository(): QiekjRepository? = null
+
+    /**
+     * 「正在出水」登记：**iOS 侧是不落地的实现**。
+     *
+     * 这条状态唯一的读者是今日页服务卡与侧栏（都在 `:app`），iOS 侧两者都还没移植，
+     * 所以登记了也没有人看。等 iOS 接上 [qiekjRepository] 与今日页时，这里换成
+     * `appDataDir()` 下的 JSON 落盘实现（与 Android 的 `QiekjWateringStore` 同口径：
+     * 5 分钟过期、165 秒后不再显示「出水中」）。
+     */
+    private val qiekjWatering: QiekjWateringSessions = object : QiekjWateringSessions {
+        override fun begin(startedAtMillis: Long, deviceName: String, goodsId: String?) = Unit
+
+        override fun clear() = Unit
+    }
+
+    override fun qiekjWateringSessions(): QiekjWateringSessions = qiekjWatering
+
+    /**
+     * 「猜你想用」：写进共享层的 [prefs]（DataStore 已搬过来，两端同一份介质）。
+     *
+     * 与 Android 的 `Graph.recordGuessOrder` 同口径：**进程作用域 + 吞错**，
+     * 不让一次偏好写失败冒到开水流程里。iOS 目前没有今日页的「猜你想用」卡片，
+     * 记了也没人读——保留写入是为了将来那张卡接上时不用回头补数据。
+     */
+    override fun recordGuessOrder(target: GuessTarget) {
+        scope.launch { runCatching { prefs.recordGuessOrder(target) } }
+    }
 
     init {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
