@@ -13,8 +13,9 @@ import edu.jxslu.schedule.data.ykt.YktException
 import edu.jxslu.schedule.data.ykt.YktRepository
 import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer
 import edu.jxslu.schedule.ui.common.NoticeTone
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.YearMonthKey
 import java.time.LocalDate
-import java.time.YearMonth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
@@ -32,7 +33,7 @@ import kotlinx.coroutines.withContext
 /** 消费流水页状态（DESIGN §4.19 L3：本地库优先 + 后台增量同步）。 */
 data class StatementUiState(
     /** 当前查看的月份。 */
-    val month: YearMonth = YearMonth.now(),
+    val month: YearMonthKey = YearMonthKey.fromDate(AppClock.today()),
     /** 当月流水（Room 流切片，时间倒序）。 */
     val records: List<YktTurnoverEntity> = emptyList(),
     /** 当月支出/收入（分，本地 SQL 汇总）。 */
@@ -75,7 +76,7 @@ class StatementViewModel(
 ) : ViewModel() {
 
     /** 当前月份键（Room 查询口径 `2026-09`）。 */
-    private val monthKey = MutableStateFlow(monthKeyOf(YearMonth.now()))
+    private val monthKey = MutableStateFlow(monthKeyOf(YearMonthKey.fromDate(AppClock.today())))
 
     /** 月份切换等 UI 侧状态（与数据流分开源，避免同步状态变化重查 SQL）。 */
     private val _uiState = MutableStateFlow(StatementUiState())
@@ -102,18 +103,18 @@ class StatementViewModel(
     /**
      * 年视图窗口：近 12 个月（含当月，升序）。
      *
-     * 柱状图与「选择月份」弹窗共用这一份，别再在 UI 里按 `YearMonth.now()` 另算一次——
-     * 两处各算一遍，跨月时弹窗会给出一组和柱子对不上的月份。
+     * 柱状图与「选择月份」弹窗共用这一份，别再在 UI 里按 `YearMonthKey.fromDate(AppClock.today())`
+     * 另算一次——两处各算一遍，跨月时弹窗会给出一组和柱子对不上的月份。
      */
-    private val window: List<YearMonth> = run {
-        val now = YearMonth.now()
-        (11 downTo 0).map { offset -> now.minusMonths(offset.toLong()) }
+    private val window: List<YearMonthKey> = run {
+        val now = YearMonthKey.fromDate(AppClock.today())
+        (11 downTo 0).map { offset -> now.plusMonths(-offset) }
     }
 
     private val recentMonthKeys: List<String> = window.map { monthKeyOf(it) }
 
     /** 月份选择弹窗与柱状图的月份窗口（升序，最后一个是当月）。 */
-    fun windowMonths(): List<YearMonth> = window
+    fun windowMonths(): List<YearMonthKey> = window
 
     /** 近 12 个月支出（suspend 一次性查；同步完成后由 syncInBackground 触发重查）。 */
     private val _monthlyExpenses = MutableStateFlow<Map<String, Long>>(emptyMap())
@@ -148,8 +149,8 @@ class StatementViewModel(
     }
 
     /** 切换月份；未来月禁用由 UI 控制，这里兜底拦截。 */
-    fun loadMonth(month: YearMonth) {
-        if (month.isAfter(YearMonth.now())) return
+    fun loadMonth(month: YearMonthKey) {
+        if (month > YearMonthKey.fromDate(AppClock.today())) return
         _uiState.update { it.copy(month = month) }
         monthKey.value = monthKeyOf(month)
     }
@@ -199,15 +200,13 @@ class StatementViewModel(
         }
     }
 
-    private fun monthKeyOf(month: YearMonth): String = "%04d-%02d".format(month.year, month.monthValue)
+    private fun monthKeyOf(month: YearMonthKey): String = month.toString()
 
-    private fun monthOf(key: String): YearMonth = runCatching {
-        val (y, m) = key.split("-").map { it.toInt() }
-        YearMonth.of(y, m)
-    }.getOrDefault(YearMonth.now())
+    private fun monthOf(key: String): YearMonthKey =
+        YearMonthKey.parse(key) ?: YearMonthKey.fromDate(AppClock.today())
 
     /** 展示用月份标签（2026-09 → 「2026 年 9 月」）。 */
-    fun monthLabel(month: YearMonth): String = "${month.year} 年 ${month.monthValue} 月"
+    fun monthLabel(month: YearMonthKey): String = "${month.year} 年 ${month.month} 月"
 
     /** 日期分组键（今天/昨天/M月d日）。 */
     fun dayGroupLabel(date: LocalDate): String {

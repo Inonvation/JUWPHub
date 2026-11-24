@@ -67,8 +67,9 @@ import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.YearMonthKey
 import edu.jxslu.schedule.ui.icon.AppIcons
-import java.time.YearMonth
 import kotlinx.coroutines.launch
 
 /**
@@ -267,7 +268,7 @@ fun PowerBillScreen(
     if (showMonthPicker) {
         MonthPickerDialog(
             months = months,
-            selected = runCatching { YearMonth.parse(state.monthKey) }.getOrDefault(YearMonth.now()),
+            selected = YearMonthKey.parse(state.monthKey) ?: YearMonthKey.fromDate(AppClock.today()),
             onDismiss = { showMonthPicker = false },
             onSelect = {
                 viewModel.selectMonth(monthKeyOf(it))
@@ -284,10 +285,11 @@ fun PowerBillScreen(
     }
 }
 
-private fun List<String>.toYearMonths(): List<YearMonth> =
-    mapNotNull { runCatching { YearMonth.parse(it) }.getOrNull() }
+private fun List<String>.toYearMonths(): List<YearMonthKey> =
+    mapNotNull { YearMonthKey.parse(it) }
 
-private fun monthKeyOf(month: YearMonth): String = "%04d-%02d".format(month.year, month.monthValue)
+/** 月份键（`2026-08`）：[YearMonthKey.toString] 就是定宽口径，不再自己 `format`。 */
+private fun monthKeyOf(month: YearMonthKey): String = month.toString()
 
 /**
  * 页头卡：月切换 + 当月汇总 + 近 12 个月充值柱状（`AppBarChart`，与消费流水页同一套）。
@@ -297,11 +299,11 @@ private fun monthKeyOf(month: YearMonth): String = "%04d-%02d".format(month.year
 @Composable
 private fun MonthCard(
     state: PowerBillUiState,
-    months: List<YearMonth>,
+    months: List<YearMonthKey>,
     onPrev: () -> Unit,
     onNext: () -> Unit,
     onPick: () -> Unit,
-    onSelectMonth: (YearMonth) -> Unit,
+    onSelectMonth: (YearMonthKey) -> Unit,
 ) {
     val month = state.month
     val rechargeFen = month?.rechargeFen ?: 0L
@@ -346,9 +348,9 @@ private fun MonthCard(
                 value = (state.monthlyRechargeFen[key] ?: 0L).toFloat(),
                 title = PowerBill.monthLabel(key),
                 axisLabel = when (index) {
-                    0 -> "%d.%d".format(item.year, item.monthValue)
-                    months.lastIndex -> "%d.%d（今）".format(item.year, item.monthValue)
-                    else -> "%d".format(item.monthValue)
+                    0 -> "%d.%d".format(item.year, item.month)
+                    months.lastIndex -> "%d.%d（今）".format(item.year, item.month)
+                    else -> "%d".format(item.month)
                 },
             )
         }

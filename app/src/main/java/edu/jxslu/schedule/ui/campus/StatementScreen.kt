@@ -49,6 +49,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.data.local.YktTurnoverEntity
 import edu.jxslu.schedule.data.ykt.YktModels
 import edu.jxslu.schedule.domain.MoneyFormat
+import edu.jxslu.schedule.domain.YearMonthKey
 import edu.jxslu.schedule.ui.common.AppBarChart
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
@@ -65,7 +66,6 @@ import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.icon.AppIcons
 import java.time.LocalDate
-import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
 /**
@@ -153,7 +153,7 @@ fun StatementScreen(
                         state = state,
                         windowMonths = windowMonths,
                         monthLabel = viewModel.monthLabel(state.month),
-                        onPrev = { viewModel.loadMonth(state.month.minusMonths(1)) },
+                        onPrev = { viewModel.loadMonth(state.month.plusMonths(-1)) },
                         onNext = { viewModel.loadMonth(state.month.plusMonths(1)) },
                         onPickMonth = { viewModel.loadMonth(it) },
                         onOpenPicker = { showMonthPicker = true },
@@ -300,11 +300,11 @@ private fun YktTurnoverEntity.matches(filter: StatementFilter): Boolean = when (
 @Composable
 private fun SummaryCard(
     state: StatementUiState,
-    windowMonths: List<YearMonth>,
+    windowMonths: List<YearMonthKey>,
     monthLabel: String,
     onPrev: () -> Unit,
     onNext: () -> Unit,
-    onPickMonth: (YearMonth) -> Unit,
+    onPickMonth: (YearMonthKey) -> Unit,
     onOpenPicker: () -> Unit,
 ) {
     val month = state.month
@@ -316,8 +316,8 @@ private fun SummaryCard(
             onPrev = onPrev,
             onNext = onNext,
             onPick = onOpenPicker,
-            prevEnabled = month.isAfter(windowMonths.first()),
-            nextEnabled = month.isBefore(currentMonth),
+            prevEnabled = month > windowMonths.first(),
+            nextEnabled = month < currentMonth,
             showThisMonth = month != currentMonth,
             onThisMonth = { onPickMonth(currentMonth) },
         )
@@ -363,11 +363,11 @@ private fun SummaryCard(
                 } else {
                     (state.monthlyExpenses[key] ?: 0L).toFloat()
                 },
-                title = "${item.year} 年 ${item.monthValue} 月",
+                title = "${item.year} 年 ${item.month} 月",
                 axisLabel = when (index) {
-                    0 -> "%d.%d".format(item.year, item.monthValue)
-                    windowMonths.lastIndex -> "%d.%d（今）".format(item.year, item.monthValue)
-                    else -> "%d".format(item.monthValue)
+                    0 -> "%d.%d".format(item.year, item.month)
+                    windowMonths.lastIndex -> "%d.%d（今）".format(item.year, item.month)
+                    else -> "%d".format(item.month)
                 },
             )
         }
@@ -581,4 +581,5 @@ private fun EmptyState(syncing: Boolean, hasRecords: Boolean) {
     }
 }
 
-private fun monthKeyOf(month: YearMonth): String = "%04d-%02d".format(month.year, month.monthValue)
+/** 月份键（`2026-08`）：[YearMonthKey.toString] 就是定宽口径，不再自己 `format`。 */
+private fun monthKeyOf(month: YearMonthKey): String = month.toString()
