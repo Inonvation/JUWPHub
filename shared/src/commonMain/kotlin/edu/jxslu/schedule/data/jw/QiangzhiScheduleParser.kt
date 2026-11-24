@@ -129,7 +129,13 @@ object QiangzhiScheduleParser {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    internal fun decodeExtractJson(jsonText: String): List<RawItem> {
+    /**
+     * 解注入 JS 抽出的 JSON（`{ok, items:[…]}`）。
+     *
+     * public 而非 internal：本层已搬进 `:shared`，而 `QiangzhiScheduleParserTest` 留在 `:app`
+     * 的 test 源集；跨模块看不见 internal，`ok:false` 与缺 `items` 键这两条分支就没有测试覆盖了。
+     */
+    fun decodeExtractJson(jsonText: String): List<RawItem> {
         val root = json.parseToJsonElement(jsonText).jsonObject
         val ok = root["ok"]?.let { runCatching { it.jsonPrimitive.content.toBoolean() }.getOrNull() }
         if (ok == false) return emptyList()

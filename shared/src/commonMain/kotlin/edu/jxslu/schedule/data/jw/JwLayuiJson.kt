@@ -13,8 +13,11 @@ import kotlinx.serialization.json.jsonObject
  *
  * 检查顺序与文案固定：`ERR:` 前缀 → no-open 页 → 未登录页 → 非 JSON → `code != 0`。
  * `data` 可能是 JSON null（不是缺键），统一收成空列表，避免 `.jsonArray` 抛裸异常。
+ *
+ * public 而非 internal：本层已搬进 `:shared`，调用方留在 `:app`（`ScoreParser` 等五个解析器
+ * 与 `ExamSync` 一族），跨模块看不见 internal。
  */
-internal object JwLayuiJson {
+object JwLayuiJson {
 
     data class Root(
         val count: Int,
@@ -50,21 +53,25 @@ internal object JwLayuiJson {
 /**
  * 字符串字段：缺失 / JSON null / 非原始值 / 空白都按 null。
  * JsonNull 虽继承 JsonPrimitive，但 `.content` 是字面量 `"null"`，必须显式挡掉。
+ *
+ * public 而非 internal：`JwLayuiJsonTest` 留在 `:app` 的 test 源集，跨模块看不见 internal。
  */
-internal fun JsonObject.strOrNull(key: String): String? =
+fun JsonObject.strOrNull(key: String): String? =
     (this[key] as? JsonPrimitive)
         ?.takeIf { it !is JsonNull }
         ?.contentOrNull
         ?.trim()
         ?.takeIf { it.isNotEmpty() }
 
-internal fun JsonObject.intOrNull(key: String): Int? =
+/** 同 [strOrNull]，转 Int；失败按 null（**public 理由同它**）。 */
+fun JsonObject.intOrNull(key: String): Int? =
     (this[key] as? JsonPrimitive)
         ?.takeIf { it !is JsonNull }
         ?.contentOrNull
         ?.toIntOrNull()
 
-internal fun JsonObject.doubleOrNull(key: String): Double? =
+/** 同 [strOrNull]，转 Double；失败按 null（**public 理由同它**）。 */
+fun JsonObject.doubleOrNull(key: String): Double? =
     (this[key] as? JsonPrimitive)
         ?.takeIf { it !is JsonNull }
         ?.contentOrNull

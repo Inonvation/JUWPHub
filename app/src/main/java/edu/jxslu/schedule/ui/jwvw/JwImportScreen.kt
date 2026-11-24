@@ -796,10 +796,12 @@ fun JwImportScreen(
             )
 
             val result = OneClickImport.combine(theory, lab)
-            if (result.blocked != null) {
-                statusNote = result.blocked
-                snackbar.showNotice(result.blocked)
-                return result.blocked
+            // 先落局部变量：`blocked` 是 `:shared` 里的 public 属性，跨模块不能智能转换
+            val blocked = result.blocked
+            if (blocked != null) {
+                statusNote = blocked
+                snackbar.showNotice(blocked)
+                return blocked
             }
             statusNote = result.breakdown.joinToString("，") { (label, count) -> "$label $count 条" } +
                 "，确认后写入"
