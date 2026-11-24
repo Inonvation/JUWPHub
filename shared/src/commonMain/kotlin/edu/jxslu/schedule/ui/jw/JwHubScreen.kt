@@ -2,7 +2,6 @@ package edu.jxslu.schedule.ui.jw
 
 import androidx.compose.foundation.background
 import edu.jxslu.schedule.ui.icon.AppIcons
-import kotlinx.datetime.toKotlinLocalDate
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -36,19 +36,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.repo.ExamSnapshot
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.domain.ExamMapper.ExamEntry
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.ScoreCalculator
+import edu.jxslu.schedule.domain.TextFmt
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
@@ -57,10 +58,9 @@ import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
-import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
-import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.LocalDate
 
 /**
  * 教务 Tab（2026-10-20 新 IA，2026-10-20 第三版；2026-10-21 课表入原生页）。
@@ -69,24 +69,41 @@ import kotlinx.coroutines.withContext
  * 已经分别落到成绩、考试、教材、学业、培养方案、实习基地、选课、教学日历
  * 各自的页面顶栏。理论 / 实验课表也先落到本机课表的只读清单（网页核对在页顶栏）。
  * 学籍信息不在这里——按用户口径收进左侧栏的头像区（2026-10-21）。
+ *
+ * ## 平台动作全在参数里（iOS 移植 S18，2026-11-25）
+ *
+ * 本文件在共享层，拿不到 `Context` / `Activity`。原来每张卡片内联的
+ * `openSubpage(...)` / `JwImportActivity.startBrowse(...)` 收成可空回调：
+ * **null = 这个平台没有这项能力，对应入口整行（或整格）不渲染**（口径同 `WeekScreen`）。
+ * 给个空 lambda 留一个点了没反应的入口，比没有更糟。
+ *
+ * | 参数 | null 的含义 |
+ * |---|---|
+ * | 十二个 `onOpenXxx` | 平台没有这个二级页 → 该行 / 该快捷格消失 |
+ * | [onOpenWebPage] | 平台没有内置浏览窗口 → 顶栏「校园门户」图标不出现 |
+ *
+ * 数据不依赖平台能力：成绩 / 教材 / 课表都读 [Services.current] 给的本地表，
+ * 考试场次读 [ExamSnapshotStore] 落盘快照，两端同源。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun JwHubScreen(
-    onOpenTheorySchedule: () -> Unit,
-    onOpenLabSchedule: () -> Unit,
-    onOpenScores: () -> Unit,
-    onOpenExams: () -> Unit,
-    onOpenTextbooks: () -> Unit,
-    onOpenScholar: () -> Unit,
-    onOpenCurriculum: () -> Unit,
-    onOpenSelection: () -> Unit,
-    onOpenInternship: () -> Unit,
-    onOpenTeachingCalendar: () -> Unit,
-    onOpenTeachingEval: () -> Unit,
-    onOpenLeaveHub: () -> Unit,
-    onOpenRepair: () -> Unit,
-    onOpenCalendar: () -> Unit,
+    onOpenTheorySchedule: (() -> Unit)? = null,
+    onOpenLabSchedule: (() -> Unit)? = null,
+    onOpenScores: (() -> Unit)? = null,
+    onOpenExams: (() -> Unit)? = null,
+    onOpenTextbooks: (() -> Unit)? = null,
+    onOpenScholar: (() -> Unit)? = null,
+    onOpenCurriculum: (() -> Unit)? = null,
+    onOpenSelection: (() -> Unit)? = null,
+    onOpenInternship: (() -> Unit)? = null,
+    onOpenTeachingCalendar: (() -> Unit)? = null,
+    onOpenTeachingEval: (() -> Unit)? = null,
+    onOpenLeaveHub: (() -> Unit)? = null,
+    onOpenRepair: (() -> Unit)? = null,
+    onOpenCalendar: (() -> Unit)? = null,
+    /** 在教务网页核对（Android 走 `JwImportActivity.startBrowse` 那个浏览窗口）。 */
+    onOpenWebPage: ((title: String, url: String) -> Unit)? = null,
 ) {
     val clearance = LocalBottomBarClearance.current
     val stats = rememberJwHubStats()
@@ -94,39 +111,44 @@ fun JwHubScreen(
     // 导入窗口 finish 后结果气泡落回主界面；本 Tab 也是落点之一（导入入口在今日 / 课表 / 成绩 / 考试页）。
     JwImportOutcomeEffect(snackbar)
 
-    val quickEntries = listOf(
-        QuickEntry("理论课表", stats.theoryShort, AppIcons.Book01, onOpenTheorySchedule),
-        QuickEntry("实验课表", stats.labShort, AppIcons.Layers01, onOpenLabSchedule),
-        QuickEntry("成绩查询", stats.scoresShort, AppIcons.Analytics01, onOpenScores),
-        QuickEntry("考试安排", stats.examsShort, AppIcons.Calendar01, onOpenExams),
+    // 回调为 null 的入口整条不列：列表本身就是「本平台能做什么」的清单。
+    val quickEntries = listOfNotNull(
+        onOpenTheorySchedule?.let { QuickEntry("理论课表", stats.theoryShort, AppIcons.Book01, it) },
+        onOpenLabSchedule?.let { QuickEntry("实验课表", stats.labShort, AppIcons.Layers01, it) },
+        onOpenScores?.let { QuickEntry("成绩查询", stats.scoresShort, AppIcons.Analytics01, it) },
+        onOpenExams?.let { QuickEntry("考试安排", stats.examsShort, AppIcons.Calendar01, it) },
     )
 
-    val sections = listOf(
+    val sections = listOfNotNull(
         HubSection(
             title = "教务服务",
-            entries = listOf(
-                HubEntry("教材", "本学期教材清单", AppIcons.Book01, onOpenTextbooks),
-                HubEntry("选课", "记录 · 轮次", AppIcons.Task01, onOpenSelection),
-                HubEntry("教学日历", "第 1 周周一 · 每周起止", AppIcons.Calendar01, onOpenTeachingCalendar),
+            entries = listOfNotNull(
+                onOpenTextbooks?.let { HubEntry("教材", "本学期教材清单", AppIcons.Book01, it) },
+                onOpenSelection?.let { HubEntry("选课", "记录 · 轮次", AppIcons.Task01, it) },
+                onOpenTeachingCalendar?.let {
+                    HubEntry("教学日历", "第 1 周周一 · 每周起止", AppIcons.Calendar01, it)
+                },
             ),
-        ),
+        ).takeIf { it.entries.isNotEmpty() },
         HubSection(
             title = "学业与规划",
-            entries = listOf(
-                HubEntry("学业完成情况", "培养方案达成度", AppIcons.Analytics01, onOpenScholar),
-                HubEntry("培养方案", "课程设置总表", AppIcons.Book01, onOpenCurriculum),
-                HubEntry("实习基地", "基地清单", AppIcons.Layers01, onOpenInternship),
+            entries = listOfNotNull(
+                onOpenScholar?.let { HubEntry("学业完成情况", "培养方案达成度", AppIcons.Analytics01, it) },
+                onOpenCurriculum?.let { HubEntry("培养方案", "课程设置总表", AppIcons.Book01, it) },
+                onOpenInternship?.let { HubEntry("实习基地", "基地清单", AppIcons.Layers01, it) },
             ),
-        ),
+        ).takeIf { it.entries.isNotEmpty() },
         HubSection(
             title = "学工与校历",
-            entries = listOf(
-                HubEntry("学生评教", "评完解锁成绩", AppIcons.CheckmarkCircle02, onOpenTeachingEval),
-                HubEntry("请假系统", "请假 · 销假 · 续假", AppIcons.File01, onOpenLeaveHub),
-                HubEntry("宿舍报修", "进度 · 审批", AppIcons.Toolbox, onOpenRepair),
-                HubEntry("校历", "学年校历", AppIcons.Calendar01, onOpenCalendar),
+            entries = listOfNotNull(
+                onOpenTeachingEval?.let {
+                    HubEntry("学生评教", "评完解锁成绩", AppIcons.CheckmarkCircle02, it)
+                },
+                onOpenLeaveHub?.let { HubEntry("请假系统", "请假 · 销假 · 续假", AppIcons.File01, it) },
+                onOpenRepair?.let { HubEntry("宿舍报修", "进度 · 审批", AppIcons.Toolbox, it) },
+                onOpenCalendar?.let { HubEntry("校历", "学年校历", AppIcons.Calendar01, it) },
             ),
-        ),
+        ).takeIf { it.entries.isNotEmpty() },
     )
 
     Scaffold(
@@ -147,8 +169,13 @@ fun JwHubScreen(
                 },
                 actions = {
                     // 2026-11-08 用户口径：这一格去**校园门户**（工作台 / 服务 / 应用），
-                    // 不是强智教务主页。门户自己会跳统一认证，Browse 窗口的自动登录照旧接管。
-                    JwWebActionButton("校园门户", JwUrls.PORTAL, description = "打开学校智慧校园门户")
+                    // 不是强智教务主页。门户自己会跳统一认证，浏览窗口的自动登录照旧接管。
+                    // 宿主不给浏览窗口（iOS 侧还没有）就不渲染这一格，不留点了没反应的图标。
+                    if (onOpenWebPage != null) {
+                        IconButton(onClick = { onOpenWebPage("校园门户", JwUrls.PORTAL) }) {
+                            Icon(AppIcons.ExternalLink, contentDescription = "打开学校智慧校园门户")
+                        }
+                    }
                 },
             )
         },
@@ -167,13 +194,15 @@ fun JwHubScreen(
                 SummaryCard(stats)
             }
 
-            item(key = "quick") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    quickEntries.forEach { entry ->
-                        QuickTile(entry, Modifier.weight(1f))
+            if (quickEntries.isNotEmpty()) {
+                item(key = "quick") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        quickEntries.forEach { entry ->
+                            QuickTile(entry, Modifier.weight(1f))
+                        }
                     }
                 }
             }
@@ -405,9 +434,9 @@ private data class JwHubStats(
  */
 @Composable
 private fun rememberJwHubStats(): JwHubStats {
-    val context = LocalContext.current
-    val repo = remember(context) { Graph.repository(context) }
-    val scoreRepo = remember(context) { Graph.scoreRepository(context) }
+    // 仓库由装配根提供（Android `GraphServices` / iOS `IosServices`），本页不再摸 `Context`。
+    val repo = remember { Services.current.scheduleRepository() }
+    val scoreRepo = remember { Services.current.scoreRepository() }
     val resumeTick = rememberResumeTick()
 
     val semester by repo.semester.collectAsStateWithLifecycle(initialValue = null)
@@ -419,19 +448,22 @@ private fun rememberJwHubStats(): JwHubStats {
 
     var term by remember { mutableStateOf<String?>(null) }
     /**
-     * 考试快照（filesDir 里的 JSON）——**读盘必须离开主线程**（2026-11-06 审计 2-B）。
+     * 考试快照（应用私有目录里的 JSON）——**读盘必须离开主线程**（2026-11-06 审计 2-B）。
      *
      * 原实现是 `remember(resumeTick) { ExamSnapshotStore(context).load() }`：组合期同步读盘，
      * 而且 `resumeTick` 每变一次（每次回到本页）就再读一次。
-     * 改成 LaunchedEffect + IO 之后首帧没有值，所以另配 [examSnapshotLoaded]：
+     * 改成 LaunchedEffect + 后台调度器之后首帧没有值，所以另配 [examSnapshotLoaded]：
      * 读到之前「考试」两处显示占位符「…」，**不显示**「暂无考试」——后者是结论，
      * 先显示再跳成「3 场」就是闪一下（这是不能为了干净引入的那种闪烁）。
+     *
+     * 调度器是 `Dispatchers.Default` 而不是 `Dispatchers.IO`：后者只声明在 JVM 源集，
+     * `commonMain` 看不见（同 `JsonFileStore` 的处置）。这里读的是几百字节的小文件。
      */
     var examSnapshot by remember { mutableStateOf<ExamSnapshot.Snapshot?>(null) }
     var examSnapshotLoaded by remember { mutableStateOf(false) }
     LaunchedEffect(resumeTick) {
         term = runCatching { repo.currentTerm() }.getOrNull()
-        examSnapshot = withContext(Dispatchers.IO) {
+        examSnapshot = withContext(Dispatchers.Default) {
             runCatching { ExamSnapshotStore().load() }.getOrNull()
         }
         examSnapshotLoaded = true
@@ -440,7 +472,7 @@ private fun rememberJwHubStats(): JwHubStats {
     return remember(
         semester, courses, scoresByTerm, textbookTitles, term, examSnapshot, examSnapshotLoaded,
     ) {
-        val today = LocalDate.now()
+        val today = AppClock.today()
         val latestScoreTerm = scoresByTerm.entries
             .filter { it.value.isNotEmpty() }
             .maxByOrNull { it.key }
@@ -452,7 +484,9 @@ private fun rememberJwHubStats(): JwHubStats {
             summary == null || summary.courseCount == 0 -> "暂无成绩"
             else -> buildString {
                 append("${summary.courseCount} 门")
-                summary.weightedAverage?.let { append(" · 加权 ${"%.1f".format(it)}") }
+                // 原为 `"%.1f".format(it)`（String.format 是 JVM 专有）：走 TextFmt 的定点实现，
+                // 与 Java `%.1f` 逐位一致（末位恰为 5 时也不会分叉，见 formatFixed 的 KDoc）。
+                summary.weightedAverage?.let { append(" · 加权 ${TextFmt.decimals(it, 1)}") }
             }
         }
         val scoresShort = summary?.takeIf { it.courseCount > 0 }
@@ -465,7 +499,7 @@ private fun rememberJwHubStats(): JwHubStats {
         val textbooks = if (bookCount == 0) "暂无教材" else "$bookCount 本"
 
         val week = semester?.let { cfg ->
-            ScheduleCalculator.weekNumberOf(cfg, today.toKotlinLocalDate()).takeIf { it in 1..cfg.totalWeeks }
+            ScheduleCalculator.weekNumberOf(cfg, today).takeIf { it in 1..cfg.totalWeeks }
         }
         val sections = week
             ?.let { ScheduleCalculator.coursesInWeek(courses, it) }
@@ -503,7 +537,7 @@ private fun rememberJwHubStats(): JwHubStats {
 }
 
 /** 教务页「考试」两处文案：概览卡的「考试」指标 + 快捷格副标题。 */
-internal data class ExamStatText(val summary: String, val short: String)
+data class ExamStatText(val summary: String, val short: String)
 
 /**
  * 考试场次口径（2026-11-19）：**本学期总场次**，与考试页表头「共 N 场」同一份数
@@ -512,8 +546,12 @@ internal data class ExamStatText(val summary: String, val short: String)
  * 旧实现数的是「还没考的场次」：11-17 那场考完之后 9 场变 8 场，用户报成
  * 「教务已经 9 场，卡片还是 8 场，重启也没用」——数据其实是新的，口径在掉数。
  * 「最近」只取待考里最早的一场（含当天）；全都考完时保留总场次并标「均已结束」。
+ *
+ * **public 而不是 internal**（iOS 移植 S18）：`:app` 的 `ExamStatTextTest` 仍在 JVM 侧
+ * 钉着这段口径，跨模块 `internal` 不可见。日期入参也从 `java.time.LocalDate` 换成了
+ * `kotlinx.datetime.LocalDate`，比较仍按 `yyyy-MM-dd` 的字典序（该格式下等价于按日比较）。
  */
-internal fun examStatText(
+fun examStatText(
     exams: List<ExamEntry>,
     today: LocalDate,
     loaded: Boolean,

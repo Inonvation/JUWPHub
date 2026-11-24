@@ -35,6 +35,7 @@ import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.DataSelfTestResult
 import edu.jxslu.schedule.ui.DataSelfTestStrip
 import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
+import edu.jxslu.schedule.ui.jw.JwHubScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.selection.SelectionScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
@@ -112,6 +113,19 @@ private fun IosRoot(services: IosServices) {
                                 // 传 null / 空 lambda 的入口本来就不渲染（见 WeekScreen 头部参数表）。
                             )
                         }
+                        // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
+                        //
+                        // 十二个二级页回调里只接三个——成绩 / 考试 / 选课在 iOS 侧
+                        // **已经是能进的页**（[IosPage] 里各有一项），点进去是真页面；
+                        // 其余九个（理论/实验课表、教材、学业、培养方案、实习基地、教学日历、
+                        // 评教、请假、报修、校历）在 iOS 侧还没有路由，传 null = 整行不渲染
+                        // （`design/ios-port.md` §11.2 ④：给空 lambda 留死入口比没有更糟）。
+                        // 顶栏「校园门户」同理：iOS 还没有通用浏览窗口，传 null 后图标不出现。
+                        IosPage.Jw -> JwHubScreen(
+                            onOpenScores = { page = IosPage.Score },
+                            onOpenExams = { page = IosPage.Exam },
+                            onOpenSelection = { page = IosPage.Selection },
+                        )
                         // 笔记库（S13 搬进共享层）：仓库是本地 Room 表，iOS 直接可读。
                         // `images` 传 null = 本平台还没有附件图解码，缩略图整行不出现；
                         // 详情页仍在 :app，条目点开先给提示（见 [hint]）。
@@ -175,13 +189,15 @@ private fun IosRoot(services: IosServices) {
 }
 
 /**
- * iOS 侧目前能进的一级页面（S13 起有笔记 / 作业 / 选课）。
+ * iOS 侧目前能进的一级页面（S13 起有笔记 / 作业 / 选课；S18 起有教务）。
  *
  * 为什么用枚举而不是导航库：iOS 侧还没有二级页栈（`SubpageActivity` 那一套是 Android 的），
  * 这一版只要能切页就够验证「共享页面在 iOS 上真的画得出来」。等详情页搬完再换真正的路由。
  */
 private enum class IosPage(val label: String) {
     Week("课表"),
+    // 教务 Tab 的入口汇总页；与 Android 底栏同序（课表之后就是教务）。
+    Jw("教务"),
     Notes("笔记"),
     Homework("作业"),
     Selection("选课"),
