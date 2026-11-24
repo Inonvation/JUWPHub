@@ -38,6 +38,9 @@ import edu.jxslu.schedule.domain.parseTex
  *
  * **解析失败 = 等宽源码**（[MathFallback]）：宁可露出 TeX 让用户知道"这条没渲染"，
  * 也不做半截渲染误导。
+ *
+ * 2026-11-25 搬进 `shared/commonMain`（iOS 移植 S21）：只依赖 Compose 与 `domain/MathTex`，
+ * 没有任何平台 API，两端共用这一份——**不要在 `:app` 再留一份**。
  */
 @Composable
 fun MathText(

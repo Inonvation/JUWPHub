@@ -80,14 +80,23 @@ enum class MdImageStyle { FullWidth, Thumbnail }
  * 分隔线 outline 30%。**行内图片**（与文字混排）渲染为可点的「[图片]」标签，
  * 真图走块级——段落内的切分判据只有 `domain/Markdown.splitParagraph` 一处
  * （独占一行的图片，本就是编辑器插入的形态；连插多张时它们同属一个段落）。
+ *
+ * ## 为什么名字不是 `MarkdownView`
+ *
+ * 2026-11-25 搬进 `shared/commonMain`（iOS 移植 S21）。正文里的真图要靠宿主解码
+ * （[MarkdownImageUi]），`null` 时图片位置退化成一行说明；而 Android 那侧的
+ * `MarkdownView`（`:app` 的 `MarkdownUiPlatform.kt`）只是个把附件图槽填好的薄壳，
+ * 名字留给 457 行详情页的既有调用点，这里就必须换个名字，否则同一个包里两个同名函数。
  */
 @Composable
-fun MarkdownView(
+fun MarkdownContent(
     markdown: String,
     modifier: Modifier = Modifier,
     imageStyle: MdImageStyle = MdImageStyle.FullWidth,
     onImageClick: ((String) -> Unit)? = null,
     onLinkClick: ((String) -> Unit)? = null,
+    /** 附件图绘制槽；null = 本平台画不出附件图，块级图片位置给一行说明。 */
+    images: MarkdownImageUi? = null,
 ) {
     val blocks = remember(markdown) { parseMarkdown(markdown) }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -98,6 +107,7 @@ fun MarkdownView(
                 imageStyle = imageStyle,
                 onImageClick = onImageClick,
                 onLinkClick = onLinkClick,
+                images = images,
             )
         }
     }
@@ -110,6 +120,7 @@ private fun ColumnScope.MarkdownBlock(
     imageStyle: MdImageStyle,
     onImageClick: ((String) -> Unit)?,
     onLinkClick: ((String) -> Unit)?,
+    images: MarkdownImageUi?,
 ) {
     when (block) {
         is MdBlock.Heading -> {
@@ -150,19 +161,30 @@ private fun ColumnScope.MarkdownBlock(
                             val local = refs.filter { isLocalImage(it) }.map { localImageName(it) }
                             val external = refs.filterNot { isLocalImage(it) }
                             if (local.isNotEmpty()) {
-                                AttachmentThumbnailRow(fileNames = local, onOpen = onImageClick)
+                                if (images != null) {
+                                    images.thumbnailRow(local) { name -> onImageClick?.invoke(name) }
+                                } else {
+                                    // 没有附件图能力：给一行说明，不静默吞掉（图还在正文里）
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        CompactImageHint("附件图不在本机显示")
+                                    }
+                                }
                             }
                             if (external.isNotEmpty()) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    external.forEach { CompactExternalImageHint() }
+                                    external.forEach { CompactImageHint("外链图片") }
                                 }
                             }
                         } else {
                             if (isLocalImage(part.ref)) {
                                 val name = localImageName(part.ref)
-                                AttachmentImage(fileName = name, onClick = onImageClick?.let { { it(name) } })
+                                if (images != null) {
+                                    images.fullWidth(name, onImageClick?.let { cb -> { cb(name) } })
+                                } else {
+                                    ImageHint("附件图不在本机显示 · $name")
+                                }
                             } else {
-                                ExternalImageHint(part.ref)
+                                ImageHint("外链图片不在本机显示 · ${part.ref}")
                             }
                             partIndex++
                         }
@@ -195,6 +217,7 @@ private fun ColumnScope.MarkdownBlock(
                     imageStyle = imageStyle,
                     onImageClick = onImageClick,
                     onLinkClick = onLinkClick,
+                    images = images,
                 )
             }
         }
@@ -212,7 +235,7 @@ private fun ColumnScope.MarkdownBlock(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 block.blocks.forEach { inner ->
-                    MarkdownBlock(inner, level, imageStyle, onImageClick, onLinkClick)
+                    MarkdownBlock(inner, level, imageStyle, onImageClick, onLinkClick, images)
                 }
             }
         }
@@ -242,6 +265,7 @@ private fun ListItemRow(
     imageStyle: MdImageStyle,
     onImageClick: ((String) -> Unit)?,
     onLinkClick: ((String) -> Unit)?,
+    images: MarkdownImageUi?,
 ) {
     Column {
         Row(verticalAlignment = Alignment.Top) {
@@ -278,7 +302,7 @@ private fun ListItemRow(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 item.sub.forEach { sub ->
-                    MarkdownBlock(sub, level + 1, imageStyle, onImageClick, onLinkClick)
+                    MarkdownBlock(sub, level + 1, imageStyle, onImageClick, onLinkClick, images)
                 }
             }
         }
@@ -335,9 +359,13 @@ private fun CodeBlockView(block: MdBlock.Code) {
     }
 }
 
-/** 外链图片：不支持联网取图（本地优先），给一行诚实提示而不是空白。 */
+/**
+ * 块级图片的「画不出来」说明：外链不联网取图（本地优先），附件图则可能是本平台没有解码能力
+ * （iOS 侧 [MarkdownImageUi] 还没实现）。两种情况都给一行诚实提示而不是空白——
+ * 空着会让用户以为正文就这么多。
+ */
 @Composable
-private fun ExternalImageHint(ref: String) {
+private fun ImageHint(text: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -346,16 +374,16 @@ private fun ExternalImageHint(ref: String) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Text(
-            text = "外链图片不在本机显示 · $ref",
+            text = text,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         )
     }
 }
 
-/** 缩略图模式下的外链图片占位：保持 72dp 方图，不把列表撑成一行说明。 */
+/** 缩略图模式下的图片占位：保持 72dp 方图，不把列表撑成一行说明。 */
 @Composable
-private fun CompactExternalImageHint() {
+private fun CompactImageHint(text: String) {
     Box(
         modifier = Modifier
             .size(72.dp)
@@ -365,7 +393,7 @@ private fun CompactExternalImageHint() {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "外链图片",
+            text = text,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,
