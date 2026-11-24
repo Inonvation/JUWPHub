@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.timetable
 
-import android.app.Application
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,19 +44,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.domain.TermNaming
 import edu.jxslu.schedule.domain.Timetable
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
@@ -79,8 +75,11 @@ import kotlinx.coroutines.launch
  * （它们不属于任何学期，插在中间只会打断时间线）。同 term 的复制表按 `sortOrder` 排。
  *
  * 只影响显示，不改 `sortOrder`：那个值是「新建课表时的相对顺序」，别处也在读。
+ *
+ * 从 `internal` 放开成 `public`：iOS 移植 X1（2026-11-25）搬进共享层后跨模块 `internal`
+ * 不可见，而 `:app` 的 `TimetableSortTest` 钉的就是这个排序（包名不变，导入语句零改动）。
  */
-internal fun sortTimetablesForDisplay(list: List<Timetable>): List<Timetable> =
+fun sortTimetablesForDisplay(list: List<Timetable>): List<Timetable> =
     list.sortedWith(
         compareByDescending<Timetable> { TermNaming.sortKey(it.term) ?: Int.MIN_VALUE }
             .thenBy { it.sortOrder }
@@ -100,13 +99,43 @@ data class ManageUiState(
 /** 学期归档的进度（DESIGN §4.17）：[total] 为 0 表示还在取学期清单。 */
 data class ArchiveProgress(val done: Int, val total: Int, val term: String)
 
+/**
+ * 课表管理页状态。
+ *
+ * ## iOS 移植 X1（2026-11-25）搬进 `commonMain`
+ *
+ * 构造只吃 [ScheduleRepository]：原来第二个参数是 `Application`，唯一用途是把 `Context`
+ * 递给 `Graph.scheduleTermImport(context)`；现在归档链从 [Services] 取，且**可空**——
+ * 没接教务直取的一端（返回 null）只是不渲染那张卡，其余五个动作照常。
+ *
+ * `ViewModelProvider.Factory` 已删：`commonMain` 没有 `viewModel()` 入口，ViewModel 由宿主
+ * 创建（`design/ios-port.md` §11.1），那个 Factory 在共享层没有任何调用方。
+ */
 class TimetableViewModel(
     private val repo: ScheduleRepository,
-    private val app: Application,
+    /**
+     * 学期归档 / 新学期探测；null = 本平台还没接教务直取。
+     *
+     * 默认值从 [Services] 取而不是必填参数：宿主只需要知道「仓库」，装配根是否装了这条链
+     * 不该漏进宿主的构造代码。`runCatching` 兜住「装配根还没装」——JVM 单测不需要它。
+     */
+    private val termImport: ScheduleTermImport? =
+        runCatching { Services.current.scheduleTermImport() }.getOrNull(),
 ) : ViewModel() {
 
     private val message = MutableStateFlow<String?>(null)
     private val archive = MutableStateFlow<ArchiveProgress?>(null)
+
+    /**
+     * 本平台有没有学期归档链。
+     *
+     * false = 整块「从教务导入全部学期」不渲染（`design/ios-port.md` §11.2 ④）：
+     * 那张卡的全部作用就是发起一次教务直取，没有它只剩一个点了没反应的按钮。
+     *
+     * 不做成 [ManageUiState] 的字段：它是构造期就定死的常量，放进 state 会让首帧
+     * （`stateIn` 的 `ManageUiState()`）与真实值不一致，卡片先闪没再出现。
+     */
+    val canArchive: Boolean = termImport != null
 
     val uiState: StateFlow<ManageUiState> = combine(
         repo.timetables,
@@ -174,13 +203,16 @@ class TimetableViewModel(
      *
      * [manual] = true：清掉「用户删除过的学期」标记并重建——这是「删了想找回来」的唯一入口。
      * 已有同学期课表仍跳过（历史学期不做覆盖重导）。离开本页会取消本轮（已导入的学期保留）。
+     *
+     * [termImport] 为 null 时整块入口不渲染，这里直接返回（防御：装配根换了实现也不会空跑）。
      */
     fun archiveAllTerms() {
         if (archive.value != null) return
+        val import = termImport ?: return
         archive.value = ArchiveProgress(0, 0, "")
         viewModelScope.launch {
             val result = runCatching {
-                Graph.scheduleTermImport(app).archive(manual = true) { done, total, term ->
+                import.archive(manual = true) { done, total, term ->
                     archive.value = ArchiveProgress(done, total, term)
                 }
             }.getOrNull()
@@ -199,12 +231,6 @@ class TimetableViewModel(
             }
         }
     }
-
-    class Factory(private val repo: ScheduleRepository, private val app: Application) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            TimetableViewModel(repo, app) as T
-    }
 }
 
 /**
@@ -213,17 +239,19 @@ class TimetableViewModel(
  * 排版约定：主操作（切换）是卡内填充按钮，重命名/复制/默认/删除收进「⋮」菜单——
  * 五个平铺文字按钮在窄屏必然溢出，且删除混在平铺行里易误触。
  * 删除保护放在 Repository（至少保留一张；删当前自动切换），这里只负责禁用入口与文案。
+ *
+ * ## iOS 移植 X1（2026-11-25）搬进 `commonMain`
+ *
+ * [viewModel] 改成必填、由宿主创建（Android `viewModel {}`、iOS `remember {}`）——
+ * `commonMain` 里没有 `viewModel()` 那个 Composable 入口（`design/ios-port.md` §11.1）。
+ * 全页零平台能力：不碰 `Context`，没有文件选择、没有 WebView，两端是同一份实现。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimetableManageScreen(
     onBack: () -> Unit,
-    viewModel: TimetableViewModel = viewModel(
-        factory = TimetableViewModel.Factory(
-            Graph.repository(LocalContext.current),
-            LocalContext.current.applicationContext as Application,
-        ),
-    ),
+    /** 由宿主创建（Android `viewModel {}`、iOS `remember {}`），见 `design/ios-port.md` §11.2 ①。 */
+    viewModel: TimetableViewModel,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -269,8 +297,11 @@ fun TimetableManageScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
-            // 学期归档（DESIGN §4.17）：删掉的学期从这里找回来；已导入的学期一律跳过
-            TimetableArchiveRow(progress = state.archive, onArchive = viewModel::archiveAllTerms)
+            // 学期归档（DESIGN §4.17）：删掉的学期从这里找回来；已导入的学期一律跳过。
+            // 本平台没有归档链时整块不渲染（§11.2 ④）——那张卡的全部作用就是发起一次教务直取
+            if (viewModel.canArchive) {
+                TimetableArchiveRow(progress = state.archive, onArchive = viewModel::archiveAllTerms)
+            }
             state.timetables.forEach { t ->
                 TimetableCard(
                     timetable = t,

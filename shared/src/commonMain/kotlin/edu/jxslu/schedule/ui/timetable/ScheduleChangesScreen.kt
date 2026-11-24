@@ -34,19 +34,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.repo.AiApplyRecord
 import edu.jxslu.schedule.data.repo.ScheduleSync
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.ScheduleAlertDefaults
 import edu.jxslu.schedule.domain.ScheduleDiff
-import edu.jxslu.schedule.domain.SchedulePendingChanges
 import edu.jxslu.schedule.domain.scheduleApplySummary
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
@@ -55,7 +54,6 @@ import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.reminder.ScoreAlertReminder
 import kotlinx.coroutines.launch
 
 /**
@@ -80,16 +78,41 @@ import kotlinx.coroutines.launch
  * 进「调课记录」页，与 AI 调课的应用记录同列、按来源标注。这类记录**不可撤销**——
  * 合并推进了检测基线，只反向撤课表而不退基线会让 App 以为已与教务一致、差异从此
  * 不再提醒（取舍见 store 类注释）。
+ *
+ * ## iOS 移植 X1（2026-11-25）搬进 `commonMain`
+ *
+ * 四件平台件按「是不是一次平台动作」分两类处理：
+ *
+ * - **副作用**（两个可空回调）：开关 / 间隔改完后要重排后台核对与通知，那是 Android 的
+ *   `WorkManager` + 通知渠道（`ui/reminder/ScheduleAlertReminder`）。null = 本平台没有调度，
+ *   与 `ReminderSettingsScreen` 同一口径：**开关与间隔照常落库，只是这一侧不排任务**——
+ *   等 iOS 接上 `BGTaskScheduler` / `UNUserNotificationCenter`，已保存的设置自动生效。
+ *   两行入口因此照常渲染（它们本身是「设置」，不是「动作」）。
+ * - **能力**（从 [Services] 取、可空）：教务直取（[ScheduleSync]）与收件箱 / 留痕仓。
+ *   直取为 null 时「重新检查」两个按钮不渲染（点了也只会得到一句「不支持」）；
+ *   收件箱与留痕仓是本地表，两端都非空。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduleChangesScreen(
     onBack: () -> Unit,
     onOpenHistory: () -> Unit,
+    /**
+     * 提醒开关变化后的重排（Android：`ensurePeriodicWork` + 开启时 `enqueueCheck`）。
+     * null = 本平台没有后台核对与通知调度（见上方 KDoc）。
+     */
+    onScheduleAlertToggle: (suspend (enabled: Boolean) -> Unit)? = null,
+    /**
+     * 检查间隔改完后的重排（Android：`ScoreAlertReminder.onSettingsChanged`，清检查时刻 +
+     * 周期任务重排 + 即时核对）。null 的语义同 [onScheduleAlertToggle]。
+     */
+    onScheduleAlertSettingsChanged: (suspend () -> Unit)? = null,
 ) {
-    val context = LocalContext.current
-    val prefs = remember { Graph.displayPrefs(context) }
-    val repo = remember { Graph.repository(context) }
+    val prefs = remember { Services.current.displayPrefs() }
+    val repo = remember { Services.current.scheduleRepository() }
+    // null = 本平台还没有教务直取链（iOS 是 `IosJwReadSession`，两端都非空；留着这一档是因为
+    // 接口本身可空，装配根换实现时不能让页面空指针）
+    val sync = remember { Services.current.scheduleSync() }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val haptics = rememberAppHaptics()
@@ -156,10 +179,10 @@ fun ScheduleChangesScreen(
     var confirmingIgnore by remember { mutableStateOf(false) }
 
     fun refreshNow() {
-        if (busy) return
+        if (busy || sync == null) return
         busy = true
         scope.launch {
-            val result = runCatching { Graph.scheduleSync(context).check(force = true) }
+            val result = runCatching { sync.check(force = true) }
             busy = false
             val message = when (val r = result.getOrNull()) {
                 is ScheduleSync.CheckResult.Ok ->
@@ -191,7 +214,7 @@ fun ScheduleChangesScreen(
             prefs.setScheduleIgnoredFingerprint(snapshot.fingerprint)
             prefs.setSchedulePendingChanges(null)
             // 收件箱（DESIGN §4.38）：本轮差异已处置，那条「课程安排有变动」标已读
-            Graph.inboxRepository(context).markKindRead(InboxKind.SCHEDULE_CHANGE)
+            Services.current.inboxRepository().markKindRead(InboxKind.SCHEDULE_CHANGE)
             busy = false
             haptics.success()
             // 回执按「组」统计：一次调课落库是两行，但对用户仍是 1 处变动
@@ -210,9 +233,9 @@ fun ScheduleChangesScreen(
                 val touchedGroups = groups.count { group ->
                     group.indexes.any { it in accepted && it in report.appliedIndexes }
                 }
-                Graph.aiApplyHistoryStore(context).append(
+                Services.current.aiApplyHistoryStore().append(
                     AiApplyRecord(
-                        id = System.currentTimeMillis(),
+                        id = AppClock.nowMillis(),
                         source = AiApplyRecord.SOURCE_DETECT,
                         appliedCourses = report.applied,
                         appliedGroups = touchedGroups,
@@ -236,7 +259,7 @@ fun ScheduleChangesScreen(
         scope.launch {
             prefs.setScheduleIgnoredFingerprint(snapshot.fingerprint)
             prefs.setSchedulePendingChanges(null)
-            Graph.inboxRepository(context).markKindRead(InboxKind.SCHEDULE_CHANGE)
+            Services.current.inboxRepository().markKindRead(InboxKind.SCHEDULE_CHANGE)
             confirmingIgnore = false
             snackbar.showNotice("已忽略本轮差异；教务再变化时会重新提醒")
         }
@@ -255,7 +278,10 @@ fun ScheduleChangesScreen(
                     IconButton(onClick = onOpenHistory) {
                         Icon(AppIcons.History, contentDescription = "调课记录")
                     }
-                    TextButton(onClick = ::refreshNow, enabled = !busy) { Text("重新检查") }
+                    // 本平台没有教务直取链时整个「重新检查」不渲染（§11.2 ④）
+                    if (sync != null) {
+                        TextButton(onClick = ::refreshNow, enabled = !busy) { Text("重新检查") }
+                    }
                 },
             )
         },
@@ -268,7 +294,19 @@ fun ScheduleChangesScreen(
         ) {
             // 开关与间隔两行**空态也常显**：第一次进页要配置的就是这两行，
             // 收在有差异的分支里等于永远配不上
-            AlertSwitchRow(alertOn, prefs, scope, context)
+            AlertSwitchRow(
+                checked = alertOn,
+                onCheckedChange = { value ->
+                    scope.launch {
+                        prefs.setScheduleAlertEnabled(value)
+                        // 两个方向都重排周期任务：开 → 本开关立即生效（清检查时刻后当场评估
+                        // 一次）。注意周期任务**不再因全关而撤销**（2026-11-19：新学期探测恒开，
+                        // 任务常驻），所以这里只是让开关尽快生效，不涉及撤销。
+                        if (value) prefs.setScheduleCheckMillis(0)
+                        onScheduleAlertToggle?.invoke(value)
+                    }
+                },
+            )
             AppCard(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -311,8 +349,10 @@ fun ScheduleChangesScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                         )
-                        Spacer(Modifier.padding(top = 14.dp))
-                        TextButton(onClick = ::refreshNow, enabled = !busy) { Text("立即检查一次") }
+                        if (sync != null) {
+                            Spacer(Modifier.padding(top = 14.dp))
+                            TextButton(onClick = ::refreshNow, enabled = !busy) { Text("立即检查一次") }
+                        }
                     }
                 }
 
@@ -408,7 +448,7 @@ fun ScheduleChangesScreen(
                 scope.launch {
                     prefs.setScheduleAlertIntervalHours(ScheduleAlertDefaults.INTERVAL_CHOICES[index])
                     // 清检查时刻 + 周期任务重排（取四链最小档）+ 即时核对，收口在一个入口
-                    ScoreAlertReminder.onSettingsChanged(context)
+                    onScheduleAlertSettingsChanged?.invoke()
                 }
             },
             onDismiss = { showIntervalPicker = false },
@@ -434,9 +474,7 @@ fun ScheduleChangesScreen(
 @Composable
 private fun AlertSwitchRow(
     checked: Boolean,
-    prefs: edu.jxslu.schedule.data.prefs.DisplayPrefsStore,
-    scope: kotlinx.coroutines.CoroutineScope,
-    context: android.content.Context,
+    onCheckedChange: (Boolean) -> Unit,
 ) {
     AppCard(
         modifier = Modifier
@@ -452,17 +490,7 @@ private fun AlertSwitchRow(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
             }
-            Switch(checked = checked, onCheckedChange = { value ->
-                scope.launch {
-                    prefs.setScheduleAlertEnabled(value)
-                    // 两个方向都重排周期任务：开 → 本开关立即生效（清检查时刻后当场评估
-                    // 一次）。注意周期任务**不再因全关而撤销**（2026-11-19：新学期探测恒开，
-                    // 任务常驻），所以这里只是让开关尽快生效，不涉及撤销。
-                    if (value) prefs.setScheduleCheckMillis(0)
-                    ScoreAlertReminder.ensurePeriodicWork(context)
-                    if (value) ScoreAlertReminder.enqueueCheck(context)
-                }
-            })
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
     }
 }
@@ -471,4 +499,3 @@ private fun AlertSwitchRow(
  * 差异卡片已抽到 `ui/common`：普通差异 [edu.jxslu.schedule.ui.common.ScheduleChangeCard]
  * （2026-10-06），单周调课 [edu.jxslu.schedule.ui.common.ScheduleChangeGroupCard]（2026-10-21）。
  */
-

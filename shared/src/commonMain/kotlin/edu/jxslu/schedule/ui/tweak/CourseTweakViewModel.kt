@@ -1,10 +1,9 @@
 package edu.jxslu.schedule.ui.tweak
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.data.repo.ScheduleRepository
-import kotlinx.datetime.toKotlinLocalDate
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.SemesterConfig
@@ -19,8 +18,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.time.DayOfWeek
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 /** 某一天的课表切片，供两侧预览卡展示。 */
 data class DaySlice(
@@ -35,11 +33,11 @@ data class DaySlice(
 data class TweakUiState(
     val loading: Boolean = true,
     val timetableName: String = "",
-    val fromDate: LocalDate = LocalDate.now(),
-    val toDate: LocalDate = LocalDate.now(),
+    val fromDate: LocalDate = AppClock.today(),
+    val toDate: LocalDate = AppClock.today(),
     val mode: TweakMode = TweakMode.Merge,
-    val from: DaySlice = DaySlice(LocalDate.now(), null, 1, emptyList()),
-    val to: DaySlice = DaySlice(LocalDate.now(), null, 1, emptyList()),
+    val from: DaySlice = DaySlice(AppClock.today(), null, 1, emptyList()),
+    val to: DaySlice = DaySlice(AppClock.today(), null, 1, emptyList()),
     val slots: List<TimeSlot> = emptyList(),
     val semester: SemesterConfig? = null,
     /** 输入不合法时的原因；null = 参数没问题。**不含**「正在执行」——那是忙碌，不是错误。 */
@@ -62,10 +60,17 @@ private data class TweakConfig(
  *
  * 日期与模式是页面自己的输入，与库里的数据流合成：日期一改，两侧预览立刻重算。
  * 默认两个日期都取今天——用户多数场景是「把今天的课挪走」，少点两次。
+ *
+ * ## iOS 移植 X1（2026-11-25）搬进 `commonMain`
+ *
+ * 三处平台差异：`java.time.LocalDate` → `kotlinx.datetime.LocalDate`（`LocalDate.now()` 走
+ * [AppClock.today]，全仓唯一「现在」来源）；`DayOfWeek.of` 在 Kotlin/Native 上没有，星期文案
+ * 改成按 1..7 取表；`ViewModelProvider.Factory` 删掉——`commonMain` 没有 `viewModel()` 入口，
+ * ViewModel 一律由宿主创建（`design/ios-port.md` §11.1 / §11.2 ①）。
  */
 class CourseTweakViewModel(
     private val repo: ScheduleRepository,
-    private val todayProvider: () -> LocalDate = { LocalDate.now() },
+    private val todayProvider: () -> LocalDate = { AppClock.today() },
 ) : ViewModel() {
 
     private val fromDate = MutableStateFlow(todayProvider())
@@ -176,8 +181,8 @@ class CourseTweakViewModel(
 
     /** 执行结果文案。数字全部来自 plan，不重查库。 */
     private fun describe(state: TweakUiState, plan: TweakPlan): String {
-        val dates = "${state.fromDate.monthValue}月${state.fromDate.dayOfMonth}日 → " +
-            "${state.toDate.monthValue}月${state.toDate.dayOfMonth}日"
+        val dates = "${state.fromDate.monthNumber}月${state.fromDate.dayOfMonth}日 → " +
+            "${state.toDate.monthNumber}月${state.toDate.dayOfMonth}日"
         return buildString {
             append("$dates：已调整 ${plan.movedCount} 门课")
             if (state.mode.destructive && plan.targetCount > 0) {
@@ -193,9 +198,10 @@ class CourseTweakViewModel(
     }
 
     private fun slice(config: TweakConfig, date: LocalDate): DaySlice {
-        val day = date.dayOfWeek.value
+        // kotlinx 的 DayOfWeek 以周一为 0，+1 回到「1=周一 … 7=周日」口径（与 domain 同源）
+        val day = date.dayOfWeek.ordinal + 1
         val semester = config.semester
-        val week = semester?.let { ScheduleCalculator.weekNumberOf(it, date.toKotlinLocalDate()) }
+        val week = semester?.let { ScheduleCalculator.weekNumberOf(it, date) }
             ?.takeIf { ScheduleCalculator.isWeekInTerm(semester, it) }
         val courses = if (week == null) {
             emptyList()
@@ -221,16 +227,11 @@ class CourseTweakViewModel(
         from.courses.isEmpty() -> "被调整日期当天没有课，无需调课"
         else -> null
     }
-
-    class Factory(private val repo: ScheduleRepository) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            CourseTweakViewModel(repo) as T
-    }
 }
 
 /** 星期文案（1=周一 … 7=周日），与课表页表头同口径。 */
 internal fun weekdayLabel(day: Int): String =
-    DayOfWeek.of(day.coerceIn(1, 7)).let {
-        listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[it.value - 1]
-    }
+    WEEKDAY_LABELS[day.coerceIn(1, 7) - 1]
+
+/** 与 `WeekGrid` 表头、`SelectionCenterScreen` 的 `WEEKDAY_LABELS` 同序同字。 */
+private val WEEKDAY_LABELS = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
