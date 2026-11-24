@@ -414,18 +414,42 @@ P-1 已把散点收口，这里只换实现：
 
 KSP 按 target 加：`kspAndroid` / `kspIosArm64` / `kspIosSimulatorArm64`；schema 目录改由 Room Gradle Plugin 声明。
 
+**网络层的收敛程度（2026-11-24 实测，决定 Ktor 替换是一处改动还是两遍返工）**：
+
+- **客户端构造是单点**：`data/net/AppHttp.kt`（55 行）已经把 OkHttpClient 收成一处
+  （注释里写着「此前 10 个模块各自 `OkHttpClient.Builder().build()`」），派生入口是
+  `withCallTimeout` / `withMaxRequestsPerHost` / `withInterceptors`。
+- **但要改的不止那一处**：**24 个文件**直接 import `okhttp3.*`（`Request` / `Response` /
+  `Interceptor` / `MediaType` / `HttpUrl`），另有 **4 个文件**用 Retrofit
+  （`QzxyApi` / `WenquApi` / `UjingApi` / `QiekjApi` + 两个 Repository 里建 Retrofit 实例）。
+- 结论：**Ktor 替换是多文件工程，不是单点开关**。顺序上应该先「把 24 个文件收成一条
+  `HttpCall` 抽象」（纯重构、Android 行为不变、可全量单测保），再换 Ktor 引擎——
+  反过来做等于把「重构」和「换实现」两件事耦在一起查错。
+
 验收：`.\gradlew.bat :shared:iosSimulatorArm64Test` 跑通解析器与迁移测试；Android 行为零变化。
 
 ### P2 UI 平移（6–10 周）
 
-299 个文件搬进 `shared/commonMain`，依赖换 CMP 坐标。改造面（P-1 已削掉 5 项）：
+299 个文件搬进 `shared/commonMain`，依赖换 CMP 坐标。
 
-| 项 | 处数 | 处理 |
+**改造面（2026-11-24 实测复核，别信之前那句「PlatformServices / AppIcon 已收口」——那两个对象在仓库里根本不存在）**：
+
+| 项 | 实测处数 | 处理 |
 |---|---|---|
-| `PlatformServices` 调用点 | 已收口 | 换 iOS 实现 |
-| `AppIcon` 映射 | 1 个文件 | 转 Compose Resources vector |
+| HugeIcons（`HugeIcons.Xxx` 直接引用） | **424 处 / 167 个不同图标 / 85 个文件** | 图标**数据**，不适合 expect/actual。做法：一次性生成器把用到的子集从 AAR 里反射提取成 CMP 原生 `ImageVector`（纯 `compose.ui.graphics.vector`，iOS 可用），落到 `shared/src/commonMain/.../ui/icon/AppIcons.kt`，再把 424 处 `HugeIcons.` 换成 `AppIcons.` |
+| `LocalContext` / `Context` / `ContentResolver` | 见下表（`ui/common` 19 个文件、`ui/ebike` 27 个……） | 按「它拿 Context 做什么」分：剪贴板 / 分享 / 权限 / MediaStore / 资源读取，每类一条 expect/actual |
+| `Bitmap` / `Intent` / `Activity` 启动 | 同上 | `Bitmap` 走「像素 + 尺寸」中性类型（P0 条码那次已立先例）；`Intent` 与 Activity 启动属平台外壳，留在 `:app` |
 | `AppWebView` / `AppMapView` | 2 个组件 | `UIKitView` 实现 |
 | 剩余 import 与坐标替换 | 299 文件 | 批量替换 + 逐批编译 |
+
+**各 `ui/` 包的平台耦合度（2026-11-24 实测，用来定搬迁顺序——数字是「有平台 import 的文件数 / 总文件数」）**：
+
+| 包 | 文件 | 有平台 import | 说明 |
+|---|---|---|---|
+| `internship` / `curriculum` / `scholar` | 1 / 1 / 1 | 1 / 1 / 1 | 单文件页面，最省事，但都要 ViewModel |
+| `tweak` / `timetable` / `exam` / `weather` / `inbox` / `tile` / `water` | 2–6 | 1–2 | 耦合低 |
+| `today` / `week` / `qzxy` / `me` / `ebike` / `campus` | 5–30 | 4–26 | 主战场 |
+| `common` | 67 | 32 | 公共件，动它牵连最广，**应该最后动**（或先只动无平台依赖的那一半） |
 
 验收：Android 全页面截图比对无差异；iOS 模拟器进今日页与课表页。
 
