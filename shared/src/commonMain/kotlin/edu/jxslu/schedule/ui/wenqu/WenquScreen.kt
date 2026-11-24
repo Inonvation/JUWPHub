@@ -55,7 +55,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -64,26 +63,23 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.data.wenqu.WenquActivity
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.WenquRules
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
-import edu.jxslu.schedule.ui.common.SessionExpiredNotice
+import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
+import edu.jxslu.schedule.ui.common.rememberResumedNow
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
-import edu.jxslu.schedule.ui.reminder.WenquActivityAlertReminder
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import edu.jxslu.schedule.data.prefs.setWenquGrabPinnedAlertedId
@@ -120,20 +116,53 @@ import edu.jxslu.schedule.data.prefs.setWenquGrabPinnedId
 @Composable
 fun WenquScreen(
     onBack: () -> Unit,
+    /**
+     * 本页状态机，**由宿主创建**（Android `viewModel {}`、iOS `remember {}`），
+     * 见 `design/ios-port.md` §11.1 / §11.2 ①。
+     */
+    viewModel: WenquViewModel,
     onOpenSettings: () -> Unit = {},
     onOpenRecords: () -> Unit = {},
     onOpenGrab: () -> Unit = {},
+    /**
+     * **预报名**（2026-10-16，DESIGN §4.45）：`(活动, 报名开始时刻)` → 排闹钟 + 前台服务。
+     * `suspend`：实现方要等落盘 / 排程落定再返回，页面据此决定提示顺序。
+     * `null` = 本平台没有那条链（精确闹钟 + 短时前台服务是 Android 专有能力，
+     * 见 `.agents/rules/wenqu-alerts.md`）→ 详情弹层里「预报名」整块不渲染。
+     */
+    onRequestPrereg: (suspend (WenquActivity, Long) -> Unit)? = null,
+    /** 取消预报名（撤闹钟 + 撤兜底任务）。`null` 的语义同 [onRequestPrereg]。 */
+    onCancelPrereg: (suspend () -> Unit)? = null,
+    /**
+     * 盯上某条活动之后的重排动作（Android = `WenquActivityAlertReminder.onPinChanged`，
+     * 让共享周期任务在「五路全关」时也保留）。`null` = 本平台没有后台提醒链。
+     */
+    onPinChanged: (suspend () -> Unit)? = null,
+    /**
+     * **去微信报名**：活动名已复制好，这里只负责把用户递到微信；参数是回执口。
+     * `null` = 本平台拉不起外部 App → 动作行只剩「复制活动名」。
+     */
+    onOpenWechat: ((onNotice: (String) -> Unit) -> Unit)? = null,
+    /**
+     * 进页一次性提示：本功能在别处已判定登录过期时给一句「登录状态已过期」。
+     * 参数 = 当前是否已登录（实现方据它决定「清标记」还是「消费并回一句」），返回值 =
+     * 要给用户看的那句话（`null` = 不必提示）。
+     *
+     * `null` = 本平台没有那张留痕表（Android 是 `SessionExpiryStore`，介质 SharedPreferences +
+     * Context，留在 `:app`）→ 提示不出现。
+     */
+    onSessionExpired: ((loggedIn: Boolean) -> String?)? = null,
 ) {
-    val context = LocalContext.current
-    val vm: WenquViewModel = viewModel(
-        factory = WenquViewModel.Factory(Graph.wenqu(context), Graph.displayPrefs(context)),
-    )
+    val vm = viewModel
     val state by vm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     // 上次判定登录过期（JWT 到期且没存密码 / 平台顶号）：进页说一句为什么退回登录表单
-    SessionExpiredNotice(SessionService.Wenqu, state.loggedIn, snackbar)
+    LaunchedEffect(state.loggedIn) {
+        val text = onSessionExpired?.invoke(state.loggedIn) ?: return@LaunchedEffect
+        snackbar.showNotice(AppNoticeVisuals(text, tone = NoticeTone.Warning))
+    }
     // 下拉刷新的触感（同流水 / 账单 / 生活那几页：轻一下，别只靠指示器）
     val haptics = rememberAppHaptics()
     // 检索框的文字放页面层：放 LazyColumn 的 item 里会随滚动被回收，滚回来就空了
@@ -469,7 +498,7 @@ fun WenquScreen(
                 applyStartTime = activity.applyStartTime,
                 applyEndTime = activity.applyEndTime,
                 blacklisted = state.applyBlockedReason.isNotBlank(),
-                now = System.currentTimeMillis(),
+                now = AppClock.nowMillis(),
             ),
             canCancel = WenquRules.canCancelFromActivity(activity.status, activity.applied),
             busy = state.applying,
@@ -477,35 +506,40 @@ fun WenquScreen(
             onApply = { vm.applyActivity(activity.id) },
             onCancel = { vm.cancelApply(activity.id, activity.applyId) },
             preregOpensAt = if (state.preregId == activity.id) state.preregOpensAt else 0L,
-            onRequestPrereg = {
-                scope.launch {
-                    val opensAt = WenquRules.stampMillis(activity.applyStartTime)
-                    if (opensAt == null) {
-                        snackbar.showNotice("这条活动的报名时间读不出来，暂不能预报名")
-                    } else {
-                        WenquPreregReminder.arm(context, activity, opensAt)
-                        snackbar.showNotice(
-                            "已预报名：到点自动抢《${activity.title.ifBlank { "这条活动" }}》",
-                        )
+            onRequestPrereg = onRequestPrereg?.let { request ->
+                {
+                    scope.launch {
+                        val opensAt = WenquRules.stampMillis(activity.applyStartTime)
+                        if (opensAt == null) {
+                            snackbar.showNotice("这条活动的报名时间读不出来，暂不能预报名")
+                        } else {
+                            request(activity, opensAt)
+                            snackbar.showNotice(
+                                "已预报名：到点自动抢《${activity.title.ifBlank { "这条活动" }}》",
+                            )
+                        }
                     }
                 }
             },
-            onCancelPrereg = {
-                scope.launch {
-                    WenquPreregReminder.cancel(context)
-                    snackbar.showNotice("已取消预报名")
+            onCancelPrereg = onCancelPrereg?.let { cancel ->
+                {
+                    scope.launch {
+                        cancel()
+                        snackbar.showNotice("已取消预报名")
+                    }
                 }
             },
+            onOpenWechat = onOpenWechat,
             // 「盯这条」（2026-10-15）：落盘给蹲点页，那一页每轮单独拉它的实时详情。
             // 本页不自动跳蹲点页——用户可能还想接着翻列表，给一句提示让他自己决定。
             onPin = {
                 scope.launch {
-                    val prefs = Graph.displayPrefs(context)
+                    val prefs = Services.current.displayPrefs()
                     prefs.setWenquGrabPinnedId(activity.id)
                     // 换了目标：清「已报过」键，让这条也能报一次「名额空出」
                     prefs.setWenquGrabPinnedAlertedId(0L)
                     // 盯了活动，共享周期任务必须存在（全关时它本来被取消了）
-                    WenquActivityAlertReminder.onPinChanged(context)
+                    onPinChanged?.invoke()
                     vm.closeDetail()
                     snackbar.showNotice(
                         "已盯上「${activity.title.ifBlank { "这条活动" }}」· 去蹲点页开蹲",
@@ -546,20 +580,15 @@ private fun LoginContent(state: WenquViewModel.UiState, vm: WenquViewModel) {
     // 只在 RESUMED 期间走（2026-11-18）：原来是无生命周期的 while，退后台/灭屏仍每秒
     // 醒一次、写一次状态，最长白跑 300 拍。剩余时间每拍都按绝对时刻重算，所以挂起
     // 再回来不会接着旧的数，回前台第一拍就是真值。
+    // 搬进共享层后这段交给 `rememberResumedNow`（`ui/common/ResumedTicker.kt`）：口径不变，
+    // 只是「只在 RESUMED 走」由那条缝统一保证，本页不再直接碰 LifecycleOwner。
     var resendRemaining by remember { mutableStateOf(0L) }
-    val resendOwner = LocalLifecycleOwner.current
-    LaunchedEffect(state.codeSentAt, resendOwner) {
-        if (state.codeSentAt == 0L) {
-            resendRemaining = 0L
-            return@LaunchedEffect
-        }
-        resendOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                val left = WenquRules.resendRemainingMs(state.codeSentAt, System.currentTimeMillis())
-                resendRemaining = left
-                if (left <= 0L) break
-                delay(1_000)
-            }
+    val tickNow by rememberResumedNow(1_000, state.codeSentAt)
+    LaunchedEffect(state.codeSentAt, tickNow) {
+        resendRemaining = if (state.codeSentAt == 0L) {
+            0L
+        } else {
+            WenquRules.resendRemainingMs(state.codeSentAt, tickNow)
         }
     }
 

@@ -1,12 +1,12 @@
 package edu.jxslu.schedule.ui.wenqu
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.wenqu.WenquActivity
 import edu.jxslu.schedule.data.wenqu.WenquGrabSpeed
 import edu.jxslu.schedule.data.wenqu.WenquRepository
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.WenquRules
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -244,7 +244,7 @@ class WenquGrabViewModel(
         // 探测每一轮都回实时值，真被限制时第一轮就会停并用平台原话说明（见下）。
         grabJob?.cancel()
         shownHitIds.clear()
-        val armedAt = System.currentTimeMillis()
+        val armedAt = AppClock.nowMillis()
         _state.update {
             it.copy(
                 phase = Phase.Checking,
@@ -277,7 +277,7 @@ class WenquGrabViewModel(
                 if (WenquRules.grabShouldStop(
                         checks = _state.value.checks,
                         detectStartedAt = armedAt,
-                        now = System.currentTimeMillis(),
+                        now = AppClock.nowMillis(),
                         publishAt = publishAt,
                     )
                 ) {
@@ -298,10 +298,10 @@ class WenquGrabViewModel(
                     stopGrab(cancelJob = false, reason = "目标活动名为空，已停止")
                     break
                 }
-                val inBurst = WenquRules.grabInBurst(System.currentTimeMillis(), publishAt)
+                val inBurst = WenquRules.grabInBurst(AppClock.nowMillis(), publishAt)
                 val speed = if (inBurst) WenquGrabSpeed.Burst else WenquGrabSpeed.Fast
                 val pinnedId = _state.value.pinnedId
-                val roundStartedAt = System.currentTimeMillis()
+                val roundStartedAt = AppClock.nowMillis()
                 var pinnedFresh: WenquActivity? = null
                 val probe = coroutineScope {
                     // 盯的那条与列表探测**并发**（2026-10-16）：原先它串行在后、还挂
@@ -338,7 +338,7 @@ class WenquGrabViewModel(
                         status = freshPinned.status,
                         applied = freshPinned.applied,
                         applyEndTime = freshPinned.applyEndTime,
-                        now = System.currentTimeMillis(),
+                        now = AppClock.nowMillis(),
                     )
                 ) {
                     unpin()
@@ -352,7 +352,7 @@ class WenquGrabViewModel(
                         )
                     }
                 }
-                val checkedAt = System.currentTimeMillis()
+                val checkedAt = AppClock.nowMillis()
                 if (probe != null) {
                     failures = 0
                     if (probe.blacklisted) {
@@ -391,13 +391,13 @@ class WenquGrabViewModel(
                     items = _state.value.items,
                     keyword = keyword,
                     blacklisted = false,
-                    now = System.currentTimeMillis(),
+                    now = AppClock.nowMillis(),
                     pinnedId = pinnedId,
                 )
                 if (hit != null && hit.id > 0L && shownHitIds.add(hit.id)) {
                     _state.update { it.copy(hit = hit) }
                 }
-                val nowForDelay = System.currentTimeMillis()
+                val nowForDelay = AppClock.nowMillis()
                 val baseDelay = WenquRules.grabNextDelayMs(
                     consecutiveFailures = failures,
                     now = nowForDelay,
@@ -691,7 +691,7 @@ class WenquGrabViewModel(
     /** 用不可变的时间字段校正状态（同主页口径，见 `WenquViewModel.corrected`）。 */
     private fun corrected(items: List<WenquActivity>): List<WenquActivity> {
         if (items.isEmpty()) return items
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         return items.map { item ->
             if (item.status == 3) {
                 item
@@ -699,15 +699,6 @@ class WenquGrabViewModel(
                 item.copy(status = WenquRules.effectiveStatus(item.status, item.endTime, now))
             }
         }
-    }
-
-    class Factory(
-        private val repo: WenquRepository,
-        private val prefs: DisplayPrefsStore,
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            WenquGrabViewModel(repo, prefs) as T
     }
 }
 

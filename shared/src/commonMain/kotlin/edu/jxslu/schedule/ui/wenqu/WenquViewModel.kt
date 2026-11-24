@@ -1,7 +1,6 @@
 package edu.jxslu.schedule.ui.wenqu
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.wenqu.WenquActivity
@@ -9,6 +8,7 @@ import edu.jxslu.schedule.data.wenqu.WenquActivityIndex
 import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.wenqu.WenquVolunteerRecord
 import edu.jxslu.schedule.data.wenqu.mergeActivities
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.WenquRules
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
@@ -184,7 +184,7 @@ class WenquViewModel(
                 list.sortedBy { WenquRules.displayRank(it.status) }
 
             WenquRules.Sort.ClosingSoon -> {
-                val now = System.currentTimeMillis()
+                val now = AppClock.nowMillis()
                 list.sortedBy { WenquRules.closingSortKey(it.applyEndTime, now) }
             }
 
@@ -373,7 +373,7 @@ class WenquViewModel(
      */
     private fun corrected(items: List<WenquActivity>): List<WenquActivity> {
         if (items.isEmpty()) return items
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         return items.map { item ->
             if (item.status == 3) {
                 item
@@ -725,7 +725,7 @@ class WenquViewModel(
                 _state.update {
                     it.copy(
                         busy = false,
-                        codeSentAt = System.currentTimeMillis(),
+                        codeSentAt = AppClock.nowMillis(),
                         message = wenquNotice("验证码已发送"),
                     )
                 }
@@ -783,14 +783,5 @@ class WenquViewModel(
 
     fun consumeMessage() {
         _state.update { it.copy(message = null) }
-    }
-
-    class Factory(
-        private val repo: WenquRepository,
-        private val prefs: DisplayPrefsStore,
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            WenquViewModel(repo, prefs) as T
     }
 }

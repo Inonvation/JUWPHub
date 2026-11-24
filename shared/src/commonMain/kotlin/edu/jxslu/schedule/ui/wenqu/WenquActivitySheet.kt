@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.wenqu
 
-import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,13 +30,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.data.wenqu.WenquActivity
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.WenquRules
-import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.LoadingHint
@@ -101,6 +99,14 @@ fun WenquActivitySheet(
     onRequestPrereg: (() -> Unit)? = null,
     /** 取消预报名（已排上时状态行点它取消）。 */
     onCancelPrereg: (() -> Unit)? = null,
+    /**
+     * **去微信报名**（2026-10-11）：活动名已经复制好，这里只负责把用户递到微信。
+     * 参数是回执口（成功 / 打不开各一句），实现方按自己的失败分支给文案。
+     *
+     * `null` = 本平台没有拉起外部 App 的能力（iOS 侧要 `weixin://` scheme + 白名单，
+     * 见 `design/ios-port.md` §10.4）→ 动作行只剩「复制活动名」，不留一个点了没反应的按钮。
+     */
+    onOpenWechat: ((onNotice: (String) -> Unit) -> Unit)? = null,
 ) {
     // 底部动作行的「关掉再做一件事」（DESIGN §3.28，2026-10-11）：
     // 弹层是比页面高一层的独立窗口，页面级提示会被它盖住——所以先关弹层（退场动画走完
@@ -110,7 +116,6 @@ fun WenquActivitySheet(
     var confirmKind by remember { mutableStateOf<SheetConfirm?>(null) }
     // 「预报名」的二次确认（2026-10-16）：开启后到点自动提交，必须过一次确认。
     var preregConfirm by remember { mutableStateOf(false) }
-    val context = LocalContext.current
     ImeAwareModalBottomSheet(onDismiss = onDismiss, pendingDismiss = afterDismiss) {
         WenquActivityDetailContent(
             activity = activity,
@@ -136,7 +141,7 @@ fun WenquActivitySheet(
             onRequestApply = { confirmKind = SheetConfirm.APPLY },
             onRequestCancel = { confirmKind = SheetConfirm.CANCEL },
             onCopyName = { afterDismiss = { onNotice("活动名已复制") } },
-            onOpenWechat = { afterDismiss = { openWechatForSignup(context, onNotice) } },
+            onOpenWechat = onOpenWechat?.let { open -> { afterDismiss = { open(onNotice) } } },
             onPin = onPin,
             preregOpenAt = preregOpensAt,
             preregEligible = onRequestPrereg != null &&
@@ -150,7 +155,7 @@ fun WenquActivitySheet(
         WenquPreregConfirmDialog(
             activityName = activityName(activity),
             opensAtText = openAt
-                ?.let { WenquRules.preregOpenLabel(it, System.currentTimeMillis()) }
+                ?.let { WenquRules.preregOpenLabel(it, AppClock.nowMillis()) }
                 .orEmpty(),
             onConfirm = {
                 preregConfirm = false
@@ -301,7 +306,7 @@ private fun WenquActivityActions(
     onRequestApply: () -> Unit,
     onRequestCancel: () -> Unit,
     onCopyName: () -> Unit,
-    onOpenWechat: () -> Unit,
+    onOpenWechat: (() -> Unit)?,
 ) {
     val clipboard = LocalClipboardManager.current
     Row(
@@ -347,14 +352,18 @@ private fun WenquActivityActions(
                 modifier = Modifier.weight(1f),
             ) { Text("报名") }
 
-            else -> Button(
-                onClick = {
-                    clipboard.setText(AnnotatedString(activityName(activity)))
-                    onOpenWechat()
-                },
-                enabled = !busy,
-                modifier = Modifier.weight(1f),
-            ) { Text("去微信报名") }
+            // 本平台没有拉起外部 App 的能力时这一枚不渲染（动作行只剩「复制活动名」），
+            // 而不是留一个点了没反应的按钮（`design/ios-port.md` §11.2 ④）。
+            else -> if (onOpenWechat != null) {
+                Button(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(activityName(activity)))
+                        onOpenWechat()
+                    },
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f),
+                ) { Text("去微信报名") }
+            }
         }
     }
 }
@@ -362,27 +371,6 @@ private fun WenquActivityActions(
 /** 复制 / 引导用的活动名：标题空就退到项目名，再空退到「志愿服务活动」。 */
 private fun activityName(activity: WenquActivity): String =
     activity.title.ifBlank { activity.projectName.ifBlank { "志愿服务活动" } }
-
-/**
- * 拉起微信并给一句引导（App 不代报名）。
- *
- * 走 [edu.jxslu.schedule.startActivityOutsideApp]：微信是 singleTask、永远开不进本 task，
- * 从它返回时二级页的右推入过渡会被重放（用户报过「界面跳动」），这个出口会先换静止过渡。
- * 只做一级兜底——这里只是「递到微信首页」，没有扫一扫那种直达诉求。
- */
-private fun openWechatForSignup(context: android.content.Context, onNotice: (String) -> Unit) {
-    val launch = context.packageManager.getLaunchIntentForPackage("com.tencent.mm")
-    if (launch == null) {
-        onNotice("没检测到微信；活动名已复制，可到小程序「问渠」里报名")
-        return
-    }
-    runCatching {
-        context.startActivityOutsideApp(launch)
-        onNotice("活动名已复制，请在微信小程序「问渠」里报名")
-    }.onFailure {
-        onNotice("打不开微信；活动名已复制，请手动打开小程序报名")
-    }
-}
 
 private const val ACTIVITY_FOOTER =
     "报名 / 取消报名会直接提交到「问渠」平台；签到、提交材料等其它操作请到微信小程序内完成。"
@@ -414,7 +402,7 @@ private fun WenquActivityDetailContent(
     onRequestApply: () -> Unit = {},
     onRequestCancel: () -> Unit = {},
     onCopyName: () -> Unit = {},
-    onOpenWechat: () -> Unit = {},
+    onOpenWechat: (() -> Unit)? = null,
     onPin: (() -> Unit)? = null,
     /** 已预报名的报名开始时刻（>0 显示状态行；见主入口的 [preregOpensAt]）。 */
     preregOpenAt: Long = 0L,
@@ -567,7 +555,7 @@ private fun WenquActivityDetailContent(
                         Text(
                             "已预报名 · " + WenquRules.preregOpenLabel(
                                 preregOpenAt,
-                                System.currentTimeMillis(),
+                                AppClock.nowMillis(),
                             ) + " 自动抢（点此取消）",
                         )
                     }
