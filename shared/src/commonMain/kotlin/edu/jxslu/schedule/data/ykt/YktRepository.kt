@@ -2,9 +2,8 @@ package edu.jxslu.schedule.data.ykt
 
 import edu.jxslu.schedule.domain.YktKeyboard
 import edu.jxslu.schedule.domain.AppClock
-import edu.jxslu.schedule.data.session.LoginTarget
-import edu.jxslu.schedule.data.session.SessionStatus
-import edu.jxslu.schedule.data.session.YktTokenCache
+import io.ktor.http.encodeURLParameter
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
@@ -17,6 +16,12 @@ import kotlinx.serialization.json.JsonPrimitive
  * - 无自动重试：失败直接抛分类异常（[YktException]），UI 给对应文案；
  * - 取码每次进页最多一批（反复调用由 UI 层节流，这里不拦）；
  * - 每次登录顺带跑 [YktKeyboard.looksLikeSampleInvariant] 协议自检。
+ *
+ * iOS 移植 S14（2026-11-25）：搬进 `:shared` 的 commonMain。三处跟着换：
+ * - `System::currentTimeMillis` → [AppClock.nowMillis]（JVM 专有）；
+ * - `java.net.URLEncoder` 两处 → Ktor 的 [encodeURLParameter]（详见各调用点的注释）；
+ * - `SessionStatus` / `LoginTarget` → [YktSuspension] 这条缝（那两个类型还在 `:app` 的
+ *   `data/session`，属于并行的登录流）。
  */
 class YktRepository(
     private val client: YktClient,
@@ -27,7 +32,12 @@ class YktRepository(
      * 照常接管，所以这里读到废 token 也不会造成错误状态。
      */
     private val tokenCache: YktTokenCache? = null,
-    private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * 「凭证被判失效」的标记（DESIGN §3.16）。null = 本平台还没有登录态卡片（iOS），
+     * 标记动作整条跳过；401 重登与分类异常不受影响。
+     */
+    private val suspension: YktSuspension? = null,
+    private val clock: () -> Long = AppClock::nowMillis,
 ) {
 
     companion object {
@@ -325,11 +335,14 @@ class YktRepository(
 
     /** 官方收银台 URL 兜底拼法（正常路径 = 服务端 302 Location 直发，不走这里）。 */
     private fun buildCashierUrl(orderId: String, token: String): String {
+        // 原为 `java.net.URLEncoder.encode(v, "UTF-8")`（JVM 专有，commonMain 没有）。
+        // 两个键是纯 ASCII 常量、token 与 orderId 是 `[A-Za-z0-9_-]`，两种写法逐字一致；
+        // 换成带空格或 `*` 的值时要重新核对（encodeURLParameter 走 %20、且不保留 `*`）。
         val q = listOf(
             "synjones-auth" to token,
             "orderid" to orderId,
         ).joinToString("&") { (k, v) ->
-            java.net.URLEncoder.encode(k, "UTF-8") + "=" + java.net.URLEncoder.encode(v, "UTF-8")
+            k.encodeURLParameter() + "=" + v.encodeURLParameter()
         }
         return "${YktClient.BASE}/payment/?$q"
     }
@@ -468,7 +481,7 @@ class YktRepository(
         cachedToken = accessToken
         tokenCache?.saveToken(accessToken, clock())
         // 登录成功 = 凭证有效，清掉「已失效」标记（用户改密码后状态卡自动恢复）
-        SessionStatus.clearSuspended(LoginTarget.Ykt)
+        suspension?.setSuspended(false)
         return accessToken
     }
 
@@ -480,7 +493,7 @@ class YktRepository(
      * 标了状态卡就会在每次 token 过期时闪一下「登录状态已失效」。
      */
     private fun credentialFailure(message: String): Nothing {
-        SessionStatus.markSuspended(LoginTarget.Ykt)
+        suspension?.setSuspended(true)
         throw YktException.Credential(message)
     }
 
@@ -491,7 +504,7 @@ class YktRepository(
     /**
      * 清进程内 token 缓存（2026-09-28 审查补，退出登录时调）。
      *
-     * 落盘 token 由 [edu.jxslu.schedule.data.session.CredentialVault.clearYkt] 清，
+     * 落盘 token 由 [YktCredentialVault.clear] 清，
      * 但这份内存缓存不会自动失效：残留值敏感（进程存活期内驻留），且重新开启校园卡后
      * 第一次请求会拿旧 token 白试一次 401 才重登。敏感值不留内存。
      */
@@ -540,12 +553,14 @@ class YktRepository(
         // query 用 urlencode 拼接（口径同 Python 侧 urlencode(params)）。
         // 注意不能用 "path".toHttpUrl()：它要求绝对 URL（带 scheme），相对路径会直接
         // 抛 "Expected URL scheme 'http' or 'https' but no scheme was found"。
+        // 编码用 Ktor 的 encodeURLParameter（原 `java.net.URLEncoder` 是 JVM 专有）；
+        // 三个值都是服务端下发的账户号，纯字母数字，两种写法输出逐字相同。
         val query = listOf(
             "account" to card.account,
             "payacc" to card.payacc,
             "paytype" to card.paytype,
         ).joinToString("&") { (k, v) ->
-            java.net.URLEncoder.encode(k, "UTF-8") + "=" + java.net.URLEncoder.encode(v, "UTF-8")
+            k.encodeURLParameter() + "=" + v.encodeURLParameter()
         }
         val barcodeRaw = client.get("/berserker-app/ykt/tsm/batchGetBarCodeGet?$query", token = token)
         if (barcodeRaw.httpCode == 401) return null

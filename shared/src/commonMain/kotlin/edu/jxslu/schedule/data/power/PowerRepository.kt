@@ -1,8 +1,8 @@
 package edu.jxslu.schedule.data.power
 
-import edu.jxslu.schedule.data.session.LoginTarget
-import edu.jxslu.schedule.data.session.SessionStatus
+import edu.jxslu.schedule.data.ykt.YktSuspension
 import edu.jxslu.schedule.domain.AppClock
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonPrimitive
@@ -14,6 +14,9 @@ import kotlinx.serialization.json.buildJsonObject
  * - 凭证复用一卡通的 `YktCredentialStore`（学号 + 查询密码；2026-09-23 实测两个平台同一密码）；
  * - token **仅内存缓存**（3599 秒有效期也不落盘），业务码 401 时重登一次；
  * - 无自动重试：失败直接抛分类异常（[PowerException]），UI 给对应文案。
+ *
+ * iOS 移植 S14（2026-11-25）：搬进 `:shared` 的 commonMain。唯一的平台依赖是
+ * `SessionStatus` / `LoginTarget`（`:app` 的 `data/session`），已收成 [YktSuspension]。
  */
 class PowerRepository(
     private val client: PowerClient,
@@ -25,6 +28,11 @@ class PowerRepository(
     private val readingStore: PowerReadingStore,
     /** debug 包专用的协议留痕（`filesDir/power_debug/`）；release 构建传 null，一个字节都不写。 */
     private val debugDump: PowerDebugDump? = null,
+    /**
+     * 「凭证被判失效」的标记。电费与一卡通是**同一份凭证、同一个状态行**，
+     * 所以用的就是 `data.ykt` 那条缝。null = 本平台还没有登录态卡片（iOS）。
+     */
+    private val suspension: YktSuspension? = null,
 ) {
 
     /** access_token：读写都锁在 [loginMutex] 内；@Volatile 保证锁外读（快路径）的可见性。 */
@@ -69,13 +77,13 @@ class PowerRepository(
             ?: throw PowerException.Protocol("登录响应里没有 access_token")
         cachedToken = token
         // 电费与一卡通共用一份凭证，所以清的是同一个平台的标记
-        SessionStatus.clearSuspended(LoginTarget.Ykt)
+        suspension?.setSuspended(false)
         return token
     }
 
     /** 凭证不对：标记失效并抛出。电费与一卡通是同一份凭证、同一个状态行。 */
     private fun credentialFailure(message: String): Nothing {
-        SessionStatus.markSuspended(LoginTarget.Ykt)
+        suspension?.setSuspended(true)
         throw PowerException.Credential(message)
     }
 

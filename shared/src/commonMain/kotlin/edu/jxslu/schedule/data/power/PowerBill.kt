@@ -1,9 +1,11 @@
 package edu.jxslu.schedule.data.power
 
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.MoneyFormat
-import java.time.Instant
-import java.time.YearMonth
-import java.time.ZoneId
+import edu.jxslu.schedule.domain.TextFmt
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.minus
 
 /**
  * 缴费账单的月度聚合（DESIGN §3.13「缴费账单页」/ §4.24）。
@@ -16,7 +18,12 @@ import java.time.ZoneId
  * 9 月 1 日交 8 月的费时两者差一个月，而用户问的是「这个月花了多少」。
  * 日期解析不出来才退回 `feerange`（`202608` 形态）；两者都没有的归到 [UNKNOWN_MONTH]。
  *
- * 纯 JVM，可单测（`PowerBillTest`）。
+ * 纯计算，可单测（`PowerBillTest`）。
+ *
+ * iOS 移植 S14（2026-11-25）：`java.time` 三处换成 kotlinx-datetime——
+ * `Instant.atZone(systemDefault()).toLocalDate()` → [AppClock.dateTimeOf]，
+ * `YearMonth.now()` 参数改成 [LocalDate]（kotlinx-datetime 没有 `YearMonth`，
+ * 而月份键本来就只是「年月」，用日期够用），`"%04d-%02d".format(…)` → [TextFmt.pad]。
  */
 data class PowerBillMonth(
     /** 月份键 `2026-08`；[UNKNOWN_MONTH] 表示日期与 `feerange` 都没解析出来。 */
@@ -40,8 +47,7 @@ object PowerBill {
     /** 一条记录归到哪个月。 */
     fun monthKeyOf(turnover: PowerTurnover): String {
         if (turnover.epochMs > 0) {
-            val date = Instant.ofEpochMilli(turnover.epochMs).atZone(ZoneId.systemDefault()).toLocalDate()
-            return "%04d-%02d".format(date.year, date.monthValue)
+            return keyOf(AppClock.dateTimeOf(turnover.epochMs).date)
         }
         return normalizeCompact(turnover.month)
     }
@@ -68,12 +74,18 @@ object PowerBill {
         rows.filter { monthKeyOf(it) == monthKey }
             .sortedWith(compareByDescending<PowerTurnover> { it.epochMs }.thenByDescending { it.turnoverId ?: 0L })
 
-    /** 近 [count] 个月的键（含当月，升序）——月切换与柱状图共用一份口径。 */
-    fun recentMonthKeys(now: YearMonth, count: Int = WINDOW_MONTHS): List<String> =
-        (count - 1 downTo 0).map { offset ->
-            val month = now.minusMonths(offset.toLong())
-            "%04d-%02d".format(month.year, month.monthValue)
-        }
+    /**
+     * 近 [count] 个月的键（含当月，升序）——月切换与柱状图共用一份口径。
+     *
+     * [today] 只用到年月，调用方给 [AppClock.today] 即可；单测传固定日期。
+     * 迁移前这个参数是 `java.time.YearMonth`，kotlinx-datetime 没有对应类型。
+     */
+    fun recentMonthKeys(today: LocalDate, count: Int = WINDOW_MONTHS): List<String> =
+        (count - 1 downTo 0).map { offset -> keyOf(today.minus(DatePeriod(months = offset))) }
+
+    /** `2026-08-01` → `2026-08`。 */
+    private fun keyOf(date: LocalDate): String =
+        "${TextFmt.pad(date.year, 4)}-${TextFmt.pad(date.monthNumber)}"
 
     /** 月份标签：`2026-08` → 「2026 年 8 月」；[UNKNOWN_MONTH] → 「月份未知」。 */
     fun monthLabel(key: String): String {

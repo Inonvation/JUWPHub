@@ -2,7 +2,9 @@ package edu.jxslu.schedule.data.power
 
 import edu.jxslu.schedule.domain.CampusPaySign
 import edu.jxslu.schedule.domain.AppClock
-import java.net.URLEncoder
+import io.ktor.http.URLProtocol
+import io.ktor.http.Url
+import io.ktor.http.encodeURLParameter
 import kotlin.random.Random
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -265,8 +267,10 @@ fun orderStateFrom(raw: String): PowerOrderState? = runCatching {
         }.toList()
         if (fields.isEmpty()) return action
         if (!attrOf(formTag, "method").orEmpty().equals("GET", ignoreCase = true)) return null
+        // 原为 `java.net.URLEncoder.encode(v, "UTF-8")`（JVM 专有）。字段值里是
+        // `/pay?ticket=…&payTicket=…` 这类机器生成的串，不含空格，两种写法逐字一致。
         val query = fields.joinToString("&") { (name, value) ->
-            "${URLEncoder.encode(name, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
+            "${name.encodeURLParameter()}=${value.encodeURLParameter()}"
         }
         return action + (if ("?" in action) "&" else "?") + query
     }
@@ -276,11 +280,17 @@ fun orderStateFrom(raw: String): PowerOrderState? = runCatching {
         Regex("""(?<![\w-])$name\s*=\s*["']([^"']*)["']""", RegexOption.IGNORE_CASE)
             .find(tag)?.groupValues?.get(1)
 
-    /** 收银台链接白名单：https + 农行域或校内域（含子域）。 */
+    /**
+     * 收银台链接白名单：https + 农行域或校内域（含子域）。
+     *
+     * 原实现是 `java.net.URI(url)` + `uri.host` / `uri.scheme`（JVM 专有）。换成 Ktor 的
+     * [Url]：判据不变（协议必须 https、主机必须落在白名单域或其子域），解析不了同样
+     * 落到 `getOrDefault(false)`——白名单是硬闸，认不出就是不放行。
+     */
     private fun isCashierUrl(url: String): Boolean = runCatching {
-        val uri = java.net.URI(url)
-        val host = uri.host.orEmpty().lowercase()
-        uri.scheme.equals("https", ignoreCase = true) && ALLOWED_CASHIER_HOSTS.any { allowed ->
+        val parsed = Url(url)
+        val host = parsed.host.lowercase()
+        parsed.protocol == URLProtocol.HTTPS && ALLOWED_CASHIER_HOSTS.any { allowed ->
             host == allowed || host.endsWith(".$allowed")
         }
     }.getOrDefault(false)
@@ -316,7 +326,7 @@ fun orderStateFrom(raw: String): PowerOrderState? = runCatching {
         val token = ((obj["param"] as? JsonObject)?.get("abcTokenID") as? JsonPrimitive)
             ?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
             ?: return@runCatching null
-        ABC_MOBILE_CASHIER + URLEncoder.encode(token, "UTF-8")
+        ABC_MOBILE_CASHIER + token.encodeURLParameter()
     }.getOrNull()
 
     /** 农行手机版收银台入口（K 码支付：手机号 → 短信验证码），`TOKEN` 由平台现发。 */

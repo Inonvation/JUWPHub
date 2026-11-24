@@ -3,6 +3,8 @@ package edu.jxslu.schedule.data.session
 import android.content.Context
 import android.content.SharedPreferences
 import edu.jxslu.schedule.data.local.EncryptedPrefs
+import edu.jxslu.schedule.data.ykt.YktCredentialVault
+import edu.jxslu.schedule.data.ykt.YktTokenCache
 
 /**
  * 凭据与登录闸门的唯一读写口（DESIGN §4.27）。
@@ -16,8 +18,14 @@ import edu.jxslu.schedule.data.local.EncryptedPrefs
  *
  * 闸门状态（连续失败次数、停用标记）放普通 prefs：它不是机密，省一次 Keystore 调用。
  * 但**必须落盘**——只存内存的话进程一重启闸门就忘了，用户改密码前每次都再撞两次风控。
+ *
+ * iOS 移植 S14（2026-11-25）：本类同时是共享层那条缝 [YktCredentialVault] 的 **Android 实现**
+ * （`EncryptedSharedPreferences` + `MasterKey` 是 Android 专有能力，进不了 commonMain）。
+ * `read` / `save` / `clear` 三个方法就是缝的形状，内部仍是原来的 `readYkt` / `saveYkt` /
+ * `clearYkt` —— 现有实现原样复用，一行加密逻辑都没改。iOS 侧没有对应实现
+ * （`IosServices.yktCredentialStore()` 返回 null，升级条件写在那里）。
  */
-class CredentialVault(context: Context) : CredentialStore, YktTokenCache {
+class CredentialVault(context: Context) : CredentialStore, YktTokenCache, YktCredentialVault {
 
     private val appContext = context.applicationContext
 
@@ -96,6 +104,28 @@ class CredentialVault(context: Context) : CredentialStore, YktTokenCache {
         yktCache = null
         yktCached = true
         clearToken()
+    }
+
+    // ------------------------------------------- 一卡通凭证（共享层那条缝的实现）
+    //
+    // 三个方法只是把上面三个已有方法翻译成 `YktCredentialVault` 的形状，行为逐字不变。
+
+    override fun read(): YktCredentialVault.Credentials? =
+        readYkt()?.let { YktCredentialVault.Credentials(it.username, it.password) }
+
+    override fun save(username: String, password: String) = saveYkt(username, password)
+
+    /**
+     * 清凭证 = 凭证 + 落盘 token + 登录闸门 + 运行时「已失效」标记。
+     *
+     * 闸门与状态标记是**平台侧**的两份存储（普通 prefs 与 `SessionStatus`），共享层看不见，
+     * 所以这一串收在这里，`YktCredentialStore.clear()` 只转调。**不动教务那套**
+     * ——两份凭证互不牵连（DESIGN §4.27）。
+     */
+    override fun clear() {
+        clearYkt()
+        writeGate(LoginTarget.Ykt, LoginGateState())
+        SessionStatus.clear(LoginTarget.Ykt)
     }
 
     // ------------------------------------------------------------ 一卡通 token

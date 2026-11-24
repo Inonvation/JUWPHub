@@ -87,10 +87,15 @@ import edu.jxslu.schedule.data.jw.JwVpnDetector
 import edu.jxslu.schedule.data.repo.TranscriptStore
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.data.session.CredentialVault
+import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionExpiryStore
+import edu.jxslu.schedule.data.session.SessionStatus
 import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
+import edu.jxslu.schedule.data.ykt.YktSuspension
+import edu.jxslu.schedule.platform.appDataDir
+import okio.Path.Companion.toPath
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -99,6 +104,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 object Graph {
+    /**
+     * 「一卡通的凭证被判失效」这条运行时事实（iOS 移植 S14，2026-11-25）。
+     *
+     * 共享层的 `YktRepository` / `PowerRepository` 看不见 `SessionStatus`（它在 `:app`），
+     * 只认 `YktSuspension` 这条缝。两个仓库共用同一份凭证（学号 + 查询密码），
+     * 所以这里也只有一份 lambda、写死的 `LoginTarget.Ykt`——别为电费另建一个。
+     */
+    private val YKT_SUSPENSION = YktSuspension { suspended ->
+        SessionStatus.syncSuspended(LoginTarget.Ykt, suspended)
+    }
+
     /**
      * 进程级协程作用域（2026-09-27，DESIGN §4.29）。
      *
@@ -870,11 +886,16 @@ object Graph {
                 .also { profileSync = it }
         }
 
-    /** 校园卡仓库单例（DESIGN §4.19）：OkHttp client 只建一次；token 只在仓库内存里。 */
+    /** 校园卡仓库单例（DESIGN §4.19）：Ktor client 只建一次；token 只在仓库内存里。 */
     fun yktRepository(context: Context): YktRepository =
         yktRepository ?: synchronized(this) {
-            yktRepository ?: YktRepository(YktClient.create(), credentialVault(context))
-                .also { yktRepository = it }
+            yktRepository ?: YktRepository(
+                YktClient.create(),
+                credentialVault(context),
+                // 「凭证被判失效」的标记仍落在 Android 的 SessionStatus（DESIGN §3.16），
+                // 共享层只认那条缝；电费仓库传的是同一个 lambda（同一份凭证、同一行状态卡）
+                suspension = YKT_SUSPENSION,
+            ).also { yktRepository = it }
         }
 
     /**
@@ -982,7 +1003,7 @@ object Graph {
         }
 
     /**
-     * 缴费平台（寝室电费）仓库单例（DESIGN §4.24）：OkHttp 连接池只建一次；
+     * 缴费平台（寝室电费）仓库单例（DESIGN §4.24）：Ktor 连接池只建一次；
      * token 只在仓库内存里，不落盘。
      */
     fun powerRepository(context: Context): PowerRepository =
@@ -992,9 +1013,11 @@ object Graph {
                 powerReadingStore(context),
                 // debug 包才落协议原文（singleFeeitem / sceneBind，供核对「未设置寝室」
                 // 判据与绑定响应；release 一个字节都不写）
-                debugDump = File(context.applicationContext.filesDir, "power_debug")
+                debugDump = (appDataDir().toPath() / "power_debug")
                     .takeIf { BuildConfig.DEBUG }
                     ?.let { PowerDebugDump(it) },
+                // 与 [yktRepository] 同一份凭证、同一行状态卡
+                suspension = YKT_SUSPENSION,
             ).also { powerRepository = it }
         }
 
