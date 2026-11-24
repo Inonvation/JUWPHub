@@ -77,8 +77,14 @@ import edu.jxslu.schedule.ui.selection.SelectionWishesScreen
 import edu.jxslu.schedule.ui.selection.rememberSelectionCenterClient
 import edu.jxslu.schedule.ui.selection.rememberSelectionScreenActions
 import edu.jxslu.schedule.ui.ai.AiChatScreen
+import edu.jxslu.schedule.ui.ai.AiChatViewModel
 import edu.jxslu.schedule.ui.ai.AiHistoryScreen
+import edu.jxslu.schedule.ui.ai.AiHistoryViewModel
 import edu.jxslu.schedule.ui.ai.AiSettingsScreen
+import edu.jxslu.schedule.ui.ai.AiSettingsViewModel
+import edu.jxslu.schedule.ui.ai.rememberAiApiKeys
+import edu.jxslu.schedule.ui.ai.rememberAiImageStore
+import edu.jxslu.schedule.ui.ai.rememberAiImageUi
 import edu.jxslu.schedule.ui.timetable.ScheduleChangesScreen
 import edu.jxslu.schedule.ui.timetable.TimetableManageScreen
 import edu.jxslu.schedule.ui.tweak.CourseTweakScreen
@@ -458,13 +464,51 @@ class SubpageActivity : ComponentActivity() {
                 onBack = onBack,
                 onOpenHistory = { SubpageActivity.start(this, SubpageScreen.AI_HISTORY) },
             )
-            SubpageScreen.AI_SCHEDULE -> AiChatScreen(
+            // AI 调课三页（S15 收尾，2026-11-25 搬进 shared/commonMain）：
+            // ViewModel 由宿主建（design/ios-port.md §11.2 ①），图片与 API Key 两条平台能力
+            // 用 `rememberAiImageStore` / `rememberAiImageUi` / `rememberAiApiKeys` 装进去。
+            SubpageScreen.AI_SCHEDULE -> {
+                val apiKeys = rememberAiApiKeys()
+                val images = rememberAiImageStore()
+                val vm: AiChatViewModel = viewModel {
+                    AiChatViewModel(
+                        repo = Services.current.scheduleRepository(),
+                        client = Services.current.aiScheduleClient(),
+                        historyStore = Services.current.aiApplyHistoryStore(),
+                        imageStore = images,
+                        apiKeys = apiKeys,
+                    )
+                }
+                AiChatScreen(
+                    viewModel = vm,
+                    onBack = onBack,
+                    onOpenSettings = { SubpageActivity.start(this, SubpageScreen.AI_SETTINGS) },
+                    onOpenHistory = { SubpageActivity.start(this, SubpageScreen.AI_HISTORY) },
+                    imageUi = rememberAiImageUi(images) { uris -> uris.forEach(vm::addImage) },
+                )
+            }
+            SubpageScreen.AI_SETTINGS -> {
+                val apiKeys = rememberAiApiKeys()
+                AiSettingsScreen(
+                    viewModel = viewModel {
+                        AiSettingsViewModel(
+                            repo = Services.current.scheduleRepository(),
+                            client = Services.current.aiScheduleClient(),
+                            apiKeys = apiKeys,
+                        )
+                    },
+                    onBack = onBack,
+                )
+            }
+            SubpageScreen.AI_HISTORY -> AiHistoryScreen(
+                viewModel = viewModel {
+                    AiHistoryViewModel(
+                        repo = Services.current.scheduleRepository(),
+                        historyStore = Services.current.aiApplyHistoryStore(),
+                    )
+                },
                 onBack = onBack,
-                onOpenSettings = { SubpageActivity.start(this, SubpageScreen.AI_SETTINGS) },
-                onOpenHistory = { SubpageActivity.start(this, SubpageScreen.AI_HISTORY) },
             )
-            SubpageScreen.AI_SETTINGS -> AiSettingsScreen(onBack = onBack)
-            SubpageScreen.AI_HISTORY -> AiHistoryScreen(onBack = onBack)
             // 收件箱（S19 搬进共享层）：route 解析留在页内，跳页这一件平台事由宿主给。
             // 参数是「已经解析好的 SubpageScreen」，认不出 route 的消息在页内就被挡掉了。
             SubpageScreen.INBOX -> InboxScreen(

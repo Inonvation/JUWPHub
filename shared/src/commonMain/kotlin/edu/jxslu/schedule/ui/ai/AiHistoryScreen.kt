@@ -30,15 +30,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.AiApplyRecord
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
@@ -46,9 +44,6 @@ import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /**
  * 「调课记录」页（DESIGN §3.25 / §4.39 / §4.17，2026-10-07）：课表改动的本机留痕，
@@ -57,17 +52,15 @@ import java.time.format.DateTimeFormatter
  * `AiApplyHistoryStore` 类注释）。入口：AI 调课页顶栏历史图标、调课检测页顶栏历史图标。
  *
  * 列表观感与全 App 一致：`AppCard` + 16dp 横距。
+ *
+ * iOS 移植（2026-11-25）：ViewModel 由宿主创建（`design/ios-port.md` §11.2 ①）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AiHistoryScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val viewModel: AiHistoryViewModel = viewModel(
-        factory = AiHistoryViewModel.Factory(
-            Graph.repository(context),
-            Graph.aiApplyHistoryStore(context),
-        ),
-    )
+fun AiHistoryScreen(
+    viewModel: AiHistoryViewModel,
+    onBack: () -> Unit,
+) {
     val records by viewModel.records.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
 
@@ -250,15 +243,18 @@ private fun AiHistoryRow(
 private fun sourceLabel(record: AiApplyRecord): String =
     if (record.source == AiApplyRecord.SOURCE_DETECT) "教务合并" else "AI 调课"
 
-private val SAME_YEAR = DateTimeFormatter.ofPattern("M月d日 HH:mm")
-private val OTHER_YEAR = DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm")
-
-/** 记录时间：当年省年份，跨年带年份（留痕上限 50 条，跨年是常态不是例外）。 */
+/**
+ * 记录时间：当年省年份，跨年带年份（留痕上限 50 条，跨年是常态不是例外）。
+ *
+ * `java.time` 的 `Instant` / `ZoneId` / `DateTimeFormatter` 都是 JVM 专有，
+ * 改成 `AppClock.dateTimeOf()`（同为系统默认时区）+ 手写补零，格式与迁移前逐字一致。
+ */
 private fun timeText(epochMillis: Long): String {
-    val time = Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault())
-    return if (time.year == java.time.LocalDate.now().year) {
-        time.format(SAME_YEAR)
+    val time = AppClock.dateTimeOf(epochMillis)
+    val clock = "${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}"
+    return if (time.year == AppClock.today().year) {
+        "${time.monthNumber}月${time.dayOfMonth}日 $clock"
     } else {
-        time.format(OTHER_YEAR)
+        "${time.year}年${time.monthNumber}月${time.dayOfMonth}日 $clock"
     }
 }

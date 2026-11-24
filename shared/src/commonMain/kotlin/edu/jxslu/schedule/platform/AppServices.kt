@@ -1,5 +1,6 @@
 package edu.jxslu.schedule.platform
 
+import edu.jxslu.schedule.data.ai.AiScheduleClient
 import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.power.PowerReadingStore
@@ -8,6 +9,7 @@ import edu.jxslu.schedule.data.qiekj.BalanceData
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
+import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.data.repo.ExamSync
@@ -180,6 +182,37 @@ interface AppServices {
      * 30 分钟 TTL 等于白设（免费档按请求数算）。
      */
     fun weatherRepository(): WeatherRepository
+
+    // ---- AI 调课（iOS 移植 S15 收尾，2026-11-25） ----
+    //
+    // 页面（`ui/ai` 整包）搬进共享层后要的两件。**只有这两件**：图片附件存储与
+    // API Key 存储都是平台能力，按 `design/ios-port.md` §11.2 ④ 收成页面侧的可空参数
+    // （`AiImageUi` / `AiApiKeys`），不进本接口——它们要的不是「一个服务」，而是
+    // 「本平台有没有 EncryptedSharedPreferences / BitmapFactory」。
+
+    /**
+     * AI 调课的 OpenAI 兼容客户端（流式 + 工具调用，见 `data/ai/AiScheduleClient`）。
+     *
+     * **非空**：纯 Ktor，两端都建得起来；差别只在图片编码器（Android 由
+     * `createAiScheduleClient()` 注入 `File → data URI`，iOS 暂时恒 null = 不发图）。
+     *
+     * **必须是同一个实例**：客户端持有 Ktor 的连接池，每次进页 new 一个等于每次重开池。
+     */
+    fun aiScheduleClient(): AiScheduleClient
+
+    /**
+     * AI 调课的应用留痕（`appDataDir()` 下一份 JSON，上限 50 条）。
+     *
+     * **非空**：`AiApplyHistoryStore` 只认 `appDataDir()`，两端都能读写。
+     * 「AI 调课」页与「调课记录」页共用的必须是同一份实例——撤销、留痕、回执同步
+     * 全按 id 对账，两个实例会各写一份 JSON。
+     *
+     * 注意它的**构造**会同步读一次盘（上限 50 条）。2026-11-06 审计 2-B 复核后
+     * 保留这个口径：它不参与首帧（只服务应用 / 撤销 / 留痕同步），但装配根把它做成
+     * 进程单例，整个进程只付一次；延后到协程里得把 provider 穿进 ViewModel 的三个
+     * 调用点，改面大、收益是一次几毫秒。
+     */
+    fun aiApplyHistoryStore(): AiApplyHistoryStore
 
     /**
      * 应用唯一的 Room 库（`JuwDatabase`，v21）。

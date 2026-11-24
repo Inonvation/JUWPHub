@@ -1,5 +1,6 @@
 package edu.jxslu.schedule
 
+import edu.jxslu.schedule.data.ai.AiScheduleClient
 import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.power.PowerClient
@@ -10,6 +11,7 @@ import edu.jxslu.schedule.data.prefs.recordGuessOrder
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
+import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
@@ -257,6 +259,22 @@ class IosServices : AppServices {
 
     /** 与课表 / 成绩 / 收件箱同一个库实例（`juwDatabase()` 自带单例缓存）。 */
     override fun database(): JuwDatabase = juwDatabase()
+
+    // ---- AI 调课（iOS 移植 S15 收尾，2026-11-25） ----
+    //
+    // 两件非空：客户端是纯 Ktor、留痕只认 `appDataDir()`，与 Android 同一份实现。
+    // 差别只有图片编码器——`AiScheduleClient.create()` 不注入时恒 null，等于「不发图」，
+    // 纯文本链路照常可用（iOS 的图片压缩还没接，见 `IosPage` 的说明）。
+
+    /** 进程单例：客户端持有 Ktor 连接池，每次进页 new 一个等于每次重开池。 */
+    private val aiClient: AiScheduleClient by lazy { AiScheduleClient.create() }
+
+    /** 与「调课记录」页共用的那一份（按 id 对账，两个实例会各写一份 JSON）。 */
+    private val aiHistory: AiApplyHistoryStore by lazy { AiApplyHistoryStore() }
+
+    override fun aiScheduleClient(): AiScheduleClient = aiClient
+
+    override fun aiApplyHistoryStore(): AiApplyHistoryStore = aiHistory
 
     /**
      * 课表页背景图：**iOS 侧还没有实现，返回 null**（iOS 移植 S17，2026-11-25）。

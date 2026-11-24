@@ -1,9 +1,7 @@
 package edu.jxslu.schedule.ui.ai
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.data.ai.AiCredentialStore
 import edu.jxslu.schedule.data.ai.AiScheduleClient
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import kotlinx.coroutines.CancellationException
@@ -21,8 +19,8 @@ import kotlinx.coroutines.withContext
 /**
  * AI 服务配置页（DESIGN §4.39）的状态容器。
  *
- * 地址 / 模型 / 脱敏走 DataStore（经 Repository 单流）；**API Key 走
- * [AiCredentialStore] 加密存储**，不进 DataStore。
+ * 地址 / 模型 / 脱敏走 DataStore（经 Repository 单流）；**API Key 走加密存储**
+ * （Android 是 `AiCredentialStore`），不进 DataStore。
  *
  * **首帧真值必须同步拿到**（同 MeViewModel 的口径）：这 6 个值直接决定开关与选中项怎么画，
  * 用默认值先渲染一次再跳过去，用户看到的是「开关自己动了一下」——这是明确要避免的。
@@ -32,12 +30,21 @@ import kotlinx.coroutines.withContext
  * 主线程阻塞；现在收成**一段**（[initial]）。DataStore 的首次读盘只发生一次（之后走内存），
  * 所以真正的收益是「6 次阻塞段 → 1 次」而不是「少读 5 次盘」。
  * 不改的选项：把 `initialValue` 换成硬编码默认值 + 首帧后刷新 —— 那就是上面说的闪一下，不做。
+ *
+ * ## iOS 移植（2026-11-25）
+ *
+ * [apiKeys] 可空：`null` = 本平台没有加密凭证存储（iOS 要等 Keychain）。此时
+ * [canStoreKey] 为 false，页面把「API Key」与「测试连接」两行整块隐藏——
+ * 给一个存不住密码的输入框比没有更糟。
  */
 class AiSettingsViewModel(
     private val repo: ScheduleRepository,
-    private val credentialStore: AiCredentialStore,
     private val client: AiScheduleClient,
+    private val apiKeys: AiApiKeys? = null,
 ) : ViewModel() {
+
+    /** 本平台能不能存 API Key（决定「API Key」「测试连接」两行渲不渲染）。 */
+    val canStoreKey: Boolean get() = apiKeys != null
 
     /** 构造期唯一一次阻塞读（见类注释）；后面 6 条流都以它为 `initialValue`。 */
     private val initial: AiSettingsInitial = runBlocking { AiSettingsInitial.read(repo) }
@@ -83,7 +90,7 @@ class AiSettingsViewModel(
      * `Graph.aiCredentialStore` 又是进程单例 → 整个进程只付一次。
      * **不能改成 `LaunchedEffect` / `viewModelScope.launch`**：见上，首帧就要真值。
      */
-    private val _apiKey = MutableStateFlow(credentialStore.readApiKey())
+    private val _apiKey = MutableStateFlow(apiKeys?.read())
     val apiKey: StateFlow<String?> = _apiKey.asStateFlow()
 
     private val _busy = MutableStateFlow(false)
@@ -114,18 +121,23 @@ class AiSettingsViewModel(
     }
 
     fun saveApiKey(value: String) {
-        credentialStore.saveApiKey(value)
-        _apiKey.value = credentialStore.readApiKey()
+        val store = apiKeys ?: return
+        store.save(value)
+        _apiKey.value = store.read()
     }
 
     fun clearApiKey() {
-        credentialStore.clear()
+        val store = apiKeys ?: return
+        store.clear()
         _apiKey.value = null
     }
 
     /**
      * 探测服务：拉一次 `/models`——既验证地址与 Key 是否可用，也顺便给出模型可选项。
      * 失败不重试，错误分类交给 [aiErrorText]。
+     *
+     * `Dispatchers.IO` → `Default`：commonMain 取不到 IO 调度器；这条链路是挂起等待网络，
+     * 占不住线程（与 `AiScheduleClient` 内部同一口径）。
      */
     suspend fun probe(): Result<List<String>> {
         val url = baseUrl.value.trim()
@@ -134,23 +146,13 @@ class AiSettingsViewModel(
         if (key.isBlank()) return Result.failure(IllegalStateException("请先填写 API Key"))
         _busy.value = true
         return try {
-            Result.success(withContext(Dispatchers.IO) { client.listModels(url, key) })
+            Result.success(withContext(Dispatchers.Default) { client.listModels(url, key) })
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             Result.failure(t)
         } finally {
             _busy.value = false
         }
-    }
-
-    class Factory(
-        private val repo: ScheduleRepository,
-        private val credentialStore: AiCredentialStore,
-        private val client: AiScheduleClient,
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            AiSettingsViewModel(repo, credentialStore, client) as T
     }
 }
 

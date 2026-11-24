@@ -40,15 +40,19 @@ import edu.jxslu.schedule.ui.theme.semanticColors
  *
  * 状态词是唯一的「发送状态」呈现：未分析不显示；已发送显示「已分析 · H:mm」；
  * 与已发送内容不一致时显示「内容有改动」（对应底栏的「重新分析」）。
+ *
+ * iOS 移植（2026-11-25）：截图三件（缩略图 / 选图 / 粘图）全部由宿主注入；
+ * [thumb] 为 null 时只留文字输入——本平台没有图片落盘与解码能力。
  */
 @Composable
 internal fun AiNoticeCard(
     work: AiWorkState,
     draft: String,
     attachments: List<String>,
+    thumb: (@Composable (String, Modifier, String?) -> Unit)?,
     onDraftChange: (String) -> Unit,
-    onPickImages: () -> Unit,
-    onPasteImage: () -> Unit,
+    onPickImages: (() -> Unit)?,
+    onPasteImage: (() -> Unit)?,
     onRemoveImage: (String) -> Unit,
     onOpenImage: (String) -> Unit,
     onClear: () -> Unit,
@@ -101,12 +105,13 @@ internal fun AiNoticeCard(
             ),
             maxLines = 8,
         )
-        if (attachments.isNotEmpty()) {
+        if (attachments.isNotEmpty() && thumb != null) {
             Spacer(Modifier.height(2.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 attachments.forEach { name ->
                     AttachmentThumb(
                         fileName = name,
+                        thumb = thumb,
                         onOpen = { onOpenImage(name) },
                         onRemove = { onRemoveImage(name) },
                     )
@@ -115,25 +120,30 @@ internal fun AiNoticeCard(
             Spacer(Modifier.height(6.dp))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(
-                onClick = onPickImages,
-                enabled = !analyzing,
-                modifier = Modifier.heightIn(min = 44.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp),
-            ) {
-                Icon(AppIcons.ImageAdd01, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("添加截图", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            // 「添加截图 / 粘贴图片」各是一条平台入口：null = 没有 → 整行不渲染（不摆死按钮）
+            if (onPickImages != null) {
+                TextButton(
+                    onClick = onPickImages,
+                    enabled = !analyzing,
+                    modifier = Modifier.heightIn(min = 44.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                ) {
+                    Icon(AppIcons.ImageAdd01, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("添加截图", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                }
             }
-            TextButton(
-                onClick = onPasteImage,
-                enabled = !analyzing,
-                modifier = Modifier.heightIn(min = 44.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp),
-            ) {
-                Icon(AppIcons.ClipboardPaste, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("粘贴图片", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            if (onPasteImage != null) {
+                TextButton(
+                    onClick = onPasteImage,
+                    enabled = !analyzing,
+                    modifier = Modifier.heightIn(min = 44.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                ) {
+                    Icon(AppIcons.ClipboardPaste, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("粘贴图片", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                }
             }
             Spacer(Modifier.weight(1f))
             TextButton(
@@ -157,17 +167,18 @@ internal fun AiNoticeCard(
 @Composable
 private fun AttachmentThumb(
     fileName: String,
+    thumb: @Composable (String, Modifier, String?) -> Unit,
     onOpen: () -> Unit,
     onRemove: () -> Unit,
 ) {
     Box {
-        AiThumb(
-            fileName = fileName,
-            modifier = Modifier
+        thumb(
+            fileName,
+            Modifier
                 .size(64.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .clickable { onOpen() },
-            contentDescription = "通知图片，点按查看",
+            "通知图片，点按查看",
         )
         Box(
             Modifier
