@@ -8,6 +8,7 @@ import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.prefs.recordGuessOrder
+import edu.jxslu.schedule.data.qiekj.IosQiekjExpiryMarker
 import edu.jxslu.schedule.data.qiekj.IosQiekjOrderStore
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
@@ -47,7 +48,6 @@ import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.session.IosJwReadSession
 import edu.jxslu.schedule.data.session.IosAiApiKeyStore
 import edu.jxslu.schedule.data.session.IosQiekjCredentialStore
-import edu.jxslu.schedule.data.session.IosQiekjExpiryMarker
 import edu.jxslu.schedule.data.session.IosSessionExpirySink
 import edu.jxslu.schedule.data.session.IosUjingSessionStore
 import edu.jxslu.schedule.data.session.IosWenquSessionStore
