@@ -341,7 +341,14 @@ class SubpageActivity : ComponentActivity() {
             )
             SubpageScreen.AI_SETTINGS -> AiSettingsScreen(onBack = onBack)
             SubpageScreen.AI_HISTORY -> AiHistoryScreen(onBack = onBack)
-            SubpageScreen.INBOX -> InboxScreen(onBack = onBack)
+            // 收件箱（S19 搬进共享层）：route 解析留在页内，跳页这一件平台事由宿主给。
+            // 参数是「已经解析好的 SubpageScreen」，认不出 route 的消息在页内就被挡掉了。
+            SubpageScreen.INBOX -> InboxScreen(
+                onBack = onBack,
+                onOpenSubpage = { target, focus ->
+                    SubpageActivity.start(this, target, focusItemId = focus)
+                },
+            )
             // focusItemId 对 SCHEDULE_SHARE 复用为「进页时预览哪一周」（课表页分享弹层第 4 行）
             SubpageScreen.SCHEDULE_SHARE ->
                 ScheduleShareScreen(

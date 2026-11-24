@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.inbox
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,9 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,24 +34,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.SubpageActivity
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.local.InboxMessageEntity
-import edu.jxslu.schedule.ui.common.AppCard
-import edu.jxslu.schedule.ui.common.AppConfirmDialog
-import edu.jxslu.schedule.ui.common.SkeletonBox
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.TextFmt
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
+import edu.jxslu.schedule.ui.common.AppBackHandler
+import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.AppConfirmDialog
+import edu.jxslu.schedule.ui.common.PageBackButton
+import edu.jxslu.schedule.ui.common.SkeletonBox
 import edu.jxslu.schedule.ui.icon.AppIcons
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import kotlinx.coroutines.launch
 
 /**
  * 收件箱（DESIGN §3.24 / §4.38，2026-10-06）：应用内重要事实的留痕——考试安排、成绩、
@@ -66,12 +62,32 @@ import kotlinx.coroutines.launch
  *   （route 按枚举名安全解析，认不出就不跳——老消息不会因路由演进点崩）；
  * - 顶栏「全部已读」一键已读；长按行进多选（底部「标为已读 / 删除」批量操作条，
  *   删除过确认弹窗）；删除是软删——同键重投不复活，30 天后物理清除。
+ *
+ * ## 搬进共享层改了什么（iOS 移植 S19，2026-11-25）
+ *
+ * 数据源改走 [Services.current]，平台动作收成可空回调——本文件不再认识 `Context`：
+ *
+ * | 原写法 | 现在 |
+ * |---|---|
+ * | `Graph.inboxRepository(context)` | `Services.current.inboxRepository()`（两端都非空） |
+ * | `SubpageActivity.start(context, target, focusItemId)` | [onOpenSubpage]；null = 本平台没有二级页栈 |
+ * | `androidx.activity.compose.BackHandler` | [AppBackHandler]（Android 同一实现，iOS 无系统返回键） |
+ * | `Icons.AutoMirrored.Filled.ArrowBack` / `Icons.Filled.Close` | `AppIcons.ArrowLeft01` / `AppIcons.Cancel01` |
+ *
+ * **route 解析留在页内**（不在宿主侧做）：`SubpageScreen` 枚举是共享层的类型，
+ * 而「认不出就不跳」是这一页的交互承诺，交给宿主等于让每个宿主各实现一遍。
+ *
+ * [onOpenSubpage] 为 null 时点行**仍会标已读**（那是数据动作，不是导航动作），
+ * 只是不跳页——iOS 侧现在就是这种状态，等二级页栈搬过去再传。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InboxScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val repo = remember { Graph.inboxRepository(context) }
+fun InboxScreen(
+    onBack: () -> Unit,
+    /** 打开消息指向的二级页；null = 本平台没有二级页栈（iOS 现状）。 */
+    onOpenSubpage: ((SubpageScreen, focusItemId: String?) -> Unit)? = null,
+) {
+    val repo = remember { Services.current.inboxRepository() }
     val scope = rememberCoroutineScope()
 
     // null = Room 首帧未到（渲染骨架防「先空态后跳真数据」）；空列表 = 真空态
@@ -82,13 +98,13 @@ fun InboxScreen(onBack: () -> Unit) {
     var confirmingDelete by remember { mutableStateOf(false) }
 
     // 多选模式接管返回：先退多选再退页
-    BackHandler(enabled = selection != null) { selection = null }
+    AppBackHandler(enabled = selection != null) { selection = null }
 
     fun openMessage(msg: InboxMessageEntity) {
         scope.launch { repo.markRead(msg.id) }
         val target = SubpageScreen.entries.firstOrNull { it.name == msg.route }
         if (target != null) {
-            SubpageActivity.start(context, target, focusItemId = msg.focusItemId)
+            onOpenSubpage?.invoke(target, msg.focusItemId)
         }
     }
 
@@ -118,15 +134,14 @@ fun InboxScreen(onBack: () -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text("收件箱") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
+                // 返回键走 ui/common 的统一形态（`AppIcons.ArrowLeft01` + 48dp 命中区）：
+                // 共享层不能用 `Icons.AutoMirrored.Filled.ArrowBack` 那一套 material 图标，
+                // 而二级页返回键本来就有唯一出处。
+                navigationIcon = { PageBackButton(onBack) },
                 actions = {
                     if (selection != null) {
                         IconButton(onClick = { selection = null }) {
-                            Icon(Icons.Filled.Close, contentDescription = "退出多选")
+                            Icon(AppIcons.Cancel01, contentDescription = "退出多选")
                         }
                     } else {
                         TextButton(

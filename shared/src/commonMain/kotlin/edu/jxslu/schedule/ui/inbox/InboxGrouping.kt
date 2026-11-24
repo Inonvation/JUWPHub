@@ -17,8 +17,12 @@ import kotlinx.datetime.TimeZone
  * 它就跟消息行一样由列表数据决定，与组合顺序无关。
  *
  * 纯函数（不碰 Compose / Android）：`InboxGroupingTest` 直接钉住分段结果。
+ *
+ * **public 而不是 internal**（iOS 移植 S19）：`InboxGroupingTest` 留在 `:app/src/test`，
+ * 跨模块看不见 `internal`。把它挪进 `commonTest` 是另一件事（`commonTest` 两个 target 都要跑，
+ * 得先确认 JUnit4 口径），这一批不动。
  */
-internal sealed interface InboxListItem {
+sealed interface InboxListItem {
     /** LazyColumn 的稳定 key。带前缀防止消息 id 与分组头撞车。 */
     val key: String
 
@@ -46,8 +50,11 @@ internal sealed interface InboxListItem {
  * 「桶变了就插一个头」。同一桶连续出现只插一次头，桶可以重复出现（数据不单调时）——
  * 这是有意的：宁可多一个头，也不要把不同日期的消息并到同一个头下面。
  * 重复出现的头靠 [InboxListItem.Header.occurrence] 区分 key，不会撞车。
+ *
+ * **public 而不是 internal**（iOS 移植 S19）：调用它的 `InboxGroupingTest` 留在
+ * `:app/src/test`，跨模块看不见 `internal`。
  */
-internal fun inboxListItems(
+fun inboxListItems(
     messages: List<InboxMessageEntity>,
     zone: TimeZone,
     today: LocalDate,

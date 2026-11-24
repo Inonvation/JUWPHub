@@ -6,6 +6,7 @@ import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
+import edu.jxslu.schedule.data.repo.InboxRepository
 import edu.jxslu.schedule.data.repo.NoteRepository
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
@@ -60,6 +61,10 @@ class GraphServices(private val context: Context) : AppServices {
     override fun noteRepository(): NoteRepository = Graph.noteRepository(appContext)
 
     override fun homeworkRepository(): HomeworkRepository = Graph.homeworkRepository(appContext)
+
+    // 收件箱（S19）：页面搬进共享层后要它。转给 `Graph` 的同一份单例——收件箱是旁路留痕，
+    // 页面读的与各 Sync 写的必须是同一个仓库实例，否则今日页角标与收件箱页会对不上。
+    override fun inboxRepository(): InboxRepository = Graph.inboxRepository(appContext)
 
     // ---- 一卡通 / 寝室电费（S14） ----
     //

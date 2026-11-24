@@ -35,6 +35,7 @@ import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.DataSelfTestResult
 import edu.jxslu.schedule.ui.DataSelfTestStrip
 import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
+import edu.jxslu.schedule.ui.inbox.InboxScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.selection.SelectionScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
@@ -141,6 +142,11 @@ private fun IosRoot(services: IosServices) {
                         // 考试（S10）：同上。考试数据来自教务同步，iOS 已有 IosJwReadSession，
                         // 顶栏的「刷新」走 ExamSync，导入页登录后即可拉到。
                         IosPage.Exam -> ExamScreen(onBack = { page = IosPage.Week })
+                        // 收件箱（S19 搬进共享层）：单表 Room，iOS 直接可读。
+                        // `onOpenSubpage` 传 null = iOS 还没有二级页栈：点行**仍会标已读**，
+                        // 只是不跳页（见 InboxScreen 头部参数表）。传个空 lambda 会变成
+                        // 「点了没反应」，比没有更糟。
+                        IosPage.Inbox -> InboxScreen(onBack = { page = IosPage.Week })
                     }
                 }
                 hint?.let { text ->
@@ -175,7 +181,7 @@ private fun IosRoot(services: IosServices) {
 }
 
 /**
- * iOS 侧目前能进的一级页面（S13 起有笔记 / 作业 / 选课）。
+ * iOS 侧目前能进的一级页面（S13 起有笔记 / 作业 / 选课；S19 起有收件箱）。
  *
  * 为什么用枚举而不是导航库：iOS 侧还没有二级页栈（`SubpageActivity` 那一套是 Android 的），
  * 这一版只要能切页就够验证「共享页面在 iOS 上真的画得出来」。等详情页搬完再换真正的路由。
@@ -187,6 +193,7 @@ private enum class IosPage(val label: String) {
     Selection("选课"),
     Score("成绩"),
     Exam("考试"),
+    Inbox("收件箱"),
 }
 
 /**
