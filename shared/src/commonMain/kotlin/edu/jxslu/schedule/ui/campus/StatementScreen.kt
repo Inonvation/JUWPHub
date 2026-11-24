@@ -39,17 +39,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.data.local.YktTurnoverEntity
 import edu.jxslu.schedule.data.ykt.YktModels
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.YearMonthKey
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppBarChart
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
@@ -65,8 +64,9 @@ import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.icon.AppIcons
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.minus
 
 /**
  * 消费流水页（DESIGN §4.19 L3/L4）：本地库优先（秒开、离线可查）+ 下拉/进页增量同步。
@@ -81,14 +81,19 @@ import java.time.format.DateTimeFormatter
  *
  * 明细列表按自然日分组、每组一张卡；筛选是本地过滤（当前月已全部在内存里，
  * 不发请求、不动 DAO）。
+ *
+ * iOS 移植 S20（2026-11-25）：搬进 `shared/commonMain`。按 `design/ios-port.md` §11.2：
+ * ViewModel 由宿主创建后传进来（共享层没有 `viewModel()`）；[onOpenSettings] 收成可空
+ * ——null = 本平台没有「校园卡设置」那一页，按钮整行不渲染；日期分组从
+ * `java.time.LocalDate` + `DateTimeFormatter` 换成 kotlinx-datetime + [AppClock]。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StatementScreen(
+    viewModel: StatementViewModel,
     onBack: () -> Unit = {},
-    /** 详情弹层内「凭证/开关」引导跳设置页（凭证缺失时）。 */
-    onOpenSettings: () -> Unit = {},
-    viewModel: StatementViewModel = viewModel(factory = StatementViewModel.Factory(LocalContext.current)),
+    /** 详情弹层内「凭证/开关」引导跳设置页（凭证缺失时）；null = 本平台没有那一页。 */
+    onOpenSettings: (() -> Unit)? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -173,9 +178,11 @@ fun StatementScreen(
                             message = "凭证未配置或已清除，请先在「我的 → 校园卡」开启并验证。已保存的历史账单仍可离线查看。",
                             tone = NoticeTone.Warning,
                         )
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                            Text("去设置")
+                        if (onOpenSettings != null) {
+                            Spacer(Modifier.height(8.dp))
+                            Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+                                Text("去设置")
+                            }
                         }
                     }
 
@@ -244,13 +251,15 @@ private data class DayGroup(
     val records: List<YktTurnoverEntity>,
 )
 
-private val DAY_KEY_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-
 /**
  * 按自然日切成组。
  *
  * 组键取时间原文的日期部分（`jndatetimeStr` 前 10 位）而不是 `jndatetime` 毫秒：
  * 时间原文解析失败时 `jndatetime` 为 0（会全挤进 1970 年一组），原文至少还能按字符串分组。
+ *
+ * iOS 移植 S20：日期解析从 `LocalDate.parse(key, DateTimeFormatter.ofPattern("yyyy-MM-dd"))`
+ * 换成 kotlinx 的 [LocalDate.parse]（它只认 ISO 口径，而组键本来就是 `yyyy-MM-dd`，
+ * 所以那层 `DateTimeFormatter` 是多余的）；「今天」取 [AppClock.today]。
  */
 private fun List<YktTurnoverEntity>.toDayGroups(filter: StatementFilter): List<DayGroup> {
     val out = ArrayList<DayGroup>()
@@ -259,13 +268,13 @@ private fun List<YktTurnoverEntity>.toDayGroups(filter: StatementFilter): List<D
 
     fun flush() {
         val key = currentKey ?: return
-        val date = runCatching { LocalDate.parse(key, DAY_KEY_FORMAT) }.getOrNull()
-        val today = LocalDate.now()
+        val date = runCatching { LocalDate.parse(key) }.getOrNull()
+        val today = AppClock.today()
         val label = when (date) {
             null -> key
             today -> "今天"
-            today.minusDays(1) -> "昨天"
-            else -> "${date.monthValue} 月 ${date.dayOfMonth} 日"
+            today.minus(DatePeriod(days = 1)) -> "昨天"
+            else -> "${date.monthNumber} 月 ${date.dayOfMonth} 日"
         }
         out.add(DayGroup(key = key, label = label, records = bucket))
     }
@@ -365,9 +374,9 @@ private fun SummaryCard(
                 },
                 title = "${item.year} 年 ${item.month} 月",
                 axisLabel = when (index) {
-                    0 -> "%d.%d".format(item.year, item.month)
-                    windowMonths.lastIndex -> "%d.%d（今）".format(item.year, item.month)
-                    else -> "%d".format(item.month)
+                    0 -> "${item.year}.${item.month}"
+                    windowMonths.lastIndex -> "${item.year}.${item.month}（今）"
+                    else -> item.month.toString()
                 },
             )
         }

@@ -1,22 +1,20 @@
 package edu.jxslu.schedule.ui.campus
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.local.JuwDatabase
-import edu.jxslu.schedule.data.local.juwDatabase
+import edu.jxslu.schedule.data.local.TypeAmountRow
 import edu.jxslu.schedule.data.local.YktTurnoverEntity
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktException
 import edu.jxslu.schedule.data.ykt.YktRepository
 import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer
-import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.YearMonthKey
-import java.time.LocalDate
+import edu.jxslu.schedule.domain.YktTurnoverRow
+import edu.jxslu.schedule.ui.common.NoticeTone
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,7 +38,7 @@ data class StatementUiState(
     val expensesFen: Long = 0,
     val incomeFen: Long = 0,
     /** 当月分类聚合（金额降序，正数支出/负数收入）。 */
-    val byType: List<edu.jxslu.schedule.data.local.TypeAmountRow> = emptyList(),
+    val byType: List<TypeAmountRow> = emptyList(),
     /** 本地库总条数。 */
     val localCount: Int = 0,
     /** 近 12 个月逐月支出（分，含当月；键 `2026-09`；无数据的月不在 map 里）。 */
@@ -66,13 +64,28 @@ sealed interface StatementEvent {
  * - 后台 [YktTurnoverSyncer] 增量拉新（时间倒序翻页，遇已入库 orderId 即停），
  *   Room 流自动刷新 UI；
  * - 月切换 = 换 Room 查询键，零网络；汇总/分类聚合全部 SQL（响应式流）。
+ *
+ * iOS 移植 S20（2026-11-25）：搬进 `shared/commonMain`，按 `design/ios-port.md` §11.2：
+ *
+ * - 构造签名里的 `Context` 去掉，改吃 [JuwDatabase]（本地表，两端都能建）；
+ * - 凭证存储可空：**null = 本平台没有加密凭证存储**，此时只显示本地已存流水、
+ *   不发同步请求（iOS 的 Keychain 未实现，见 `AppServices.yktCredentialStore`）；
+ * - 「新消费入收件箱」原来是 `postYktPaymentInbox(context, row)`（`:app` 的
+ *   `Graph.inboxRepository` + `SubpageScreen` 路由），改成 [postInbox] 回调注入：
+ *   null = 本平台不接收件箱，同步照跑、只是不留痕（旁路纪律，不影响主链）；
+ * - `Dispatchers.IO` → `Dispatchers.Default`：IO 调度器在 commonMain 里不可见，
+ *   而 Room / Ktor 的挂起调用本身就在各自的调度器上跑；
+ * - 顺带删掉没人调的 `dayGroupLabel(java.time.LocalDate)`（零调用方，日期分组已由
+ *   页面自己的 `toDayGroups` 承担）。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class StatementViewModel(
-    private val appContext: Context,
     private val repo: YktRepository,
-    private val credentialStore: YktCredentialStore,
+    /** 凭证存储；null 的语义见类注释。 */
+    private val credentialStore: YktCredentialStore?,
     private val db: JuwDatabase,
+    /** 本次同步新见到的支出记录逐条投递（null = 本平台没有收件箱）。 */
+    private val postInbox: (suspend (YktTurnoverRow) -> Unit)? = null,
 ) : ViewModel() {
 
     /** 当前月份键（Room 查询口径 `2026-09`）。 */
@@ -103,8 +116,8 @@ class StatementViewModel(
     /**
      * 年视图窗口：近 12 个月（含当月，升序）。
      *
-     * 柱状图与「选择月份」弹窗共用这一份，别再在 UI 里按 `YearMonthKey.fromDate(AppClock.today())`
-     * 另算一次——两处各算一遍，跨月时弹窗会给出一组和柱子对不上的月份。
+     * 柱状图与「选择月份」弹窗共用这一份，别再在 UI 里按「今天」另算一次——
+     * 两处各算一遍，跨月时弹窗会给出一组和柱子对不上的月份。
      */
     private val window: List<YearMonthKey> = run {
         val now = YearMonthKey.fromDate(AppClock.today())
@@ -140,7 +153,7 @@ class StatementViewModel(
 
     // postInbox：同步拉到的新扣款静默入箱（2026-10-23，覆盖食堂 POS 直刷等非付款码
     // 消费场景；键与文案在 postYktPaymentInbox 唯一，与扫码命中处同键幂等）。
-    private val syncer = YktTurnoverSyncer(repo, db) { postYktPaymentInbox(appContext, it) }
+    private val syncer = YktTurnoverSyncer(repo, db, postInbox)
 
     init {
         // 进页即增量同步（凭证缺失走 UI 引导；失败保持本地数据并给一次性提示）。
@@ -167,14 +180,14 @@ class StatementViewModel(
 
     /** 后台增量同步：凭证缺失置引导态；失败保持本地数据并给一次性提示。 */
     private suspend fun syncInBackground(force: Boolean) {
-        val credentials = credentialStore.read()
+        val credentials = credentialStore?.read()
         if (credentials == null) {
             _uiState.update { it.copy(noCredentials = true, canRetry = false, syncing = false) }
             return
         }
         _uiState.update { it.copy(syncing = true, error = null, noCredentials = false) }
         try {
-            withContext(kotlinx.coroutines.Dispatchers.IO) {
+            withContext(Dispatchers.Default) {
                 syncer.sync(credentials.username, credentials.password, force = force)
             }
             // 同步后重查年视图（suspend 查询不随表自动刷新）
@@ -207,26 +220,4 @@ class StatementViewModel(
 
     /** 展示用月份标签（2026-09 → 「2026 年 9 月」）。 */
     fun monthLabel(month: YearMonthKey): String = "${month.year} 年 ${month.month} 月"
-
-    /** 日期分组键（今天/昨天/M月d日）。 */
-    fun dayGroupLabel(date: LocalDate): String {
-        val today = LocalDate.now()
-        return when (date) {
-            today -> "今天"
-            today.minusDays(1) -> "昨天"
-            else -> "${date.monthValue} 月 ${date.dayOfMonth} 日"
-        }
-    }
-
-    companion object {
-        fun Factory(context: Context) = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = StatementViewModel(
-                context.applicationContext,
-                Graph.yktRepository(context.applicationContext),
-                Graph.yktCredentialStore(context.applicationContext),
-                juwDatabase(context.applicationContext),
-            ) as T
-        }
-    }
 }

@@ -1,5 +1,6 @@
 package edu.jxslu.schedule
 
+import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.power.PowerClient
 import edu.jxslu.schedule.data.power.PowerReadingStore
@@ -205,6 +206,9 @@ class IosServices : AppServices {
     override fun powerRepository(): PowerRepository = powerRepo
 
     override fun powerReadingStore(): PowerReadingStore = powerReadings
+
+    /** 与课表 / 成绩 / 收件箱同一个库实例（`juwDatabase()` 自带单例缓存）。 */
+    override fun database(): JuwDatabase = juwDatabase()
 
     init {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，

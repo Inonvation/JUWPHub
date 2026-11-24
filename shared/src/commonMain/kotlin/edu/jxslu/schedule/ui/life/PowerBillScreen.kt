@@ -40,16 +40,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.data.power.PowerBill
 import edu.jxslu.schedule.data.power.PowerModels
 import edu.jxslu.schedule.data.power.PowerTurnover
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.YearMonthKey
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppBarChart
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
@@ -67,8 +67,6 @@ import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.common.showNotice
-import edu.jxslu.schedule.domain.AppClock
-import edu.jxslu.schedule.domain.YearMonthKey
 import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.launch
 
@@ -90,19 +88,30 @@ import kotlinx.coroutines.launch
  *    数据里却没有出口。
  * 3. 月份导航与柱状图换成与消费流水页同一套组件（`MonthNavRow` / `AppBarChart`）。
  * 4. 页签对调：**用电统计**放第一页、进页默认显示（用户拍板），充值账单退到第二页。
+ *
+ * iOS 移植 S20（2026-11-25）：搬进 `shared/commonMain`，按 `design/ios-port.md` §11.2：
+ * ViewModel 由宿主创建后传进来（共享层没有 `viewModel()`）；原来页面里直接
+ * `openExternal(context, url)` 打开缴费平台的那一步收成 [onOpenPlatformUrl]，
+ * **null = 本平台没有「拉起外部浏览器」的能力，页脚那行入口整块不渲染**（不是留个死按钮）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PowerBillScreen(
+    viewModel: PowerBillViewModel,
     onBack: () -> Unit = {},
-    /** 凭证未开启时的「去设置」入口（一卡通设置页）。 */
-    onOpenSettings: () -> Unit = {},
-    viewModel: PowerBillViewModel = viewModel(
-        factory = PowerBillViewModel.Factory(LocalContext.current),
-    ),
+    /**
+     * 凭证未开启时的「去设置」入口（一卡通设置页）。
+     * null = 本平台没有那一页，按钮整行不渲染（只留提示文案）。
+     */
+    onOpenSettings: (() -> Unit)? = null,
+    /**
+     * 页脚「在缴费平台打开」：把带登录态的深链交给宿主，由宿主用本平台的方式打开
+     * （Android 走 `ACTION_VIEW`）。返回 false = 没能打开，本页给一条一次性提示。
+     * null = 本平台没有打开外部链接的能力，该入口整行不渲染。
+     */
+    onOpenPlatformUrl: ((String) -> Boolean)? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val haptics = rememberAppHaptics()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -254,9 +263,15 @@ fun PowerBillScreen(
 
                     item(key = "footer") {
                         Footer(
-                            onOpenPlatform = {
-                                haptics.tap()
-                                viewModel.openPlatformPage { url -> openExternal(context, url, showNotice) }
+                            onOpenPlatform = onOpenPlatformUrl?.let { open ->
+                                {
+                                    haptics.tap()
+                                    viewModel.openPlatformPage { url ->
+                                        if (!open(url)) {
+                                            showNotice("打不开浏览器：本机没有可用的浏览器", NoticeTone.Error)
+                                        }
+                                    }
+                                }
                             },
                         )
                     }
@@ -348,9 +363,9 @@ private fun MonthCard(
                 value = (state.monthlyRechargeFen[key] ?: 0L).toFloat(),
                 title = PowerBill.monthLabel(key),
                 axisLabel = when (index) {
-                    0 -> "%d.%d".format(item.year, item.month)
-                    months.lastIndex -> "%d.%d（今）".format(item.year, item.month)
-                    else -> "%d".format(item.month)
+                    0 -> "${item.year}.${item.month}"
+                    months.lastIndex -> "${item.year}.${item.month}（今）"
+                    else -> item.month.toString()
                 },
             )
         }
@@ -537,23 +552,30 @@ private fun EmptyMonth(loading: Boolean) {
     }
 }
 
-/** 提示块（凭证缺失 / 取数失败）：一句话 + 一个出口。 */
+/** 提示块（凭证缺失 / 取数失败）：一句话 + 一个出口（[onAction] 为 null 时只剩那句话）。 */
 @Composable
-private fun NoticeBlock(message: String, actionLabel: String, onAction: () -> Unit) {
+private fun NoticeBlock(message: String, actionLabel: String, onAction: (() -> Unit)?) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         InlineNoticeRow(message = message, tone = NoticeTone.Warning)
-        Button(onClick = onAction, modifier = Modifier.fillMaxWidth()) {
-            Text(actionLabel)
+        if (onAction != null) {
+            Button(onClick = onAction, modifier = Modifier.fillMaxWidth()) {
+                Text(actionLabel)
+            }
         }
     }
 }
 
-/** 页脚：兜底入口 + 免责。 */
+/**
+ * 页脚：兜底入口 + 免责。
+ *
+ * [onOpenPlatform] 为 null 时**只留免责那句话**——本平台打不开外部链接（iOS 还没接
+ * `UIApplication.openURL`）时，留一个点了没反应的按钮比没有更糟（§11.2 ④）。
+ */
 @Composable
-private fun Footer(onOpenPlatform: () -> Unit) {
+private fun Footer(onOpenPlatform: (() -> Unit)?) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -561,10 +583,12 @@ private fun Footer(onOpenPlatform: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        TextButton(onClick = onOpenPlatform) {
-            Icon(AppIcons.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("在缴费平台打开")
+        if (onOpenPlatform != null) {
+            TextButton(onClick = onOpenPlatform) {
+                Icon(AppIcons.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("在缴费平台打开")
+            }
         }
         Text(
             text = "账单数据来自学校缴费平台，仅供参考，以平台网页为准。",

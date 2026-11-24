@@ -1,6 +1,8 @@
 package edu.jxslu.schedule
 
 import android.content.Context
+import edu.jxslu.schedule.data.local.JuwDatabase
+import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.power.PowerReadingStore
 import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
@@ -74,4 +76,7 @@ class GraphServices(private val context: Context) : AppServices {
     override fun powerRepository(): PowerRepository = Graph.powerRepository(appContext)
 
     override fun powerReadingStore(): PowerReadingStore = Graph.powerReadingStore(appContext)
+
+    /** 共享层与 `:app` 拿到的是**同一个**库实例（`juwDatabase(context)` 自带单例缓存）。 */
+    override fun database(): JuwDatabase = juwDatabase(appContext)
 }
