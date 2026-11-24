@@ -1,0 +1,485 @@
+# iOS 移植方案（KMP + Compose Multiplatform）
+
+状态：**预研，尚未开工**。开工前本文件是唯一口径；P0 落地后，构建与发布命令迁到
+`.agents/rules/ios-build.md`，本文只留决策与规格。
+
+目标：**功能全对齐**，两端长期同仓维护。
+
+数据来源：2026-11-24 对 `app/src/main` 的实测统计（612 个 kt、152,657 行、231 个测试文件）。
+
+## 0. 结论
+
+| 项 | 结论 |
+|---|---|
+| 目标形态 | `shared`（KMP，含 UI）+ `androidApp` + `iosApp` |
+| UI | 共享，不写 SwiftUI 版界面；原生代码只保留系统扩展与硬件访问 |
+| 交付物 | CI 出**未签名 IPA**，Windows 侧用 Apple ID 重签安装 |
+| 顺序 | **先做 P-1（Android 侧预移植改造），再动 iOS** |
+| 墙钟 | 全对齐 5–7 个月，瓶颈是编译与真机点验，不是写代码 |
+
+## 1. 决策
+
+### 1.1 共享 UI，而不是「共享逻辑 + SwiftUI」
+
+| 层 | 文件 | 行数 | 占比 |
+|---|---|---|---|
+| `ui/` | 299 | 101,346 | 66% |
+| `data/` | 179 | 29,658 | 19% |
+| `domain/` | 122 | 17,244 | 11% |
+
+只共享逻辑、UI 各写一套，等于此后每个功能写两遍。Compose 是声明式的，平移代价集中在平台 API，
+不在界面重画——这是能把 10 万行 UI 搬过去的唯一理由。
+
+代价：iOS 上没有原生控件手感。本 App 的价值在数据与流程，可以接受。
+
+### 1.2 别人怎么管双端
+
+| 项目 | 结构 | 结果 |
+|---|---|---|
+| JetBrains 官方模板 | `shared` + `androidApp` + `iosApp`，UI 全共享 | 2026-05 起的新默认结构，AGP 9.0 起强制 |
+| Duolingo | shared 库 + 原生壳，KMP-first，Umbrella XCFramework 统一输出 | 原生 9 个月的功能 KMP 化用 5 个月；同类再移植降到 1.5 个月 |
+| Cash App | 只共享逻辑与持久化，UI 各自原生；共享库另开仓库 | 躲开 Gradle 拖慢 Xcode 构建 |
+| Slack（LibSlack） | C++ 共享逻辑，UI 原生 | 2019 年解散团队，回退原生 |
+
+映射：**结构抄 JetBrains，共享边界抄 Duolingo（KMP-first），iOS 构建若被 Gradle 拖慢再学 Cash App。**
+
+### 1.3 模块结构
+
+```
+shared/            KMP 库：domain + data + ui
+  src/commonMain   跨平台主体
+  src/androidMain  actual：WebView / 通知 / WorkManager / Keystore / 高德 Android
+  src/iosMain      actual：WKWebView / UNUserNotification / BGTask / Keychain / 高德 iOS / CoreBluetooth
+  src/commonTest   231 个测试文件的迁移目标
+androidApp/        薄壳：Activity、manifest、res、Glance 小组件、TileService
+iosApp/            薄壳：Xcode 工程、SwiftUI 入口、WidgetKit 扩展、Info.plist
+```
+
+壳里只允许：平台 API 适配、UI 容器、清单与权限。
+
+### 1.4 必须原生的能力
+
+| 能力 | iOS 实现 | 原因 |
+|---|---|---|
+| 桌面 / 锁屏小组件 | WidgetKit + SwiftUI | 只能 Swift |
+| 灵动岛倒计时 | ActivityKit + Live Activity 扩展 | 只能 Swift |
+| 蓝牙水控 | CoreBluetooth（协议字节共享） | 传输层不同 |
+| 相机扫码 | AVFoundation（解码逻辑共享） | 传输层不同 |
+| 地图渲染 | 高德 iOS SDK，`UIKitView` 包 | 无 KMP 版 |
+| 支付宝调起 | iOS SDK，从 Kotlin 侧调用 | 无 KMP 版 |
+| 控制中心磁贴 | ControlWidget（iOS 18+） | 建议不做，见 §2 |
+
+## 2. 不可对齐的能力（产品口径必须改）
+
+| 现状（Android） | iOS 上 | 处理 |
+|---|---|---|
+| WorkManager 15 分钟刷小组件 | WidgetKit 刷新由系统决定 | 文案不承诺实时 |
+| 快捷设置磁贴 | ControlWidget 交互窄得多 | 建议砍掉 |
+| 后台定时任务（蹲点、提醒） | BGTaskScheduler 不保证时机 | 降级为「打开 App 时补算」 |
+| Live Updates 灵动岛 | ActivityKit 可做，全重写 | P3 单独排 |
+| 免打扰时段 | 权限模型不同 | 重新走引导 |
+| 应用内装 APK 更新 | 不存在 | iOS 端不提供检查更新 |
+
+## 3. Android 侧预移植改造（P-1）
+
+**这段先做，而且只改 Android。** 每一条都是「Android 上现在就正确、且让 iOS 移植只剩换实现」的改动，
+行为零变化，231 个纯 JVM 单测是安全网。做完这一段，P1/P2 的返工量降一大截。
+
+**一处纠正（2026-11-24 实测）**：`System.currentTimeMillis` 那 282 处**不是移植障碍**——它们绝大多数是
+计时、防抖、动画节拍，各平台都有等价的毫秒时钟，移植时一行 `expect/actual` 就够。真正的成本在
+`java.time` 的**类型与格式化**：`DateTimeFormatter` 在 kotlinx-datetime 里没有等价物，自定义格式必须手写。
+别再按「调用点数量」估时间成本。
+
+**进度**：
+
+- 第 1 批（哈希）✅ `CampusPaySign` / `QiekjSign` / `QzxyCredential` / `YktKeyboard` 的
+  `MessageDigest` → okio `Hashing`
+- 第 2 批（Base64 / UUID）✅ `QzxyClData`（`Base64.getDecoder`）、`WenquRules`（`getUrlDecoder`
+  + `String(ByteArray, Charset)`）、`QuietHours` / `SelectionWish` / `Shortcuts`（`UUID.randomUUID`
+  → `kotlin.uuid.Uuid`）。`domain/` 里 `java.security`、`java.util.Base64`、`java.util.UUID` 已归零，
+  2388 个单测全绿。
+
+- 第 3 批（定宽格式化）✅ 新增 `domain/TextFmt.kt`（`pad` / `clock` / `hex2` / `decimals`），
+  把 11 个文件里的 14 处 `String.format`、`"%02d:%02d"`、`"%02x"`、`"%04d-%02d"` 全部收成一个入口；
+  `decimals` 暂时保留 `String.format` 是在**集中**而不是在清掉（浮点舍入手写会和原显示差一分钱），
+  P1 拆模块时它变成 `expect/actual`，`String(format:)` 在 iOS 上语义一致。
+  新增 `TextFmtTest`（5 条）逐项对照旧 `String.format` 输出。2393 个单测全绿。
+
+- 第 4 批（金额）✅ 新增 `domain/Money.kt`（整数「分」的值对象：`parse` / `text` / `ofLi` /
+  `plus` / `minus` / `coerceAtLeast`），把 `java.math.BigDecimal` 从全仓 **39 处降到 0 处**
+  （8 个文件：`MoneyFormat`、`QzxyBillStats`、`UnlockFlowState`、`QzxyScreen`、`WaterFlowBlocks`、
+  `WaterScreen`、`CampusRechargeUi`、`PowerRechargeSheet`、`CampusCardViewModel`）。
+  新增 `MoneyTest`（6 条）+ `MoneyFormatTest` 的 BigDecimal 用例改成 `Money.parse`。
+  2399 个单测全绿。
+- 第 5 批（护栏）✅ 新增 `scripts/check-domain-portability.ps1` 并接进 CI：扫 `domain/` 下所有
+  `java.*` / `javax.*` / `okhttp3.*` / `com.google.zxing.*` 引用，允许清单之外一律失败，
+  清单里每项写明欠账原因与剩余处数。负向测试验过（临时塞一行 `java.net.URI` → 退出码 1）。
+  作用是把每轮清理的成果钉住，防止下一次随手写回。
+- 第 6 批（时间工具链）✅ 加 `kotlinx-datetime:0.8.0`（依赖 kotlin-stdlib 2.1.20，与项目 2.1.21 同线）、
+  模块级 `-opt-in=kotlin.time.ExperimentalTime`、`KotlinxDateTimeSmokeTest`（3 条）把可用 API 钉成事实。
+  `QzxyCredential` 的 `uppercase(Locale.ROOT)` 改无参重载。2402 个单测全绿。
+- 第 7 批（`java.time` 迁移开工）✅ `ScheduleShare` 整体换到 `kotlinx.datetime.LocalDate`，
+  自定义格式 `M/d` 手写成 `"${d.monthNumber}/${d.dayOfMonth}"`；`ui/week/ScheduleShareScreen`
+  两处调用点用 `toKotlinLocalDate()` 桥接，`ScheduleShareTest` 的 7 处改用 kotlinx 构造器。
+  2402 个单测全绿，护栏里 `java.time` 75 → 74。
+- 第 8 批（核心试迁，部分回退）：`LocalTimeLike.now()` 改走 `kotlin.time.Clock`
+  （`java.time.LocalTime` 从此彻底离开 `domain/`，护栏 74 → 73）。但**核心签名整体迁移
+  试了一轮后回退**：把 `parseDate` / `startOfWeek` / `weekNumberOf` / `dateOf` 换成
+  kotlinx 类型后，编译器一次性报出 **31 处调用点错误、散在 18 个文件**（`AiSchedulePrompt`、
+  `ExamMapper`、`ScheduleOverride`、`TodayState`、`WeekViewModel`、`MeViewModel`、
+  `WeekGrid`、三个 jw 页面……），全部是在 java.time 与 kotlinx 之间换手。
+  为不把仓库留在半编译状态，这一轮只保留可独立落地的那部分，核心迁移单独排一轮做完。
+
+**核心迁移的实测代价（已按此清单做完，第 9 批）**：18 个文件、31 处调用点，
+每处要么 `.toKotlinLocalDate()`（实参侧）、要么 `.toJavaLocalDate()`（返回值侧），
+外加 import。典型改动：`ExamMapper` 的 `.toEpochDay()` → `.toEpochDays()`、
+`AiSchedulePrompt` 的 `monday.plusWeeks(n)` → `monday.plus(DatePeriod(days = n * 7))`、
+`ScheduleBackup` 的 `to.isBefore(from)` → `to < from`。
+- 第 9 批（核心迁移完成）✅ `ScheduleCalculator` 的 `parseDate` / `startOfWeek` /
+  `weekNumberOf` / `dateOf`×2 / `todayWeekOf` 全部换成 `kotlinx.datetime.LocalDate`；
+  18 个调用文件按上面的清单加了桥接，`ScheduleCalculatorTest` / `ScheduleShareTest` 的
+  `LocalDate` 改用 kotlinx 构造器，`ScheduleTipsTest` 保留 java.time、只在调核心处转换。
+  护栏里 `java.time` 73 → 69，2402 个单测全绿。
+- 第 10 批（业务文件整文件迁移）✅ `TeachingCalendar`（`week1Monday` 改用 kotlinx 构造器与
+  `minus(DatePeriod)`，`monthValue` → `monthNumber`）和 `ExamMapper`（去掉 `ISO_LOCAL_DATE`
+  格式化器，`LocalDate.of` → 构造器，`dayOfWeek.value` → `ordinal + 1`）整文件迁完；
+  顺带修了两处下游：`TeachingCalendarParser.plusDays` → `plus(DatePeriod)`、
+  `ScheduleTermImport` 的 `plusWeeks(20).plusDays(180)` → 一次 `DatePeriod(days = 320)`。
+  两个测试文件的期望值改用 kotlinx 构造器。护栏 `java.time` 69 → 65。
+- 第 11 批（时间源 + 护栏补漏）✅ `CampusPaySign.buildTimestamp` 改用
+  `Instant.fromEpochMilliseconds(...).toLocalDateTime(TimeZone.currentSystemDefault())` +
+  `TextFmt.pad` 手拼 `yyyyMMddHHmmssSSS`；`CampusPaySign` / `YktRechargeSign` 的默认参数从
+  `System.currentTimeMillis()` 换成 `Clock.System.now().toEpochMilliseconds()`。
+  **护栏补了一条漏洞**：`System.*` 原是盲区（`System.currentTimeMillis()` 在 Kotlin/Native 上
+  不存在，但它不以 `java.` 开头），现在也纳入违规模式，正则用 `(?<![A-Za-z.])System\.`
+  以放行 `Clock.System`。护栏 `java.time` 65 → 61，`domain/` 里 `System.*` 已清零。
+- 第 12 批（整文件迁移）✅ `TranscriptHistory.timeLabel` 改用
+  `Instant.fromEpochMilliseconds(...).toLocalDateTime(zone)` + `TextFmt.pad` 手拼
+  `yyyy-MM-dd HH:mm`，`zone` 参数从 `ZoneId` 换成 kotlinx `TimeZone`（默认值同改为
+  `currentSystemDefault()`）；`TranscriptHistoryTest` 用 `LocalDateTime(...).toInstant(zone)`
+  造毫秒，不再依赖 `ZonedDateTime`。护栏 `java.time` 61 → 58。
+
+**成对迁移的约束（下一轮按这个走）**：`EbikeRideCard` 与 `EbikeCardExpiry` 的
+`zone` 参数互相传递（`isUsable` → `parseEndAt`、`dayKey`、`latestExpiryText`），
+必须同一个提交迁完，否则中间态编译不过。`EbikeCardExpiry` 另有两处要手写：
+`"yyyy-MM-dd HH:mm:ss"` 的解析（kotlinx 只认 `T` 分隔，要先把空格换成 `T`）、
+`ChronoUnit.DAYS.between` → `daysUntil`。
+- 第 13 批（成对迁移）✅ `EbikeRideCard` + `EbikeCardExpiry` 一起迁完（`zone` 参数在两者之间
+  传递，必须同提交）：`parseEndAt` 把快趣的 `yyyy-MM-dd HH:mm:ss` 先把空格换成 `T` 再
+  `LocalDateTime.parse`，只给日期时回退 `LocalDate.parse(...).atTime(23,59,59)`；
+  `remainingText` 的 `ChronoUnit.DAYS.between` → `daysUntil`；`dayKey` 手拼 `yyyy-MM-dd`。
+  递归连带 `EbikeCardSavings` 的 `zone` 参数与两个测试文件（`ZoneId.of` → `TimeZone.of`、
+  `ZoneOffset.UTC` → `TimeZone.UTC`、`LocalDateTime.of(...).atZone(...)` →
+  `LocalDateTime(...).toInstant(zone)`）。护栏 `java.time` 58 → 46。
+- 第 14 批（大文件）✅ `PowerUsage` 整文件迁完：`TemporalAdjusters.previousOrSame(MONDAY)`
+  → `minus(DatePeriod(days = dayOfWeek.ordinal))`、`ChronoUnit.DAYS.between` → `daysUntil`、
+  `atStartOfDay(zone).toInstant()` → `atStartOfDayIn(zone)`、`withDayOfMonth(1)` 直接省掉
+  （`monthKeyOf` 只看年月）、`isAfter` → `>`。连带 `PowerBillViewModel` 的 zone 参数、
+  `PowerUsagePanel` 三处 `labelOf` 与 `readTimeText`（顺带把一个 `"%02d-%02d %02d:%02d".format`
+  换成 `TextFmt.pad`），`PowerUsageTest` 的 zone 与时间构造。护栏 `java.time` 46 → 40。
+- 第 15 批（最大一块）✅ `WenquRules`（1174 行、30 处）迁完，两处 kotlinx 没有现成解析器，
+  只能手写：
+  - `stampMillis` 解析平台的两位年份 `yy-MM-dd HH:mm`——手工拆字段再组装，
+    年份按 `2000 + yy` 还原（与 java.time `yy` 口径一致）；
+  - `parseHttpDate` 解析 RFC 1123——去逗号后切成六段，月份查 `HTTP_MONTHS` 表，
+    时区固定 `TimeZone.UTC`；
+  - `nextOrSameSunday` 用 `(SUNDAY.ordinal - today.ordinal + 7) % 7` 代替 `TemporalAdjusters`；
+  - 三处 `at.format(ofPattern("HH:mm"))` 换成 `TextFmt.pad(hour):pad(minute)`。
+  连带 `WenquTestSupport` 的共享夹具 `zone` 一改，**一次性清掉 52 个测试编译错误**
+  （两个测试文件 37 + 15 处都在传这个 zone）。护栏 `java.time` 40 → 33，`Locale` 4 → 3。
+- 第 16 批（小步）✅ `CurrentTimetableRules` 整文件迁移（`covers` 的 `isBefore` 边界改成
+  `today >= start && today < start.plus(DatePeriod(days = weeks * 7))`），连带唯一生产调用方
+  `ScheduleRepository.syncCurrentTimetableToDate`（`LocalDate.parse(...).toKotlinLocalDate()`）
+  与 `CurrentTimetableRulesTest`。护栏 `java.time` 33 → 32。
+
+**这批为什么慢**：剩下 15 个文件每一个都带 `LocalDate` 签名，且 `Homework.dueDate` 这类
+**Room 实体字段**仍是 java.time——文件级的迁移会连到 UI 调用点和实体类型上。下一批挑
+`HomeworkCenter`（4 个 UI 调用点）和 `TodayFormat`（两个共享 formatter，4 处调用）一起做。
+- 第 17 批（格式器 + 作业域）✅
+  - `TodayFormat` 的两个 `DateTimeFormatter` 常量换成纯字符串函数
+    `monthDayText(month, day)` / `shortDayText(month, day)`——入参是整数，java.time 与 kotlinx
+    的调用方都能直接用，5 处调用点（`HomeworkCenter`×2、`CourseUi`、`CourseTweakScreen`、`WeekGrid`）零类型改动；
+  - `HomeworkCenter` 整文件迁到 kotlinx（`dueLabel` 用 `daysUntil`、`dueDetailLabel` 的
+    `dayOfWeek.value` → `ordinal + 1`），连带 7 个 UI 调用点（作业列表 / 详情 / 今日卡 / 待办 / `TodayViewModel`）
+    用 `toKotlinLocalDate()` 桥接；
+  - **`Homework.dueDate` 仍保持 java.time**（Room 实体字段，动了要连 TypeConverter 与库迁移），
+    转换只在 domain 边界做；测试里用 `java.time.LocalDate::parse` 单独构造实体字段。
+  护栏 `java.time` 32 → 30。
+- 第 18 批（`AppClock` + 账单统计）✅ 新增 `domain/AppClock.kt`（`nowMillis` / `nowDateTime` /
+  `today`，唯一「现在」来源，替代散落的 `LocalDate.now()` 与 `ZoneId.systemDefault()`）。
+  `QzxyBillStats` 整文件迁移：`parseBillTime` 把服务端的空格分隔换成 `T` 再解析；
+  `billRangeBounds` 的 `TemporalAdjusters` / `withDayOfMonth` 换成 `DatePeriod` 与
+  `LocalDate(year, month, 1)`；`groupBillsByDay` 的 `LocalDateTime.MIN` 排序键换成毫秒数。
+  顺带把 `QzxyBillScreen` 里最后一处 `"%02d:%02d".format` 换成 `TextFmt.pad`。
+  护栏 `java.time` 30 → 25。
+- 第 19 批（两个单点文件）✅ `TodayBoundary.nextTodayBoundaryMinutes` 的 `today` 换成 kotlinx
+  （调用方 `TodayWidgetRefresh` 加一次 `toKotlinLocalDate()`）；`AiSchedulePrompt.calendar` /
+  `userMessage` 同样迁移，默认参数改用 `AppClock.today()`，`weekdayLabel(today.dayOfWeek.value)`
+  → `ordinal + 1`。两处都是一改就干净的单点，没有中间态。护栏 `java.time` 25 → 23。
+- 第 20 批（提醒链上半）✅ `ScheduleTips`（`dayTipFor` / `dismissalTipFor` / `dismissalTip` /
+  `rainAfter` 的 `date`+`today`+`now` 全换 kotlinx，`now` 默认值用 `AppClock.nowDateTime()`）与
+  `WeatherAdvice`（`referenceDayIndex` / `segments` 的 `now`）一起迁；`WeatherHour.time`
+  仍是 java.time（天气模型未动），用 `hour.time.toKotlinLocalDateTime().date` 桥接。
+  调用方 `TodayViewModel` 在函数入口转换一次 `appNow`，两条链路共用。
+  两个测试文件用 `import kotlinx.datetime.LocalDate as KDate` 别名，把「传给被测函数的日期」
+  与「构造 `WeatherHour` 的 java.time 日期」分开。护栏 `java.time` 23 → 20。
+- 第 21 批（提醒链下半，最长的一批）✅ `ReminderPlanner` 整文件迁移，牵动三处新能力：
+  - `AppClock` 补 `secondsBetween`（kotlinx 没有 `Duration.between(LocalDateTime, LocalDateTime)`，
+    两侧折 UTC 相减，偏移抵消）与 `plusMinutes`（可负、可跨天；`DateTimeUnit` 只收
+    `TimeBased`，与其跟签名较劲不如自己按「当天分钟 + 天数进位」算）；
+  - `startAt` 不再走 `atStartOfDay().plusMinutes`，直接 `LocalDateTime(y, m, d, start/60, start%60)`；
+  - 作业提醒的 `due` 仍来自 Room 实体的 java.time `dueDate`，在函数入口 `toKotlinLocalDate()`。
+  调用方 `ClassReminder`（通知服务）保持内部 java.time，只在跨进 domain 时
+  `toKotlinLocalDateTime()`、把 `plan.startAt` 折回毫秒时 `toJavaLocalDateTime()`。
+  三个测试文件（`HomeworkReminderTest` / `ReminderPlannerTest` / `LiveClassUpdateTest`）
+  整体换 kotlinx，`LocalDateTime.of(` → `LocalDateTime(`、`LocalTime.of(` → `LocalTime(`。
+  护栏 `java.time` 20 → 17。
+- 第 22 批（`TodayState` 及其消费方）✅ `TodayState.date` 换 kotlinx、默认值 `AppClock.today()`；
+  连带 6 处消费方：`TodayScreen`（`monthValue` → `monthNumber`、传给作业卡时 `toJavaLocalDate()`）、
+  `WidgetModel`（`epochMillisAt` 重写成 `atStartOfDayIn(zone) + 分钟数`）、`ScheduleWidget` /
+  `WidgetSettingsScreen` / `TodayViewModel`（入口 `toKotlinLocalDate()`）。
+  两个测试（`TodayStateTest` / `WidgetModelTest`）在传参处转换。护栏 `java.time` 17 → 16。
+- 第 23 批（日期覆盖 + 选课）✅ `ScheduleOverride` 整文件收干净（此前内部 java.time ↔ kotlinx
+  来回转换，现在 `slotOf` / `dateOf` / `parseOrNull` / `eachDate` 全 kotlinx，
+  三处 `isBefore`/`isAfter`/`plusDays` 换成比较符与 `DatePeriod`）；连带 5 处 UI：
+  `SchedulePreviewGrid`（`DAY_MONTH` 格式化器删掉，手拼 `M/d`）、`JwScheduleListScreen`
+  （`monthValue` → `monthNumber`，`DayHeader`/`SuspendedCard` 传入前转回 java.time）、
+  `WeekScreen`。`CourseSelection.parseTimeRange` 换 `TimeZone` + `toInstant(zone)` +
+  `atStartOfDayIn`，`SelectionRoundsTest` 的夹具同步。护栏 `java.time` 16 → 12。
+- 第 24 批（天气 + 导出）✅ `Weather` 模型（`WeatherHour.time` / `WeatherDay.date`）换 kotlinx，
+  连带 `WeatherApi` 的两个解析辅助、`WeatherScreen`（`now` 走 `AppClock.nowDateTime()`、
+  `dayNameOf` 用 `daysUntil`、`hour.time <= currentHour`）、`ScheduleTips.rainAfter` 去掉桥接。
+  `ScheduleExporter` 的两个 `DateTimeFormatter` 手写：`M/d/yyyy` 直接拼，
+  `h:mm a`（Google 导入模板不吃 24 小时制）按 12 小时制 + AM/PM 自己算；
+  `CalendarSyncer` 的 `event.start.toEpochMilli()` 改 `toInstant(zone).toEpochMilliseconds()`。
+  `AiScheduleTool.parseDateOrNull` 去掉反向转换。护栏 `java.time` 12 → 5。
+
+> **护栏这次抓到两个 import 扫描漏掉的文件**：`AiScheduleTool` 和 `InboxMessage` 用的是
+> **全限定名**（`java.time.LocalDate` 直接写进签名），按 import 分组的统计看不见它们。
+> 这就是护栏扫正文而不是只扫 import 的价值。
+
+**P2 的已知欠账**：`domain/` 之外还有 **280 处 `System.currentTimeMillis()`**（挨个做太碎，
+随 UI 平移一起换成 `Clock.System.now().toEpochMilliseconds()`）；护栏只扫 `domain/`，
+届时要把扫描根目录扩到 `shared/`。
+
+**迁移顺序的实测结论**：叶子文件迁不动。原本想从最小的 `TodayBoundary` 开始，但它
+`today: LocalDate` 直接喂给 `ScheduleCalculator.weekNumberOf(…, today)`——只要核心还是
+`java.time`，任何日期函数都得先桥接。所以顺序反过来：**先迁核心**（`ScheduleCalculator`
+224 行 / 15 处 java.time、`ScheduleOverrides`、`SemesterConfig`），调用方一律
+`toKotlinLocalDate()` 桥接；核心干净之后，剩下的 20 多个文件才是纯机械替换。
+
+**`domain/` 剩余 JVM 专有面（2026-11-24 复核）**：
+
+| API | 处数 | 卡点 |
+|---|---|---|
+| `java.time` | 5 处 | 只剩 `InboxMessage.timeGroupOf`（4，全限定名）与 `Homework` 的实体字段（1，按约定保留） |
+| `java.text.SimpleDateFormat` / `java.util.Date` | 各 1 处 | `QzxyWatering` 的开阀时刻文案，随 java.time 一起换 |
+| `java.util.Locale` | 5 处 | 随 java.time 与 `TextFmt.decimals` 一起清 |
+| `com.google.zxing` | 17 | iOS 无对应，需换 KMP 条码库或只保留生成侧 |
+| `javax.crypto` | 3 | `QzxyClData` 的 AES，要 CommonCrypto expect/actual |
+| `okhttp3` | 1 | `HttpUrl`，随网络层一起换 |
+
+> `String.format` 已在第 3 批清零；`domain/` 里剩下的 `.format(…)` 全是日期格式化，随 `java.time` 一起处理。
+
+**下一步的前提：已解除**（第 6 批）。`org.jetbrains.kotlinx:kotlinx-datetime:0.8.0` 已加进
+`app/build.gradle.kts`，一次联网构建把依赖拉进了本地缓存，之后照旧 `--offline` 构建。
+两点要注意：
+
+- 0.8.0 的 `Instant` / `Clock` 由 `kotlin.time` 提供，在 Kotlin 2.1.21 上仍是实验 API，
+  已在模块级开 `-opt-in=kotlin.time.ExperimentalTime`（几十个文件逐个加 `@OptIn` 只会淹没改动）；
+  Kotlin 2.2 稳定后删掉这行。
+- `DateTimeFormatter` **没有**等价物，自定义格式要手写。可用写法已由
+  `KotlinxDateTimeSmokeTest` 钉成可编译的事实（`LocalDate` / `LocalTime` / `LocalDateTime` /
+  `TimeZone` / `DatePeriod` / `Instant.fromEpochMilliseconds` / `toLocalDateTime` / `atStartOfDayIn`）。
+
+**遗留（P1 必须处理）**：okio 现在是 `okhttp` 的传递依赖，签名函数直接用了它。显式声明
+`com.squareup.okio:okio:3.18.1` 后本机 `--offline` 构建会报 `No cached version available`
+（okio 根模块与 `kotlin-stdlib-jdk8` 的变体没进离线缓存）。P1 把网络层换成 Ktor 时这条传递链会消失，
+到时必须一并显式声明 okio，先联网预热一次缓存再跑离线构建。
+
+| # | 改造项 | 现状（实测） | 目标形态 | 对 Android 本身的好处 |
+|---|---|---|---|---|
+| 1 | 时间与哈希原语收口 | `java.time` 240 处（其中 `DateTimeFormatter`/`ofPattern` 28 处）、`SimpleDateFormat` 21 处；域内 4 个文件自建 `MessageDigest`；`java.util.Base64` 2 处 | 时间只走 `AppClock` / `AppDateFormat`；哈希改 okio `Hashing`（跨平台，不需要自建抽象） | 测试可注入固定时钟；签名函数不再绑 JVM |
+| 2 | 金额收口 | `BigDecimal` 散在电费、一卡通、胖乖 | `Money` 值对象，舍入规则内聚 | 不再各处 `setScale`，对账口径统一 |
+| 3 | 网络客户端收口 | ✅ **2026-10-02 的 `AppHttp` 已经做完了**：全仓只有 `AppHttp.base` 一处 `OkHttpClient.Builder()`，其余 20 处引用都是类型声明 | 无需再动 | 连接池、线程池、DNS 缓存已全进程共享 |
+| 4 | 会话逻辑纯函数化 | `data/session` 18 文件 1475 行 | 「请求描述」纯函数 + 执行器接口（Android 用 OkHttp 执行） | 教务改版时能单测，不必真机抓包 |
+| 5 | 平台能力收口 | `LocalContext` 285、`Intent(` 169、`rememberLauncherForActivityResult` 69 | `PlatformServices` 接口 + Android 实现 | 权限与 Intent 散点归零 |
+| 6 | 图标收口 | HugeIcons 456 处直接引用 | `AppIcon` 枚举 + 一个 `icon()` 渲染器 | 换图标只改映射表一行 |
+| 7 | 日志收口 | `android.util.Log` 62 处 | `Logger` 接口 | release 可整体静音 |
+| 8 | 小组件数据快照 | Glance 组件内直接查库 | `WidgetSnapshot` 纯数据 + JSON | 刷新逻辑可单测；iOS WidgetKit 吃同一份 JSON |
+| 9 | 视图边界 | `AndroidView` 20 处内联 | `AppWebView` / `AppMapView` 可复用组件 | 状态管理与复用清晰 |
+| 10 | 装配去 Context | `object Graph` 776 行，持 `Context` | `AppGraph(deps)` 构造注入 | 可测；预览与多进程可用 |
+| 11 | JS 注入外置 | 注入脚本写在 Kotlin 字符串里 | `commonMain/resources/*.js` | 能直接改、能做语法检查 |
+| 12 | 平台判定与 IO | `Build.VERSION` 29、`ContentResolver` 30、`java.io.File` 31 | `Platform.osVersion`、`FileStore` | 版本分支与文件读写集中 |
+
+**不用改的（省力气）**：
+
+- `collectAsStateWithLifecycle` 311 处、`LocalLifecycleOwner` 38 处——CMP 里都有对应物
+- 231 个测试文件全是纯 JVM JUnit4，**没有 Robolectric、没有 `androidTest` 目录**，可直接进 `commonTest`
+
+验收（每批都跑）：
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug --offline
+```
+
+分批建议：`1+2`（时间与金额）→ `3+4`（网络与会话）→ `5+6+7`→ `8+9+10+11+12`。
+
+## 4. 迁移阶段
+
+### P0 骨架（3–5 天）
+建 `shared`（`androidTarget()` + `iosArm64()` + `iosSimulatorArm64()`），`:app` 改名 `androidApp`，
+搬 P-1 后的 domain，验证工具链。
+
+```powershell
+.\gradlew.bat :androidApp:assembleDebug :androidApp:testDebugUnitTest --offline
+.\gradlew.bat :shared:linkDebugFrameworkIosSimulatorArm64
+```
+
+### P1 基础设施与 data（3–5 周）
+
+P-1 已把散点收口，这里只换实现：
+
+| 现在 | iOS 侧 | 说明 |
+|---|---|---|
+| Ktor 未引入 | Ktor 3 + `ktor-client-engine-defaults` | Android 走 OkHttp，iOS 走 Darwin |
+| Room 2.7.1 Android | Room 2.7 KMP + `BundledSQLiteDriver` | 实体与 21 级迁移原样保留 |
+| DataStore Android | DataStore KMP | 偏好键不变 |
+| EncryptedSharedPreferences | Keychain expect/actual | 无 KMP 版 |
+| WorkManager | BGTaskScheduler expect/actual | 时机不保证 |
+| `java.time` | kotlinx-datetime（P-1 已只剩 `AppClock`） | `DateTimeFormatter` 无等价物，格式要手写 |
+
+KSP 按 target 加：`kspAndroid` / `kspIosArm64` / `kspIosSimulatorArm64`；schema 目录改由 Room Gradle Plugin 声明。
+
+验收：`.\gradlew.bat :shared:iosSimulatorArm64Test` 跑通解析器与迁移测试；Android 行为零变化。
+
+### P2 UI 平移（6–10 周）
+
+299 个文件搬进 `shared/commonMain`，依赖换 CMP 坐标。改造面（P-1 已削掉 5 项）：
+
+| 项 | 处数 | 处理 |
+|---|---|---|
+| `PlatformServices` 调用点 | 已收口 | 换 iOS 实现 |
+| `AppIcon` 映射 | 1 个文件 | 转 Compose Resources vector |
+| `AppWebView` / `AppMapView` | 2 个组件 | `UIKitView` 实现 |
+| 剩余 import 与坐标替换 | 299 文件 | 批量替换 + 逐批编译 |
+
+验收：Android 全页面截图比对无差异；iOS 模拟器进今日页与课表页。
+
+### P3 iOS 壳与系统扩展（3–5 周）
+
+SwiftUI 容器 + `ComposeUIViewController`；WidgetKit 读 App Group 数据；通知授权引导；Live Activity；扫码。
+验收：真机装包，小组件能出课表。
+
+### P4 长尾业务（8–12 周）
+
+`jw` 教务 → `ykt` 一卡通 → `power` 电费 → `qiekj` 胖乖 → `kqcx` 快趣 → `wenqu` 问渠 →
+`ujing` U净 → `xg` 学工 → `ai` 调课 → `qzxy` 水控 → `weather` 天气 → `calendar` 校历。
+
+每域验收：同一份测试数据，两端结果一致。
+
+## 5. 工期与分工
+
+| 阶段 | 谁做 | 墙钟 |
+|---|---|---|
+| P-1 预移植 | 我批量改，你跑命令 | 2–3 周 |
+| P0 骨架 | 我 | 3–5 天 |
+| P1 基础设施 | 我改，卡在 iOS 编译 | 3–5 周 |
+| P2 UI 平移 | 我批量改，你抽查截图 | 6–10 周 |
+| P3 iOS 壳 | 我写，你真机点验 | 3–5 周 |
+| P4 长尾 12 域 | 我逐域改 | 8–12 周 |
+| **合计** | | **5–7 个月墙钟** |
+
+**能压缩什么、不能压缩什么**（别按「AI 写代码很快」估）：
+
+- 能吃掉：1120 个改造点、299 个文件搬迁、批量 import 替换、模板化的 expect/actual
+- 吃不掉：每次 Kotlin/Native 编译 5–15 分钟的等待；iOS 证书与真机环节；教务 SSO、蓝牙水控、
+  WKWebView 注入这些只能在真机上判定的行为
+- 结论：瓶颈从「写代码」变成「编译与点验」，人工估的 8–9 个月压到 5–7 个月
+
+## 6. 风险
+
+| 风险 | 触发条件 | 应对 |
+|---|---|---|
+| 教务 SSO 在 iOS 上行为不同 | Cookie / UA / 重定向判定 | P-1 把会话写成纯函数，P1 用真实账号回归 |
+| 高德 iOS SDK 集成 | CocoaPods / 手动 framework + cinterop | Swift 侧封装，`UIKitView` 暴露，不走 cinterop |
+| 蓝牙水控协议 | MTU、写特征差异 | 真机实测，代码审查判不了 |
+| 免费侧载 7 天 | 日常使用 | 长期使用买 ¥688 开发者账号 |
+| 迁移期间搅动 Android | P-1/P2 覆盖现有功能 | 每批改完跑全量单测；CI 已就位 |
+| AGP 9.0 | 未来升级 | 先按新结构分模块，避免二次搬迁 |
+
+## 7. 构建与分发（IPA）
+
+出 IPA 必须有 macOS。本仓库是公开仓库，GitHub Actions 的标准 runner
+**在公开仓库上免费且不限量**，macOS 也在内——不需要买 Mac：**CI 出未签名 IPA，Windows 本地重签。**
+
+- 产物：`JUWPHub-<version>-unsigned.ipa`
+- 重签：Sideloadly / 爱思助手 / SideStore，用自己 Apple ID
+- 免费账号 7 天、同时 3 个 App；付费账号 ¥688/年管 1 年
+- Bundle ID 固定 `edu.jxslu.schedule`（iOS 高德 key 绑它），debug 变体 `edu.jxslu.schedule.debug`
+- iOS 高德 key 与 Android 两把分开申请，落 `keystore.properties` 的 `amapKeyIos`
+
+```yaml
+name: iOS CI
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 共享模块 iOS 单测
+        run: ./gradlew :shared:iosSimulatorArm64Test
+
+      - name: 构建未签名 IPA
+        run: |
+          xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp \
+            -configuration Release -sdk iphoneos -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/iosApp.app Payload/
+          zip -qry JUWPHub-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa
+          path: JUWPHub-unsigned.ipa
+          retention-days: 90
+```
+
+KMP framework 由 Xcode 的 Build Phase 调 `./gradlew :shared:embedAndSignAppleFrameworkForXcode` 产出，
+不在 workflow 里单独跑。
+
+版本号单一来源：`gradle.properties` 的 `versionName` / `versionCode`，iOS 由
+`scripts/ios-gen-version.sh` 写成 `iosApp/Config/Version.xcconfig`；同一 tag 双产物。
+
+**不做**：不上架 App Store（抓第三方数据、非官方身份，审核过不了）；不用企业签/超级签分发（违规，
+随时集体吊销）；不把证书进 CI secrets（免费证书 7 天失效，签出来对任何设备都无效）。
+
+## 8. 双平台同步纪律
+
+1. `shared/` 是唯一逻辑实现，壳里出现业务逻辑就是错。
+2. 功能 PR 三件齐：shared 实现 + 两端验证记录（或 `ios-pending` 标签）。
+3. 新功能先写共享层再包两端壳（KMP-first），不先写 Android 再移植。
+4. 能力差异只登记在 §2，不在 PR 描述里散落。
+5. `commonTest` 两个 target 都跑，iOS 侧失败不能标 ignore。
+6. 依赖选型先问「有没有 KMP 版本」，没有的进 §1.4 原生清单。
+7. iOS 专属实现只放 `iosApp/`。
+8. 同 tag 双产物；iOS 落后时落后的是壳，不是逻辑。
+
+## 9. 起步顺序
+
+1. **P-1 第一批**：时间源 + 金额收口（改造项 1、2），改完跑全量单测。
+2. **P-1 第二批**：网络收口 + 会话纯函数化（3、4）——这一步决定后续会不会翻车。
+3. **并行**：申请 iOS 高德 key（绑 `edu.jxslu.schedule`），不占工时。
+4. 之后按 §4 的 P0 起骨架。

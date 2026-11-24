@@ -25,6 +25,7 @@
 | §4.28–§4.32 | 应用图标 · 学业自动导入 · 趣智校园 · 教材 · 快趣出行 | [design/04e-modules-services.md](design/04e-modules-services.md) |
 | §4.33–§4.51 | 成绩/考试变动提醒 · 校历 · 选课日志与轮次 · 应用内选课与抢课 · U净 · 收件箱 · AI 调课 · 日期覆盖（调休/停课）· 培养方案 · 教学日历→开学日 · 实习基地 · 学生评教直达 · 问渠（志愿服务 / 劳动教育）· 天气（Open-Meteo）· 百宝箱（图片水印 / 拼接 / 菜鸟批量查）· 宿舍报修进度（今日页卡片 / 原生详情 / 办结提醒）· 快捷设置磁贴（TileService）· 猜你想用（时段表 · 订单习惯 · 抽样） | [design/04d-modules.md](design/04d-modules.md) |
 | §5–§10 | 非功能 · 里程碑 · 风险 · 开放问题 · 参考仓库 · 附录（实现日志去哪了） | [design/05-meta.md](design/05-meta.md) |
+| 规划 | iOS 移植（KMP + Compose Multiplatform）方案、阶段划分、IPA 构建与双端同步纪律 | [design/ios-port.md](design/ios-port.md) |
 
 ## 阅读纪律
 
