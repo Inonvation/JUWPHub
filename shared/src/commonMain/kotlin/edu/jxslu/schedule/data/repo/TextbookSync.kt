@@ -1,19 +1,19 @@
 package edu.jxslu.schedule.data.repo
 
-import android.util.Log
+import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.data.jw.TextbookParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.AutoSyncRules
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 
 /**
- * 教材抓取（DESIGN §4.31）。走 [CasSession]（OkHttp + 已存凭证），**不开 WebView**，
+ * 教材抓取（DESIGN §4.31）。走 [JwReadSession]（OkHttp + 已存凭证），**不开 WebView**，
  * 触发点是「教务导入课表写库成功后」——用户刚在导入窗口登录过教务，会话大概率还热着；
  * 会话失效就静默放弃（教材是快照数据，晚一点没关系），**冷启动补抓**兜住这一次失败
  * （[backfillIfMissing]，2026-10-06）。
@@ -29,10 +29,10 @@ import kotlinx.coroutines.sync.Mutex
  *    （补抓那道闸门记的是**尝试**时刻，见 [backfillIfMissing]）。
  */
 class TextbookSync(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val repo: ScheduleRepository,
     private val prefs: DisplayPrefsStore,
-    private val today: () -> LocalDate = LocalDate::now,
+    private val today: () -> LocalDate = AppClock::today,
 ) {
 
     /** 抓取互斥：撞上了直接让位，不排队重抓一遍。 */
@@ -57,7 +57,7 @@ class TextbookSync(
             // 教材链路的 Result 只有一个出口，而调用点把返回值丢掉了（页面上什么都不显示），
             // 于是「导入成功但详情里没教材」在真机上无从查起（2026-10-06 用户报障）。
             // 这行日志是 release 包唯一能自证的地方；只记学期、条数与失败原因，不含任何凭证。
-            Log.i(TAG, "textbook sync $term -> $it")
+            Logger.i(TAG, "textbook sync $term -> $it")
         } ?: Result.InProgress
     }
 

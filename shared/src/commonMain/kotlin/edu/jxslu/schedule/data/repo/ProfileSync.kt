@@ -4,10 +4,11 @@ import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.jw.ScoreParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.CasEnsureResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.data.session.ProfileSyncRules
 import edu.jxslu.schedule.data.session.bodyOrNull
-import java.time.LocalDate
+import edu.jxslu.schedule.domain.AppClock
+import kotlinx.datetime.LocalDate
 import kotlinx.coroutines.flow.first
 
 /**
@@ -24,9 +25,9 @@ import kotlinx.coroutines.flow.first
  * 3. **不覆盖已有值**：落库走 `setProfile`，它对空串不动键（脏解析不会抹掉已有数据）。
  */
 class ProfileSync(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val prefs: DisplayPrefsStore,
-    private val today: () -> LocalDate = LocalDate::now,
+    private val today: () -> LocalDate = AppClock::today,
 ) {
 
     /** @return true = 这次真的抓到并落库了 */

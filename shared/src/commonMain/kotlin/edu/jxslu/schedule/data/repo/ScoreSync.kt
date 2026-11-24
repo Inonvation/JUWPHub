@@ -5,7 +5,7 @@ import edu.jxslu.schedule.data.jw.ScoreParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
@@ -37,13 +37,13 @@ import kotlinx.coroutines.sync.Mutex
  * 写库是**按学期替换**，未涉及的学期不动（同成绩导入的既有口径）。
  */
 class ScoreSync(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val repo: ScoreRepository,
     private val prefs: DisplayPrefsStore,
     /** 收件箱留痕（DESIGN §4.38）：出分/改分事实入箱，与成绩提醒开关无关。 */
     private val inbox: InboxRepository,
     private val today: () -> LocalDate = AppClock::today,
-    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val nowMillis: () -> Long = AppClock::nowMillis,
 ) {
 
     /** 抓取互斥（口径同 `ScholarProgressSync`）：撞上了直接让位，不排队重抓一遍。 */

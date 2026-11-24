@@ -10,9 +10,10 @@ import edu.jxslu.schedule.data.jw.ImportParseResult
 import edu.jxslu.schedule.data.jw.QiangzhiScheduleParser
 import edu.jxslu.schedule.data.jw.SyjxScheduleParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseKind
@@ -51,12 +52,12 @@ import kotlinx.coroutines.CancellationException
  * 失败不重试（防撞风控）；两页之间 [AutoSyncRules.interRequestDelayMs] 随机间隔。
  */
 class ScheduleSync(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val repo: ScheduleRepository,
     private val prefs: DisplayPrefsStore,
     /** 收件箱留痕（DESIGN §4.38）：新差异落待处置缓存的同时入箱。 */
     private val inbox: InboxRepository,
-    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val nowMillis: () -> Long = AppClock::nowMillis,
 ) {
 
     /**
@@ -294,8 +295,13 @@ class ScheduleSync(
          */
         private const val LAB_TABLE_MARK = "qz-weeklyTable"
 
-        /** 课表页学期下拉的 id（理论与实验页同一个）。 */
-        internal const val TERM_SELECT = "xnxq01id"
+        /**
+         * 课表页学期下拉的 id（理论与实验页同一个）。
+         *
+         * 公开：iOS 移植 S4 起本文件在 `:shared`，`:app` 的 `ScheduleSyncTermFromHtmlTest` /
+         * `ScheduleSyncFetchGuardsTest` 直接调它和下面两个校验函数——跨模块看不见 `internal`。
+         */
+        const val TERM_SELECT = "xnxq01id"
 
         /**
          * 从理论课表页 HTML 抽 `select#xnxq01id` 的当前选中项。
@@ -303,7 +309,7 @@ class ScheduleSync(
          * 整页搜 `<option selected>` 会串（同 [ExamSync.termFromShell] 的教训）。
          * value 与文本兜底各一次，抽不到返回 null（调用方报失败，不猜学期）。
          */
-        internal fun termFromHtml(html: String): String? =
+        fun termFromHtml(html: String): String? =
             JwHtml.selectedTerm(html, selectId = TERM_SELECT)
 
         /**
@@ -312,7 +318,7 @@ class ScheduleSync(
          * 学期参数、按自己的默认学期渲染实验页，直取就会把两个学期的课混为一批。
          * 抽不到下拉同样视为不可信（结构变了就别猜）。返回 null = 校验通过。
          */
-        internal fun labTermError(theoryTerm: String, labHtml: String): String? {
+        fun labTermError(theoryTerm: String, labHtml: String): String? {
             val labTerm = termFromHtml(labHtml)
                 ?: return "实验课表页没有学期下拉（教务结构可能已变化）"
             return if (labTerm == theoryTerm) null
@@ -328,7 +334,7 @@ class ScheduleSync(
          *
          * 只守「有 → 零」这一侧：基线没有、教务新有的课（0 → N）是正常新增，照报。
          */
-        internal fun vanishingKindError(
+        fun vanishingKindError(
             remote: List<Course>,
             baselineRows: List<ScheduleCourseRow>,
         ): String? {

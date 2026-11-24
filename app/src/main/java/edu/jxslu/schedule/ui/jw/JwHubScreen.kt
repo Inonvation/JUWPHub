@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.jw.JwUrls
+import edu.jxslu.schedule.data.repo.ExamSnapshot
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.domain.ExamMapper.ExamEntry
@@ -426,7 +427,7 @@ private fun rememberJwHubStats(): JwHubStats {
      * 读到之前「考试」两处显示占位符「…」，**不显示**「暂无考试」——后者是结论，
      * 先显示再跳成「3 场」就是闪一下（这是不能为了干净引入的那种闪烁）。
      */
-    var examSnapshot by remember { mutableStateOf<ExamSnapshotStore.Snapshot?>(null) }
+    var examSnapshot by remember { mutableStateOf<ExamSnapshot.Snapshot?>(null) }
     var examSnapshotLoaded by remember { mutableStateOf(false) }
     LaunchedEffect(resumeTick) {
         term = runCatching { repo.currentTerm() }.getOrNull()

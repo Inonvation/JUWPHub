@@ -2,9 +2,10 @@ package edu.jxslu.schedule.data.repo
 
 import edu.jxslu.schedule.data.jw.SelectionParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.CourseSelection
 import edu.jxslu.schedule.domain.SelectionRound
@@ -14,14 +15,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 
 /**
- * 选课同步（DESIGN §4.35）：走 [CasSession]（已存凭证 + OkHttp），不开窗口。
+ * 选课同步（DESIGN §4.35）：走 [JwReadSession]（已存凭证 + OkHttp），不开窗口。
  *
  * 两条链：
  * 1. **选课结果**：缺省学期以教务壳页为准（不猜，带 [AutoSyncRules.shellTermCacheUsable]
  *    的 TTL 缓存，省一次壳页 GET），再 GET 数据接口翻页抓全；**先全部抓到内存、
  *    再一次性写库**——多学期同步中途失败宁可一行不写，也不留「本学期替换了、
  *    下学期还是旧的」的半套。
- * 2. **选课轮次**：GET `/jsxsd/xsxk/xklc_list_data`，落 [SelectionRoundsStore] 快照。
+ * 2. **选课轮次**：GET `/jsxsd/xsxk/xklc_list_data`，落 [SelectionRoundsSource] 快照。
  *    非选课期 `count=0` 是正常空态（不是失败），照样落盘——空快照才会让页面如实显示、
  *    让过期提醒被撤销。
  *
@@ -33,11 +34,11 @@ import kotlinx.coroutines.sync.Mutex
  * `SelectionAlertReminder.scheduleNext`）：本类不持 Context，不直接碰 AlarmManager。
  */
 class SelectionSync(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val repo: SelectionRepository,
     private val prefs: DisplayPrefsStore,
-    private val roundsStore: SelectionRoundsStore,
-    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val roundsStore: SelectionRoundsSource,
+    private val nowMillis: () -> Long = AppClock::nowMillis,
 ) {
 
     /** 网络互斥（口径同 `ScoreSync`）：撞上了直接让位，不排队重抓一遍。 */
@@ -134,9 +135,9 @@ class SelectionSync(
                 // 写盘失败不推进检查时间：快照没更新却记下「刚查过」，下一轮会按旧轮次
                 // 判「没变化」，提醒静默失效一整轮。
                 val saved = roundsStore.save(
-                    SelectionRoundsStore.Snapshot(
+                    SelectionRoundsSource.Snapshot(
                         fetchedAt = fetchedAt,
-                        rounds = rounds.map(SelectionRoundsStore::rowOf),
+                        rounds = rounds.map(SelectionRoundsSource::rowOf),
                     ),
                 )
                 if (saved) prefs.setSelectionRoundsCheckMillis(fetchedAt)
@@ -150,7 +151,7 @@ class SelectionSync(
 
     /** 快照里的轮次（页面与提醒共用；坏了等于空快照）。 */
     fun cachedRounds(): List<SelectionRound> =
-        roundsStore.load().rounds.map(SelectionRoundsStore::rowToRound)
+        roundsStore.load().rounds.map(SelectionRoundsSource::rowToRound)
 
     /** 快照抓取时刻（epoch millis；0 = 从未抓到过），轮次卡「上次同步」脚注用。 */
     fun cachedFetchedAt(): Long = roundsStore.load().fetchedAt

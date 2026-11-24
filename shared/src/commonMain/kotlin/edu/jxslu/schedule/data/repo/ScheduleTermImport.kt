@@ -5,7 +5,7 @@ import edu.jxslu.schedule.data.DefaultData
 import edu.jxslu.schedule.data.jw.JwHtml
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.session.CasFetchResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.AutoSyncRules
@@ -39,12 +39,12 @@ import kotlinx.datetime.plus
  * [AutoSyncRules.interRequestDelayMs] 间隔，撞上在跑的那次直接让位（[syncLocked]）。
  */
 class ScheduleTermImport(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val repo: ScheduleRepository,
     private val prefs: DisplayPrefsStore,
     private val inbox: InboxRepository,
     private val sync: ScheduleSync,
-    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val nowMillis: () -> Long = AppClock::nowMillis,
     private val today: () -> LocalDate = AppClock::today,
 ) {
 

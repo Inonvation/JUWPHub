@@ -1,12 +1,12 @@
 package edu.jxslu.schedule.data.repo
 
-import android.util.Log
+import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.data.DefaultData
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.jw.TeachingCalendarParser
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
-import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.JwReadSession
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 
@@ -20,12 +20,12 @@ import kotlinx.coroutines.sync.Mutex
  * 与 [TextbookSync] 同一套纪律，四条：
  * 1. **没学期钥匙不抓**：term 为空直接跳过（不知道抓哪份日历）；
  * 2. **学期必须自证**：解析器要求响应学期 == 请求学期，对不上不算数（不猜学期）；
- * 3. **失败静默**：返回值不抛异常，绝不挡住导入主流程；只记 [Log.i]——
+ * 3. **失败静默**：返回值不抛异常，绝不挡住导入主流程；只记 [Logger.i]——
  *    开学日原本就有值，失败 = 维持现状，不是数据丢失，故不补失败气泡；
  * 4. **值没变不写库**：已和教务一致时不产生写操作，调用方也不弹气泡。
  */
 class TeachingCalendarSync(
-    private val cas: CasSession,
+    private val cas: JwReadSession,
     private val repo: ScheduleRepository,
 ) {
 
@@ -52,7 +52,7 @@ class TeachingCalendarSync(
     suspend fun applyAfterImport(term: String?, timetableId: Long? = null): Result {
         if (term.isNullOrBlank()) return Result.Skipped
         return mutex.tryLocked { applyLocked(term, timetableId) }?.also {
-            Log.i(TAG, "calendar apply $term -> $it")
+            Logger.i(TAG, "calendar apply $term -> $it")
         } ?: Result.InProgress
     }
 
