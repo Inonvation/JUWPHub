@@ -125,27 +125,28 @@ object CurriculumParser {
     private const val HOUR_CLASS = "cols-9-2-1"
 
     /** 方案名的第一出处（页首「一、培养目标」段落）。 */
+    // 换行靠 `[\s\S]` 而不是 `RegexOption.DOT_MATCHES_ALL`：后者只有 JVM 有，
+    // commonMain 里编不过（`:shared:metadataCommonMainClasses` 会拦）。语义等价，勿换回。
     private val PLAN_NAME_RE =
-        Regex("""class="item-area-content-inner"[^>]*>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL)
+        Regex("""class="item-area-content-inner"[^>]*>([\s\S]*?)</p>""")
 
     /** 方案名的兜底出处（页头 span，带「培养方案及教学计划」模板后缀）。 */
     private val HEADER_TITLE_RE =
-        Regex("""class="header-item-title"[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL)
+        Regex("""class="header-item-title"[^>]*>([\s\S]*?)</span>""")
 
     private val TIXI_RE =
-        Regex("""class="tixi-cell-text"[^>]*>(.*?)</div>""", RegexOption.DOT_MATCHES_ALL)
+        Regex("""class="tixi-cell-text"[^>]*>([\s\S]*?)</div>""")
 
     /**
      * 课程行。终止前瞻覆盖三种边界：下一行、下一个容器、页脚/正文结尾——
      * 缺了任何一种，最后一行会把页脚汇总数字一起吞进来。
      */
     private val ROW_RE = Regex(
-        """<div class="son-table-tr">(.*?)(?=<div class="son-table-tr">|<div class="body-table-|<footer|</html|$)""",
-        RegexOption.DOT_MATCHES_ALL,
+        """<div class="son-table-tr">([\s\S]*?)(?=<div class="son-table-tr">|<div class="body-table-|<footer|</html|$)""",
     )
 
     private val CELL_RE =
-        Regex("""<div class="table-td-cell ([^"]+)"[^>]*>(.*?)</div>""", RegexOption.DOT_MATCHES_ALL)
+        Regex("""<div class="table-td-cell ([^"]+)"[^>]*>([\s\S]*?)</div>""")
 
     private val TAG_RE = Regex("""<[^>]+>""")
     private val NUMERIC_ENTITY_RE = Regex("""&#x?[0-9a-fA-F]+;""")

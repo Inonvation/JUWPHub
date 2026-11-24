@@ -200,8 +200,13 @@ object SyjxScheduleParser {
         val position: String,
     )
 
-    /** `3-4` → (3,4)；`11` → (11,11)。 */
-    internal fun parseSections(text: String): Pair<Int, Int>? {
+    /**
+     * `3-4` → (3,4)；`11` → (11,11)。
+     *
+     * public 而非 internal：本层已搬进 `:shared`，而 `SyjxScheduleParserTest` 留在 `:app`
+     * 的 test 源集；跨模块看不见 internal，这条节次解析的边界（空格容忍、非法返回 null）就没测试钉了。
+     */
+    fun parseSections(text: String): Pair<Int, Int>? {
         val t = text.trim()
         Regex("^(\\d+)\\s*-\\s*(\\d+)$").find(t)?.let { m ->
             return m.groupValues[1].toInt() to m.groupValues[2].toInt()

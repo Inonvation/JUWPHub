@@ -9,8 +9,11 @@ package edu.jxslu.schedule.data.jw
  * **静默失效**——没有报错，只是判不出来，正是最难排查的那种。
  *
  * 纯逻辑、不依赖 android.*，可 JVM 单测。
+ *
+ * public 而非 internal：本层已搬进 `:shared`，而 `JwImportScreen` / `XgFormScreen` /
+ * `TranscriptScreen` 留在 `:app`，跨模块看不见 internal。
  */
-internal fun unwrapJsString(raw: String?): String {
+fun unwrapJsString(raw: String?): String {
     if (raw.isNullOrBlank()) return ""
     var s = raw.trim()
     if (s == "null") return ""
@@ -25,8 +28,8 @@ internal fun unwrapJsString(raw: String?): String {
     return if ("\\u" in s) decodeUnicodeEscapes(s) else s
 }
 
-/** 把 `\uXXXX` 解回字符；非法转义原样保留（宁可留着让调用方看见，也不要丢字符）。 */
-internal fun decodeUnicodeEscapes(s: String): String {
+/** 把 `\uXXXX` 解回字符；非法转义原样保留（宁可留着让调用方看见，也不要丢字符）。public 理由见 [unwrapJsString]。 */
+fun decodeUnicodeEscapes(s: String): String {
     if ("\\u" !in s) return s
     val sb = StringBuilder(s.length)
     var i = 0

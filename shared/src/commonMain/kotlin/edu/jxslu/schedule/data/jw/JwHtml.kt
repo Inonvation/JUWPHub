@@ -8,8 +8,11 @@ import edu.jxslu.schedule.domain.TermNaming
  * 优先按 `id` / `name` 收窄到指定 select，避免整页多个下拉时串值；
  * `selectId = null` 只用于确认页面上只有一个 select 的壳页。
  * value 属性优先、option 文本兜底；`requireTermPattern` 时用 [JwUrls.TERM_PATTERN] 校验。
+ *
+ * public 而非 internal：本层已搬进 `:shared`，而 `ExamSync` / `ScheduleSync` /
+ * `ScheduleTermImport` 留在 `:app`，跨模块看不见 internal。
  */
-internal object JwHtml {
+object JwHtml {
 
     fun selectedTerm(
         html: String,
