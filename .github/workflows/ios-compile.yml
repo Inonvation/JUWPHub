@@ -18,10 +18,12 @@
 name: iOS Compile
 
 on:
-  push:
-    branches: [main, feat/ios-port]
+  # 2026-11-24 起 push 不再触发本 workflow：它与 `ios-ipa.yml` 都在 push 时启动，
+  # 两个 macOS 任务同时抢 runner，实测会互相饿死（run 45363244752 报
+  # "The job was not acquired by Runner of type hosted even after multiple attempts"）。
+  # 现在 push 走 ios-ipa（它内部先 compile + link，等于含了本 workflow 的验证）；
+  # 这里只留 PR 与手工触发，用来在不打 IPA 时快速验一遍编译。
   pull_request:
-  # 手工触发：想单独验 iOS 时不用推提交
   workflow_dispatch:
 
 concurrency:
@@ -62,7 +64,25 @@ jobs:
           yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
           "$SDKMGR" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
+      # ~/.konan 不在 Gradle User Home 里，setup-gradle 管不到它。Kotlin/Native 的
+      # LLVM / libffi / sysroot 冷启动要下载并解压 40s 以上（实测 `Downloading native
+      # dependencies (LLVM, sysroot etc)`），而它们只在 Kotlin 版本或 Gradle 配置变化时才失效。
+      - name: 缓存 Kotlin/Native 工具链（~/.konan）
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('build.gradle.kts', 'shared/build.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: konan-${{ runner.os }}-
+
+      # `cache-read-only: false` 是必须写的，不是冗余：gradle/actions **只从默认分支写缓存**，
+      # 特性分支上默认就是只读。实测日志（2026-11-24，run 45360577520）：
+      #   Cache is read-only: will not save state for use in subsequent builds.
+      #   Gradle User Home cache not found. Will initialize empty.
+      # 于是每次 run 全冷——Gradle 发行包重下 1m29s、依赖全下、LLVM 重下。
+      # GitHub 缓存本来就按分支隔离，放开写只影响本分支自己的后续 run。
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: 打印工具链版本（失败时定位用）
         run: |
@@ -71,16 +91,21 @@ jobs:
 
       # 编译 + 链接两步都要：
       # - `compileKotlin*` 验「代码能不能编」；
-      # - `linkDebugFramework*` 验「产物能不能被 Xcode 消费」——链接会检查 `:shared` 的导出面
-      #   （Kotlin/Native 导出不了的泛型、内联类、默认参数之类只在链接期暴露）。
+      # - `linkDebugFrameworkIosArm64` 验「产物能不能被 Xcode 消费」——链接会检查 `:shared`
+      #   的导出面（Kotlin/Native 导出不了的泛型、内联类、默认参数之类只在链接期暴露）。
       #   framework 已在 shared/build.gradle.kts 里声明为 `Shared`（static）。
+      #   **链接占本步一半时间**（实测 2m50s / 8m45s），所以只链设备那份。
+      #
+      # 不再链 `linkDebugFrameworkIosSimulatorArm64`（原 1m21s）：CI 里没有任何一条路径
+      # 拿模拟器 framework 去跑——没有 iosSimulatorArm64Test，也没人对模拟器 xcodebuild。
+      # 模拟器产物由 mac 本地按需构建（Xcode 跑预览/模拟器时才需要）。
+      # 模拟器的**编译**留着（30s，且是 mac 侧 Xcode 直接用的 target）。
       - name: 编译并链接 :shared 的 iOS klib 与 framework
         run: |
           ./gradlew \
             :shared:compileKotlinIosArm64 \
             :shared:compileKotlinIosSimulatorArm64 \
             :shared:linkDebugFrameworkIosArm64 \
-            :shared:linkDebugFrameworkIosSimulatorArm64 \
             --stacktrace
 
       # 把 framework 的路径与大小打出来：P3 建 iosApp 时要链它，路径写死容易过期。
