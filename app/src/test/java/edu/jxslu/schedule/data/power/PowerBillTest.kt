@@ -1,6 +1,6 @@
 package edu.jxslu.schedule.data.power
 
-import java.time.YearMonth
+import kotlinx.datetime.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -85,7 +85,8 @@ class PowerBillTest {
 
     @Test
     fun `月窗口跨年且含当月`() {
-        val keys = PowerBill.recentMonthKeys(YearMonth.of(2026, 1), count = 3)
+        // 参数从 java.time.YearMonth 换成 kotlinx-datetime 的 LocalDate（只用到年月）
+        val keys = PowerBill.recentMonthKeys(LocalDate(2026, 1, 15), count = 3)
         assertEquals(listOf("2025-11", "2025-12", "2026-01"), keys)
     }
 

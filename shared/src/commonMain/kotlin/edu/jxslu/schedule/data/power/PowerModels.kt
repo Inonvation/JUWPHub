@@ -1,10 +1,11 @@
 package edu.jxslu.schedule.data.power
 
 import edu.jxslu.schedule.domain.PowerReading
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlin.math.roundToLong
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -123,9 +124,6 @@ object PowerModels {
 
     /** 电费收费项目 id（2026-09-23 实测：平台上只有这一个项目）。 */
     const val RECHARGE_FEE_ITEM_ID = 181
-
-    /** 时间原文格式（服务端 `createdate`）。 */
-    private val TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -362,12 +360,20 @@ object PowerModels {
         return null to null
     }
 
-    /** 服务端时间原文 → epoch 毫秒；解析不了给 0（排序沉底）。 */
+    /**
+     * 服务端时间原文 → epoch 毫秒；解析不了给 0（排序沉底）。
+     *
+     * 原实现走 `java.time.LocalDateTime.parse(text, DateTimeFormatter.ofPattern(
+     * "yyyy-MM-dd HH:mm:ss"))` + `ZoneId.systemDefault()`——两条都是 JVM 专有。
+     * kotlinx-datetime 的 [LocalDateTime.parse] 只吃 ISO 口径（`T` 分隔），所以把空格换成
+     * `T` 再解析；时区仍取**系统默认**（与 `AppClock.dateTimeOf` 同口径，不写死东八区）。
+     * 只有日期、没有时刻的串（`2026-08-25`）照样解析失败 → 0，与迁移前一致。
+     */
     fun parseTimeMs(text: String): Long {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return 0L
-        return runCatching { LocalDateTime.parse(trimmed, TIME_FORMAT) }
-            .map { it.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() }
+        return runCatching { LocalDateTime.parse(trimmed.replace(' ', 'T')) }
+            .map { it.toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds() }
             .getOrDefault(0L)
     }
 

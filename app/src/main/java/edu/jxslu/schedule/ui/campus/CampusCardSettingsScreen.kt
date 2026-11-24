@@ -82,6 +82,7 @@ import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.life.PowerRoomPickerSheet
 import edu.jxslu.schedule.ui.life.PowerRoomPickerViewModel
+import edu.jxslu.schedule.ui.life.powerRoomPickerFactory
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 
@@ -162,7 +163,7 @@ fun CampusCardSettingsScreen(
     var showRoomPicker by remember { mutableStateOf(false) }
     var roomLabel by remember { mutableStateOf<String?>(null) }
     val roomPickerViewModel: PowerRoomPickerViewModel = viewModel(
-        factory = PowerRoomPickerViewModel.factory(context.applicationContext),
+        factory = powerRoomPickerFactory(context.applicationContext),
     )
     androidx.compose.runtime.LaunchedEffect(Unit) {
         roomLabel = runCatching { Graph.powerReadingStore(context.applicationContext).latest() }

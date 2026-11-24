@@ -4,8 +4,10 @@ import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.YktTurnoverEntity
 import edu.jxslu.schedule.domain.YktTurnoverRow
 import edu.jxslu.schedule.domain.AppClock
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import kotlin.concurrent.Volatile
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 
 /** 流水实体 → 判定/展示行（`domain/YktPayment` 的 [YktTurnoverRow]，消费检测与入箱共用）。 */
 fun YktTurnoverEntity.toWatchRow() = YktTurnoverRow(
@@ -127,7 +129,19 @@ class YktTurnoverSyncer(
     }
 
     companion object {
-        private val SERVER_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+        /**
+         * 服务端时间原文 → epoch 毫秒；解析失败为 0 沉底。
+         *
+         * 原实现是 `LocalDateTime.parse(text, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))`
+         * ——`java.time` 在 Kotlin/Native 上没有。kotlinx-datetime 的 [LocalDateTime.parse]
+         * 只吃 ISO 口径（`T` 分隔），所以把空格换成 `T` 再解析；两者都只认「到秒」的定长串，
+         * 对 `2026-08-25`（只有日期）一律解析失败 → 0，与迁移前一致。
+         */
+        private fun serverTimeMs(text: String): Long = runCatching {
+            LocalDateTime.parse(text.replace(' ', 'T'))
+                .toInstant(TimeZone.currentSystemDefault())
+                .toEpochMilliseconds()
+        }.getOrDefault(0L)
 
         /**
          * 哪些新流水该入收件箱（纯函数，单测钉住）：**库里此前有数据**（否则是首装
@@ -143,12 +157,7 @@ class YktTurnoverSyncer(
 
         /** 流水记录 → 实体（jndatetime 解析失败为 0 沉底；orderId 空用合成键）。 */
         fun YktTurnover.toEntity(now: Long = AppClock.nowMillis()): YktTurnoverEntity {
-            val epoch = runCatching {
-                LocalDateTime.parse(jndatetimeStr, SERVER_FORMAT)
-                    .atZone(java.time.ZoneId.systemDefault())
-                    .toInstant()
-                    .toEpochMilli()
-            }.getOrDefault(0L)
+            val epoch = serverTimeMs(jndatetimeStr)
             // `orderId` 是 `:shared` 里 `YktTurnover` 的公开属性，跨模块不能智能转换，
             // 所以用 orEmpty() 收口（else 分支里它必然非空非空串，orEmpty 只是让类型落定）
             val key = if (orderId.isNullOrBlank()) "syn_${jndatetimeStr}_$tranamtFen" else orderId.orEmpty()

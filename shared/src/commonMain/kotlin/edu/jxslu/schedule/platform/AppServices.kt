@@ -1,6 +1,8 @@
 package edu.jxslu.schedule.platform
 
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.data.power.PowerReadingStore
+import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.NoteRepository
@@ -11,6 +13,8 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.ykt.YktCredentialStore
+import edu.jxslu.schedule.data.ykt.YktRepository
 
 /**
  * 共享层向「各平台装配根」要服务的唯一入口（iOS 移植 M1，2026-11-25）。
@@ -94,6 +98,43 @@ interface AppServices {
 
     /** 作业仓库（DESIGN §3.11）。 */
     fun homeworkRepository(): HomeworkRepository
+
+    // ---- 一卡通 / 寝室电费（iOS 移植 S14，2026-11-25） ----
+    //
+    // 四个成员按「有没有平台能力」分两类：纯 HTTP + 内存缓存与本地表都返回非空，
+    // 只有要保险箱（Android 的 EncryptedSharedPreferences）的那一个可空。
+    // 上面那条「类型还在 :app 的仓库等搬过来再加」的纪律到此为止——这两块的数据层
+    // 已经在 commonMain 了。
+
+    /**
+     * 一卡通仓库（登录 / 付款码 / 余额 / 流水 / 充值）。
+     *
+     * **非空**：它只要一个 Ktor client 与内存里的 token，两端都建得起来。
+     * 落盘 token（`YktTokenCache`）与「失效标记」（`YktSuspension`）都是可选加速，
+     * 缺了只是每次冷启动多登一次、状态卡不显示「已失效」。
+     */
+    fun yktRepository(): YktRepository
+
+    /**
+     * 校园卡凭证存储；**null = 本平台还没有加密凭证存储**。
+     *
+     * 返回 null 而不是抛：付款码 / 流水 / 设置三页据此整块隐藏「开启校园卡」入口，
+     * 而不是点下去才发现存不住密码。Android 侧是 `EncryptedSharedPreferences`
+     * （`CredentialVault`）；iOS 要等 Keychain 实现（`kSecClassGenericPassword`），
+     * 升级条件写在 `IosServices` 的 KDoc 里。
+     */
+    fun yktCredentialStore(): YktCredentialStore?
+
+    /**
+     * 缴费平台（寝室电费）仓库。
+     *
+     * **非空**：凭证由调用方传进来（与一卡通同一份学号 + 查询密码），仓库自己只要
+     * Ktor client + 本地读数表，两端都能建。
+     */
+    fun powerRepository(): PowerRepository
+
+    /** 电表读数本机记录（DESIGN §3.13「用电统计」）：本地表，两端都能读写。 */
+    fun powerReadingStore(): PowerReadingStore
 }
 
 /**

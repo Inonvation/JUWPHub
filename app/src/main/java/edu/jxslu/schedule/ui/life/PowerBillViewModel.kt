@@ -15,13 +15,13 @@ import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.power.PowerTurnover
 import edu.jxslu.schedule.data.session.NetworkHint
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.PowerReading
 import edu.jxslu.schedule.domain.PowerRechargePoint
 import edu.jxslu.schedule.domain.PowerUsage
 import edu.jxslu.schedule.domain.PowerUsageRange
 import edu.jxslu.schedule.domain.PowerUsageSummary
 import edu.jxslu.schedule.ui.common.NoticeTone
-import java.time.YearMonth
 import kotlinx.datetime.TimeZone
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
@@ -33,7 +33,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** 账单页的月份窗口（进页算一次，页面存活期间不变）。 */
-private val BILL_MONTH_KEYS: List<String> = PowerBill.recentMonthKeys(YearMonth.now())
+private val BILL_MONTH_KEYS: List<String> = PowerBill.recentMonthKeys(AppClock.today())
 
 /** 用电统计的档位状态。 */
 data class PowerUsageUiState(

@@ -1,6 +1,9 @@
 package edu.jxslu.schedule
 
 import edu.jxslu.schedule.data.local.juwDatabase
+import edu.jxslu.schedule.data.power.PowerClient
+import edu.jxslu.schedule.data.power.PowerReadingStore
+import edu.jxslu.schedule.data.power.PowerRepository
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
@@ -19,6 +22,9 @@ import edu.jxslu.schedule.data.session.IosJwReadSession
 import edu.jxslu.schedule.data.session.IosWebCookieSource
 import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.data.session.WebCookies
+import edu.jxslu.schedule.data.ykt.YktClient
+import edu.jxslu.schedule.data.ykt.YktCredentialStore
+import edu.jxslu.schedule.data.ykt.YktRepository
 import edu.jxslu.schedule.platform.AppServices
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -135,6 +141,53 @@ class IosServices : AppServices {
     override fun noteRepository(): NoteRepository = NoteRepository(juwDatabase())
 
     override fun homeworkRepository(): HomeworkRepository = HomeworkRepository(juwDatabase())
+
+    // ---- 一卡通 / 寝室电费（S14，2026-11-25） ----
+    //
+    // 两个仓库非空：数据层已经是纯 Ktor + 本地表，iOS 直接建得起来。
+    // 但**都不带落盘 token、也不带「失效标记」**——那两样各要一条平台能力（见下）。
+
+    /**
+     * 一卡通仓库。
+     *
+     * `tokenCache = null`：落盘 token 只能进 Android 的 `EncryptedSharedPreferences`，
+     * iOS 侧要等 Keychain（同 [yktCredentialStore] 的升级条件）。缺了它只是每次冷启动
+     * 多登一次（取安全键盘 + 换 token 两条请求），对外行为不变。
+     *
+     * `suspension = null`：iOS 还没有「我的」页账户卡，没有地方显示「登录状态已失效」。
+     * 失效判定本身仍由服务端 401 驱动。
+     */
+    private val yktRepo: YktRepository by lazy {
+        YktRepository(YktClient.create(), tokenCache = null, suspension = null)
+    }
+
+    /** 电表读数本机记录（与课表共用一个 Room）。 */
+    private val powerReadings: PowerReadingStore by lazy {
+        PowerReadingStore(juwDatabase().powerReadingDao())
+    }
+
+    /** 电费仓库：读数落本地表，协议留痕 release/debug 都不写。 */
+    private val powerRepo: PowerRepository by lazy {
+        PowerRepository(PowerClient.create(), powerReadings, debugDump = null, suspension = null)
+    }
+
+    override fun yktRepository(): YktRepository = yktRepo
+
+    /**
+     * 校园卡凭证存储：**iOS 侧还没有实现，返回 null**。
+     *
+     * 升级条件（照 `data/ykt/YktCredentialVault.kt` 的约定）：用 Keychain 实现
+     * `YktCredentialVault`——`kSecClassGenericPassword`，service 取包名、
+     * account 沿用 Android 的 `username` / `password` 两个键名，
+     * `kSecAttrAccessibleAfterFirstUnlock`（后台刷新要用，不能是 `WhenUnlocked`），
+     * `clear()` 里连 token 项一起删。在那之前**不要**退回 `NSUserDefaults`：
+     * 明文存密码比不存更糟，而三页的「开启校园卡」入口在 null 时会整块隐藏。
+     */
+    override fun yktCredentialStore(): YktCredentialStore? = null
+
+    override fun powerRepository(): PowerRepository = powerRepo
+
+    override fun powerReadingStore(): PowerReadingStore = powerReadings
 
     init {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
