@@ -1,32 +1,42 @@
 package edu.jxslu.schedule.data.wenqu
 
-import edu.jxslu.schedule.data.net.AppHttp
+import edu.jxslu.schedule.data.net.SharedHttp
 import edu.jxslu.schedule.data.qiekj.QiekjJson
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import edu.jxslu.schedule.domain.AppClock
+import io.ktor.client.HttpClient
+import io.ktor.client.request.header
+import io.ktor.client.request.request
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
+import io.ktor.http.contentType
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
- * 问渠实践教育平台 裸 OkHttp 客户端（DESIGN §4.45）。
+ * 问渠实践教育平台客户端（DESIGN §4.45）。
  *
  * 形态对齐 [edu.jxslu.schedule.data.ujing.UjingApi]：私有构造 + `create()`、手写请求头、
  * 解析交宽容序列化。**不用 Retrofit**——端点都是 POST 一条 JSON（下载那条 GET）、无 query 参数，
- * 裸 OkHttp 更直白。
+ * 直接发请求更直白。
  *
  * 红线：
  * - **无日志拦截器**——手机号 / 密码 / token 绝不进 Logcat（对齐一卡通 / 电费 / 快趣 / U净）；
  * - token 不驻留本类（持久化归 [WenquCredentialStore]），本类只见调用方传入的串；
  * - 只发读接口 + 用户显式触发的写（登录 / 设密码 / **报名** / **取消报名**）；
  *   **签到、提交材料类写接口仍不碰**（`volunteer/checkin`、`*_submit` 一个都不要调）。
+ *
+ * iOS 移植 P1（2026-11-24）：搬进 `:shared`，OkHttp → Ktor。`withServerClock` 原本靠
+ * 挂一层 OkHttp 拦截器实现，现在改为在 [send] 里就地记账（Ktor 没有 Interceptor），
+ * 口径不变：发前取钟 → 收后取钟 → 读 `Date` 头算偏移。
  */
-class WenquApi private constructor(private val http: OkHttpClient) {
+class WenquApi private constructor(
+    private val http: HttpClient,
+    private val withServerClock: Boolean,
+) {
 
     companion object {
         /** 平台根（与小程序 `HTTP_REQUEST_URL` 逐字一致）。 */
@@ -40,7 +50,12 @@ class WenquApi private constructor(private val http: OkHttpClient) {
          */
         const val MSG_NOT_APPLIED = "您未报名该活动"
 
-        private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+        /**
+         * `Accept` 头原值。抽成常量是为了让 KDoc 能引用它——把星号与斜杠连写进 KDoc
+         * 会被当成块注释的结束符，编译器只会报一串「Expecting member declaration」，
+         * 真正的病因（注释提前闭合）得自己往回找。
+         */
+        private const val ACCEPT_JSON = "application/json, text/plain, */*"
 
         /**
          * 共享池派生；[callTimeoutSeconds] 默认 30s（登录 / 详情 / 写操作都够用）。
@@ -49,14 +64,13 @@ class WenquApi private constructor(private val http: OkHttpClient) {
          * 6s / 3s 见 `WenquRules.GRAB_REQUEST_TIMEOUT_S` / `GRAB_BURST_TIMEOUT_S`）：
          * 高频轮询挂 30 秒等于一轮白等——别直接把这个默认值改小，会误伤写操作。
          *
-         * [withServerClock] = true 时多挂一层 [WenquServerClockInterceptor]（预报名专用：
+         * [withServerClock] = true 时每次响应顺手记一笔服务器时钟偏移（预报名专用：
          * 它要按服务器的钟算「提前 15 秒」，见 `WenquRules.preregTryStartAt`）。
          */
         fun create(callTimeoutSeconds: Long = 30L, withServerClock: Boolean = false): WenquApi =
             WenquApi(
-                AppHttp.withCallTimeout(callTimeoutSeconds).newBuilder()
-                    .apply { if (withServerClock) addInterceptor(WenquServerClockInterceptor()) }
-                    .build(),
+                http = SharedHttp.create(requestTimeoutSeconds = callTimeoutSeconds),
+                withServerClock = withServerClock,
             )
     }
 
@@ -182,29 +196,36 @@ class WenquApi private constructor(private val http: OkHttpClient) {
         path: String,
         body: JsonObject,
         token: String? = null,
-    ): WenquEnvelope = withContext(Dispatchers.IO) {
-        send(baseBuilder(path, token).post(body.toString().toRequestBody(JSON_MEDIA)).build())
-    }
+    ): WenquEnvelope = send(path, body.toString(), token)
 
     /** `GET` 版（星级证书下载用）。 */
     private suspend fun get(path: String, token: String? = null): WenquEnvelope =
-        withContext(Dispatchers.IO) {
-            send(baseBuilder(path, token).get().build())
-        }
+        send(path, jsonBody = null, token = token)
 
-    /** 公共请求头：`Accept` + CRMEB 特有拼写的 **`Authori-zation`**（写成 Authorization 会被判未登录）。 */
-    private fun baseBuilder(path: String, token: String?): Request.Builder {
-        val builder = Request.Builder()
-            .url(BASE + path)
-            .header("Accept", "application/json, text/plain, */*")
-        if (!token.isNullOrBlank()) builder.header("Authori-zation", "Bearer $token")
-        return builder
-    }
-
-    private fun send(request: Request): WenquEnvelope {
-        val (httpCode, text) = http.newCall(request).execute().use { response ->
-            response.code to response.body?.string().orEmpty()
+    /**
+     * 发一次请求并解析。
+     *
+     * 请求头两个都要（值见 [ACCEPT_JSON]）：
+     * - `Accept`：JSON 优先、其余走通配
+     * - **`Authori-zation`**——CRMEB 特有拼写，写成 `Authorization` 会被判未登录。
+     */
+    private suspend fun send(path: String, jsonBody: String?, token: String?): WenquEnvelope {
+        val sentAt = AppClock.nowMillis()
+        val response = http.request(BASE + path) {
+            header("Accept", ACCEPT_JSON)
+            if (!token.isNullOrBlank()) header("Authori-zation", "Bearer $token")
+            if (jsonBody != null) {
+                method = HttpMethod.Post
+                contentType(ContentType.Application.Json)
+                setBody(jsonBody)
+            }
         }
+        val receivedAt = AppClock.nowMillis()
+        if (withServerClock) {
+            WenquServerClock.recordFrom(response.headers["Date"], sentAt, receivedAt)
+        }
+        val text = response.bodyAsText()
+        val httpCode = response.status.value
         return try {
             QiekjJson.json.decodeFromString(WenquEnvelope.serializer(), text)
         } catch (e: SerializationException) {

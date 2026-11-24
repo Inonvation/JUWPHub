@@ -1,9 +1,7 @@
 package edu.jxslu.schedule.data.wenqu
 
 import edu.jxslu.schedule.domain.WenquRules
-import edu.jxslu.schedule.domain.AppClock
-import okhttp3.Interceptor
-import okhttp3.Response
+import kotlin.concurrent.Volatile
 import kotlin.math.abs
 
 /**
@@ -11,11 +9,15 @@ import kotlin.math.abs
  *
  * 平台写接口会**提前约 10 秒放行**（用户实测：活动写着 12:00 开始报名，11:59:50
  * 就能抢），所以「开始前 15 秒起试发」落在服务器几点几分，得用服务器自己的钟来算。
- * 不依赖 NTP：HTTP 响应自带 `Date` 头，每次请求顺手记一笔偏移
- * （[WenquServerClockInterceptor]）。
+ * 不依赖 NTP：HTTP 响应自带 `Date` 头，每次请求顺手记一笔偏移（见 [recordFrom]）。
  *
  * 只保留**最近一次**测量；偏移大得离谱（差 10 分钟以上）视为异常样本丢弃——
  * 那种情况下错的是手机时间，不是这一发请求能修的。
+ *
+ * iOS 移植 P1（2026-11-24）：本对象原本和一个 OkHttp `Interceptor` 在一起。Ktor 没有
+ * `Interceptor` 这个概念，所以拦截器删掉，改成调用方（`WenquApi.send`）在拿到响应后
+ * 调 [recordFrom]——记账口径完全一样（发前取钟、收后取钟、读 `Date` 头），
+ * 且省掉一层包装。
  */
 object WenquServerClock {
 
@@ -37,24 +39,16 @@ object WenquServerClock {
         offsetMs = offset
         measuredAt = at
     }
-}
 
-/**
- * 记 `Date` 头的拦截器：把「服务器时间 − 手机时间」写进 [WenquServerClock]。
- * 只做本地记账，不读也不改请求 / 响应体（**不是日志拦截器**，没有任何数据出站）。
- */
-class WenquServerClockInterceptor : Interceptor {
-    override fun intercept(chain: Interceptor.Chain): Response {
-        val sentAt = AppClock.nowMillis()
-        val response = chain.proceed(chain.request())
-        val receivedAt = AppClock.nowMillis()
-        val serverAt = WenquRules.parseHttpDate(response.header("Date"))
-        if (serverAt != null) {
-            WenquServerClock.record(
-                WenquRules.clockOffsetMs(serverAt, sentAt, receivedAt),
-                receivedAt,
-            )
-        }
-        return response
+    /**
+     * 从一次请求的响应头记一笔偏移。
+     *
+     * @param httpDate 响应 `Date` 头的原值（没有就给 null，直接跳过）
+     * @param sentAt 请求发出前的手机钟
+     * @param receivedAt 响应拿到后的手机钟
+     */
+    fun recordFrom(httpDate: String?, sentAt: Long, receivedAt: Long) {
+        val serverAt = WenquRules.parseHttpDate(httpDate) ?: return
+        record(WenquRules.clockOffsetMs(serverAt, sentAt, receivedAt), receivedAt)
     }
 }
