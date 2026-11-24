@@ -1069,33 +1069,52 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 
 ### 12.2 今晚没做完（能搬，时间不够）
 
-按 `:app` 里剩下的行数排（2026-11-25 01:50 实测）：
+按 `:app` 里剩下的行数排（2026-11-25 03:15 实测）。共享层 `commonMain` 已从
+43.8% 涨到 **64.3%**（116,823 行 / `:app` 64,819 行）。
 
 | 包 | 文件 | 行数 | 卡在哪 |
 |---|---|---|---|
-| `ui/qzxy` | 11 | 6,121 | 开阀要 BLE 传输层（见 12.1）；UI 本身可搬，靠 `IosQzxyBluetoothLink` 存根落在「本平台不支持蓝牙」态 |
-| `ui/me` | 10 | 4,584 | 设置子页 + 账户中心；依赖 `data/session`（正在搬） |
-| `ui/campus` | 13 | 4,561 | 请假 / 宿舍报修 / 学工表单；含 `WebView` 与 `Bitmap` |
-| `ui/today` | 4 | 3,629 | 今日页是**所有能力的汇合点**：依赖 water / ujing / qzxy / ebike / homework / inbox / jwvw / reminder 八个包，得等它们先搬完 |
-| `ui/life` | 6 | 3,114 | 侧边栏 + 电费充值；依赖 `SubpageActivity` 路由 |
-| `ui/jwvw` | 5 | 2,895 | 教务 WebView 外壳 + 自动填表注入 |
-| `ui/toolbox` | 7 | 1,745 | 图片水印 / 拼接 / 菜鸟批量查，重度 `Bitmap` |
-| `ui/score` | 4 | 1,215 | 成绩页设置 + 盖章成绩单（`WebView` + PDF） |
-| `ui/scholar` | 1 | 780 | 学业完成情况 |
-| `ui/homework` | 1 | 768 | 今日页的作业卡（详情页已搬） |
-| `ui/curriculum` | 1 | 486 | 培养方案 |
-| `ui/notes` | 1 | 470 | 课程备注 |
-| `ui/internship` | 1 | 352 | 实习基地 |
-| `ui/selection` | 1 | 89 | 选课页的平台槽 |
-| `ui/weather` | 1 | 97 | 天气设置页 |
-| `ui/jw` | 1 | 44 | 教务页的平台槽 |
+| `ui/ebike` | 30 | 17,879 | 见 12.1：高德 Android SDK |
+| `ui/reminder` | 15 | 4,107 | 见 12.1：通知 + WorkManager |
+| `ui/campus` | 9 | 3,991 | 学工表单 / 教务导入的 WebView 外壳（要文件上传、SSL、定位、WebSettings 那一层），`CampusCardViewModel` 被 `ui/life` 的禁改文件调着，`PayCodeScreen` 用 `FLAG_SECURE` + 屏幕亮度 |
+| `ui/me` | 9 | 3,847 | 日历设置（系统 Calendar Provider）、教务账号（三个 Activity 入口）、提醒设置（通知 + WorkManager）、快捷方式设置（`PackageManager` 查应用图标）、小组件设置（Glance） |
+| `ui/widget` | 12 | 3,112 | 见 12.1：Glance |
+| `ui/onboarding` | 1 | 2,592 | 首启引导；多步向导 + 权限申请 + 图片素材 |
+| `ui/jwvw` | 2 | 2,445 | `JwImportScreen`：教务导入总入口，WebView 全套 API + 文件选择 |
+| `ui/common` | 22 | 2,087 | 剩下的都是位图与 WebView 辅助（`DecodeSampled` / `CodeBitmaps` / `WebViewSupport` / `ImageViewerDialog`） |
+| `ui/today` | 3 | 1,914 | `ActiveServiceCard`（1,389）与 `GuessYouWantCardPlatform`：依赖 `ui.ebike` + `ui.qzxy` + 五张品牌位图，已按槽位反转成宿主注入，本机实现仍留 `:app` |
+| `ui/wenqu` | 5 | 1,737 | 蹲点提醒 / 前台服务 / `AlarmManager`（见 12.1 通知那一行） |
+| `ui/week` | 4 | 1,568 | 课表页的平台槽（文件选择、日历写入、背景图） |
+| `ui/life` | 5 | 1,311 | `RechargeHost` / `PowerBankPayScreen`（`android.webkit` 全家 + `@JavascriptInterface`） |
+| `ui/timetable` / `ui/tweak` / `ui/onboarding` 之外 | — | 各 0.7–1.1k | 时间表管理 / 调课面板：依赖 `data/session` 与二级页栈 |
+
+### 12.4 今晚（2026-11-25 01:30–03:30）实际推进了什么
+
+| 批次 | 内容 | 结果 |
+|---|---|---|
+| 第一波（5 条并行） | `data/session` 会话层 + 账号中心、开水房、问渠、AI 调课、U净 | 全部合并，门禁绿 |
+| 第二波（1 条） | 侧边栏内容 + 生活/电费 | 合并，门禁绿 |
+| 第三波（4 条并行） | 今日页（槽位反转）、学工/报修/教务 WebView 适配、趣智页面层 + 百宝箱、学业/培养方案/笔记作业详情页 | 全部合并，门禁绿 |
+| iOS 壳 | `IosNavigation` 用 `SubpageScreen` 当路由键 + 抽屉白名单（31 条）；`IosKeychain` + 六个第三方凭证存储；AI 三页、账号中心、报修、百宝箱、学业、培养方案、天气设置接进路由 | 见 §12.5 |
+| 工具 | `scripts/check_kt_balance.py`（括号平衡，976→1004 个文件全绿）；`runner-probe.yml`（runner 标签实测） | 已入库 |
+
+**没做到的**：`iosMain` 的编译验证卡在 GitHub macOS runner 容量上——今晚 6 次
+`cancelled` 里只有 2 次是代码错误，其余是排满 10–15 分钟拿不到机器（`steps=0`）。
+
 
 ### 12.3 iOS 壳本身还差的（不是「搬不动」，是没写）
 
-| 差什么 | 现状 | 影响 |
+| 差什么 | 现状（2026-11-25 03:30） | 影响 |
 |---|---|---|
-| **导航与 Android 不一致** | Android 是「3 底栏 Tab + 左侧抽屉（身份/钱包/生活/江水生活/学习/设置/付款码）+ `SubpageActivity` 二级页栈」；iOS 现在是一条 12 格的底栏 | **界面不统一**，这是 §12 里最该先补的一条 |
+| 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份），底栏「今日 / 课表 / 教务 / 我的」+ 「更多」打开抽屉，抽屉按 Android 的分组列 31 条。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的手势与视差；`我的` 那一格在 Android 上是从抽屉进的 |
 | 教务登录后的自动填表 | iOS 用 `WKWebView` 让用户手点登录，登录成功落地后自动 `archive` | Android 有自动填表；iOS 需要注入 JS，能做 |
-| 凭证存储 | 六个第三方存储刚接上 Keychain（`IosSessionStores`），**未编译验证** | 一卡通 / 教务（CAS）那两套仍返回 `null`，因为 `data/session` 还在 `:app` |
+| 凭证存储 | `IosKeychain`（CoreFoundation）+ 六个第三方存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI）已写，**iOS 编译验证卡在 runner 容量** | 一卡通 / 教务（CAS）那两套仍返回 `null`：还要「CAS 学号 + 登录闸门」两样，它们在 `:app` 的 `CredentialVault` 里 |
+| 第三方仓库 | `qiekjRepository()` / `qzxyRepository()` / `ujingRepository()` / `wenquRepository()` / `kqcxSession()` 仍返回 `null` | 所以开水房 / 趣智 / U净 / 问渠四个页面**在 iOS 上没有入口**——不是点了没反应，是路由不给。凭证那一半已经接上 Keychain，缺的是订单快照 / 收藏 / 历史那几份 `KeyValuePrefs` 落点（各写一份 `appDataDir()` JSON 即可） |
 | 支付调起 | 一卡通走「收银台 URL 进 `WKWebView`」；胖乖 / 趣智走 `alipays://` 深链 | `Info.plist` 还没有 `LSApplicationQueriesSchemes`（`alipays` / `weixin`），深链会被系统拦 |
 | App 图标与启动屏 | `Info.plist` 有意不给（链路验证包） | 侧载后桌面是默认灰图标 |
+
+**iOS 上现在能进的页面**（抽屉 31 条 + 4 个底栏 Tab）：今日、课表、教务汇总、我的、笔记库 / 课程分组 / 笔记详情、
+作业库 / 待办 / 课程分组 / 作业详情、理论课表、实验课表、教材、教学日历、学籍信息、学业完成情况、
+培养方案、成绩 / 成绩设置、考试 / 考试设置、选课 / 选课中心 / 已选课程 / 预选清单、收件箱、天气 /
+天气设置、电费、消费流水、宿舍报修、百宝箱 / 菜鸟批量查、数据与备份、账号中心、AI 调课 / AI 设置 / 调课记录。
+
