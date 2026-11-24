@@ -8,7 +8,7 @@ import android.os.StrictMode
 import edu.jxslu.schedule.data.repo.CrashReporter
 import edu.jxslu.schedule.data.repo.UpdateCheckClient
 import edu.jxslu.schedule.data.repo.UpdateCheckResult
-import edu.jxslu.schedule.data.session.AutoSyncRules
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.UpdateCheck
 import edu.jxslu.schedule.ui.ai.clearAiImageCache
 import edu.jxslu.schedule.ui.common.clearAttachmentImageCache

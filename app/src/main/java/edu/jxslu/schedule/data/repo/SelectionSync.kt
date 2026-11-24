@@ -2,10 +2,10 @@ package edu.jxslu.schedule.data.repo
 
 import edu.jxslu.schedule.data.jw.SelectionParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
-import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.CourseSelection
 import edu.jxslu.schedule.domain.SelectionRound
 import edu.jxslu.schedule.domain.SelectionRounds

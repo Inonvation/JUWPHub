@@ -15,8 +15,8 @@ import edu.jxslu.schedule.data.repo.PendingLaunch
 import edu.jxslu.schedule.data.wenqu.WenquActivity
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.PendingNotification
-import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.wenqu.WenquRepository
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.WenquRules

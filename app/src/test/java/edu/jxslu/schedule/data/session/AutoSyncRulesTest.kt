@@ -1,6 +1,10 @@
 package edu.jxslu.schedule.data.session
 
-import java.time.LocalDate
+import edu.jxslu.schedule.domain.AutoSyncRules
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,7 +16,7 @@ import org.junit.Test
  */
 class AutoSyncRulesTest {
 
-    private val today = LocalDate.of(2026, 9, 27)
+    private val today = LocalDate(2026, 9, 27)
 
     @Test
     fun `库里没数据立即抓`() {
@@ -38,7 +42,7 @@ class AutoSyncRulesTest {
         assertFalse(
             AutoSyncRules.shouldAttempt(
                 hasData = true,
-                lastSuccessDate = today.minusDays(6).toString(),
+                lastSuccessDate = today.minus(6, DateTimeUnit.DAY).toString(),
                 today = today,
             ),
         )
@@ -56,14 +60,16 @@ class AutoSyncRulesTest {
         assertTrue(
             AutoSyncRules.shouldAttempt(
                 hasData = true,
-                lastSuccessDate = today.minusDays(AutoSyncRules.REFRESH_INTERVAL_DAYS).toString(),
+                lastSuccessDate = today
+                    .minus(AutoSyncRules.REFRESH_INTERVAL_DAYS.toInt(), DateTimeUnit.DAY)
+                    .toString(),
                 today = today,
             ),
         )
         assertTrue(
             AutoSyncRules.shouldAttempt(
                 hasData = true,
-                lastSuccessDate = today.minusDays(30).toString(),
+                lastSuccessDate = today.minus(30, DateTimeUnit.DAY).toString(),
                 today = today,
             ),
         )
@@ -81,7 +87,7 @@ class AutoSyncRulesTest {
         assertFalse(
             AutoSyncRules.shouldAttempt(
                 hasData = true,
-                lastSuccessDate = today.plusDays(3).toString(),
+                lastSuccessDate = today.plus(3, DateTimeUnit.DAY).toString(),
                 today = today,
             ),
         )

@@ -25,15 +25,14 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.Homework
-import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.dueLabel
 import edu.jxslu.schedule.domain.homeworkDisplay
 import edu.jxslu.schedule.ui.common.MarkdownView
 import edu.jxslu.schedule.ui.common.MdImageStyle
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import kotlinx.datetime.LocalDate
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.PencilEdit02
-import java.time.LocalDate
 
 /**
  * 作业列表的**展开详情块**（2026-10-21，DESIGN §3.11）：
@@ -59,8 +58,8 @@ internal fun HomeworkItemBlock(
 ) {
     val haptics = rememberAppHaptics()
     val display = remember(homework.detail) { homeworkDisplay(homework.detail) }
-    val label = dueLabel(homework.dueDate?.toKotlinLocalDate(), today.toKotlinLocalDate())
-    val overdue = homework.dueDate?.isBefore(today) == true && !homework.done
+    val label = dueLabel(homework.dueDate, today)
+    val overdue = homework.dueDate?.let { it < today } == true && !homework.done
     val onSurface = MaterialTheme.colorScheme.onSurface
 
     Column(

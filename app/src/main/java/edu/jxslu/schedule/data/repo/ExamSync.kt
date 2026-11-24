@@ -6,10 +6,10 @@ import edu.jxslu.schedule.data.jw.ExamScheduleParser
 import edu.jxslu.schedule.data.jw.JwHtml
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
-import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.ExamChangeDetector
 import edu.jxslu.schedule.domain.ExamChangeText
 import edu.jxslu.schedule.domain.ExamMapper.ExamEntry

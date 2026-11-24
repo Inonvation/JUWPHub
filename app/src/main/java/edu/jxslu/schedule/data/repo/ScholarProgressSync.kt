@@ -3,16 +3,17 @@ package edu.jxslu.schedule.data.repo
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.jw.ScholarProgressParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
-import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.data.session.notReadyReason
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.ScholarCourse
 import edu.jxslu.schedule.domain.ScholarDimension
 import edu.jxslu.schedule.domain.ScholarGroup
 import edu.jxslu.schedule.domain.ScholarProgressRules
-import java.time.LocalDate
+import edu.jxslu.schedule.domain.AppClock
+import kotlinx.datetime.LocalDate
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -36,7 +37,7 @@ class ScholarProgressSync(
     private val cas: CasSession,
     private val repo: ScholarProgressRepository,
     private val prefs: DisplayPrefsStore,
-    private val today: () -> LocalDate = LocalDate::now,
+    private val today: () -> LocalDate = AppClock::today,
 ) {
 
     /** 抓取互斥（见 [Result.InProgress]）。实例是单例，所以这道锁覆盖全进程的触发点。 */

@@ -47,7 +47,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.SubpageActivity
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.repo.SelectionClientException
-import edu.jxslu.schedule.data.session.AutoSyncRules
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.SelectionRound
 import edu.jxslu.schedule.domain.SelectionRounds
 import edu.jxslu.schedule.domain.SelectionWish

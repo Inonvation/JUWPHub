@@ -7,7 +7,7 @@ import edu.jxslu.schedule.domain.HomeworkCourseGroup
 import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 /**
  * 作业仓库（DESIGN §4.20）：薄封装，排序/汇总/截止文案一律归 `domain/HomeworkCenter`。

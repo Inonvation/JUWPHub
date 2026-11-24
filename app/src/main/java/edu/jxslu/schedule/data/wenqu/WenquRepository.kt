@@ -1,8 +1,8 @@
 package edu.jxslu.schedule.data.wenqu
 
-import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.SessionExpiryStore
 import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.WenquRules
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers

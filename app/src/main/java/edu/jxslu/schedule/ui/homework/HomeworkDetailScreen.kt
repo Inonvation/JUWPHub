@@ -61,8 +61,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Homework
-import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.dueDetailLabel
 import edu.jxslu.schedule.domain.imageRefs
 import edu.jxslu.schedule.domain.removeImageRef
@@ -86,16 +86,19 @@ import edu.jxslu.schedule.ui.common.rememberImageInserter
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.reminder.ClassReminder
 import kotlinx.coroutines.launch
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.DayOfWeek
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.plus
+import kotlinx.datetime.toLocalDateTime
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Calendar03
 import me.rerere.hugeicons.stroke.Eye
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.PencilEdit02
-import java.time.DayOfWeek
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.temporal.TemporalAdjusters
 
 /**
  * 作业详情/编辑（DESIGN §3.11）：**编辑/预览双态**，2026-10-21 重排。
@@ -128,7 +131,8 @@ fun HomeworkDetailScreen(
     }
 
     // 抗重建（优化 2）：转屏 / 进程回收后未保存的编辑必须还在（口径与笔记详情一致）。
-    // 截止日期存 epochDay（Long 一定可存 Bundle），Long.MIN_VALUE = 未设置 —— 不赌 LocalDate 的可保存性。
+    // 截止日期存 epochDay 整数（Long 直接可存 Bundle），NO_DUE = 未设置 —— 不赌 LocalDate 的可保存性。
+    // 口径是 kotlinx-datetime 的 `toEpochDays()`：0.8.0 起它返回 Long（不是 Int），所以常量也用 Long。
     var original by remember { mutableStateOf<Homework?>(null) }
     var savedId by rememberSaveable { mutableStateOf(homeworkId) }
     var createdAt by rememberSaveable { mutableStateOf(0L) }
@@ -136,7 +140,7 @@ fun HomeworkDetailScreen(
         mutableStateOf(TextFieldValue(""))
     }
     var dueEpochDay by rememberSaveable { mutableStateOf(NO_DUE) }
-    val dueDate: LocalDate? = if (dueEpochDay == NO_DUE) null else LocalDate.ofEpochDay(dueEpochDay)
+    val dueDate: LocalDate? = if (dueEpochDay == NO_DUE) null else LocalDate.fromEpochDays(dueEpochDay)
     var done by rememberSaveable { mutableStateOf(false) }
     var loadedFromDb by rememberSaveable { mutableStateOf(false) }
     // 「保存并继续新建」后与路由里的旧 homeworkId 脱钩：进程回收再恢复时不能把旧条目重新灌进来
@@ -151,8 +155,8 @@ fun HomeworkDetailScreen(
     var editing by rememberSaveable { mutableStateOf(homeworkId == 0L || startEditing) }
     // 「保存并继续新建」后再次聚焦正文：focusTick 变化触发 LaunchedEffect
     var focusTick by remember { mutableStateOf(0) }
-    val today = LocalDate.now()
-    val dueText = dueDate?.let { dueDetailLabel(it.toKotlinLocalDate(), today.toKotlinLocalDate()) } ?: "未设置"
+    val today = AppClock.today()
+    val dueText = dueDate?.let { dueDetailLabel(it, today) } ?: "未设置"
 
     // 从预览点铅笔进编辑后主动聚焦正文（光标在末尾），省一次点击；
     // loaded 守卫：载入中编辑器还没组合，requestFocus 会抛 FocusRequester not initialized
@@ -177,7 +181,7 @@ fun HomeworkDetailScreen(
                     savedId = item.id
                     createdAt = item.createdAt
                     detail = TextFieldValue(item.detail)
-                    dueEpochDay = item.dueDate?.toEpochDay() ?: NO_DUE
+                    dueEpochDay = item.dueDate?.toEpochDays() ?: NO_DUE
                     done = item.done
                     editing = homeworkId == 0L || startEditing
                 }
@@ -283,7 +287,7 @@ fun HomeworkDetailScreen(
 
     /** 截止日期改动即落库（已有作业）；新建作业先留在本地，随首次保存一起写入。 */
     fun applyDue(newDue: LocalDate?) {
-        dueEpochDay = newDue?.toEpochDay() ?: NO_DUE
+        dueEpochDay = newDue?.toEpochDays() ?: NO_DUE
         val base = original ?: return
         if (base.id <= 0) return
         original = base.copy(dueDate = newDue, updatedAt = System.currentTimeMillis())
@@ -521,9 +525,11 @@ fun HomeworkDetailScreen(
     }
 
     if (showDatePicker) {
+        // M3 DatePicker 的 selectedDateMillis 是「所选日期的 UTC 零点」口径：进出都按 UTC 折算。
+        // 这里不能用系统时区——西半球时区下选择/回读会整体差一天。
         val state = rememberDatePickerState(
-            initialSelectedDateMillis = (dueDate ?: LocalDate.now())
-                .atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli(),
+            initialSelectedDateMillis = (dueDate ?: AppClock.today())
+                .atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds(),
         )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
@@ -532,9 +538,9 @@ fun HomeworkDetailScreen(
                     onClick = {
                         state.selectedDateMillis?.let { millis ->
                             applyDue(
-                                Instant.ofEpochMilli(millis)
-                                    .atZone(ZoneId.of("UTC"))
-                                    .toLocalDate(),
+                                Instant.fromEpochMilliseconds(millis)
+                                    .toLocalDateTime(TimeZone.UTC)
+                                    .date,
                             )
                         }
                         showDatePicker = false
@@ -611,11 +617,12 @@ private fun HomeworkMetaEditor(
     onDoneChange: (Boolean) -> Unit,
     onCustomDate: () -> Unit,
 ) {
-    val today = LocalDate.now()
-    val nextSunday = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
+    val today = AppClock.today()
+    // kotlinx 没有 TemporalAdjusters：周日 ordinal 是 6，往回加「模 7 天」就是下一个周日（今天是周日则取今天）。
+    val nextSunday = today.plus(DatePeriod(days = (DayOfWeek.SUNDAY.ordinal - today.dayOfWeek.ordinal + 7) % 7))
     val isCustom = dueDate != null &&
         dueDate != today &&
-        dueDate != today.plusDays(1) &&
+        dueDate != today.plus(DatePeriod(days = 1)) &&
         dueDate != nextSunday
     val haptics = rememberAppHaptics()
     Column(
@@ -635,7 +642,9 @@ private fun HomeworkMetaEditor(
                 modifier = Modifier.align(Alignment.CenterVertically),
             )
             DueChipButton("今天", dueDate == today) { onDueChange(today) }
-            DueChipButton("明天", dueDate == today.plusDays(1)) { onDueChange(today.plusDays(1)) }
+            DueChipButton("明天", dueDate == today.plus(DatePeriod(days = 1))) {
+                onDueChange(today.plus(DatePeriod(days = 1)))
+            }
             DueChipButton("本周日", dueDate == nextSunday) { onDueChange(nextSunday) }
             DueChipButton("自定义", isCustom, onCustomDate)
             DueChipButton("清除", dueDate == null) { onDueChange(null) }
@@ -753,7 +762,7 @@ private fun DueChipButton(
     )
 }
 
-/** 未设置截止日期在可保存状态里的哨兵值（Long.MIN_VALUE，正常 epochDay 不会取到）。 */
+/** 未设置截止日期在可保存状态里的哨兵值（Int.MIN_VALUE，正常 epochDay 不会取到）。 */
 private const val NO_DUE = Long.MIN_VALUE
 
 /** 详情里打开链接的兜底（与笔记页同口径）。 */

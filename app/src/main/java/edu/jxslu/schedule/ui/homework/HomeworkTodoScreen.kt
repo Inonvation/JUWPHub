@@ -32,8 +32,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.homeworkDisplayTitle
-import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.pendingHomework
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
@@ -48,7 +48,6 @@ import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.reminder.ClassReminder
 import kotlinx.coroutines.launch
-import java.time.LocalDate
 
 /**
  * 作业中心（今日页作业卡与截止提醒的落点，DESIGN §3.11）：**管理页同款折叠分组**
@@ -76,10 +75,10 @@ fun HomeworkTodoScreen(
     val all by repo.observePending().collectAsStateWithLifecycle(initialValue = null)
     val snackbar = remember { SnackbarHostState() }
     val haptics = rememberAppHaptics()
-    val today = LocalDate.now()
+    val today = AppClock.today()
     // 默认全展开：collapsed 集合记录用户手动收起的课程（与「默认展开」语义对齐）
     val collapsed = remember { mutableStateMapOf<String, Boolean>() }
-    val pending = remember(all) { all?.let { pendingHomework(it, today.toKotlinLocalDate()) } }
+    val pending = remember(all) { all?.let { pendingHomework(it, today) } }
     val listState = rememberLazyListState()
     val revealSpacePx = rememberRevealSpacePx()
     var viewer by remember { mutableStateOf<String?>(null) }

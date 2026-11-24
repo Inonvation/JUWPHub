@@ -1,6 +1,6 @@
 package edu.jxslu.schedule.domain
 
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 /**
  * 一条作业（DESIGN §4.20）。归属口径与 [Note] 完全一致：挂**课程名**，不带 courseId / timetableId。

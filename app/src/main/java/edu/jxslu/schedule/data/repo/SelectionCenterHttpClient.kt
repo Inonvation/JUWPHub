@@ -3,9 +3,9 @@ package edu.jxslu.schedule.data.repo
 import edu.jxslu.schedule.data.jw.JwHttpSession.JwHttpException
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.jw.SelectionCenterParser
-import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.SelectionCourse
 import edu.jxslu.schedule.domain.SelectionQuery
 import java.net.URLEncoder

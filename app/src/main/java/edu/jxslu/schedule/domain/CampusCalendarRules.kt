@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.domain
 
-import edu.jxslu.schedule.data.session.AutoSyncRules
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 

@@ -4,7 +4,7 @@ import edu.jxslu.schedule.domain.Homework
 import edu.jxslu.schedule.domain.Note
 import edu.jxslu.schedule.domain.OverrideKind
 import edu.jxslu.schedule.domain.ScheduleOverride
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
@@ -111,7 +111,7 @@ class BackupValidationTest {
         id = 7,
         courseName = "高等数学",
         detail = "- [ ] 习题 1.1\n第二行正文",
-        dueDate = LocalDate.of(2026, 11, 9),
+        dueDate = LocalDate(2026, 11, 9),
         done = false,
         doneAt = null,
         createdAt = 1_760_000_000_000,

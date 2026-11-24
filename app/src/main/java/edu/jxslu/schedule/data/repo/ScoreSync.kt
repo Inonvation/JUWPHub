@@ -3,15 +3,16 @@ package edu.jxslu.schedule.data.repo
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.jw.ScoreParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
-import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.ScoreChangeDetector
 import edu.jxslu.schedule.domain.ScoreRecord
-import java.time.LocalDate
+import edu.jxslu.schedule.domain.AppClock
+import kotlinx.datetime.LocalDate
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
@@ -41,7 +42,7 @@ class ScoreSync(
     private val prefs: DisplayPrefsStore,
     /** 收件箱留痕（DESIGN §4.38）：出分/改分事实入箱，与成绩提醒开关无关。 */
     private val inbox: InboxRepository,
-    private val today: () -> LocalDate = LocalDate::now,
+    private val today: () -> LocalDate = AppClock::today,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
 

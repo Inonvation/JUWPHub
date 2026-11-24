@@ -4,10 +4,10 @@ import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.DefaultData
 import edu.jxslu.schedule.data.jw.JwHtml
 import edu.jxslu.schedule.data.jw.JwUrls
-import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.ExamMapper
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys

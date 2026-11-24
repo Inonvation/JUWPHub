@@ -12,7 +12,7 @@ import edu.jxslu.schedule.domain.SemesterConfig
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.Timetable
 import edu.jxslu.schedule.domain.Textbook
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 /**
  * 单个课表的元信息与课表级设置（DESIGN §4.9）。

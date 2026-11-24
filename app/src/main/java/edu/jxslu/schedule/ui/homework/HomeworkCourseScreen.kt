@@ -31,8 +31,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Homework
-import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.courseHomeworkOrder
 import edu.jxslu.schedule.domain.homeworkDisplayTitle
 import edu.jxslu.schedule.ui.common.AppCard
@@ -45,9 +45,9 @@ import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.reminder.ClassReminder
 import kotlinx.coroutines.launch
+import kotlinx.datetime.LocalDate
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
-import java.time.LocalDate
 
 /**
  * 某课程的作业列表（DESIGN §3.11）。
@@ -67,7 +67,7 @@ fun HomeworkCourseScreen(
     val scope = rememberCoroutineScope()
     val repo = remember { Graph.homeworkRepository(context) }
     val list by repo.observeForCourse(courseName).collectAsStateWithLifecycle(initialValue = null)
-    val today = LocalDate.now()
+    val today = AppClock.today()
     val snackbar = remember { SnackbarHostState() }
     var viewer by remember { mutableStateOf<String?>(null) }
 
@@ -105,7 +105,7 @@ fun HomeworkCourseScreen(
             }
 
             else -> {
-                val ordered = courseHomeworkOrder(items, today.toKotlinLocalDate())
+                val ordered = courseHomeworkOrder(items, today)
                 val pending = ordered.filter { !it.done }
                 val done = ordered.filter { it.done }
                 LazyColumn(

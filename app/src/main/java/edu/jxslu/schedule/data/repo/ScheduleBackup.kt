@@ -17,7 +17,7 @@ import edu.jxslu.schedule.domain.SemesterConfig
 import edu.jxslu.schedule.domain.Textbook
 import edu.jxslu.schedule.domain.TimeSlot
 import edu.jxslu.schedule.domain.TimeSlotRules
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 

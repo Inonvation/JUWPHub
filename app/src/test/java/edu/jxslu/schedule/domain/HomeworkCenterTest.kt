@@ -27,7 +27,7 @@ class HomeworkCenterTest {
     ) = Homework(
         id = id,
         courseName = "高等数学",
-        dueDate = due?.let(java.time.LocalDate::parse),
+        dueDate = due?.let { LocalDate.parse(it) },
         done = done,
         createdAt = created,
         updatedAt = created,

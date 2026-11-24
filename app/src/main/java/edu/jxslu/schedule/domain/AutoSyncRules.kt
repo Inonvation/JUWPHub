@@ -1,19 +1,22 @@
-package edu.jxslu.schedule.data.session
+package edu.jxslu.schedule.domain
 
 import kotlin.random.Random
-import java.time.LocalDate
-import java.time.temporal.ChronoUnit
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.daysUntil
 
 /**
  * 自动导入的闸门（DESIGN §4.29）：学业完成情况与成绩共用这一套。
  *
- * 和 [ProfileSyncRules] 是同一类东西，判据不同：
+ * 和 `data.session.ProfileSyncRules` 是同一类东西，判据不同：
  * - 学籍卡补抓是「字段还空着 + 今天没试过」；
  * - 这里是「**库里还没数据**（首次，立刻就抓）或**距上次成功超过 7 天**」。
  *
  * 为什么是 7 天而不是每次冷启动：这两份数据一学期才动一次，天天抓只是白撞教务的风控
  * （登录闸门是按失败次数停用的，没必要的请求就是没必要的风险）。用户想立刻刷新，
  * 页面里有「重新导入」按钮强制绕过闸门。
+ *
+ * 放在 domain 而不是 data：规则属于纯逻辑，留在 data 层会让 domain 反过来依赖 data
+ * （[CampusCalendarRules] 委托这里的 [shouldAttemptAt]）；P0 搬 shared 时一并归位。
  */
 object AutoSyncRules {
 
@@ -35,14 +38,15 @@ object AutoSyncRules {
     fun shouldAttempt(
         hasData: Boolean,
         lastSuccessDate: String?,
-        today: LocalDate = LocalDate.now(),
+        today: LocalDate = AppClock.today(),
     ): Boolean {
         if (!hasData) return true
         val last = lastSuccessDate
             ?.takeIf { it.isNotBlank() }
             ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
             ?: return true
-        return ChronoUnit.DAYS.between(last, today) >= REFRESH_INTERVAL_DAYS
+        // daysUntil 返回 Int，REFRESH_INTERVAL_DAYS 与其余闸门常量同用 Long，比较前先转换
+        return last.daysUntil(today).toLong() >= REFRESH_INTERVAL_DAYS
     }
 
     /**

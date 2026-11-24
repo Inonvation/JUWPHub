@@ -2,7 +2,6 @@ package edu.jxslu.schedule.domain
 
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.daysUntil
-import kotlinx.datetime.toKotlinLocalDate
 
 /**
  * 未完成作业的口径（DESIGN §3.11）：排序、计数、截止文案全在这里，纯函数可 JVM 测
@@ -59,7 +58,7 @@ fun sortPendingHomework(items: List<Homework>, today: LocalDate): List<Homework>
 
 private fun dueRank(homework: Homework, today: LocalDate): Int = when {
     homework.dueDate == null -> 2
-    homework.dueDate.toKotlinLocalDate() < today -> 0
+    homework.dueDate < today -> 0
     else -> 1
 }
 
@@ -70,9 +69,9 @@ fun pendingHomework(all: List<Homework>, today: LocalDate): PendingHomework {
     val due = pending.mapNotNull { it.dueDate }
     return PendingHomework(
         items = sortPendingHomework(pending, today),
-        overdue = due.count { it.toKotlinLocalDate() < today },
-        nextDue = due.filter { it.toKotlinLocalDate() >= today }.minOrNull()?.toKotlinLocalDate(),
-        earliestDue = due.minOrNull()?.toKotlinLocalDate(),
+        overdue = due.count { it < today },
+        nextDue = due.filter { it >= today }.minOrNull(),
+        earliestDue = due.minOrNull(),
     )
 }
 

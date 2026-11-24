@@ -55,7 +55,7 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.jw.SelectionCenterParser
 import edu.jxslu.schedule.data.repo.SelectionClientException
 import edu.jxslu.schedule.data.repo.SelectionSubmitResult
-import edu.jxslu.schedule.data.session.AutoSyncRules
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.SelectionCourse
 import edu.jxslu.schedule.domain.SelectionCourseTypes
 import edu.jxslu.schedule.domain.SelectionCourses

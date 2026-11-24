@@ -7,7 +7,6 @@ import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.atTime
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
-import kotlinx.datetime.toKotlinLocalDate
 import kotlin.math.abs
 
 /**
@@ -256,7 +255,7 @@ private fun homeworkReminderPoints(homework: Homework, due: LocalDate): List<Hom
  */
 fun homeworkReminderPlan(homework: Homework, now: LocalDateTime): HomeworkReminderPlan? {
     if (homework.done) return null
-    val due = homework.dueDate?.toKotlinLocalDate() ?: return null
+    val due = homework.dueDate ?: return null
     if (due < now.date) return null
     return homeworkReminderPoints(homework, due).firstOrNull { plan ->
         now >= plan.triggerAt && now < plan.noticeDate.plus(DatePeriod(days = 1)).atTime(0, 0)
@@ -288,7 +287,7 @@ fun nextHomeworkReminder(items: List<Homework>, now: LocalDateTime): HomeworkRem
     val horizon = now.date.plus(DatePeriod(days = HOMEWORK_HORIZON_DAYS.toInt()))
     return items.mapNotNull { homework ->
         if (homework.done) return@mapNotNull null
-        val due = homework.dueDate?.toKotlinLocalDate() ?: return@mapNotNull null
+        val due = homework.dueDate ?: return@mapNotNull null
         if (due > horizon) return@mapNotNull null
         homeworkReminderPoints(homework, due).firstOrNull { it.triggerAt > now }
     }.minByOrNull { it.triggerAt }

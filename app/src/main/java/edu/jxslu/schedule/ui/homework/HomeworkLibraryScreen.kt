@@ -48,8 +48,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.Course
-import kotlinx.datetime.toKotlinLocalDate
 import edu.jxslu.schedule.domain.Homework
 import edu.jxslu.schedule.domain.courseHomeworkOrder
 import edu.jxslu.schedule.domain.homeworkDisplayTitle
@@ -70,10 +70,10 @@ import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.reminder.ClassReminder
 import kotlinx.coroutines.launch
+import kotlinx.datetime.LocalDate
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowDown01
-import java.time.LocalDate
 
 /**
  * 作业库（我的 → 学习 → 作业，DESIGN §3.11）：**按课程折叠分组**（2026-09-23 改）。
@@ -93,7 +93,7 @@ fun HomeworkLibraryScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val today = LocalDate.now()
+    val today = AppClock.today()
     val repo = remember { Graph.homeworkRepository(context) }
     val scheduleRepo = remember { Graph.repository(context) }
     val groupsState by repo.observeGroups().collectAsStateWithLifecycle(initialValue = null)
@@ -157,7 +157,7 @@ fun HomeworkLibraryScreen(
                         } else {
                             "全部完成 · 共 ${group.total} 项"
                         },
-                        items = courseHomeworkOrder(courseItems, today.toKotlinLocalDate()),
+                        items = courseHomeworkOrder(courseItems, today),
                         today = today,
                         courses = courses,
                         expanded = expanded[group.courseName] == true,

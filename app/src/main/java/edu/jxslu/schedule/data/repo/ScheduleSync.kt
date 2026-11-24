@@ -10,10 +10,10 @@ import edu.jxslu.schedule.data.jw.ImportParseResult
 import edu.jxslu.schedule.data.jw.QiangzhiScheduleParser
 import edu.jxslu.schedule.data.jw.SyjxScheduleParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
-import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.domain.AutoSyncRules
 import edu.jxslu.schedule.domain.Course
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.domain.InboxKind

@@ -3,11 +3,11 @@ package edu.jxslu.schedule.data.repo
 import android.util.Log
 import edu.jxslu.schedule.data.jw.TextbookParser
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
-import edu.jxslu.schedule.data.session.AutoSyncRules
 import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasFetchResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.AutoSyncRules
 import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex

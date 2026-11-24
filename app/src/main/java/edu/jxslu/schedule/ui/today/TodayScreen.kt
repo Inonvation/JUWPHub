@@ -77,7 +77,6 @@ import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.Course
-import kotlinx.datetime.toJavaLocalDate
 import edu.jxslu.schedule.domain.DormRepairRecord
 import edu.jxslu.schedule.domain.DormRepairRules
 import edu.jxslu.schedule.domain.GuessPick
@@ -1262,7 +1261,7 @@ private fun TodayContent(
                 item(key = "homework") {
                     HomeworkTodayCard(
                         pending = homework,
-                        today = state.date.toJavaLocalDate(),
+                        today = state.date,
                         onClick = onOpenHomeworkTodo,
                     )
                 }
