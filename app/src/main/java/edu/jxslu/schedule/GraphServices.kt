@@ -46,6 +46,7 @@ import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
 import edu.jxslu.schedule.platform.ThirdPartySession
 import edu.jxslu.schedule.platform.UjingReminder
+import edu.jxslu.schedule.ui.reminder.BalanceAlertReminder
 import edu.jxslu.schedule.ui.reminder.UjingDoneReminder
 import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 import edu.jxslu.schedule.ui.widget.WaterWidgetSync
@@ -336,4 +337,30 @@ class GraphServices(private val context: Context) : AppServices {
     }
 
     override fun ujingReminder(): UjingReminder = ujingReminderSink
+
+    // ---- 校园卡（iOS 移植 V2，2026-11-25） ----
+    //
+    // 两个**平台副作用**，转给 `:app` 现有的实现。两者都留在原地：
+    // 前者是 Glance（`androidx.glance` 只有 Android 变体），后者是 `AlarmManager` +
+    // 通知渠道；搬过去只会得到一份 expect/actual 的空壳。
+
+    /**
+     * 桌面生活卡：余额推给小组件（`LifeWidgetSync` 零网络重跑一次快照）。
+     *
+     * 与搬迁前 `PayCodeViewModel` 里那一行逐字对应，只是从 ViewModel 挪到装配根——
+     * 共享层不该知道「桌面小组件」这种东西存在。
+     */
+    override suspend fun pushCampusBalance(cardFen: Long) {
+        LifeWidgetSync.pushCampusBalance(appContext, cardFen)
+    }
+
+    /**
+     * 余额提醒：用已知余额当场评估一次（同到账核对那条链，见 `BalanceAlertReminder`）。
+     *
+     * 搬迁前这行写在 `CampusBalanceSync` 里，直接 `runCatching` 吞错；这里同样不抛——
+     * 付款已经成功，提醒评估失败不该让「支付成功」的收尾翻车。
+     */
+    override suspend fun evaluateYktBalance(cardFen: Long) {
+        BalanceAlertReminder.evaluateYktBalance(appContext, cardFen)
+    }
 }

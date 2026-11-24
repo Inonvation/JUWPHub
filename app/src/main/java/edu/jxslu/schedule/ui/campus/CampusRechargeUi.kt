@@ -17,7 +17,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -382,7 +381,6 @@ fun CampusPaymentDialog(
 @Composable
 fun CampusPayResultDialogHost() {
     val payResult by PayCodeResultBus.result.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     var paid by remember { mutableStateOf<YktPayment?>(null) }
     LaunchedEffect(payResult) {
         payResult?.let {
@@ -390,7 +388,7 @@ fun CampusPayResultDialogHost() {
             PayCodeResultBus.consume()
             // 钱刚动过：后台强拉一次余额（生活页钱包卡 / 设置页 / 桌面小组件跟着更新），
             // 别让用户回到页面看到的还是扣款前的数字（2026-10-09，见 CampusBalanceSync）
-            CampusBalanceSync.refreshAfterPayment(context)
+            CampusBalanceSync.refreshAfterPayment()
         }
     }
     paid?.let { CampusPaymentDialog(payment = it, onDismiss = { paid = null }) }

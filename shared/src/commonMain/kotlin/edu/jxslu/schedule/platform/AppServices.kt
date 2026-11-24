@@ -428,6 +428,35 @@ interface AppServices {
      * 直调，搬不动也不该搬）。
      */
     fun ujingReminder(): UjingReminder?
+
+    // ---- 校园卡（付款码 / 流水 / 消费结果，iOS 移植 V2，2026-11-25） ----
+    //
+    // `ui/campus` 里能搬的那一半带出来的两件**副作用**。两者都不是「一个服务」，
+    // 而是「本平台有没有这个东西」：桌面生活小组件（Android 的 Glance）与余额提醒
+    // （Android 的 AlarmManager + 通知渠道）。按同一把尺子做成默认空实现，
+    // 调用方（`CampusBalanceSync`）因此不用写空判。
+
+    /**
+     * 桌面生活卡：把刚取到的正式卡余额推过去（零额外请求，后台另有闸门兜底）。
+     *
+     * **默认空实现**：桌面小组件是 `androidx.glance`（Android 专有），iOS 没有这张卡，
+     * 所以这不是「以后补」的占位，而是本平台确实没有这个副作用。
+     * Android 侧转接 `ui/widget/LifeWidgetSync.pushCampusBalance`（口径同
+     * [pushQiekjWaterBalance]）。
+     */
+    suspend fun pushCampusBalance(cardFen: Long) {}
+
+    /**
+     * 用一份**已经在手上**的余额当场评估一次余额提醒（零额外请求）。
+     *
+     * 为什么不交给提醒侧自己拉：付款把余额刷低的那一刻，用户正回到页面，余额就在内存里；
+     * 再让提醒侧发一次请求只是白打服务端（`force = true` 那条口径已经用过一次了）。
+     *
+     * **默认空实现**：iOS 侧还没有通知与余额提醒（`ui/reminder` 整包是 `AlarmManager` +
+     * 通知渠道，见 `design/ios-port.md` §12.1），没有提醒可评估。
+     * Android 侧转接 `ui/reminder/BalanceAlertReminder.evaluateYktBalance`。
+     */
+    suspend fun evaluateYktBalance(cardFen: Long) {}
 }
 
 /**

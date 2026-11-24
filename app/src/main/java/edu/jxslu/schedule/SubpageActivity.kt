@@ -692,7 +692,7 @@ class SubpageActivity : ComponentActivity() {
                         repo = services.yktRepository(),
                         credentialStore = services.yktCredentialStore(),
                         db = services.database(),
-                        postInbox = { row -> postYktPaymentInbox(this@SubpageActivity, row) },
+                        postInbox = { row -> postYktPaymentInbox(row) },
                     )
                 }
                 StatementScreen(
