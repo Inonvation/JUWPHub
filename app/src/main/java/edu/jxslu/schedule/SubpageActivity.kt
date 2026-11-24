@@ -495,8 +495,16 @@ class SubpageActivity : ComponentActivity() {
                     onOpenJwImport = actions.openJwImport,
                 )
             }
-            SubpageScreen.SCHOLAR -> ScholarScreen(onBack = onBack)
-            SubpageScreen.CURRICULUM -> CurriculumScreen(onBack = onBack)
+            // 学业 / 培养方案已搬进 shared/commonMain（iOS 移植 V4）：唯一平台动作是顶栏
+            // 「在教务网页核对」，由本侧的 `JwScreenPlatformActions.openWebPage` 给。
+            SubpageScreen.SCHOLAR -> {
+                val actions = rememberJwScreenPlatformActions()
+                ScholarScreen(onBack = onBack, onOpenWebPage = actions.openWebPage)
+            }
+            SubpageScreen.CURRICULUM -> {
+                val actions = rememberJwScreenPlatformActions()
+                CurriculumScreen(onBack = onBack, onOpenWebPage = actions.openWebPage)
+            }
             SubpageScreen.INTERNSHIP_BASES -> InternshipBasesScreen(onBack = onBack)
             // 选课四页已在 shared/commonMain（iOS 移植 S13），平台动作用
             // `rememberSelectionScreenActions` 补齐；`client` 是选课接口（真身仍在 :app）。
@@ -617,7 +625,9 @@ class SubpageActivity : ComponentActivity() {
                 viewModel = viewModel { WeatherViewModel(Services.current.weatherRepository()) },
                 onBack = onBack,
             )
+            // 天气设置（V4 搬进共享层）同样由宿主建 VM：`viewModel { }` 保留配置变更不重建。
             SubpageScreen.WEATHER_SETTINGS -> WeatherSettingsScreen(
+                viewModel = viewModel(factory = MeViewModel.Factory(Graph.repository(this))),
                 onBack = onBack,
                 onOpenWeather = { SubpageActivity.start(this, SubpageScreen.WEATHER) },
             )

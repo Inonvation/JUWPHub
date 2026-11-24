@@ -44,7 +44,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -54,11 +53,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.domain.ScholarCourse
@@ -67,6 +64,9 @@ import edu.jxslu.schedule.domain.ScholarDimension
 import edu.jxslu.schedule.domain.ScholarGroup
 import edu.jxslu.schedule.domain.ScholarProgressRules
 import edu.jxslu.schedule.domain.ScholarTotals
+import edu.jxslu.schedule.domain.TextFmt
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.rememberRevealSpacePx
 import edu.jxslu.schedule.ui.common.scrollToReveal
@@ -77,7 +77,7 @@ import edu.jxslu.schedule.ui.common.PageScaffold
 import edu.jxslu.schedule.ui.common.ImeAwareModalBottomSheet
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
-import edu.jxslu.schedule.ui.jwvw.JwWebActionButton
+import edu.jxslu.schedule.ui.jw.JwWebActionButton
 import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.launch
 
@@ -93,22 +93,35 @@ import kotlinx.coroutines.launch
  * 2. 汇总卡由分组求和得来（口径见 [ScholarProgressRules.totals]），不用进度条百分比——
  *    教务那个数在「已修远超要求」时会给出 17200% 这种值，照抄只会让人怀疑眼睛；
  * 3. 刷新失败**必须说出来**：自动导入可以静默，用户手动点的那次不能装没事。
+ *
+ * ## 依赖从哪来（iOS 移植 V4，2026-11-25）
+ *
+ * 原来四行 `Graph.xxx(context)`（`LocalContext` 的唯一用途）改成
+ * `Services.current.xxx()`：仓库与同步都在 `commonMain`，两端装配根各给同一份单例。
+ * 抓取链路走 `JwReadSession`，iOS 侧同样非空——所以本页在 iOS 上是**真的能重新导入**，
+ * 不是「点了没反应」的入口。
+ *
+ * 顶栏「在教务网页核对」是唯一的平台动作：`null` = 本平台没有内置浏览窗口，那只图标不渲染
+ * （口径见 `design/ios-port.md` §11.2 ④）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScholarScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val repo = remember { Graph.scholarProgressRepository(context) }
-    val sync = remember { Graph.scholarProgressSync(context) }
-    val prefs = remember { Graph.displayPrefs(context) }
+fun ScholarScreen(
+    onBack: () -> Unit,
+    /** 在内置浏览窗口打开教务页面；null = 本平台没有这个窗口。 */
+    onOpenWebPage: ((title: String, url: String) -> Unit)? = null,
+) {
+    val repo = remember { Services.current.scholarProgressRepository() }
+    val sync = remember { Services.current.scholarProgressSync() }
+    val prefs = remember { Services.current.displayPrefs() }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
     // null = Room 流首帧还没到（未就绪），非 null 空列表 = 确实没有数据。
     // 与成绩页同一处收口：不区分的话首帧会闪一下「暂无数据」再跳真实内容。
-    val groupsState by repo.groups.collectAsState(initial = null)
-    val coursesState by repo.courses.collectAsState(initial = null)
-    val planName by prefs.scholarPlanName.collectAsState(initial = "")
+    val groupsState by repo.groups.collectAsStateWithLifecycle(initialValue = null)
+    val coursesState by repo.courses.collectAsStateWithLifecycle(initialValue = null)
+    val planName by prefs.scholarPlanName.collectAsStateWithLifecycle(initialValue = "")
     val ready = groupsState != null && coursesState != null
     val groups = groupsState.orEmpty()
     val courses = coursesState.orEmpty()
@@ -211,7 +224,7 @@ fun ScholarScreen(onBack: () -> Unit) {
         snackbar = snackbar,
         state = listState,
         actions = {
-            JwWebActionButton("学业完成情况", JwUrls.SCHOLAR_PROGRESS)
+            JwWebActionButton("学业完成情况", JwUrls.SCHOLAR_PROGRESS, onOpenWebPage)
             if (busy) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     progress?.let { (done, total) ->
@@ -757,14 +770,8 @@ private fun CourseSearchField(query: String, onQueryChange: (String) -> Unit) {
 }
 
 /** 学分数值展示：整数不带小数点，小数最多两位（79.0 → 79，24.25 → 24.25）。 */
-private fun trimNum(value: Double): String {
-    val rounded = Math.round(value * 100) / 100.0
-    return if (rounded == rounded.toLong().toDouble()) {
-        rounded.toLong().toString()
-    } else {
-        rounded.toString().trimEnd('0').trimEnd('.')
-    }
-}
+private fun trimNum(value: Double): String =
+    TextFmt.decimals(value, 2).trimEnd('0').trimEnd('.').ifEmpty { "0" }
 
 private val PASS_BG = androidx.compose.ui.graphics.Color(0x1A34A853)
 private val PASS_FG = androidx.compose.ui.graphics.Color(0xFF1E8E3E)

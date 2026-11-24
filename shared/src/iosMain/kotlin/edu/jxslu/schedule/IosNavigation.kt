@@ -37,6 +37,7 @@ import edu.jxslu.schedule.ui.ai.AiSettingsViewModel
 import edu.jxslu.schedule.ui.me.hub.AccountsHubScreen
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
+import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
 import edu.jxslu.schedule.ui.exam.ExamSettingsScreen
 import edu.jxslu.schedule.ui.homework.HomeworkCourseScreen
@@ -56,11 +57,13 @@ import edu.jxslu.schedule.ui.notes.NoteCourseScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.score.ScoreSettingsScreen
+import edu.jxslu.schedule.ui.scholar.ScholarScreen
 import edu.jxslu.schedule.ui.selection.SelectionCenterScreen
 import edu.jxslu.schedule.ui.selection.SelectionRecordsScreen
 import edu.jxslu.schedule.ui.selection.SelectionScreen
 import edu.jxslu.schedule.ui.selection.SelectionWishesScreen
 import edu.jxslu.schedule.ui.weather.WeatherScreen
+import edu.jxslu.schedule.ui.weather.WeatherSettingsScreen
 import edu.jxslu.schedule.ui.weather.WeatherViewModel
 
 /**
@@ -116,6 +119,8 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     IosDrawerEntry("学习", IosRoute(SubpageScreen.LAB_SCHEDULE), "实验课表"),
     IosDrawerEntry("学习", IosRoute(SubpageScreen.TEXTBOOKS), "教材"),
     IosDrawerEntry("学习", IosRoute(SubpageScreen.TEACHING_CALENDAR), "教学日历"),
+    IosDrawerEntry("学习", IosRoute(SubpageScreen.SCHOLAR), "学业完成情况"),
+    IosDrawerEntry("学习", IosRoute(SubpageScreen.CURRICULUM), "培养方案"),
     // 教务
     IosDrawerEntry("教务", IosRoute(SubpageScreen.SCORES), "成绩"),
     IosDrawerEntry("教务", IosRoute(SubpageScreen.SCORE_SETTINGS), "成绩设置"),
@@ -132,6 +137,7 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     // 生活
     IosDrawerEntry("生活", IosRoute(SubpageScreen.INBOX), "收件箱"),
     IosDrawerEntry("生活", IosRoute(SubpageScreen.WEATHER), "天气"),
+    IosDrawerEntry("生活", IosRoute(SubpageScreen.WEATHER_SETTINGS), "天气设置"),
     // 设置
     IosDrawerEntry("设置", IosRoute(SubpageScreen.DATA_SETTINGS), "数据与备份"),
     // 账号
@@ -217,6 +223,13 @@ internal fun IosRouteContent(
 
         SubpageScreen.TEACHING_CALENDAR -> TeachingCalendarScreen(onBack = pop)
 
+        // 学业完成情况 / 培养方案（V4 搬进共享层）：顶栏「在教务网页核对」是唯一平台动作，
+        // iOS 没有内置浏览窗口 → 不传（默认 null），那只图标整行不渲染。
+        // 两页的「重新导入」是真的能用：抓取链路走 `JwReadSession`，iOS 是 `IosJwReadSession`。
+        SubpageScreen.SCHOLAR -> ScholarScreen(onBack = pop)
+
+        SubpageScreen.CURRICULUM -> CurriculumScreen(onBack = pop)
+
         // ---------------------------------------------------------------- 教务
         SubpageScreen.SCORES -> ScoreScreen(
             onBack = pop,
@@ -290,6 +303,14 @@ internal fun IosRouteContent(
             val vm = remember { WeatherViewModel(services.weatherRepository()) }
             WeatherScreen(viewModel = vm, onBack = pop)
         }
+
+        // 天气设置（V4 搬进共享层）：ViewModel 复用根上那一份 `MeViewModel`
+        // （开关写的是同一份 DataStore `weather_enabled`）。
+        SubpageScreen.WEATHER_SETTINGS -> WeatherSettingsScreen(
+            viewModel = meViewModel,
+            onBack = pop,
+            onOpenWeather = { push(IosRoute(SubpageScreen.WEATHER)) },
+        )
 
         // ---------------------------------------------------------------- 设置
         SubpageScreen.DATA_SETTINGS -> DataSettingsScreen(onBack = pop, viewModel = meViewModel)

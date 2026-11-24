@@ -13,6 +13,8 @@ import edu.jxslu.schedule.data.qiekj.QiekjWateringSession
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
+import edu.jxslu.schedule.data.repo.CurriculumRepository
+import edu.jxslu.schedule.data.repo.CurriculumSync
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
 import edu.jxslu.schedule.data.repo.InboxRepository
@@ -25,6 +27,8 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.repo.ScholarProgressRepository
+import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.session.LoginGateRules
 import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionExpirySink
@@ -336,4 +340,18 @@ class GraphServices(private val context: Context) : AppServices {
     }
 
     override fun ujingReminder(): UjingReminder = ujingReminderSink
+
+    // ---- 学业完成情况 / 培养方案（iOS 移植 V4，2026-11-25） ----
+    //
+    // 四个都转给 `Graph` 的现有单例。同步那两个**必须**是同一份：它们内部的 Mutex 是
+    // 「单飞」的全部依据，各 new 一个等于引导页与页面刷新同时各抓一轮教务。
+
+    override fun scholarProgressRepository(): ScholarProgressRepository =
+        Graph.scholarProgressRepository(appContext)
+
+    override fun scholarProgressSync(): ScholarProgressSync = Graph.scholarProgressSync(appContext)
+
+    override fun curriculumRepository(): CurriculumRepository = Graph.curriculumRepository(appContext)
+
+    override fun curriculumSync(): CurriculumSync = Graph.curriculumSync(appContext)
 }

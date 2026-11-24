@@ -17,12 +17,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.weather.WeatherApi
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.FooterDisclaimer
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsNote
@@ -38,16 +35,21 @@ import edu.jxslu.schedule.ui.me.MeViewModel
  * 一行 emoji + 一句话，点那行进天气详情页。
  *
  * 开关写 [MeViewModel]（DataStore `weather_enabled`），与其它功能开关同一层。
+ *
+ * ## 为什么 ViewModel 是必填参数（iOS 移植 V4，2026-11-25）
+ *
+ * `viewModel()` 那个 Composable 入口要 Compose 1.9，共享层拿不到
+ * （`design/ios-port.md` §11.1）。所以由宿主建好传进来：Android 是
+ * `viewModel { MeViewModel(...) }`（转屏不重建），iOS 是 `remember { ... }`。
+ * 本页没有别的平台动作——`onOpenWeather` 是普通导航回调，两端都给得起。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WeatherSettingsScreen(
+    viewModel: MeViewModel,
     onBack: () -> Unit,
     /** 查看天气详情（开关关着时也有入口，先看再决定开不开）。 */
     onOpenWeather: () -> Unit,
-    viewModel: MeViewModel = viewModel(
-        factory = MeViewModel.Factory(Graph.repository(LocalContext.current)),
-    ),
 ) {
     val enabled by viewModel.weatherEnabled.collectAsStateWithLifecycle()
     Scaffold(
