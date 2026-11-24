@@ -2,11 +2,17 @@ package edu.jxslu.schedule
 
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
+import edu.jxslu.schedule.data.repo.InboxRepository
 import edu.jxslu.schedule.data.repo.ScheduleBaselineStore
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.session.IosJwReadSession
+import edu.jxslu.schedule.data.session.IosWebCookieSource
+import edu.jxslu.schedule.data.session.JwReadSession
+import edu.jxslu.schedule.data.session.WebCookies
 import edu.jxslu.schedule.platform.AppServices
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,19 +20,26 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * iOS 侧的共享服务装配（iOS 移植 M1，2026-11-25）。
+ * iOS 侧的共享服务装配（iOS 移植 M1 起，M2 补齐教务三件套）。
  *
  * 与 `:app` 的 `GraphServices` 一一对应，只是这边没有 `Graph`——直接自己造：
  *
- * | 服务 | iOS 现状 |
+ * | 服务 | iOS 实现 |
  * |---|---|
  * | 偏好 | `DisplayPrefsStore()`，DataStore 落在 `appDataDir()`（沙箱私有目录） |
- * | 课表仓库 | `ScheduleRepository` + `BundledSQLiteDriver` 的 Room（v21，无迁移链） |
- * | 教务直取三件套 | **null**——要等 M2 的 WKWebView 会话与 Ktor 版 `JwReadSession` |
+ * | 课表仓库 | `ScheduleRepository` + `BundledSQLiteDriver` 的 Room（v21，无迁移链）+ 基线快照 |
+ * | 收件箱 | `InboxRepository(juwDatabase().inboxDao())` |
+ * | 教务会话 | [IosJwReadSession]：Cookie 来自 `WebCookies`（WKWebView 登录后写入） |
+ * | 教务三件套 | `ScheduleSync` / `ExamSync` / `ScheduleTermImport`，全部走上面那条会话 |
  *
- * 返回 null 不是省事，而是**如实表达能力**：课表页的「快速检测」图标与分享弹层里的
- * 「同步到日历」都据此不出现，而不是点了没反应。等 M2 接上教务导入，把这三行改成
- * 真实实例即可，页面侧一个字都不用动。
+ * ## M2 的关键点：会话来源换了，调用方一行没改
+ *
+ * Android 的会话是 `CasSession`（OkHttp + 凭证保险箱 + 自动填表）；iOS 没有保险箱，
+ * 也不该拿明文密码去填表——登录交给 `WKWebView` 里人自己完成，App 只从
+ * `WKWebsiteDataStore` 读 Cookie（见 `data/session/WebCookieSource.kt`）。
+ * 两条实现都实现 [JwReadSession]，所以 `ScheduleSync` / `ExamSync` / `ScheduleTermImport`
+ * 这三个已经在共享层的类**一个字都不用改**，`WeekScreen` 的「检测」图标也会自动出现
+ * （它读的是 `WeekViewModel.canQuickCheck`，而那读的是这三个服务是否非空）。
  *
  * ## 作用域为什么是 `Dispatchers.Default`
  *
@@ -41,9 +54,10 @@ class IosServices : AppServices {
 
     private val prefs: DisplayPrefsStore by lazy { DisplayPrefsStore() }
 
+    private val inbox: InboxRepository by lazy { InboxRepository(juwDatabase().inboxDao()) }
+
     private val repository: ScheduleRepository by lazy {
-        // 调课检测基线（DESIGN §4.17）：S7 把 `ScheduleBaselineStore` 也搬进共享层了，
-        // 落盘走 `appDataDir()`，iOS 侧直接可用——不再像 M1 草案那样传 null。
+        // 调课检测基线（DESIGN §4.17）：落盘走 `appDataDir()`，iOS 侧直接可用。
         ScheduleRepository(
             juwDatabase(),
             prefs,
@@ -52,15 +66,48 @@ class IosServices : AppServices {
         )
     }
 
+    /** 教务读取会话。Cookie 在请求时才从 `WebCookies` 取，所以登录前后都能立刻生效。 */
+    private val session: JwReadSession by lazy { IosJwReadSession() }
+
+    private val sync: ScheduleSync by lazy {
+        ScheduleSync(cas = session, repo = repository, prefs = prefs, inbox = inbox)
+    }
+
+    private val examSyncImpl: ExamSync by lazy {
+        ExamSync(
+            cas = session,
+            prefs = prefs,
+            snapshotStore = ExamSnapshotStore(),
+            inbox = inbox,
+            repo = repository,
+        )
+    }
+
+    private val termImport: ScheduleTermImport by lazy {
+        ScheduleTermImport(
+            cas = session,
+            repo = repository,
+            prefs = prefs,
+            inbox = inbox,
+            sync = sync,
+        )
+    }
+
     override fun displayPrefs(): DisplayPrefsStore = prefs
 
     override fun scheduleRepository(): ScheduleRepository = repository
 
-    override fun scheduleSync(): ScheduleSync? = null
+    override fun scheduleSync(): ScheduleSync = sync
 
-    override fun examSync(): ExamSync? = null
+    override fun examSync(): ExamSync = examSyncImpl
 
-    override fun scheduleTermImport(): ScheduleTermImport? = null
+    override fun scheduleTermImport(): ScheduleTermImport = termImport
+
+    init {
+        // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
+        // 用户关掉导入页之后课表页的「检测」照样能读登录态。
+        WebCookies.source = IosWebCookieSource
+    }
 
     /** 首次打开时把作息表与默认学期写进库（与 Android 的 `ensureDefaults` 同步口径）。 */
     fun warmUp() {

@@ -7,10 +7,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.UIKitView
+import edu.jxslu.schedule.data.session.IosWebCookieSource
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCSignatureOverride
 import platform.CoreGraphics.CGRectMake
-import platform.Foundation.NSHTTPCookie
 import platform.Foundation.NSError
 import platform.Foundation.NSURL
 import platform.Foundation.NSURLRequest
@@ -19,10 +19,7 @@ import platform.WebKit.WKNavigationDelegateProtocol
 import platform.WebKit.WKUserContentController
 import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
-import platform.WebKit.WKWebsiteDataStore
 import platform.darwin.NSObject
-import platform.darwin.dispatch_async
-import platform.darwin.dispatch_get_main_queue
 
 /**
  * [WebContentView] 的 iOS 实现：`UIKitView` + `WKWebView`（iOS 移植，2026-11-24）。
@@ -186,21 +183,14 @@ private class IosWebHost {
     }
 
     /**
-     * 读某个 URL 的 Cookie 请求头。回调在任意线程，统一在主队列上交给 [onResult]（见文件头第三节）。
+     * 读某个 URL 的 Cookie 请求头。
+     *
+     * **实现已收拢到 `data/session/IosWebCookieSource`**：那个文件直接从
+     * `WKWebsiteDataStore` 读，不依赖视图存活——用户关掉导入页之后课表页的「检测」还要靠它。
+     * 这里只保留转发，避免两份同义实现各自漂移。
      */
     private fun readCookieHeader(url: String, onResult: (String?) -> Unit) {
-        val host: String? = NSURL.URLWithString(url)?.host
-        WKWebsiteDataStore.defaultDataStore().httpCookieStore.getAllCookies { cookies ->
-            // `getAllCookies` 的入参在 Kotlin/Native 里是**可空**的 `List<*>?`（ObjC 的
-            // `NSArray` 没做非空标注），直接 `cookies.filter` 编不过，先 orEmpty。
-            val header = cookies.orEmpty()
-                .filterIsInstance<NSHTTPCookie>()
-                .filter { cookie -> host == null || domainMatches(host, cookie.domain) }
-                .mapNotNull { cookie -> cookie.value?.let { value -> "${cookie.name}=$value" } }
-                .joinToString("; ")
-            val result: String? = if (header.isEmpty()) null else header
-            dispatch_async(dispatch_get_main_queue()) { onResult(result) }
-        }
+        IosWebCookieSource.readCookieHeader(url, onResult)
     }
 }
 
@@ -240,11 +230,4 @@ private class NavigationDelegate(
     ) {
         controller.onError?.invoke(withError.localizedDescription)
     }
-}
-
-/** cookie 的 `domain`（可能带前导点）能否覆盖 [host]。 */
-private fun domainMatches(host: String, domain: String?): Boolean {
-    val normalized = (domain ?: return false).removePrefix(".")
-    if (normalized.isEmpty()) return false
-    return host == normalized || host.endsWith(".$normalized")
 }

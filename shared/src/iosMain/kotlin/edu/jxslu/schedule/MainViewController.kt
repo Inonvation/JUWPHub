@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +29,7 @@ import edu.jxslu.schedule.data.local.CourseEntity
 import edu.jxslu.schedule.data.local.DB_VERSION
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.local.juwDatabasePath
+import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.DataSelfTestResult
 import edu.jxslu.schedule.ui.DataSelfTestStrip
@@ -36,6 +38,7 @@ import edu.jxslu.schedule.ui.web.WebContentView
 import edu.jxslu.schedule.ui.web.WebViewController
 import edu.jxslu.schedule.ui.week.WeekScreen
 import edu.jxslu.schedule.ui.week.WeekViewModel
+import kotlinx.coroutines.launch
 import platform.UIKit.UIViewController
 
 /**
@@ -75,7 +78,7 @@ private fun IosRoot(services: IosServices) {
     JuwTheme {
         var jwOpen by remember { mutableStateOf(false) }
         if (jwOpen) {
-            JwLoginScreen(onClose = { jwOpen = false })
+            JwLoginScreen(services = services, onClose = { jwOpen = false })
         } else {
             Column(
                 Modifier
@@ -105,31 +108,57 @@ private fun IosRoot(services: IosServices) {
 }
 
 /**
- * 教务登录页（M2 第一步，2026-11-25）：用共享的 [WebContentView] 装一个 WKWebView。
+ * 教务导入页（M2，2026-11-25）：WKWebView 登录 → 自动抓取并落库。
  *
- * ## 这一版做到哪儿
+ * ## 流程
  *
- * 只做到「能把统一身份认证页打开、能登录、能读回当前 URL」。
- * **还没有接**：把 WebView 里的 Cookie 交给共享层的 Ktor 会话去抓课表——那一步要
- * Ktor 版的 `JwReadSession`（`:app` 那份走 OkHttp），属于 M2 的后半段。
+ * 1. `WKWebView` 打开统一身份认证（[JwUrls.ENTRY]），用户自己填账号密码 —— iOS 没有凭证
+ *    保险箱（`EncryptedSharedPreferences` 是 Android 专有），**不做自动填表**，也不存密码。
+ * 2. 页面落在教务域（[JwUrls.isJwHost]）就说明 CAS 回跳完成、Cookie 已经进
+ *    `WKWebsiteDataStore`：这时跑一次 `ScheduleTermImport.archive(manual = true)`，
+ *    它用 `IosJwReadSession` 读 Cookie 发 HTTP，走的是**与 Android 同一条共享抓取链**。
+ * 3. 结果写成顶栏一行字；返回课表页即可看到，课表是 Room 的流，不需要手动刷新。
  *
- * 所以现在从这一页登录成功后返回，课表仍然是空的。这不是坏掉，是**还没接完**。
+ * ## 为什么只抓一次
  *
- * ## 为什么顶栏自己做
+ * `archive` 自己会遍历教务下拉里的全部学期，重复触发只是白撞教务（强智是单会话，
+ * 撞多了会被顶掉）。所以用 `importing` 闸门；失败后闸门放开，下一次页面加载会自然重试。
  *
- * iOS 侧没有 `SubpageActivity` 那套返回栈，这一页由 [IosRoot] 的布尔状态控制进出，
- * 顶栏就是一个返回按钮 + 当前地址。等 M2 接完导入流程，这里会换成完整的一页。
+ * ## 这一版还没有的
+ *
+ * 没有成绩 / 考试 / 教材 / 选课的单页导入——那些在 Android 侧是 `JwImportScreen` 里
+ * 的多个入口，要逐页搬。当前只打通「课表导入」这一条主链路。
  */
 @Composable
-private fun JwLoginScreen(onClose: () -> Unit) {
+private fun JwLoginScreen(services: IosServices, onClose: () -> Unit) {
     val controller = remember { WebViewController() }
+    val scope = rememberCoroutineScope()
     var currentUrl by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var importing by remember { mutableStateOf(false) }
 
-    // 两个回调挂在**控制器**上而不是组合上：控制器比组合活得久（视图销毁后仍在），
-    // 所以用 remember 装一次即可；`by remember` 写法会让它在每次重组时被换掉。
+    // 回调挂在**控制器**上：控制器比组合活得久（视图销毁后仍在），装一次即可。
+    // 内层读的 `importing` / `status` 是 remember 的 State 委托，读到的是当前值。
     remember(controller) {
-        controller.onPageFinished = { url -> currentUrl = url }
+        controller.onPageFinished = { url ->
+            currentUrl = url
+            error = null
+            if (!importing && JwUrls.isJwHost(url)) {
+                importing = true
+                status = "已登录，正在从教务导入课表…"
+                scope.launch {
+                    val failure = services.scheduleTermImport()
+                        .archive(manual = true) as? ScheduleTermImport.Result.Failed
+                    status = if (failure == null) {
+                        "导入完成，返回课表即可看到"
+                    } else {
+                        "导入失败：${failure.reason}"
+                    }
+                    importing = false
+                }
+            }
+        }
         controller.onError = { message -> error = message }
         controller
     }
@@ -144,14 +173,15 @@ private fun JwLoginScreen(onClose: () -> Unit) {
         ) {
             TextButton(onClick = onClose) { Text("返回课表") }
             Text(
-                text = error ?: currentUrl ?: JwUrls.ENTRY,
+                // 有状态就说状态：导入中 / 导入结果比 URL 有用得多
+                text = error ?: status ?: currentUrl ?: JwUrls.ENTRY,
                 fontSize = 11.sp,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                color = if (error != null) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                color = when {
+                    error != null -> MaterialTheme.colorScheme.error
+                    status != null -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                 },
                 modifier = Modifier.padding(end = 8.dp),
             )
