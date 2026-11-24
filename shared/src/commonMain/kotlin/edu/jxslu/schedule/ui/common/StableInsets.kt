@@ -23,9 +23,12 @@ import androidx.compose.ui.platform.LocalDensity
  * M3 `TopAppBar` 的默认 insets 是实时 systemBars，**会拉起外部应用的页面必须显式传
  * 本值**（出码页、一卡通、缴费账单、作业详情、快捷方式、权限设置、附近单车、今日页、
  * 生活页）；不拉起外部应用的页面可以继续用默认值。
+ *
+ * **为什么公开**：定义搬进 `:shared` 而调用方留在 `:app`，跨模块看不见 `internal`；
+ * 现有 15 个 `:app` 页面直接调它（`P2` 搬 UI 时才会跟着走）。
  */
 @Composable
-internal fun pinnedStatusBars(): WindowInsets {
+fun pinnedStatusBars(): WindowInsets {
     val density = LocalDensity.current
     val live = WindowInsets.statusBars
     val pinnedTop = remember { mutableIntStateOf(live.getTop(density)) }

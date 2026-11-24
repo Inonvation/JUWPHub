@@ -15,8 +15,13 @@ import androidx.compose.ui.text.withStyle
  *
  * [boldColor] 为空时只加粗、不改色；页脚这类整体半透明的正文传入更实的颜色，
  * 避免重点字段跟着正文一起变淡。
+ *
+ * **为什么不用 `RegexOption.DOT_MATCHES_ALL`**：common 的 `kotlin.text.RegexOption` 只有
+ * `IGNORE_CASE` / `MULTILINE` 两项（`DOT_MATCHES_ALL` 是 JVM 侧扩展），搬进 `commonMain`
+ * 就编不过。改用 `[\s\S]` 表示「含换行的任意字符」——语义与原标志一致：声明正文是
+ * 多段字符串，`**` 可能跨行成对。
  */
-private val EmphasisPattern = Regex("\\*\\*(.+?)\\*\\*", RegexOption.DOT_MATCHES_ALL)
+private val EmphasisPattern = Regex("\\*\\*([\\s\\S]+?)\\*\\*")
 
 fun emphasizedText(
     text: String,

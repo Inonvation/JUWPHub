@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.time.Clock
 import kotlinx.coroutines.delay
 
 /**
@@ -68,7 +69,7 @@ fun WaterUnlockButton(
                 onUnlock()
                 return@Button
             }
-            val now = System.currentTimeMillis()
+            val now = Clock.System.now().toEpochMilliseconds()
             if (awaitingConfirm && now - armedAt <= WaterClickPolicy.DOUBLE_CLICK_WINDOW_MS) {
                 awaitingConfirm = false
                 armedAt = 0L
