@@ -1,6 +1,8 @@
 package edu.jxslu.schedule
 
 import edu.jxslu.schedule.data.ai.AiScheduleClient
+import edu.jxslu.schedule.data.kqcx.KqcxAuthClient
+import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.power.PowerClient
@@ -51,6 +53,7 @@ import edu.jxslu.schedule.data.repo.TextbookSync
 import edu.jxslu.schedule.data.session.IosJwReadSession
 import edu.jxslu.schedule.data.session.IosJwSessionFlag
 import edu.jxslu.schedule.data.session.IosAiApiKeyStore
+import edu.jxslu.schedule.data.session.IosKqcxCredentialStore
 import edu.jxslu.schedule.data.session.IosQiekjCredentialStore
 import edu.jxslu.schedule.data.session.IosSessionExpirySink
 import edu.jxslu.schedule.data.session.IosUjingSessionStore
@@ -60,6 +63,7 @@ import edu.jxslu.schedule.data.session.IosYktCredentialStore
 import edu.jxslu.schedule.data.session.JwReadSession
 import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionExpirySink
+import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.session.SessionStatus
 import edu.jxslu.schedule.data.session.WebCookies
 import edu.jxslu.schedule.data.ujing.UjingDraftStore
@@ -81,7 +85,6 @@ import edu.jxslu.schedule.platform.AppServices
 import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
-import edu.jxslu.schedule.platform.ThirdPartySession
 import edu.jxslu.schedule.platform.UjingReminder
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -547,9 +550,6 @@ class IosServices : AppServices {
     /** 历史账单：与主页记录卡共用同一份实例（各建一个会出现「刚洗完看不到」）。 */
     override fun ujingHistoryStore(): UjingHistoryStore = ujingHistory
 
-    /** 快趣：**iOS 侧返回 null**，理由同上。 */
-    override fun kqcxSession(): ThirdPartySession? = null
-
     /**
      * 问渠仓库：**iOS 侧已能建起来**（2026-11-25）。
      *
@@ -785,6 +785,38 @@ class IosServices : AppServices {
     }
 
     override fun teachingCalendarSync(): TeachingCalendarSync = teachingCalendarSyncImpl
+
+    // ---- 快趣出行（iOS 移植 S23，2026-11-25） ----
+
+    /**
+     * 快趣会话本体：**iOS 侧已能建起来**，不再是 null。
+     *
+     * 构造只要三样，这一端全都有：[KqcxAuthClient.create]（纯 Ktor，`data/net/SharedHttp`）、
+     * [IosKqcxCredentialStore]（Keychain，service `secure_kqcx`，与 Android 的
+     * `secure_kqcx.xml` 一一对应）与 [sessionExpiry]（「已过期」留痕，`NSUserDefaults`）。
+     *
+     * 为什么现在才接：S12 把逻辑搬进 `KqcxSessionCore` 之后，这一端差的不是代码而是
+     * **一个装配点**——`:app` 的 `KqcxSessionRepository` 把 core 包成私有字段，
+     * `AppServices.kqcxSession()` 当时只能收成 `ThirdPartySession`（登录态 + 退出）。
+     * S23 把 core 提到装配根（`Graph.kqcxCore` / 这里），接口签名随之放宽成
+     * `KqcxSessionCore?`，两端同形。
+     *
+     * 它**不落 token**（token 仅内存，与 Android 同一口径）；落盘的只有「记住登录」的
+     * 手机号 + 明文密码，供 token 过期后静默重登——密码落 Keychain，不进日志、不进 git。
+     *
+     * 单例的理由与 Android 侧一致：token / 当前账号 / 重登单飞（Mutex）都是它内部的
+     * 进程级状态，各建一个等于「账号中心显示已登录、页面仍是未登录」。
+     */
+    private val kqcxCoreImpl: KqcxSessionCore by lazy {
+        KqcxSessionCore(
+            client = KqcxAuthClient.create(),
+            credentials = IosKqcxCredentialStore(),
+            onSessionExpired = { sessionExpiry.mark(SessionService.Kqcx.id) },
+            onSessionCleared = { sessionExpiry.clear(SessionService.Kqcx.id) },
+        )
+    }
+
+    override fun kqcxSession(): KqcxSessionCore = kqcxCoreImpl
 
     private companion object {
         /** 日志 tag：崩溃/后台失败都记在这个名字下，排查时先 grep 它。 */
