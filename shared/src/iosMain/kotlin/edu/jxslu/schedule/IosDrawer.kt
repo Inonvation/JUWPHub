@@ -164,17 +164,19 @@ internal fun IosDrawer(
     onOpenMe: () -> Unit,
 ) {
     val entries = remember { iosDrawerEntries() }
-    val sections = remember(entries) {
-        entries
+    // 「江水生活」是**唯一分成两半**的段：服务行（共享层的 `lifeServiceRows`）在钱包卡下面渲染，
+    // 白名单里同段剩下的二级页（洗衣账单）接在同一段里。**不能交给下面的段循环**：
+    // 那会再起一个同名段头，抽屉里看上去就是两段「江水生活」——Android 侧栏这一段只有
+    // 一个段头（`lifeDrawerGroups` 的 `DrawerGroup("江水生活")`）。更不能「只跳过段头」：
+    // `items` 的键在整条 LazyColumn 里必须唯一，同一个 `route.screen.name` 出两遍会崩在
+    // 「key was already used」。
+    val serviceSectionTitle = "江水生活"
+    val (serviceSectionExtras, otherSections) = remember(entries) {
+        val grouped = entries
             .filterNot { it.route.screen in IOS_DRAWER_QUICK_SCREENS }
             .groupBy { it.section }
+        grouped[serviceSectionTitle].orEmpty() to (grouped - serviceSectionTitle)
     }
-    // 「江水生活」段在上面已经有一条段头（服务行那三行），白名单里同段剩下的二级页
-    // （洗衣账单）接在同一段里。**不能交给下面的 `sections.forEach`**：那会再起一个
-    // 同名段头，抽屉里就出现两段「江水生活」——Android 侧栏这一段只有一个段头
-    // （`lifeDrawerGroups` 的 `DrawerGroup("江水生活")`）。
-    val serviceSectionTitle = "江水生活"
-    val serviceSectionExtras = sections[serviceSectionTitle].orEmpty()
     // 身份区数据源与 Android 侧栏同一份 `DisplayPrefsStore`（iOS 落在沙箱私有目录的 DataStore）
     val prefs = remember { services.displayPrefs() }
     val profileName by prefs.profileName.collectAsStateWithLifecycle(initialValue = "")
@@ -310,11 +312,8 @@ internal fun IosDrawer(
                     CompactDrawerRow(entry = entry, onClick = { onPick(entry.route) })
                 }
                 // 其余二级页：紧凑分组列表（键仍是 `route.screen.name`，与上一版一致）
-                sections.forEach { (section, rows) ->
-                    // 「江水生活」的段头已经在上面出过，这里只画其余段的段头
-                    if (section != serviceSectionTitle) {
-                        item(key = "h-$section") { DrawerSectionHeader(section) }
-                    }
+                otherSections.forEach { (section, rows) ->
+                    item(key = "h-$section") { DrawerSectionHeader(section) }
                     items(rows, key = { it.route.screen.name }) { entry ->
                         CompactDrawerRow(entry = entry, onClick = { onPick(entry.route) })
                     }
