@@ -93,6 +93,7 @@ import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
 import edu.jxslu.schedule.platform.UjingReminder
+import edu.jxslu.schedule.platform.installCrashHook
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -737,6 +738,11 @@ class IosServices : AppServices {
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
         // 用户关掉导入页之后课表页的「检测」照样能读登录态。
         WebCookies.source = IosWebCookieSource
+        // 未捕获异常落盘（B1，2026-11-25）：上面那个 CoroutineExceptionHandler 只接得住
+        // 协程作用域里的异常；UIKit 回调 / 组合期抛出来的走「进程终止」那条路，
+        // 只能靠 `setUnhandledExceptionHook` 在死前留一份栈到 `logs/app.log`。
+        // 这里是最好的位置：本类是 `MainViewController` 的第一行，比任何一个页面都早。
+        installCrashHook()
     }
 
     /** 首次打开时把作息表与默认学期写进库（与 Android 的 `ensureDefaults` 同步口径）。 */

@@ -53,7 +53,7 @@ import edu.jxslu.schedule.ui.me.hub.AboutUpdateScreen
 import edu.jxslu.schedule.ui.me.hub.AccountsHubScreen
 import edu.jxslu.schedule.ui.me.hub.AppearanceSettingsScreen
 import edu.jxslu.schedule.ui.me.hub.openUrl
-import edu.jxslu.schedule.ui.me.hub.PermissionsStorageScreen
+import edu.jxslu.schedule.ui.me.hub.PermissionsStorageScreenAndroid
 import edu.jxslu.schedule.ui.me.hub.QuietHoursScreen
 import edu.jxslu.schedule.ui.me.hub.REWARD_QR_RES
 import edu.jxslu.schedule.ui.me.hub.saveRewardQrToGallery
@@ -840,7 +840,9 @@ class SubpageActivity : ComponentActivity() {
                 onOpenWenqu = { SubpageActivity.start(this, SubpageScreen.WENQU) },
                 onOpenAiSettings = { SubpageActivity.start(this, SubpageScreen.AI_SETTINGS) },
             )
-            SubpageScreen.PERMISSIONS_STORAGE -> PermissionsStorageScreen(onBack = onBack)
+            // 页框与「存储与诊断」在 shared/commonMain；权限块与缓存清理仍是 `:app` 的件，
+            // 由 `PermissionsStorageScreenAndroid` 按槽位注入（iOS 移植 W1 收尾）。
+            SubpageScreen.PERMISSIONS_STORAGE -> PermissionsStorageScreenAndroid(onBack = onBack)
             // 「关于」三页已在 shared/commonMain（iOS 移植 W1）：链接跳转 / 许可弹窗 / 条款弹窗
             // 仍是 `:app` 的件，按槽位注入（`ui/me/hub/AboutPlatform.kt` 是 Android 侧那一份）。
             SubpageScreen.ABOUT_UPDATE -> AboutUpdateScreen(
