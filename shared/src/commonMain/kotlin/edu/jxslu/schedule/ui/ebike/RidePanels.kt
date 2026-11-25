@@ -282,8 +282,10 @@ fun RideActionArea(
     /** 小程序方式下"码已经生成好了"：只有这时才给「打开微信扫一扫」。 */
     hasCode: Boolean,
     onDismissPicked: () -> Unit,
-    onWechatScan: () -> Unit,
-    onScanBodyCode: () -> Unit,
+    /** 打开微信扫一扫；**null = 本平台跳不了微信**（那一档改走「按车号」）。 */
+    onWechatScan: (() -> Unit)?,
+    /** 拉起扫码相机；**null = 本平台没有扫码能力**（那一档改走「按车号」）。 */
+    onScanBodyCode: (() -> Unit)?,
     onOpenCarNumber: () -> Unit,
     onLogin: () -> Unit,
     onUnlock: (String) -> Unit,
@@ -586,8 +588,8 @@ private fun RideActionButtons(
     summary: KvcxReturnSummary?,
     /** 结算卡自动「继续找车」的截止时刻（0 = 不自动收尾）；见 [RideActionArea] 同名参数。 */
     settleDeadlineAt: Long,
-    onWechatScan: () -> Unit,
-    onScanBodyCode: () -> Unit,
+    onWechatScan: (() -> Unit)?,
+    onScanBodyCode: (() -> Unit)?,
     onOpenCarNumber: () -> Unit,
     onLogin: () -> Unit,
     onUnlock: (String) -> Unit,
@@ -629,14 +631,23 @@ private fun RideActionButtons(
         key == BAR_FINDING_PLAIN ->
             RideActionButton("按车号生成乘车码", onOpenCarNumber, icon = AppIcons.QrCode01)
 
-        key == BAR_FINDING_CODE ->
+        // 小程序方式的主动作；**没有微信这一档的平台退到「按车号生成乘车码」**
+        // （那枚按钮本来就在车号面板里，这里只是把它提到主动作位，不留死按钮）
+        key == BAR_FINDING_CODE -> if (onWechatScan != null) {
             RideActionButton("打开微信扫一扫", onWechatScan, icon = AppIcons.QrCodeScan)
+        } else {
+            RideActionButton("按车号生成乘车码", onOpenCarNumber, icon = AppIcons.QrCode01)
+        }
 
         key == BAR_FINDING_LOGIN ->
             RideActionButton("登录快趣账号", onLogin, icon = AppIcons.UserAccount)
 
-        key == BAR_FINDING_SCAN ->
+        // 账号方式的主动作；没有扫码能力时同样退到「按车号」
+        key == BAR_FINDING_SCAN -> if (onScanBodyCode != null) {
             RideActionButton("扫车身码", onScanBodyCode, icon = AppIcons.QrCodeScan)
+        } else {
+            RideActionButton("按车号用车", onOpenCarNumber, icon = AppIcons.QrCode01)
+        }
 
         carNum != null -> when {
             caps.directUnlock -> RideActionButton(
@@ -2107,7 +2118,8 @@ fun RideCarNumberSheet(
     onLocateCar: () -> Unit,
     onGenerate: () -> Unit,
     onSave: () -> Unit,
-    onWechatScan: () -> Unit,
+    /** 打开微信扫一扫；**null = 本平台跳不了微信**（这一行只剩「存相册」）。 */
+    onWechatScan: (() -> Unit)?,
     onUnlock: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -2313,12 +2325,14 @@ fun RideCarNumberSheet(
                     modifier = Modifier.weight(1f),
                     filled = false,
                 )
-                RideActionButton(
-                    text = "打开微信扫一扫",
-                    onClick = { requestClose { onWechatScan() } },
-                    enabled = ready,
-                    modifier = Modifier.weight(1f),
-                )
+                if (onWechatScan != null) {
+                    RideActionButton(
+                        text = "打开微信扫一扫",
+                        onClick = { requestClose { onWechatScan.invoke() } },
+                        enabled = ready,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
             Text(
                 text = if (qrSaved) {

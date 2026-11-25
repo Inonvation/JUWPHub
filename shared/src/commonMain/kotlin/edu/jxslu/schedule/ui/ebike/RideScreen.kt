@@ -1,14 +1,12 @@
 package edu.jxslu.schedule.ui.ebike
 
-import android.content.Context
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,21 +51,12 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.SubpageActivity
-import edu.jxslu.schedule.SubpageScreen
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.BikeCluster
 import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeQr
@@ -76,22 +65,27 @@ import edu.jxslu.schedule.domain.EbikeRideCard
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.GcjPoint
 import edu.jxslu.schedule.domain.KqcxAuth
+import edu.jxslu.schedule.domain.KvcxZones
+import edu.jxslu.schedule.domain.NearbyBike
 import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppHaptics
 import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
-import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.postNotice
-import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
+import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -132,6 +126,15 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RideScreen(
+    /**
+     * 车辆 / 地图 / 本机用车的唯一一份编排（`BikeMapViewModel` 已在共享层）。
+     *
+     * **必填，宿主建**（`design/ios-port.md` §11.2 ①）：Android 用
+     * `viewModel { BikeMapViewModel(...) }`，iOS 用 `remember { … }`。
+     */
+    viewModel: BikeMapViewModel,
+    /** 出码与计时归它管（生成 / 保存 / 焚码 / 免费时长计时的口径都在那边）。**必填，宿主建。** */
+    ebikeViewModel: EbikeViewModel,
     onBack: () -> Unit = {},
     /**
      * 带车号进页（侧栏「扫一扫」扫到车身码）：第一笔查询结果里找到就高亮并定位，
@@ -139,20 +142,44 @@ fun RideScreen(
      * 不轮询——找不到就等用户下一次动作。
      */
     initialFocusCarNum: String? = null,
-    viewModel: BikeMapViewModel = viewModel(
-        factory = BikeMapViewModelFactory(
-            Graph.kqcxBikeClient(LocalContext.current),
-            Graph.displayPrefs(LocalContext.current),
-        ),
-    ),
-    /** 出码与计时归它管（生成 / 保存 / 焚码 / 免费时长计时的口径都在那边）。 */
-    // 平台件（相册 / 提醒）由宿主装配：`AndroidEbikeCodePlatform` 是 :app 的实现，
-    // 共享层的 EbikeViewModel 只认两个接口（iOS 宿主将来传自己的实现或 null）。
-    // 用 `Graph.appContext` 而不是 `LocalContext.current`：`viewModel { }` 的 initializer
-    // 不是组合函数，里面读不了 CompositionLocal。
-    ebikeViewModel: EbikeViewModel = viewModel {
-        EbikeViewModel(Graph.displayPrefs(Graph.appContext), AndroidEbikeCodePlatform)
-    },
+    /**
+     * 地图槽位（`BikeMapSlot`，契约见 `ui/ebike/BikeMapContract.kt`）。
+     *
+     * **`null` = 本平台没有地图能力**：地图区域渲染一块正常的空态（圆角框 + 一行说明），
+     * 右上的两枚浮钮一并隐藏（它们只在有图可看时才有意义）；车辆列表、动作区、
+     * 所有用车动作照常工作（见 `design/ios-port.md` §11.2 ④）。
+     *
+     * Android 传 `BikeMapHost` 的槽实现（高德 / osmdroid），iOS 传 MapKit 那份。
+     */
+    bikeMap: BikeMapSlot? = null,
+    /**
+     * 拉起扫码相机；结果回调给共享层解析（null = 取消）。
+     * **`null` = 本平台没有扫码能力**：扫车身码入口不渲染（`caps.cameraScan` 也要它非空）。
+     */
+    onScanBodyCode: ((onResult: (String?) -> Unit) -> Unit)? = null,
+    /**
+     * 打开微信（结清欠费 / 小程序方式的「打开微信扫一扫」）。
+     * **`null` = 本平台跳不了微信**：小程序方式的主动作与结算卡的「去微信结清」入口不渲染。
+     */
+    onOpenWechatScan: (() -> Unit)? = null,
+    /** 「去微信结清」的出口（与 [onOpenWechatScan] 分开：两条去向不同，能力判定也不同）。 */
+    onOpenWechatForSettle: (() -> Unit)? = null,
+    /** 进快趣账号页（登录 / 管理）；`null` = 本平台还没有这一页（入口只给一句说明）。 */
+    onOpenKvcxAccount: (() -> Unit)? = null,
+    /** 申请定位权限（系统弹窗）；`null` = 本平台没有权限这一档，动作直接发。 */
+    onRequestLocationPermission: (() -> Unit)? = null,
+    /** 打开系统「定位服务」总开关页；`null` = 没有这一页（提示里不给「去设置」）。 */
+    onOpenLocationSettings: (() -> Unit)? = null,
+    /** 打开本应用详情页（权限）；`null` 同上。 */
+    onOpenAppDetailsSettings: (() -> Unit)? = null,
+    /** 申请通知权限，授予后执行回调；`null` = 没有这一步（直接执行）。 */
+    requestNotificationPermission: ((onGranted: () -> Unit) -> Unit)? = null,
+    /** 打开系统通知设置；`null` = 本平台没有这个系统页。 */
+    onOpenNotificationSettings: (() -> Unit)? = null,
+    /** 地图瓦片缓存的统计与清理；`null` = 没有可管的缓存（设置里那张卡不渲染）。 */
+    mapCache: EbikeMapCachePort? = null,
+    /** 有没有第二档底图（Android 高德 ↔ 栅格）；`false` = 只有一个底图。 */
+    showMapSourceChoice: Boolean = false,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val prefs by ebikeViewModel.ebikePrefs.collectAsStateWithLifecycle()
@@ -160,9 +187,8 @@ fun RideScreen(
     val kvcxState by viewModel.kvcx.state.collectAsStateWithLifecycle()
     val kvcxLoggedIn by viewModel.kvcx.loggedIn.collectAsStateWithLifecycle()
     val useMode by viewModel.useMode.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     /** 开锁前骑行卡提醒的「今日不再提醒」日期读在这里（行为判定读原始值，不读页面快照）。 */
-    val cardPrefs = remember(context) { Graph.displayPrefs(context) }
+    val cardPrefs = remember { Services.current.displayPrefs() }
     val scheme = MaterialTheme.colorScheme
     val haptics = rememberAppHaptics()
     val scope = rememberCoroutineScope()
@@ -176,7 +202,7 @@ fun RideScreen(
     // 倒计时只看「有没有在案计时」，不被提醒开关藏住（DESIGN §3.9 红线）
     var timerExpired by remember(prefs.rideStartAt) { mutableStateOf(false) }
     val timerActive = !timerExpired &&
-        EbikeFreeRide.isActive(prefs.rideStartAt, System.currentTimeMillis())
+        EbikeFreeRide.isActive(prefs.rideStartAt, AppClock.nowMillis())
     val riding = ride != null || timerActive
     // 结算卡只属于账号方式（小程序方式没有本机还车这个动作）
     val rawSummary = if (caps.inAppRide) kvcxState.returnSummary else null
@@ -200,10 +226,9 @@ fun RideScreen(
      * 回来就当它已经过期，不会让一张旧结算卡无限期挂在屏幕上。
      */
     var settlePausedMs by remember(kvcxState.returnSummaryAt) { mutableStateOf(0L) }
-    var settlePausedAt by remember(kvcxState.returnSummaryAt) { mutableStateOf(0L) }
     // 过期的结算卡不再渲染（离开页面很久再回来不闪一帧）；主动点过上面两个动作则保留
     val summaryExpired = rawSummary != null && kvcxState.returnSummaryAt > 0L &&
-        System.currentTimeMillis() >=
+        AppClock.nowMillis() >=
         kvcxState.returnSummaryAt + SettleAutoContinueMillis + settlePausedMs
     val summary = rawSummary.takeUnless { !settleAutoCancelled && summaryExpired }
     // 倒计时截止时刻（0 = 不自动收尾）：从控制器里的结果卡出现时刻起算，跨页面重建不重来
@@ -241,18 +266,20 @@ fun RideScreen(
     // 就跳过（`settleAutoCancelled`），把卡片留给正在进行的动作 / 付款。
     // **只在页面可见时收尾**（2026-11-19）：后台把卡片收掉，用户回来就只剩「结算卡没了、
     // 金额也没看到」。`settlePausedMs` 进 key：从后台回来时按新的截止时刻重算。
-    val lifecycleOwner = LocalLifecycleOwner.current
+    // 「回到前台」计数（`ui/common/ResumedTicker` 的既有缝）：iOS 侧恒为 0，
+    // 那一侧的页面生命周期口径见该文件的表。
+    val resumeTick = rememberResumeTick()
     LaunchedEffect(kvcxState.returnSummaryAt, rawSummary != null, settlePausedMs) {
         val summaryAt = kvcxState.returnSummaryAt
         if (rawSummary == null || summaryAt <= 0L) return@LaunchedEffect
         val remain = summaryAt + SettleAutoContinueMillis + settlePausedMs -
-            System.currentTimeMillis()
+            AppClock.nowMillis()
         if (remain > 0L) delay(remain)
         if (settleAutoCancelled) return@LaunchedEffect
-        // 到点时若正退在后台（灭屏 / 切走），等回前台再收——后台收卡用户什么都没看到
-        while (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            delay(500)
-        }
+        // 到点时若正退在后台（灭屏 / 切走），等回前台再收——后台收卡用户什么都没看到。
+        // shortcut: `commonMain` 看不见 `Lifecycle.currentState`，这里改成「后台那段时长已
+        // 经不计入」的等价口径（`settlePausedMs`）：到点时几乎总是前台。升级条件 = CMP 的
+        // iOS 生命周期口径可用（或给 ResumedTicker 补一个 `rememberIsResumed`）。
         if (settleAutoCancelled) return@LaunchedEffect
         continueFinding()
     }
@@ -412,11 +439,12 @@ fun RideScreen(
     }
 
     // ── 权限与动作 ──
-    // 写操作要定位（快趣按位置校验）：未授权先申请，授权后用户再点一次
-    val locationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { _ ->
-        if (!BikeLocator.hasPermission()) {
+    // 写操作要定位（快趣按位置校验）：未授权先申请，授权后用户再点一次。
+    // 「申请」这一下是宿主的事（系统弹窗）；null = 本平台没有权限概念，动作直接发。
+    val requestLocation: () -> Unit = {
+        if (onRequestLocationPermission != null) {
+            onRequestLocationPermission.invoke()
+        } else if (!BikeLocator.hasPermission()) {
             showNotice(scope, snackbar, "没有定位权限，快趣无法校验位置", NoticeTone.Warning)
         }
     }
@@ -438,7 +466,7 @@ fun RideScreen(
      * 按"不确定"放行——读接口不该把用户挡在车外。有可用卡时 `warningText` 返回 null。
      */
     suspend fun unlockCardWarning(): String? {
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         val muted = runCatching { cardPrefs.ebikeNoCardNoticeDate.first() }.getOrDefault("")
         if (muted.isNotEmpty() && muted == EbikeRideCard.dayKey(now)) return null
         val coupons = viewModel.kvcx.rideCardCoupons(now) ?: return null
@@ -466,7 +494,7 @@ fun RideScreen(
         haptics.tap()
         when {
             !BikeLocator.hasPermission() -> {
-                locationPermissionLauncher.launch(AppPermissions.location.toTypedArray())
+                requestLocation()
                 showNotice(scope, snackbar, "本机用车需要定位权限（快趣按位置校验）", NoticeTone.Warning)
             }
             // 临时锁车免二次确认：订单与计费继续、随时可再解锁
@@ -496,42 +524,42 @@ fun RideScreen(
             else -> pendingAction.value = action to carNum
         }
     }
-    val withNotificationPermission = rememberNotificationPermissionGate()
+    // 通知权限：Android 要 POST_NOTIFICATIONS；没有这一档的平台给「直接执行」
+    val withNotificationPermission: (() -> Unit) -> Unit =
+        requestNotificationPermission ?: { action -> action() }
 
     // 内置相机扫车身码（账号方式）：识别后**回填车号 + 换成车辆卡**，并让地图侧在**确认这辆车
     // 可用**后发一次 AutoUnlockReady——开锁仍走同一套闸（二次确认 / 定位前置，见 autoUnlockRequest）
-    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
-        val raw = result.contents
-        val carNum = raw?.let(EbikeQr::parseScannedCarNum)
-        when {
-            // 内容为空 = **取消**：取景页没扫到就被关掉（返回键 / 手势返回）都落这里。
-            // 取消不是失败——报一句「未识别到有效车号」等于每次放弃扫码都挨一次无端报错
-            raw == null -> Unit
-            // 扫到了、但内容不是车号（名片码 / 小程序码 / 别的链接）：这才是识别失败
-            carNum == null ->
-                showNotice(scope, snackbar, "未识别到有效车号，请对准车身上的二维码", NoticeTone.Warning)
-            else -> {
-                haptics.tap()
-                ebikeViewModel.onCarInput(carNum)
-                // 先不要弹车辆卡：等 focusCar 确认这辆车可用（AutoUnlockReady）再摆卡片。
-                // 扫到已出租/维修的车时保持当前页，用户可以直接再点扫一扫，不用先关卡片。
-                pickedCar = null
-                viewModel.focusCar(carNum, autoUnlock = true)
+    // 相机扫车身码：**拉起相机与识别界面是宿主的事**（zxing / AVFoundation 各一套），
+    // 解析、可用性判定与自动开锁的闸全在共享层——宿主只把识别到的原文交回来（null = 取消）。
+    val scanBodyCode: (() -> Unit)? = onScanBodyCode?.let { scan ->
+        {
+            haptics.tap()
+            scan { raw ->
+                val carNum = raw?.let(EbikeQr::parseScannedCarNum)
+                when {
+                    // 内容为空 = **取消**：取景页没扫到就被关掉（返回键 / 手势返回）都落这里。
+                    // 取消不是失败——报一句「未识别到有效车号」等于每次放弃扫码都挨一次无端报错
+                    raw == null -> Unit
+                    // 扫到了、但内容不是车号（名片码 / 小程序码 / 别的链接）：这才是识别失败
+                    carNum == null ->
+                        showNotice(
+                            scope,
+                            snackbar,
+                            "未识别到有效车号，请对准车身上的二维码",
+                            NoticeTone.Warning,
+                        )
+                    else -> {
+                        haptics.tap()
+                        ebikeViewModel.onCarInput(carNum)
+                        // 先不要弹车辆卡：等 focusCar 确认这辆车可用（AutoUnlockReady）再摆卡片。
+                        // 扫到已出租/维修的车时保持当前页，用户可以直接再点扫一扫，不用先关卡片。
+                        pickedCar = null
+                        viewModel.focusCar(carNum, autoUnlock = true)
+                    }
+                }
             }
         }
-    }
-    val scanBodyCode: () -> Unit = {
-        haptics.tap()
-        scanLauncher.launch(
-            ScanOptions().apply {
-                setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                setPrompt("对准车身上的二维码")
-                setBeepEnabled(false)
-                setOrientationLocked(true)
-                // 自带的 CaptureActivity 只有取景框 + 提示，没有手电筒与相册入口（扫描窗口见它）
-                setCaptureActivity(EbikeScanActivity::class.java)
-            },
-        )
     }
     // 「生成乘车码」：按输入框里的车号生成一张，好了铺进车号面板（DESIGN §3.9）
     val generateCode: () -> Unit = {
@@ -544,12 +572,15 @@ fun RideScreen(
             ebikeViewModel.generate()
         }
     }
-    // 主动作「打开微信扫一扫」：不要求先出码，拉起微信 + 起免费计时（顺带补存已有的码）
-    val wechatScanPlain: () -> Unit = {
-        haptics.tap()
-        withNotificationPermission {
-            ebikeViewModel.onWechatScanClicked()
-            openWechatScan(context) { message -> showNotice(scope, snackbar, message) }
+    // 主动作「打开微信扫一扫」：不要求先出码，拉起微信 + 起免费计时（顺带补存已有的码）。
+    // null = 本平台跳不了微信：动作区与车号面板的这枚入口都不渲染（见 RidePanels 的可空参数）。
+    val wechatScanPlain: (() -> Unit)? = onOpenWechatScan?.let { openWeChat ->
+        {
+            haptics.tap()
+            withNotificationPermission {
+                ebikeViewModel.onWechatScanClicked()
+                openWeChat()
+            }
         }
     }
     // 停车点卡 / 车辆卡上的「出码」：按这辆车出码并打开面板
@@ -560,9 +591,15 @@ fun RideScreen(
         qrRequest = EbikeQr.resolveCarNum(carNum)
         showCarNumberSheet = true
     }
+    // 快趣账号页（登录 / 退出 / 骑行记录）。iOS 侧的路由由宿主接，`null` 时只给一句说明
+    // ——这一页是真实的导航目的地，不是平台能力缺失，所以不走「整行不渲染」那一档。
     val openAccount: () -> Unit = {
         haptics.tap()
-        SubpageActivity.start(context, SubpageScreen.KVCX)
+        if (onOpenKvcxAccount != null) {
+            onOpenKvcxAccount.invoke()
+        } else {
+            showNotice(scope, snackbar, "本平台还没有快趣账号页，请先在快趣小程序登录", NoticeTone.Info)
+        }
     }
     /**
      * 打开「车号 / 出码」面板：面板头行那枚「按车号」与动作区里同名的那枚共用一个入口。
@@ -622,7 +659,7 @@ fun RideScreen(
     }
     LaunchedEffect(Unit) {
         // 进页核对一次：计时中缺服务/闹钟就补上，过期状态就清干净（幂等）
-        EbikeFreeRideReminder.check(context)
+        ebikeViewModel.checkFreeRide()
         viewModel.queryRideQuietly()
     }
     LaunchedEffect(initialFocusCarNum) {
@@ -647,55 +684,52 @@ fun RideScreen(
      * 翻成 true（2026-11-19 修「设置里授权后蓝点不出现」），观察者得能读到它。
      */
     var locationGranted by remember { mutableStateOf(BikeLocator.hasPermission()) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                // 结算卡的 8 秒只数看得见的时间：记下离开前台的时刻，回来看这一段有多长
-                Lifecycle.Event.ON_PAUSE -> settlePausedAt = System.currentTimeMillis()
-
-                Lifecycle.Event.ON_RESUME -> {
-                    if (settlePausedAt > 0L) {
-                        val gap = (System.currentTimeMillis() - settlePausedAt).coerceAtLeast(0L)
-                        settlePausedAt = 0L
-                        // 离开太久（> 1 分钟）不补：一张旧结算卡不该无限期挂着
-                        if (gap <= SETTLE_PAUSE_CREDIT_MAX_MS) settlePausedMs += gap
-                    }
-                    ebikeViewModel.burnPending()
-                    viewModel.queryRideQuietly()
-                    // 授权只在两处会变：本页发起的系统权限框（见 locatePermissionLauncher）、
-                    // 用户自己进系统设置改的。后者拿不到任何回调，只能回到前台时重读；
-                    // 不重读的话 `locationGranted` 一直是 false，连续定位流永远不启动。
-                    val granted = BikeLocator.hasPermission()
-                    if (granted && !locationGranted) {
-                        locationGranted = true
-                        // 刚授权：顺手取一次定位，把镜头带过去（与点「定位」同一条路，静默）
-                        locate(context, viewModel, scope, silent = true, onIssue = {})
-                    } else if (!granted && locationGranted) {
-                        locationGranted = false
-                    }
-                    // 小程序方式的远程用车提醒（2026-10-24）：跳微信那一下不打断，标记落盘，
-                    // 回 App 在这里消费弹出（读了就清，一次性）。账号方式不走这条（当场已弹），
-                    // 标记常态为 false，多查一次无副作用。
-                    scope.launch {
-                        val pending = runCatching { cardPrefs.ebikeRemoteRidePending.first() }
-                            .getOrDefault(false)
-                        if (pending) {
-                            runCatching { cardPrefs.setEbikeRemoteRidePending(false) }
-                            remoteNoticeCount = runCatching { cardPrefs.ebikeRemoteRideCount.first() }
-                                .getOrDefault(0)
-                            showRemoteRideNotice = true
-                        }
-                    }
-                }
-
-                else -> Unit
+    /**
+     * 「回到前台」要做的事（原先是 `ON_RESUME` 的观察者）。
+     *
+     * Android 侧语义不变：`rememberResumeTick()` 每次真正的回前台 +1（进页那次注册不补发）。
+     * iOS 侧恒为 0，只在进页跑一次——见 `ui/common/ResumedTicker` 的两端表。
+     *
+     * 结算卡「8 秒只数看得见的时间」的账在这里补：拿上次记录的时刻算离台时长，
+     * 不超过 [SETTLE_PAUSE_CREDIT_MAX_MS] 就加进 `settlePausedMs`（与原先 ON_PAUSE/ON_RESUME
+     * 那一对观察者同一口径，只是起点改成「上一次回前台」）。
+     */
+    val lastResumeAt = remember { longArrayOf(0L) }
+    LaunchedEffect(resumeTick) {
+        val now = AppClock.nowMillis()
+        val previous = lastResumeAt[0]
+        lastResumeAt[0] = now
+        if (previous > 0L) {
+            val gap = (now - previous).coerceAtLeast(0L)
+            // 离开太久（> 1 分钟）不补：一张旧结算卡不该无限期挂着
+            if (gap <= SETTLE_PAUSE_CREDIT_MAX_MS) settlePausedMs += gap
+        }
+        ebikeViewModel.burnPending()
+        viewModel.queryRideQuietly()
+        // 授权只在两处会变：本页发起的系统权限框、用户自己进系统设置改的。后者拿不到任何
+        // 回调，只能回到前台时重读；不重读的话 `locationGranted` 一直是 false，
+        // 连续定位流永远不启动。
+        val granted = BikeLocator.hasPermission()
+        if (granted && !locationGranted) {
+            locationGranted = true
+            // 刚授权：顺手取一次定位，把镜头带过去（与点「定位」同一条路，静默）
+            locate(viewModel, scope, silent = true, onIssue = {})
+        } else if (!granted && locationGranted) {
+            locationGranted = false
+        }
+        // 小程序方式的远程用车提醒（2026-10-24）：跳微信那一下不打断，标记落盘，
+        // 回 App 在这里消费弹出（读了就清，一次性）。账号方式不走这条（当场已弹），
+        // 标记常态为 false，多查一次无副作用。
+        scope.launch {
+            val pending = runCatching { cardPrefs.ebikeRemoteRidePending.first() }
+                .getOrDefault(false)
+            if (pending) {
+                runCatching { cardPrefs.setEbikeRemoteRidePending(false) }
+                remoteNoticeCount = runCatching { cardPrefs.ebikeRemoteRideCount.first() }
+                    .getOrDefault(0)
+                showRemoteRideNotice = true
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            ebikeViewModel.burnPending()
-        }
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     // 进页定位一次（已授权静默定；没问过且没被拒就申请一次）——与地图页同一套口径。
     // `ebikeLocationAsked` 落 DataStore：系统在用户拒绝两次后静默拒绝，不看这个标记的话
@@ -713,34 +747,40 @@ fun RideScreen(
             ),
         )
         if (outcome == SnackbarResult.ActionPerformed) {
+            // 「去设置」：两档各有各的系统页，宿主没接就什么也不做（提示里已经写明原因）
             if (issue.issue == LocateResult.Issue.ServiceOff) {
-                AppPermissions.jumpLocationSettings(context)
+                onOpenLocationSettings?.invoke()
             } else {
-                AppPermissions.jumpAppDetails(context)
+                onOpenAppDetailsSettings?.invoke()
             }
         }
     }
-    val locatePermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { result ->
-        // 进状态是为了让下面的连续定位流跟着重启：授权后不用等下次进页蓝点就活了
-        locationGranted = result.values.any { it }
-        if (locationGranted) {
-            locate(context, viewModel, scope, silent = false, onIssue = notifyLocateIssue)
+    /**
+     * 申请定位权限（宿主去弹系统框）。
+     *
+     * 搬迁前这里是一个 `RequestMultiplePermissions` 启动器，拿它的结果直接翻 `locationGranted`
+     * ——共享层看不见系统回调，所以改成「请宿主去要」，授权结果由上面那条「回到前台」的
+     * effect 重读 `BikeLocator.hasPermission()` 翻状态（那条路本来就要处理「用户去系统设置里改」）。
+     */
+    val locatePermissionRequest: () -> Unit = {
+        if (onRequestLocationPermission != null) {
+            onRequestLocationPermission.invoke()
         } else {
-            showNotice(scope, snackbar, DENIED_HINT, NoticeTone.Warning)
+            // 本平台没有权限这一档：没授权就直说，别弹一个不存在的框
+            locationGranted = BikeLocator.hasPermission()
+            if (!locationGranted) showNotice(scope, snackbar, DENIED_HINT, NoticeTone.Warning)
         }
     }
-    val prefsStore = remember { Graph.displayPrefs(context) }
+    val prefsStore = remember { Services.current.displayPrefs() }
     /** 上次把位置落盘的时刻（节流用：定位每两秒来一次，不能每次都写 DataStore）。 */
     val lastLocationPersistAt = remember { longArrayOf(0L) }
     LaunchedEffect(Unit) {
         when {
             BikeLocator.hasPermission() ->
-                locate(context, viewModel, scope, silent = true, onIssue = notifyLocateIssue)
+                locate(viewModel, scope, silent = true, onIssue = notifyLocateIssue)
             !prefsStore.ebikeLocationAsked.first() -> {
                 prefsStore.setEbikeLocationAsked(true)
-                locatePermissionLauncher.launch(AppPermissions.location.toTypedArray())
+                locatePermissionRequest()
             }
             // 问过也被拒过：什么都不做，等用户点「定位」按钮
         }
@@ -748,9 +788,11 @@ fun RideScreen(
     // 蓝点实时更新：只挪蓝点与「距你」距离，不移镜头、不重查接口
     // 罗盘朝向（2026-10-08）挂同一段生命周期：只转蓝点上的朝向箭头，同样不移镜头、不重查。
     // 两条流都先发过 BikeCompass / BikeLocator 内部的过滤，到这里频率对地图重绘是安全的
-    LaunchedEffect(lifecycleOwner, locationGranted) {
+    // `commonMain` 看不见 `repeatOnLifecycle`：这里改成组合期直接收（页面关掉就停）。
+    // shortcut: 退到后台期间照收；升级条件同上面的 resumeTick 注释（CMP 的 iOS 生命周期口径）。
+    LaunchedEffect(locationGranted) {
         if (!locationGranted) return@LaunchedEffect
-        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+        coroutineScope {
             launch {
                 BikeLocator.updates().collect { result ->
                     if (result is LocateResult.Ok) {
@@ -763,7 +805,7 @@ fun RideScreen(
                             fromCache = result.source == "session",
                         )
                         // 落盘「上次位置」给下次进页面用（60 秒一次足够，定位本身是 ~2 秒一跳）
-                        val now = System.currentTimeMillis()
+                        val now = AppClock.nowMillis()
                         if (now - lastLocationPersistAt[0] >= LOCATION_PERSIST_INTERVAL_MS) {
                             lastLocationPersistAt[0] = now
                             scope.launch {
@@ -822,7 +864,8 @@ fun RideScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
-                windowInsets = pinnedStatusBars(),
+                // 状态栏内边距由宿主的窗口负责（iOS 侧由安全区给），这里不再钉状态栏图标色
+                windowInsets = WindowInsets(0, 0, 0, 0),
                 title = { Text("快趣出行") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -935,10 +978,9 @@ fun RideScreen(
                         .fillMaxSize()
                         .clipToBounds(),
                 ) {
-                    BikeMapHost(
-                        // 底图选择（DESIGN §3.9，2026-11-17）：同意过高德才走官方 SDK，
-                        // 否则 / SDK 不可用时走 osmdroid 栅格（见 BikeMapHost）
-                        amapChoice = prefs.amapChoice,
+                    // 地图：宿主注入的槽位（见 BikeMapContract）。底图选择、高德 / osmdroid
+                    // 的取舍都在 :app 那一侧，共享层只给数据契约。
+                    BikeMapSlotHost(
                         // 账号方式的骑行态让位给还车点：那一刻用户要找的是"停哪儿"。
                         // 小程序方式没有还车点图层，让位只会剩一张空地图（见 showSpots）
                         clusters = if (showSpots) emptyList() else state.clusters,
@@ -1002,6 +1044,7 @@ fun RideScreen(
                         },
                         initialZoom = viewModel.initialViewport.zoom,
                         logoBottomMarginPx = mapLogoBottomMarginPx,
+                        slot = bikeMap,
                         // 面板高度与底部块高度一变，就把整幅地图按两者之和的一半向上平移
                         // （见上面那段的注释）：只动图层、不 resize 视图，地图内容不跳、瓦片不重绘。
                         modifier = Modifier
@@ -1042,7 +1085,9 @@ fun RideScreen(
                     // 定位到我的位置移到右下角、面板右上方；定位我的在下、定位到校区在上）。
                     // 底距 = 面板高度 + 底部常驻块实测高度：面板拖动、卡片进出（块高变化）时
                     // 按钮跟着面板上沿走，既不会被面板盖住，也不占右上角的地图内容。
-                    Column(
+                    // 两枚浮钮都是「动地图」的动作（回到校区 / 定位到我的位置）：
+                    // 本平台没有地图能力时它们没有作用对象，一并隐藏（§11.2 ④）。
+                    if (bikeMap != null) Column(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(bottom = panelHeight + liveBlockDp.dp + 12.dp)
@@ -1070,9 +1115,9 @@ fun RideScreen(
                             onClick = {
                                 haptics.tap()
                                 if (BikeLocator.hasPermission()) {
-                                    locate(context, viewModel, scope, silent = false, onIssue = notifyLocateIssue)
+                                    locate(viewModel, scope, silent = false, onIssue = notifyLocateIssue)
                                 } else {
-                                    locatePermissionLauncher.launch(AppPermissions.location.toTypedArray())
+                                    requestLocation()
                                 }
                             },
                         )
@@ -1253,8 +1298,15 @@ fun RideScreen(
                                 // 用户已经在付款路径上：取消 8 秒自动收尾，别把结算卡抽走
                                 settleAutoCancelled = true
                                 haptics.tap()
-                                openWechatForSettle(context) { message ->
-                                    showNotice(scope, snackbar, message, NoticeTone.Info)
+                                if (onOpenWechatForSettle != null) {
+                                    onOpenWechatForSettle.invoke()
+                                } else {
+                                    showNotice(
+                                        scope,
+                                        snackbar,
+                                        "本平台跳不了微信；欠费请在快趣小程序（或找客服）结清",
+                                        NoticeTone.Info,
+                                    )
                                 }
                             },
                         onContinue = {
@@ -1356,7 +1408,7 @@ fun RideScreen(
             mode = useMode,
             onSelect = { mode ->
                 haptics.tap()
-                scope.launch { Graph.displayPrefs(context).setEbikeUseMode(mode) }
+                scope.launch { Services.current.displayPrefs().setEbikeUseMode(mode) }
                 showModeSheet = false
                 showNotice(
                     scope,
@@ -1380,11 +1432,11 @@ fun RideScreen(
             onDismiss = { showSettings = false },
             onOpenKvcxAccount = openAccount,
             onNotice = { message, tone -> showNotice(scope, snackbar, message, tone) },
-            // 以下四项是 Android 侧的平台能力（iOS 宿主各传自己的一份或 null）
-            mapCache = AndroidBikeMapCache,
-            showMapSourceChoice = true,
-            requestNotificationPermission = withNotificationPermission,
-            onOpenNotificationSettings = { AppPermissions.jumpNotificationSettings(context) },
+            // 平台能力全部由宿主给（null = 本平台没有，那一块设置不渲染）
+            mapCache = mapCache,
+            showMapSourceChoice = showMapSourceChoice,
+            requestNotificationPermission = requestNotificationPermission,
+            onOpenNotificationSettings = onOpenNotificationSettings,
         )
     }
 
@@ -1421,7 +1473,6 @@ fun RideScreen(
         scope = scope,
         snackbar = snackbar,
         haptics = haptics,
-        context = context,
     )
 
     // 开锁前的「没有可用骑行卡」提醒（独立于上面的确认闸，2026-10-22）：
@@ -1436,7 +1487,7 @@ fun RideScreen(
                     scope.launch {
                         runCatching {
                             cardPrefs.setEbikeNoCardNoticeDate(
-                                EbikeRideCard.dayKey(System.currentTimeMillis()),
+                                EbikeRideCard.dayKey(AppClock.nowMillis()),
                             )
                         }
                     }
@@ -1484,7 +1535,6 @@ private fun KvcxConfirmHost(
     scope: CoroutineScope,
     snackbar: SnackbarHostState,
     haptics: AppHaptics,
-    context: Context,
 ) {
     val pendingAction by pending
     val (action, carNum) = pendingAction ?: return
@@ -1516,7 +1566,7 @@ private fun KvcxConfirmHost(
             onActionStart()
             if (dialog.allowSkip && skipNextTime) {
                 scope.launch {
-                    Graph.displayPrefs(context).setEbikeUnlockConfirm(false)
+                    Services.current.displayPrefs().setEbikeUnlockConfirm(false)
                     showNotice(
                         scope,
                         snackbar,
@@ -1747,7 +1797,6 @@ private fun rideBikePosition(ride: KqcxAuth.Ride?, state: BikeMapUiState): Pair<
  * 等不到读数（室内 / 信号差）不提，用户点「定位」时自然会看到原因。
  */
 private fun locate(
-    context: android.content.Context,
     viewModel: BikeMapViewModel,
     scope: kotlinx.coroutines.CoroutineScope,
     silent: Boolean,
@@ -1851,5 +1900,152 @@ private fun RideModeChip(
             },
             modifier = Modifier.size(14.dp),
         )
+    }
+}
+
+/**
+ * 本页的提示出口（搬迁前是 `:app` 的 `showNotice(scope, snackbar, text, tone)`）。
+ *
+ * 共享层的唯一实现在 `ui/common/AppNotice`：事件流里用 [postNotice]（给每条提示单开协程，
+ * 新提示才能顶掉旧的），这一层只是把参数顺序摆成药方一样——调用点保持搬迁前的样子，
+ * 不至于为了一个参数顺序在 20 处里挑错。
+ */
+private fun showNotice(
+    scope: CoroutineScope,
+    snackbar: SnackbarHostState,
+    text: String,
+    tone: NoticeTone = NoticeTone.Info,
+) {
+    scope.postNotice(snackbar, text, tone)
+}
+
+/**
+ * 地图槽位的**共享层适配层**：把页面这一堆具名参数收成 [BikeMapInput] 再交给宿主。
+ *
+ * 为什么要这一层（而不是把页面里的调用点改写成 `bikeMap?.content(input, modifier)`）：
+ * 那个调用点有三十个具名参数、夹在两层 `Box` 与一段 `graphicsLayer` 平移里，
+ * 就地改写会把「地图怎么让位」那段注释与代码搅在一起。这里只是搬运，语义零变化。
+ *
+ * [slot] 为 null = 本平台没有地图能力：渲染空态（[BikeMapEmptyState]），
+ * 页面其余部分（车辆列表、动作区、全部用车动作）照常工作。
+ */
+@Composable
+private fun BikeMapSlotHost(
+    clusters: List<BikeCluster>,
+    selectedKey: String?,
+    bikes: List<NearbyBike>,
+    byBike: Boolean,
+    selectedBikeCarNum: String?,
+    onBikeTap: (String) -> Unit,
+    userLat: Double?,
+    userLng: Double?,
+    userAccuracyMeters: Float,
+    userHeadingFlow: StateFlow<Float?>,
+    rideLat: Double?,
+    rideLng: Double?,
+    highlightLat: Double?,
+    highlightLng: Double?,
+    highlightLabel: String?,
+    showCampusFence: Boolean,
+    zones: KvcxZones,
+    colors: BikeMarkerColors,
+    camera: CameraRequest?,
+    onCenterSettled: (Double, Double, Double) -> Unit,
+    onViewportMeasured: (Double) -> Unit,
+    onClusterTap: (String) -> Unit,
+    onRideTap: () -> Unit,
+    onCameraApplied: (Long) -> Unit,
+    onUserPan: () -> Unit,
+    onFallback: () -> Unit,
+    initialCenter: GcjPoint?,
+    initialZoom: Double?,
+    logoBottomMarginPx: Int,
+    modifier: Modifier = Modifier,
+    slot: BikeMapSlot? = null,
+) {
+    if (slot == null) {
+        BikeMapEmptyState(modifier)
+        return
+    }
+    slot.content(
+        BikeMapInput(
+            clusters = clusters,
+            selectedKey = selectedKey,
+            bikes = bikes,
+            byBike = byBike,
+            selectedBikeCarNum = selectedBikeCarNum,
+            onBikeTap = onBikeTap,
+            userLat = userLat,
+            userLng = userLng,
+            userAccuracyMeters = userAccuracyMeters,
+            userHeadingFlow = userHeadingFlow,
+            rideLat = rideLat,
+            rideLng = rideLng,
+            highlightLat = highlightLat,
+            highlightLng = highlightLng,
+            highlightLabel = highlightLabel,
+            showCampusFence = showCampusFence,
+            zones = zones,
+            colors = colors,
+            camera = camera,
+            onCenterSettled = onCenterSettled,
+            onViewportMeasured = onViewportMeasured,
+            onClusterTap = onClusterTap,
+            onRideTap = onRideTap,
+            onCameraApplied = onCameraApplied,
+            onUserPan = onUserPan,
+            onFallback = onFallback,
+            initialCenter = initialCenter,
+            initialZoom = initialZoom,
+            logoBottomMarginPx = logoBottomMarginPx,
+        ),
+        modifier,
+    )
+}
+
+/**
+ * 没有地图能力时的地图区空态：一块圆角框 + 一句说明，**不是留白**。
+ *
+ * 为什么要有它：`null` 槽位的语义是「本平台确实没有这项能力」（`design/ios-port.md`
+ * §11.2 ④），不是「忘了接」。用户看到一块空白的深色区域只会以为是加载失败；
+ * 一句「车辆列表照常可用」把这一页还能干什么说清楚。
+ */
+@Composable
+private fun BikeMapEmptyState(modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(20.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(scheme.surfaceContainerLow)
+                .border(1.dp, scheme.outlineVariant, RoundedCornerShape(16.dp))
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                AppIcons.MapsLocation02,
+                contentDescription = null,
+                tint = scheme.onSurface.copy(alpha = 0.35f),
+                modifier = Modifier.size(28.dp),
+            )
+            Text(
+                text = "本平台暂不显示地图",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = "车辆列表、开锁与还车照常可用；定位与地图选点在这一端还没接上。",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }

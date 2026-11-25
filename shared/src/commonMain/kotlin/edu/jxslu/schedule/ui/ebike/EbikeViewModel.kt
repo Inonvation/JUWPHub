@@ -246,6 +246,16 @@ class EbikeViewModel(
 
     /** 通知权限授予后的续跑：把进行中的计时的常驻倒计时与提醒补上（开关开着才做）。 */
     fun onReminderPermissionGranted() {
+        checkFreeRide()
+    }
+
+    /**
+     * 进页 / 回前台核对一次计时与提醒（幂等）：缺服务/闹钟就补上，过期状态就清干净。
+     *
+     * 搬迁前这一行直接调 `:app` 的 `EbikeFreeRideReminder.check(context)`；现在走 [reminders]。
+     * 与 [onReminderPermissionGranted] 是同一件事，只是调用点不同（权限授予后 / 页面可见时）。
+     */
+    fun checkFreeRide() {
         val port = reminders ?: return
         viewModelScope.launch {
             emitReminderNotice(port.checkFreeRide())
