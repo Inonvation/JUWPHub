@@ -87,7 +87,9 @@ import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.platform.AccountCredentials
 import edu.jxslu.schedule.platform.AiApiKeyStore
 import edu.jxslu.schedule.platform.AppServices
+import edu.jxslu.schedule.platform.ClassReminder
 import edu.jxslu.schedule.platform.HomeworkReminder
+import edu.jxslu.schedule.platform.IosClassReminder
 import edu.jxslu.schedule.platform.IosHomeworkReminder
 import edu.jxslu.schedule.platform.IosLocalNotifications
 import edu.jxslu.schedule.platform.IosNotificationPermission
@@ -774,7 +776,7 @@ class IosServices : AppServices {
     }
 
     /**
-     * 首帧之后、主线程上跑的「提醒三件」（2026-11-26）。
+     * 首帧之后、主线程上跑的「提醒四件」（2026-11-26）。
      *
      * 与 [warmUp] 分开是因为**时机**而不是因为它们不重要：
      *
@@ -782,6 +784,7 @@ class IosServices : AppServices {
      * |---|---|
      * | [IosLocalNotifications.installForegroundPresentation] | `UNUserNotificationCenter` 在 App 进 active 之前碰是闪退嫌疑（见该方法的 KDoc） |
      * | 作业截止提醒重排 | 要读写系统待发队列，同上 |
+     * | 上课提醒重排（N3） | 同上；另外它是「4 天窗口 → 整周」的唯一补排入口，每次冷启动都得跑 |
      * | 成绩提醒核对 | 会打教务网络，不该和首帧抢时间 |
      *
      * 每一步各自 `runCatching`：提醒是**锦上添花**，任何一步失败都不该影响开 App。
@@ -795,11 +798,15 @@ class IosServices : AppServices {
         // 上一次进程排的那批可能已被投递，作业也可能已被勾完成 / 删掉（重排会按前缀清空重来）。
         runCatching { homeworkReminder().reschedule() }
             .onFailure { Logger.w(TAG, "重排作业截止提醒失败：$it") }
+        // 上课提醒（N3）：冷启动按前缀清空重排未来 4 天。理由与作业那行相同——本地通知到点不执行
+        // 代码，必须提前排上；而「4 天窗口」正是靠每次进前台补一段来覆盖整周的（§12.9.3 策略 A）。
+        runCatching { classReminder().reschedule() }
+            .onFailure { Logger.w(TAG, "重排上课提醒失败：$it") }
         // 成绩提醒（降级形态）：进 App 查一次，有新成绩立刻弹一条。放在最后——它要打教务，
         // 失败（没登录 / 没网）不该拖住上面两件事。
         runCatching { scoreReminderImpl.checkOnLaunch() }
             .onFailure { Logger.w(TAG, "成绩提醒核对失败：$it") }
-        Logger.i(TAG, "⑩ 提醒三件完成，启动结束")
+        Logger.i(TAG, "⑩ 提醒四件完成，启动结束")
     }
 
     // ---- 学业完成情况 / 培养方案（iOS 移植 V4，2026-11-25） ----
@@ -976,6 +983,27 @@ class IosServices : AppServices {
     private val scoreReminderImpl: IosScoreReminder by lazy {
         IosScoreReminder(prefs = prefs, sync = scoreSyncImpl)
     }
+
+    // ---- 上课提醒（iOS 移植 N3，2026-11-26） ----
+
+    /**
+     * 上课提醒：按课表排未来 [CLASS_REMINDER_DAYS] 天每节课的本地通知（**非空**）。
+     *
+     * 时刻换算与 Android 同一份（`domain/ReminderPlanner.kt`），差别在「到点不执行代码」：
+     * 未来若干个提醒点必须提前排上，上限 [CLASS_REMINDER_SLOTS]（40 条，占 64 条待发额度的一份，
+     * 分配表见 `platform/ClassReminderPlatform.kt` / §12.9.3）。
+     *
+     * **不是 `AppServices` 的成员**：`AppServices` 是两端共同契约，加进去就得让 `:app` 的
+     * `GraphServices` 也实现一个它已经有了的方法（Android 那条链在 `ui/reminder/ClassReminder`），
+     * 而这一族在本端只有 iOS 需要。所以按 `aiKeys` 的先例，做成 [IosServices] 自己的公开成员。
+     *
+     * 惰性单例：它自己**不持有状态**（状态在系统的待发队列里），每次 `reschedule` 都重读课表与开关。
+     */
+    private val classReminderImpl: ClassReminder by lazy {
+        IosClassReminder(repo = repository, prefs = prefs, scope = scope)
+    }
+
+    fun classReminder(): ClassReminder = classReminderImpl
 
     private companion object {
         /** 日志 tag：崩溃/后台失败都记在这个名字下，排查时先 grep 它。 */
