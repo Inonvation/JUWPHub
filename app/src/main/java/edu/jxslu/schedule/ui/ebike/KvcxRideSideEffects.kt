@@ -5,22 +5,23 @@ import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.ui.common.NoticeTone
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 
 /**
- * [KvcxSideEffects] 的**生产实现**，以及它用到的三件平台动作（2026-11-25 从
- * `KvcxRideController.kt` 拆出来）。
+ * [KvcxSideEffects] 的**生产实现**，以及它用到的平台动作（2026-11-25 从
+ * `KvcxRideController.kt` 拆出来；iOS 移植 P4 又收窄了一半）。
  *
- * 为什么这三块留在 `:app` 而不是跟控制器一起搬进共享层：它们全要 Android 专有件——
+ * 为什么它留在 `:app` 而不是跟控制器一起搬进共享层：它全要 Android 专有件——
  * `EbikeFreeRideReminder` / `EbikeAutoReturnReminder` 是 `AlarmManager` + 通知渠道，
- * `burnPendingCodes` 要 `Context` 与相册，`openWechatForSettle` 要
- * `PackageManager` + `startActivityOutsideApp`。按 `design/ios-port.md` §11.2 ④，
- * 共享层的控制器收的是**可空**的 `KvcxSideEffects`：iOS 传 `null`，逐个动作整体跳过。
+ * `EbikeAutoReturnNotifier` 是通知栏，`RideRecordStore` 与 `openWechatForSettle` 要
+ * `Context`（后者还要 `PackageManager` + `startActivityOutsideApp`）。按
+ * `design/ios-port.md` §11.2 ④，共享层的控制器收的是**可空**的 `KvcxSideEffects`：
+ * iOS 传 `null`，逐个动作整体跳过。
+ *
+ * 出码页那一批平台件搬走之后，这条转接线只剩三处共享层入口：
+ * [startFreeRideNotice]（文案唯一实现）、`burnPendingCodes`（焚码唯一实现）、
+ * `KvcxSideEffects` 接口本身。
  */
 internal object AppKvcxSideEffects : KvcxSideEffects {
 
@@ -126,10 +127,9 @@ internal fun openWechatForSettle(context: android.content.Context, onHint: (Stri
 }
 
 /**
- * 时刻文案 `HH:mm`（骑行卡上的「更新于 / 位置」）；两页共用一个格式化器。
+ * 时刻文案 `HH:mm`（快趣账号页 / 订单页的「更新于 / 位置」）。
+ *
+ * **唯一实现在共享层** `ui/ebike/RideClockText.kt`（`rideClockText`）：骑行页搬走后，
+ * 两端都要同一份格式化，JVM 那份只是转接，别再在这里写第二个 `DateTimeFormatter`。
  */
-internal fun clockText(millis: Long): String =
-    Instant.ofEpochMilli(millis)
-        .atZone(ZoneId.systemDefault())
-        .toLocalTime()
-        .format(DateTimeFormatter.ofPattern("HH:mm", Locale.US))
+internal fun clockText(millis: Long): String = rideClockText(millis)

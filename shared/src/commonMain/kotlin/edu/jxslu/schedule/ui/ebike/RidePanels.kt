@@ -1,4 +1,4 @@
-﻿package edu.jxslu.schedule.ui.ebike
+package edu.jxslu.schedule.ui.ebike
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -81,10 +81,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
-import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.BarcodeMatrix
 import edu.jxslu.schedule.domain.BikeCluster
 import edu.jxslu.schedule.domain.BikeNearby
@@ -97,6 +96,7 @@ import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KvcxParkSpot
 import edu.jxslu.schedule.domain.NearbyBike
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.BarcodeMatrixImage
 import edu.jxslu.schedule.ui.common.AppCardDefaults
@@ -116,9 +116,6 @@ import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
 /**
@@ -139,7 +136,7 @@ import kotlin.math.roundToInt
  */
 
 /** 出码位的边长（240dp 居中，DESIGN §3.9）：旧版整宽方形会把用码按钮顶出首屏。 */
-internal val QR_PANEL_SIZE = 240.dp
+val QR_PANEL_SIZE = 240.dp
 
 /** 「更新于」超过这个时长就把时间标出来，提示数据可能已经不准。 */
 private const val STALE_AFTER_MS = 90_000L
@@ -168,7 +165,7 @@ private val SPOT_COLOR = Color(0xFFD7535D)
  * （否则动画每帧都 resize 一次地图、osmdroid 每帧整幅重绘——2026-10-01 用户报的
  * 「开锁后掉帧、然后骑行面板弹出来」就是这一段）。
  */
-internal fun rideBarKey(
+fun rideBarKey(
     phase: RidePhase,
     caps: EbikeCapabilities,
     loggedIn: Boolean,
@@ -201,7 +198,7 @@ internal fun rideBarKey(
  * 「更新于 15:09」还被切掉半个字，看着像两个不同的组件（用户报「解锁状态和锁车状态信息
  * 卡片都不一致，有些地方还被挡住」）。现在**容器与内边距恒定**，只有颜色与胶囊文案变。
  */
-internal enum class RidingCardTone { Unlocked, Locked, Pending, Unknown }
+enum class RidingCardTone { Unlocked, Locked, Pending, Unknown }
 
 /**
  * [RidingCardTone] 的构造规则（与胶囊文案同一判据链，逐级短路）：
@@ -210,7 +207,7 @@ internal enum class RidingCardTone { Unlocked, Locked, Pending, Unknown }
  *
  * **全函数**（无 null 分支）：调用方不该再按"有没有态"分两套排版——那正是卡片变形的来路。
  */
-internal fun ridingCardTone(
+fun ridingCardTone(
     locked: Boolean?,
     unlockPending: Boolean,
     lockPending: Boolean,
@@ -228,7 +225,7 @@ internal fun ridingCardTone(
  * 现查中（[querying]）优先于一切：胶囊**原位**翻成「查询中…」，不跳位置、不换颜色
  * （它就是最近一次快照的说明，查完再落回真实态）。
  */
-internal fun ridingStateChipText(
+fun ridingStateChipText(
     querying: Boolean,
     locked: Boolean?,
     unlockPending: Boolean,
@@ -254,7 +251,7 @@ internal fun ridingStateChipText(
  * 删掉了三个只透传不消费的死参数。
  */
 @Composable
-internal fun RideActionArea(
+fun RideActionArea(
     caps: EbikeCapabilities,
     state: BikeMapUiState,
     ride: KqcxAuth.Ride?,
@@ -443,13 +440,13 @@ internal fun RideActionArea(
  * 过了 8 秒进页也不再弹一张过期的结算卡。用户主动点「重新使用该车 / 去微信结清」后
  * 由页面取消自动收尾（正在决策 / 正在付款，不该把卡片抽走）。
  */
-internal const val SettleAutoContinueMillis = 8_000L
+const val SettleAutoContinueMillis = 8_000L
 
 /**
  * 「继续找车」按钮上的剩余秒数（向上取整；0 = 已到点 / 没有截止时刻）。
  * 纯函数：单测在 `SettleAutoContinueTest`。
  */
-internal fun settleContinueSecondsLeft(deadlineAt: Long, now: Long): Int {
+fun settleContinueSecondsLeft(deadlineAt: Long, now: Long): Int {
     if (deadlineAt <= 0L) return 0
     val remain = deadlineAt - now
     return if (remain <= 0L) 0 else ((remain + 999L) / 1_000L).toInt()
@@ -813,11 +810,11 @@ private fun RideActionButtons(
 @Composable
 private fun rememberUnlockCooldownSeconds(until: Long): Int {
     var seconds by remember(until) {
-        mutableStateOf(unlockCooldownSecondsLeft(until, System.currentTimeMillis()))
+        mutableStateOf(unlockCooldownSecondsLeft(until, AppClock.nowMillis()))
     }
     LaunchedEffect(until) {
         while (true) {
-            val now = System.currentTimeMillis()
+            val now = AppClock.nowMillis()
             val remain = until - now
             seconds = unlockCooldownSecondsLeft(until, now)
             if (remain <= 0L) break
@@ -836,11 +833,11 @@ private fun rememberUnlockCooldownSeconds(until: Long): Int {
 @Composable
 private fun rememberSettleSecondsLeft(deadlineAt: Long): Int {
     var seconds by remember(deadlineAt) {
-        mutableStateOf(settleContinueSecondsLeft(deadlineAt, System.currentTimeMillis()))
+        mutableStateOf(settleContinueSecondsLeft(deadlineAt, AppClock.nowMillis()))
     }
     LaunchedEffect(deadlineAt) {
         while (true) {
-            val now = System.currentTimeMillis()
+            val now = AppClock.nowMillis()
             seconds = settleContinueSecondsLeft(deadlineAt, now)
             if (deadlineAt <= 0L || now >= deadlineAt) break
             delay(minOf(deadlineAt - now, 1_000L))
@@ -1143,7 +1140,7 @@ private fun RideRidingUpper(
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        text = "更新于 ${clockText(rideFetchedAt)}",
+                        text = "更新于 ${rideClockText(rideFetchedAt)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                         maxLines = 1,
@@ -1151,7 +1148,7 @@ private fun RideRidingUpper(
                 }
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                    LabeledValue(label = "计时起点", value = clockText(timerStartAt))
+                    LabeledValue(label = "计时起点", value = rideClockText(timerStartAt))
                     LabeledValue(label = "免费时长", value = "15 分钟")
                 }
             }
@@ -1329,7 +1326,7 @@ private fun RideSettledUpper(summary: KvcxReturnSummary) {
  * 有数据。失败时不清空列表：拿用户刚看到的那批车配一条提示，比清成空白有用。
  */
 @Composable
-internal fun RideBikePanel(
+fun RideBikePanel(
     state: BikeMapUiState,
     caps: EbikeCapabilities,
     showSpots: Boolean,
@@ -1809,7 +1806,7 @@ private fun RideFilterButton(filtered: Boolean, onClick: () -> Unit) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun RideFilterSheet(
+fun RideFilterSheet(
     onlyOurCampus: Boolean,
     onlyAvailable: Boolean,
     onToggleOnlyOurCampus: () -> Unit,
@@ -2090,7 +2087,7 @@ private fun RideBikeCard(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun RideCarNumberSheet(
+fun RideCarNumberSheet(
     caps: EbikeCapabilities,
     carInput: String,
     inputError: String?,
@@ -2578,7 +2575,7 @@ private fun RideSpotsContent(
  * 不做吸附动画——拖动过程中任何动画都会让地图跟着抖。松手才落盘。
  */
 @Composable
-internal fun PanelDragHandle(onResize: (Float) -> Unit, onResizeFinished: () -> Unit) {
+fun PanelDragHandle(onResize: (Float) -> Unit, onResizeFinished: () -> Unit) {
     // 回调走 rememberUpdatedState 再进 pointerInput：`pointerInput(Unit)` 的块只跑一次，
     // 闭包里捕获的会是首次组合那版的 lambda（它的 maxPanelDp 是首帧窗口高度算出来的）。
     val resize by rememberUpdatedState(onResize)
@@ -2791,11 +2788,11 @@ private fun RideCountdown(
     showEstimateNote: Boolean = false,
 ) {
     val now by produceState(
-        initialValue = System.currentTimeMillis(),
+        initialValue = AppClock.nowMillis(),
         key1 = startAt,
     ) {
         while (true) {
-            val tick = System.currentTimeMillis()
+            val tick = AppClock.nowMillis()
             value = tick
             if (!EbikeFreeRide.isActive(startAt, tick)) {
                 onExpired()
@@ -2863,9 +2860,8 @@ private fun RideCountdown(
 @Composable
 private fun rememberAutoReturnHint(startAt: Long, wechatMode: Boolean): String? {
     if (wechatMode || startAt <= 0L) return null
-    val context = LocalContext.current
-    val prefs = remember { Graph.displayPrefs(context) }
-    val clock = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    // 偏好从装配根取（原先 LocalContext + Graph.displayPrefs；共享层没有 Context）
+    val prefs = remember { Services.current.displayPrefs() }
     val hint by produceState(initialValue = null as String?, key1 = startAt) {
         val enabled = runCatching { prefs.ebikeAutoReturnEnabled.first() }.getOrDefault(false)
         if (!enabled) {
@@ -2875,8 +2871,8 @@ private fun rememberAutoReturnHint(startAt: Long, wechatMode: Boolean): String? 
         val lead = runCatching { prefs.ebikeAutoReturnLeadSeconds.first() }
             .getOrDefault(EbikeAutoReturn.DEFAULT_LEAD_SECONDS)
         val triggerAt = EbikeAutoReturn.triggerAtMillis(startAt, lead)
-        val at = Instant.ofEpochMilli(triggerAt).atZone(ZoneId.systemDefault()).format(clock)
-        value = "$at 自动还车（提前 $lead 秒）"
+        // 时刻文案走共享层的 rideClockText（原先 java.time + DateTimeFormatter）
+        value = "${rideClockText(triggerAt)} 自动还车（提前 $lead 秒）"
     }
     return hint
 }
@@ -2890,7 +2886,7 @@ private fun rememberAutoReturnHint(startAt: Long, wechatMode: Boolean): String? 
  * `animateColorAsState` 渐变到主色系，一眼可辨镜头正跟着人走，而不是硬切一个亮色。
  */
 @Composable
-internal fun MapCircleButton(
+fun MapCircleButton(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
@@ -2965,7 +2961,7 @@ internal fun MapCircleButton(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun RideModeSheet(
+fun RideModeSheet(
     mode: EbikeUseMode,
     onSelect: (EbikeUseMode) -> Unit,
     onDismiss: () -> Unit,
@@ -3086,7 +3082,7 @@ private fun subtitleText(
     val now by rememberResumedNow(CLOCK_TICK_MS)
     val base = when {
         loading && queried -> "刷新中…"
-        updatedAtMillis > 0 -> "更新于 ${clockText(updatedAtMillis)}"
+        updatedAtMillis > 0 -> "更新于 ${rideClockText(updatedAtMillis)}"
         queried -> "尚未获取到数据"
         else -> "正在获取…"
     }

@@ -106,7 +106,7 @@ import kotlin.math.roundToInt
  * 「选中某辆车」「选中某个停车点」不在三态里：它们只是**找车态的两种形态**
  * （动作条换成车辆卡 / 停车点卡），换的是内容不是页面。
  */
-internal enum class RidePhase { Finding, Riding, Settled }
+
 
 /**
  * 快趣出行页（DESIGN §3.9，唯一主页）。
