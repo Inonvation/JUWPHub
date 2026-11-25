@@ -64,11 +64,15 @@ import edu.jxslu.schedule.platform.AppServices
 import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
 import edu.jxslu.schedule.platform.UjingReminder
+import edu.jxslu.schedule.ui.ebike.AndroidBikeHeading
+import edu.jxslu.schedule.ui.ebike.AndroidBikeLocation
+import edu.jxslu.schedule.ui.ebike.BikeLocationSource
 import edu.jxslu.schedule.ui.reminder.BalanceAlertReminder
 import edu.jxslu.schedule.ui.reminder.UjingDoneReminder
 import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 import edu.jxslu.schedule.ui.widget.WaterWidgetSync
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -471,4 +475,20 @@ class GraphServices(private val context: Context) : AppServices {
     /** 开学日校准：转接 `Graph.teachingCalendarSync` 的同一份单例（Mutex 即「一次一张表」的依据）。 */
     override fun teachingCalendarSync(): TeachingCalendarSync =
         Graph.teachingCalendarSync(appContext)
+
+    // ---- 快趣出行页面层（iOS 移植 P4，2026-11-25） ----
+    //
+    // 两条传感器缝。**定位源必须是进程内同一份**：骑行页的连续定位流与一次性定位
+    // 共用同一个 `LocationManager`（`AndroidBikeLocation` 自己缓存它），各建一个等于
+    // 同时向系统注册两套监听。
+    //
+    // 罗盘每次订阅都会新建一条 `callbackFlow`（订阅即注册、取消即注销），
+    // 但它不持有除 `applicationContext` 以外的状态，所以每次现建；
+    // 反过来持有一个长命实例没有任何好处——`SensorManager` 的监听生命周期本来就是订阅级的。
+
+    private val bikeLocation: BikeLocationSource by lazy { AndroidBikeLocation(appContext) }
+
+    override fun bikeLocation(): BikeLocationSource = bikeLocation
+
+    override fun bikeHeading(): Flow<Float> = AndroidBikeHeading(appContext).heading()
 }

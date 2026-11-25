@@ -1137,7 +1137,7 @@ private fun rememberUjingLocator(): suspend () -> UjingLocateOutcome {
     }
     return remember(context, permissionLauncher) {
         {
-            val granted = if (BikeLocator.hasPermission(context)) {
+            val granted = if (BikeLocator.hasPermission()) {
                 true
             } else {
                 val deferred = CompletableDeferred<Boolean>()
@@ -1148,7 +1148,7 @@ private fun rememberUjingLocator(): suspend () -> UjingLocateOutcome {
             if (!granted) {
                 UjingLocateOutcome.Failed("没有定位权限，无法获取附近洗衣房")
             } else {
-                when (val fix = BikeLocator.currentLocation(context)) {
+                when (val fix = BikeLocator.currentLocation()) {
                     is LocateResult.Ok -> UjingLocateOutcome.Ok(fix.lat, fix.lng)
                     is LocateResult.Failed -> UjingLocateOutcome.Failed(fix.message)
                 }

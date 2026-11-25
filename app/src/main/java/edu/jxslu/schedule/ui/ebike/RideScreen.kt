@@ -412,7 +412,7 @@ fun RideScreen(
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { _ ->
-        if (!BikeLocator.hasPermission(context)) {
+        if (!BikeLocator.hasPermission()) {
             showNotice(scope, snackbar, "没有定位权限，快趣无法校验位置", NoticeTone.Warning)
         }
     }
@@ -461,7 +461,7 @@ fun RideScreen(
     val requestKvcxAction: (KvcxAction, String?) -> Unit = { action, carNum ->
         haptics.tap()
         when {
-            !BikeLocator.hasPermission(context) -> {
+            !BikeLocator.hasPermission() -> {
                 locationPermissionLauncher.launch(AppPermissions.location.toTypedArray())
                 showNotice(scope, snackbar, "本机用车需要定位权限（快趣按位置校验）", NoticeTone.Warning)
             }
@@ -642,7 +642,7 @@ fun RideScreen(
      * 声明必须排在那个 ON_RESUME 观察者**之前**：用户从系统设置里补授权限回来时要把这里
      * 翻成 true（2026-11-19 修「设置里授权后蓝点不出现」），观察者得能读到它。
      */
-    var locationGranted by remember { mutableStateOf(BikeLocator.hasPermission(context)) }
+    var locationGranted by remember { mutableStateOf(BikeLocator.hasPermission()) }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -661,7 +661,7 @@ fun RideScreen(
                     // 授权只在两处会变：本页发起的系统权限框（见 locatePermissionLauncher）、
                     // 用户自己进系统设置改的。后者拿不到任何回调，只能回到前台时重读；
                     // 不重读的话 `locationGranted` 一直是 false，连续定位流永远不启动。
-                    val granted = BikeLocator.hasPermission(context)
+                    val granted = BikeLocator.hasPermission()
                     if (granted && !locationGranted) {
                         locationGranted = true
                         // 刚授权：顺手取一次定位，把镜头带过去（与点「定位」同一条路，静默）
@@ -732,7 +732,7 @@ fun RideScreen(
     val lastLocationPersistAt = remember { longArrayOf(0L) }
     LaunchedEffect(Unit) {
         when {
-            BikeLocator.hasPermission(context) ->
+            BikeLocator.hasPermission() ->
                 locate(context, viewModel, scope, silent = true, onIssue = notifyLocateIssue)
             !prefsStore.ebikeLocationAsked.first() -> {
                 prefsStore.setEbikeLocationAsked(true)
@@ -748,7 +748,7 @@ fun RideScreen(
         if (!locationGranted) return@LaunchedEffect
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             launch {
-                BikeLocator.updates(context).collect { result ->
+                BikeLocator.updates().collect { result ->
                     if (result is LocateResult.Ok) {
                         viewModel.onUserLocationChanged(
                             result.lat,
@@ -772,7 +772,7 @@ fun RideScreen(
                 }
             }
             launch {
-                BikeCompass.heading(context).collect { heading ->
+                BikeCompass.heading().collect { heading ->
                     viewModel.onUserHeadingChanged(heading)
                 }
             }
@@ -1065,7 +1065,7 @@ fun RideScreen(
                             active = state.followUser && state.userLat != null,
                             onClick = {
                                 haptics.tap()
-                                if (BikeLocator.hasPermission(context)) {
+                                if (BikeLocator.hasPermission()) {
                                     locate(context, viewModel, scope, silent = false, onIssue = notifyLocateIssue)
                                 } else {
                                     locatePermissionLauncher.launch(AppPermissions.location.toTypedArray())
@@ -1746,7 +1746,7 @@ private fun locate(
     viewModel.setLocating(true)
     scope.launch {
         val first = try {
-            BikeLocator.currentLocation(context)
+            BikeLocator.currentLocation()
         } finally {
             viewModel.setLocating(false)
         }
@@ -1767,7 +1767,7 @@ private fun locate(
         val cached = first as? LocateResult.Ok
         if (cached == null || cached.source != "session") return@launch
         // 转圈已经在第一段收掉了：收敛这一段最多等 8 秒，静默进行，别让按钮一直转
-        val live = BikeLocator.currentLocation(context, acceptCached = false)
+        val live = BikeLocator.currentLocation(acceptCached = false)
         if (live !is LocateResult.Ok) return@launch
         if (!shouldRecenterFromCache(cached.lat, cached.lng, live.lat, live.lng, live.accuracyMeters)) {
             return@launch

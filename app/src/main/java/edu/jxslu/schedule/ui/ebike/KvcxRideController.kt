@@ -400,7 +400,7 @@ class KvcxRideController internal constructor(
     /** 定位前置（写操作硬闸）。默认走真实定位；单测里换成假坐标。 */
     private val locate: suspend () -> LocateResult = {
         // 写动作不能像地图页那样等 8 秒；5 秒拿不到就走车辆锚点 / 明确提示。
-        BikeLocator.currentLocation(Graph.appContext, timeoutMs = 5_000L)
+        BikeLocator.currentLocation(timeoutMs = 5_000L)
     },
     private val effects: KvcxSideEffects = AppKvcxSideEffects,
     /**
