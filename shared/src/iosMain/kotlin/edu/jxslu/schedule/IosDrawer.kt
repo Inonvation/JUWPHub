@@ -239,6 +239,10 @@ internal fun IosDrawer(
         onOpenCampusAccount = { onPick(IosRoute(SubpageScreen.CAMPUS_CARD_SETTINGS)) },
         onOpenWater = { onPick(IosRoute(SubpageScreen.WATER)) },
         onOpenUjing = { onPick(IosRoute(SubpageScreen.UJING)) },
+        // 快趣出行（P4，2026-11-26）：页面搬完之后才有这一行。此前 `onOpenRide` 不传，
+        // `lifeServiceRows` 按「本平台没有这一项」整行不渲染——与 Android 侧栏的
+        // 「快趣出行」行同位同序（`SideDrawerGroups.kt` 的 `onOpenRide?.let { … }`）。
+        onOpenRide = { onPick(IosRoute(SubpageScreen.RIDE)) },
     )
 
     ModalDrawerSheet(modifier = Modifier.width(IosDrawerWidth)) {

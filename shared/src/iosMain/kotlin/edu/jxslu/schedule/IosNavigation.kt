@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.data.kqcx.KqcxBikeClient
 import edu.jxslu.schedule.data.kqcx.KqcxOrderStore
 import edu.jxslu.schedule.data.repo.RideRecordStore
 import edu.jxslu.schedule.data.xg.XgForm
@@ -81,10 +82,13 @@ import edu.jxslu.schedule.ui.tweak.CourseTweakViewModel
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
+import edu.jxslu.schedule.ui.ebike.BikeMapViewModel
+import edu.jxslu.schedule.ui.ebike.EbikeViewModel
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersViewModel
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
 import edu.jxslu.schedule.ui.ebike.KvcxViewModel
+import edu.jxslu.schedule.ui.ebike.RideScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
 import edu.jxslu.schedule.ui.exam.ExamSettingsScreen
 import edu.jxslu.schedule.ui.homework.HomeworkCourseScreen
@@ -603,6 +607,61 @@ internal fun IosRouteContent(
                 )
             }
             KvcxOrdersScreen(viewModel = viewModel, onBack = pop)
+        }
+
+        // ---------------------------------------------------------------- 快趣 · 出行页
+        //
+        // 2026-11-26 搬进共享层（P4）。页面本体、各面板、出码页、设置弹层全在 `commonMain`，
+        // 这一层只做**装配**——Android 的对应物是 `:app/ui/ebike/AppRideScreen.kt`。
+        //
+        // ## 地图这一格是 null，而且是**短期内给不出**的
+        //
+        // MapKit 在这个 Kotlin 版本（2.1.21）的绑定里放不了标注：`MKAnnotationProtocol.coordinate`
+        // 是 final、`MKPointAnnotation.coordinate` 是 `val`、`addOverlay(s)` 全 Unresolved。
+        // 没有车标的地图不如不摆，所以 `bikeMap = null` —— 页面在地图位置渲染一块空态
+        // （见 `RideScreen` 的 `bikeMap` 参数与 `iosBikeMapSlot` 的 KDoc），而不是白板。
+        //
+        // ## 其余平台动作：iOS 确实没有，全部按 §11.2 ④ 传 null（不是「以后补」）
+        //
+        // | 动作 | 为什么给不出 |
+        // |---|---|
+        // | `onScanBodyCode` | 没有相机取景页（Android 是 zxing `EbikeScanActivity`） |
+        // | `onOpenWechatScan` / `onOpenWechatForSettle` | `Info.plist` 没有 `LSApplicationQueriesSchemes`，拉不起微信 |
+        // | `onRequestLocationPermission` / 三个「去设置」 | 定位授权由 `IosBikeLocation` 自己在开流时请求；没有对应的系统设置深链 |
+        // | `requestNotificationPermission` | 见下：iOS 还没有快趣提醒的实现 |
+        // | `mapCache` / `showMapSourceChoice` | 没有瓦片缓存；底图只有一种，没有「来源」可选 |
+        //
+        // `EbikeViewModel` 的 `gallery` / `reminders` 同样是 null：存相册要 `UIImageWriteToSavedPhotosAlbum`
+        // （新平台实现，未验），免费时长提醒与自动还车要一条 iOS 的 `EbikeReminderPort`
+        // （`UNTimeIntervalNotificationTrigger` 能排「免费时长到点」，自动还车则依赖
+        // `BGTaskScheduler`，而系统不保证触发时刻）。两者都为 null 时页面把「存相册」
+        // 与两组提醒设置整块隐藏，**码照出、计时照走**——真降级，不是空壳。
+        //
+        // 升级条件写在 `design/ios-port.md` §12.13：先补 `EbikeReminderPort` 的 iOS 实现，
+        // 再回来把这里三个 null 换成真实现。
+        SubpageScreen.RIDE -> {
+            val mapViewModel = remember {
+                BikeMapViewModel(
+                    client = KqcxBikeClient.create(),
+                    prefs = services.displayPrefs(),
+                    // 会话本体同时是「本机用车编排」与「还车点 / 禁停区图层」两条缝的实现
+                    kqcx = services.kqcxSession(),
+                    zoneSource = services.kqcxSession(),
+                    // zoneCache / rideController / sideEffects 留默认 null：
+                    // 图层缓存只是「省一个往返」，`rideController` 为 null 时 VM 自建一份。
+                )
+            }
+            val ebikeViewModel = remember {
+                EbikeViewModel(services.displayPrefs())
+            }
+            RideScreen(
+                viewModel = mapViewModel,
+                ebikeViewModel = ebikeViewModel,
+                onBack = pop,
+                initialFocusCarNum = route.arg,
+                bikeMap = null,
+                onOpenKvcxAccount = { push(IosRoute(SubpageScreen.KVCX)) },
+            )
         }
 
         // ---------------------------------------------------------------- AI 调课
