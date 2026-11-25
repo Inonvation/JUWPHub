@@ -4,12 +4,12 @@ package edu.jxslu.schedule.ui.me.hub
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.interop.LocalUIViewController
 import edu.jxslu.schedule.data.local.juwDatabasePath
 import edu.jxslu.schedule.domain.SizeText
 import edu.jxslu.schedule.platform.IosLogFile
 import edu.jxslu.schedule.platform.platformFileSystem
-import edu.jxslu.schedule.ui.common.IosShareTarget
+import edu.jxslu.schedule.ui.common.ShareTarget
+import edu.jxslu.schedule.ui.common.rememberIosShareTarget
 import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.Dispatchers
@@ -20,7 +20,6 @@ import okio.Path.Companion.toPath
 import platform.Foundation.NSCachesDirectory
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSUserDomainMask
-import platform.UIKit.UIViewController
 
 /**
  * 「权限与存储」在 iOS 侧的那一半（B3，2026-11-25）。
@@ -59,20 +58,20 @@ import platform.UIKit.UIViewController
 fun IosPermissionsStorageScreen(onBack: () -> Unit) {
     // present 分享面板要有真实的宿主 VC。**不猜 `UIApplication.keyWindow`**（多场景之后
     // 语义不成立，理由与 `ShareIntents.ios.kt` / `FilePickers.ios.kt` 逐字相同），
-    // 从组合里取——CMP 1.7.3 在 `androidx.compose.ui.interop`，与选文件那条缝同一处。
-    val host = LocalUIViewController.current
-    val storage = remember(host) { iosStorageDiagnostics(host) }
+    // 从组合里取——那条取法的唯一实现在 `ui/common/IosSharePresenter.kt`。
+    val share = rememberIosShareTarget()
+    val storage = remember(share) { iosStorageDiagnostics(share) }
     PermissionsStorageScreen(onBack = onBack, storage = storage, permissionSections = null)
 }
 
 /**
  * 「存储与诊断」的 iOS 实现。
  *
- * [host] 是 present 分享面板的宿主 VC（由 [IosPermissionsStorageScreen] 从组合里取）。
- * 体积统计与清缓存都切到 [Dispatchers.Default]：`Library/Caches` 里可能有上千个文件，
- * 别在主线程上走一遍目录树。
+ * [share] 是 present 分享面板的出口（由 [IosPermissionsStorageScreen] 从组合里取，见
+ * `ui/common/IosSharePresenter.kt`）。体积统计与清缓存都切到 [Dispatchers.Default]：
+ * `Library/Caches` 里可能有上千个文件，别在主线程上走一遍目录树。
  */
-internal fun iosStorageDiagnostics(host: UIViewController): StorageDiagnostics = StorageDiagnostics(
+internal fun iosStorageDiagnostics(share: ShareTarget): StorageDiagnostics = StorageDiagnostics(
     cacheScope = "系统缓存目录里的网页与网络缓存",
     measureCacheBytes = { withContext(Dispatchers.Default) { cacheBytes() } },
     clearCache = { withContext(Dispatchers.Default) { clearCacheDir() } },
@@ -91,7 +90,7 @@ internal fun iosStorageDiagnostics(host: UIViewController): StorageDiagnostics =
         subtitle = { count ->
             if (count > 0) "$count 个日志文件 · 经系统分享发送" else "没有日志文件"
         },
-        export = { exportLogs(host) },
+        export = { exportLogs(share) },
     ),
 )
 
@@ -124,14 +123,15 @@ private fun storageLines(): List<StorageLine> = listOf(
  * 只能在主线程弹。分享面板是异步的：这里返回 `true` 只代表**面板弹出来了**，
  * 用户点没点「存储到文件」不进我们的账（与 `ShareIntents` 的返回值口径一致）。
  *
- * 直接 new 一个 [IosShareTarget] 而不去写全局的 `ShareSettings.target`：那条缝留给将来的
- * Swift 壳一次性注入，这里已经拿得到宿主 VC，改全局状态反而会影响别的页面的分享行为。
+ * [share] 是本屏自己的出口（`ui/common/IosSharePresenter.kt` 的 `rememberIosShareTarget`），
+ * 不去写全局的 `ShareSettings.target`：那条缝留给 Swift 壳一次性注入，这里已经拿得到宿主 VC，
+ * 改全局状态反而会影响别的页面的分享行为。
  */
-private suspend fun exportLogs(host: UIViewController): Boolean {
+private suspend fun exportLogs(share: ShareTarget): Boolean {
     val text = withContext(Dispatchers.Default) { runCatching { IosLogFile.exportText() }.getOrNull() }
         ?: return false
     if (text.isBlank()) return false
-    return runCatching { IosShareTarget { host }.shareText(text, "诊断日志") }.getOrDefault(false)
+    return runCatching { share.shareText(text, "诊断日志") }.getOrDefault(false)
 }
 
 /** 缓存目录（沙箱 `Library/Caches`）；取不到回 null，调用方按「没有缓存」处理。 */

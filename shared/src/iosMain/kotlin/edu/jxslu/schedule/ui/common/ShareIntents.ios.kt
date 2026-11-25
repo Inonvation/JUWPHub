@@ -21,15 +21,16 @@ import platform.UIKit.popoverPresentationController
  *   在 `ComposeUIViewController` 被别的容器包着时拿到的往往是包皮而不是能 present 的那一层；
  * - 猜「`rootViewController.presentedViewController` 链顶」在多窗口下会 present 到别的场景去。
  *
- * 所以这里只做一件事：读 [ShareSettings.target]。**没注入就返回 false**（调用方按「分享不可用」
- * 处理），绝不退回某个猜出来的 VC。
+ * 所以这里只做一件事：按两条来源找 VC，**都没有就返回 false**（调用方按「分享不可用」处理），
+ * 绝不退回某个猜出来的 VC：
  *
- * ## 接法（P3 的 Swift 壳，两行）
+ * 1. [ShareSettings.target]——Swift 壳自己注入的（`ShareSettings.shared.target = IosShareTarget { vc }`）。
+ *    壳最清楚从哪个 VC 弹，所以它优先。
+ * 2. `IosShareHost.target()`——根组合里 `IosSharePresenter()` 装进来的当前宿主 VC
+ *    （`IosSharePresenter.kt`，那是「从组合里取 VC」的唯一实现）。
  *
- * `ShareSettings.shared.target = IosShareTarget { composeRootViewController }`
- *
- * [IosShareTarget] 就是这条缝留给壳的那一半：壳只负责回答「从哪个 VC 弹」，UIKit 的那些
- * 细节（activity items、iPad 的 popover 锚点、present 调用）留在 Kotlin 侧，公共代码里
+ * [IosShareTarget] 是这条缝留给宿主的那一半：宿主只负责回答「从哪个 VC 弹」，UIKit 的那些
+ * 细节（activity items、iPad 的 popover 锚点、present 调用）留在这里，公共代码里
  * 一行 UIKit 都不出现。
  *
  * ## 两端语义差异
@@ -50,15 +51,24 @@ import platform.UIKit.popoverPresentationController
  * 用到的 UIKit 符号清单与不确定项见返回报告；真要改，只改本文件。
  */
 actual fun sharePlainText(text: String, chooserTitle: String): Boolean =
-    ShareSettings.target?.shareText(text, chooserTitle) ?: false
+    resolveShareTarget()?.shareText(text, chooserTitle) ?: false
 
 /** 见 [sharePlainText] 的类 KDoc；[fileRef] 是**文件路径**（不是 `content://`，iOS 没有这个概念）。 */
 actual fun shareFile(fileRef: String, mime: String, chooserTitle: String): Boolean =
-    ShareSettings.target?.shareFile(fileRef, mime, chooserTitle) ?: false
+    resolveShareTarget()?.shareFile(fileRef, mime, chooserTitle) ?: false
+
+/**
+ * 分享出口的两条来源，按优先级：[ShareSettings.target]（壳注入）→ `IosShareHost`（根组合装的）。
+ * 见文件头的 KDoc。
+ */
+private fun resolveShareTarget(): ShareTarget? = ShareSettings.target ?: IosShareHost.target()
 
 /**
  * 现成的 [ShareTarget] 实现：把 UIKit 那一半写死在 Kotlin/Native 里，只把「从哪个 VC 弹」
- * 留给 Swift 壳注入（构造参数是一个返回当前 VC 的闭包，每次分享时现取，不要缓存）。
+ * 留给构造方（构造参数是一个返回当前 VC 的闭包，每次分享时现取，不要缓存）。
+ *
+ * 两个构造方：Swift 壳（`ShareSettings.target`）与根组合里的 `IosSharePresenter()`
+ * （`IosSharePresenter.kt`）。两者都只是回答「哪个 VC」，不重复实现本类。
  *
  * 线程：`UIActivityViewController` 必须在主线程 present。Compose 在 iOS 上跑在主线程，
  * 这里不切线程——切过去反而会因为跨线程碰 UIKit 崩。
