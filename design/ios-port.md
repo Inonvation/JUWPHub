@@ -1626,8 +1626,19 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 真正画背景的 `ScheduleBackgroundLayer` 整个在 `:app`。所以「选图器 + 落盘 + 缩略图」即使全做出来，
 用户选完图课表页**仍是纯色底**——那是「选完没反应」的入口，比不给更糟。
 
-结论：**整组保持不渲染**。升级条件只有一条——CMP 升到 1.8+（或允许引 skia），届时用
-`decodeToImageBitmap()` 一次解决，页面与落盘都不用改。
+结论：**整组保持不渲染**。两条升级路线，优先级从高到低：
+
+1. **`UIKitView` 垫底（不必等 CMP 升级，推荐）**：给 `WeekScreen` 加一个可空背景层槽位
+   `backgroundLayer: (@Composable (Modifier) -> Unit)? = null`（§11.2 ④ 那套反转），Android 传现有的
+   `ScheduleBackgroundLayer`，iOS 传一个 `UIKitView` 包的 `UIImageView`（`aspectFill`）——
+   这条路**不需要 `ImageBitmap`**，符号全有出处。还差的活：iOS 的选图器
+   （`UIDocumentPickerViewController` + `UTTypeImage`，新符号）、`UIImageJPEGRepresentation` 重编码、
+   `IosScheduleBackgroundFiles` 的 `delete`。**本轮没做，不是做不了。**
+2. CMP 升到 1.8+（或允许引 skia）：`ByteArray.decodeToImageBitmap()` 一次解决，页面与落盘都不用改。
+
+⚠️ 别只做「选图 + 落盘 + 缩略图」就交付：`WeekScreen` 没有背景层槽位时课表页仍是纯色底，
+用户选完图看不到任何变化——那是「选完没反应」的入口，比不给更糟。
+
 ## 14. 外观与交互打磨（2026-11-25 晚，U1）
 
 用户的判断是对的：「外形还是非常粗糙」。这一轮只动**看得见的层级与过渡**，不碰页面内容。
