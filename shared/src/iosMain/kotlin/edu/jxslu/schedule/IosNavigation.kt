@@ -1,43 +1,29 @@
 package edu.jxslu.schedule
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.CourseKind
-import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.ai.AiChatScreen
 import edu.jxslu.schedule.ui.ai.AiChatViewModel
 import edu.jxslu.schedule.ui.ai.AiHistoryScreen
@@ -101,7 +87,6 @@ import edu.jxslu.schedule.ui.jw.JwScheduleListScreen
 import edu.jxslu.schedule.ui.jw.StudentInfoScreen
 import edu.jxslu.schedule.ui.jw.TeachingCalendarScreen
 import edu.jxslu.schedule.ui.jw.TextbookScreen
-import edu.jxslu.schedule.ui.life.DrawerHeader
 import edu.jxslu.schedule.ui.life.PowerBillScreen
 import edu.jxslu.schedule.ui.life.PowerBillViewModel
 import edu.jxslu.schedule.ui.life.PowerRoomPickerViewModel
@@ -893,134 +878,6 @@ private fun IosNotPortedScreen(screen: SubpageScreen, onBack: () -> Unit) {
     }
 }
 
-/**
- * 左侧抽屉（iOS 版）：与 Android 的 `SideDrawer` **同一份内容、同一种交互**。
- *
- * 2026-11-25 晚改版：从「自己画遮罩 + 面板 + 点外部关闭」换成 Material3 的
- * [ModalDrawerSheet]，由 `ModalNavigationDrawer` 提供左缘右滑手势、遮罩渐隐、面板位移
- * 与无障碍语义。自己写那套手势，本机（Windows）一行都验不了，而它恰恰是最容易出错的地方。
- *
- * 分组顺序照 Android：教务 / 学习 / 钱包 / 生活 / 设置 / 账号 / 江水生活。
- * 点条目由宿主关抽屉并 push 二级页。
- *
- * ## 顶部身份区（2026-11-25 对齐 Android）
- *
- * 上一版这里写的是「JUWPHub / 江西水利电力大学 · 非官方」两行字——Android 的侧栏顶部
- * 从来不是应用名，而是**身份区**（头像 + 姓名 + 遮罩学号 + 班级，整块点开进学籍信息）。
- * 现在直接复用共享层的 [DrawerHeader]：同一个 Composable、同一套文案规则，两端一字不差。
- *
- * 学号只取**学籍卡落库**那一份（`profileStudentId`）：iOS 没有 CAS 凭证保险箱
- * （`design/ios-port.md` §12.3），`casUsername` / `yktUsername` 那两档在 iOS 上恒为 null，
- * 所以这里与 Android 的 `casUsername ?: yktUsername ?: profileStudentId` 是**同一条链**，
- * 只是前两档在本平台不存在。
- *
- * `onScan` 传 null：iOS 还没有相机扫码实现，那一枚整颗不渲染（§11.2 ④）——比留一个
- * 点了没反应的圆钮好。
- */
-@Composable
-internal fun IosDrawer(
-    services: IosServices,
-    onPick: (IosRoute) -> Unit,
-    /**
-     * 「我的 · 设置」那一行。
-     *
-     * 2026-11-25 晚（用户指定）：底栏只剩 今日 / 课表 / 教务 三格，「我的」改从抽屉进 ——
-     * 与 Android 一致（那边设置首页也不在底栏）。放在身份卡正下方而不是列表底部：
-     * 身份卡点进去是学籍信息（只读），紧跟着一行「我的 · 设置」才符合「头像是我的」这个直觉。
-     */
-    onOpenMe: () -> Unit,
-) {
-    val entries = remember { iosDrawerEntries() }
-    val sections = remember(entries) { entries.groupBy { it.section } }
-    // 身份区数据源与 Android 侧栏同一份 `DisplayPrefsStore`（iOS 落在沙箱私有目录的 DataStore）
-    val prefs = remember { services.displayPrefs() }
-    val profileName by prefs.profileName.collectAsStateWithLifecycle(initialValue = "")
-    val profileClass by prefs.profileClass.collectAsStateWithLifecycle(initialValue = "")
-    val profileStudentId by prefs.profileStudentId.collectAsStateWithLifecycle(initialValue = "")
-
-    ModalDrawerSheet {
-        // 身份区：头像 + 姓名 + 遮罩学号 + 班级，整块点开进学籍信息（与 Android 同一个回调语义）。
-        // 学籍信息页在 iOS 白名单里（`iosDrawerEntries` 的「教务」组），所以这条不是死入口。
-        DrawerHeader(
-            name = profileName,
-            studentId = profileStudentId,
-            className = profileClass,
-            onOpenStudentInfo = { onPick(IosRoute(SubpageScreen.STUDENT_INFO)) },
-            onScan = null,
-        )
-        // 分隔线用 1dp 的 Box 而不是 HorizontalDivider：后者在不同 material3 小版本里名字与
-        // 可用性都变过（`Divider` → `HorizontalDivider`），不值得为一条线赌一次 CI。
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-        )
-        // 「我的 · 设置」固定行（不在底栏，只从这里进）
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .clickable(onClickLabel = "打开我的", onClick = onOpenMe)
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                AppIcons.UserAccount,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp),
-            )
-            Text(
-                text = "我的 · 设置",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 12.dp),
-            )
-            Icon(
-                AppIcons.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-                modifier = Modifier.size(18.dp),
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-        )
-        LazyColumn(
-            modifier = Modifier.fillMaxHeight(),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-        ) {
-            sections.forEach { (section, rows) ->
-                item(key = "h-$section") {
-                    Text(
-                        text = section,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 4.dp),
-                    )
-                }
-                items(rows, key = { it.route.screen.name }) { entry ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { onPick(entry.route) }
-                            .padding(horizontal = 12.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(entry.label, style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-            }
-        }
-    }
-}
 
 /**
  * iOS 侧打开外部链接（开源仓库 / 用户协议那几行用）。
