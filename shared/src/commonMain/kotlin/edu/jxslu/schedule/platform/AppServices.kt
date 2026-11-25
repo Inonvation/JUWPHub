@@ -49,7 +49,9 @@ import edu.jxslu.schedule.data.weather.WeatherRepository
 import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
+import edu.jxslu.schedule.ui.ebike.BikeLocationSource
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 
 /**
@@ -641,6 +643,37 @@ interface AppServices {
      * **必须是同一份实例**：它内部那道 Mutex 是「一次只校准一张表」的全部依据。
      */
     fun teachingCalendarSync(): TeachingCalendarSync
+
+    // ---- 快趣出行页面层（iOS 移植 P4，2026-11-25） ----
+    //
+    // 骑行页整包（`ui/ebike`）搬进共享层带出来的两条**传感器缝**。地图不走这里：
+    // 它是 `ui/ebike/BikeMapContract.kt` 的 `BikeMapSlot`（宿主直接注入页面参数，
+    // 因为地图要按可空渲染整块、还要拿 `Modifier`）。
+    //
+    // 两条都可空，null 的语义各写在下面：**本平台确实没有那项能力**，页面据此降级
+    // （没有定位 = 停留在上次视野、没有「距你」；没有罗盘 = 蓝点无方向箭头）。
+
+    /**
+     * 平台定位源（`LocationManager` / `CLLocationManager`）；**null = 本平台没有定位能力**。
+     *
+     * 只给 WGS84 读数与失败成因，坐标转换（GCJ-02）、文案与挪点判据都在共享层的
+     * `ui/ebike/BikeLocator`——两端同一份。Android 是 `AndroidBikeLocation`，
+     * iOS 是 `IosBikeLocation`（`CLLocationManager`）。
+     *
+     * 必须是**进程内同一份**：连续定位流与一次性定位共用同一个 `LocationManager`，
+     * 各建一个等于同时向系统注册两套监听（Android 会各收一份回调）。
+     */
+    fun bikeLocation(): BikeLocationSource? = null
+
+    /**
+     * 罗盘朝向流（度，0–360，北 = 0 顺时针）；**null = 本平台没有可用的罗盘**。
+     *
+     * 订阅即注册、取消即注销，低通与节流在共享层的 `ui/ebike/BikeCompass` 里。
+     * Android 给 `AndroidBikeHeading`（`SensorManager`，无磁力计时它自己给空流）；
+     * iOS 给 null——`BikeMapInput.userHeadingFlow` 在那边本来就被忽略
+     * （见 `BikeMapContract.kt` 第四节），没有消费方就不装传感器。
+     */
+    fun bikeHeading(): Flow<Float>? = null
 }
 
 /**

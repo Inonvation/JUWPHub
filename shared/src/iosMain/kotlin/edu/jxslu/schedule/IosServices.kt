@@ -100,6 +100,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import platform.Foundation.NSBundle
 import edu.jxslu.schedule.ui.ai.AiApiKeys
+import edu.jxslu.schedule.ui.ebike.BikeLocationSource
+import edu.jxslu.schedule.ui.ebike.IosBikeLocation
+import kotlinx.coroutines.flow.Flow
 
 /**
  * iOS 侧的共享服务装配（iOS 移植 M1 起，M2 补齐教务三件套）。
@@ -872,6 +875,30 @@ class IosServices : AppServices {
     }
 
     override fun kqcxSession(): KqcxSessionCore = kqcxCoreImpl
+
+    // ---- 快趣出行页面层（iOS 移植 P4，2026-11-25） ----
+
+    /**
+     * 定位源：`CLLocationManager`（`shared/iosMain` 的 `IosBikeLocation`）。
+     *
+     * **必须是同一份**：连续定位流与一次性定位共用同一个 `CLLocationManager`，
+     * 各建一个等于同时开两套 `startUpdatingLocation`。
+     *
+     * Info.plist 必须有 `NSLocationWhenInUseUsageDescription`，否则
+     * `requestWhenInUseAuthorization()` 静默无效（不弹框、状态一直 `NotDetermined`），
+     * 现象与「用户拒绝」一模一样。
+     */
+    private val bikeLocationImpl: BikeLocationSource by lazy { IosBikeLocation() }
+
+    override fun bikeLocation(): BikeLocationSource = bikeLocationImpl
+
+    /**
+     * 罗盘朝向：**给 null**（本平台没有可消费的朝向）。
+     *
+     * `BikeMapInput.userHeadingFlow` 在 iOS 侧被忽略（`BikeMapContract.kt` 第四节：
+     * 系统气球旋转后造型别扭），没有消费方就不装传感器。蓝点画成无方向圆点。
+     */
+    override fun bikeHeading(): Flow<Float>? = null
 
     private companion object {
         /** 日志 tag：崩溃/后台失败都记在这个名字下，排查时先 grep 它。 */
