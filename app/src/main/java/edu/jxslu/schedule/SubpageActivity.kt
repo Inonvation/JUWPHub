@@ -2,6 +2,8 @@ package edu.jxslu.schedule
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -676,9 +678,14 @@ class SubpageActivity : ComponentActivity() {
                     viewModel = settingsViewModel,
                     onBack = onBack,
                     onOpenStatement = { SubpageActivity.start(this, SubpageScreen.CAMPUS_STATEMENT) },
-                    // 拉起微信 / 官方收银台；`openExternal` 顺手把本窗口的推入/滑出过渡换成静止
+                    // 拉起微信 / 官方收银台：与搬迁前逐字一致——`ACTION_VIEW` **不加 NEW_TASK**
+                    // （微信是 singleTask，开不进本 task，这条只对浏览器有意义），
+                    // 交给 `startActivityOutsideApp` 顺手把本窗口的推入/滑出过渡换成静止，
+                    // 防止从外部应用返回时重放右推动画（2026-09-26 修页面跳动）
                     onOpenPaymentUrl = { url ->
-                        openExternal(this, url) { message, _ -> Logger.w("YktRecharge", message) }
+                        runCatching {
+                            startActivityOutsideApp(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        }.isSuccess
                     },
                     notificationPermission = rememberCampusNotificationPermission(),
                     powerRoomPicker = viewModel(

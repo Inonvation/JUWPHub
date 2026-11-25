@@ -45,8 +45,12 @@ import edu.jxslu.schedule.ui.ai.AiSettingsScreen
 import edu.jxslu.schedule.ui.ai.AiSettingsViewModel
 import edu.jxslu.schedule.ui.me.hub.AccountsHubScreen
 import edu.jxslu.schedule.ui.campus.CampusCalendarScreen
+import edu.jxslu.schedule.ui.campus.CampusCardSettingsScreen
+import edu.jxslu.schedule.ui.campus.CampusCardViewModel
 import edu.jxslu.schedule.ui.campus.DormRepairScreen
 import edu.jxslu.schedule.ui.campus.LeaveHubScreen
+import edu.jxslu.schedule.ui.campus.PayCodeScreen
+import edu.jxslu.schedule.ui.campus.PayCodeViewModel
 import edu.jxslu.schedule.ui.internship.InternshipBasesScreen
 import edu.jxslu.schedule.ui.me.CalendarSettingsScreen
 import edu.jxslu.schedule.ui.me.CalendarSettingsViewModel
@@ -99,6 +103,7 @@ import edu.jxslu.schedule.ui.jw.TextbookScreen
 import edu.jxslu.schedule.ui.life.DrawerHeader
 import edu.jxslu.schedule.ui.life.PowerBillScreen
 import edu.jxslu.schedule.ui.life.PowerBillViewModel
+import edu.jxslu.schedule.ui.life.PowerRoomPickerViewModel
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.notes.NoteCourseScreen
@@ -193,6 +198,11 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     // 钱包
     IosDrawerEntry("钱包", IosRoute(SubpageScreen.POWER_BILL), "电费"),
     IosDrawerEntry("钱包", IosRoute(SubpageScreen.CAMPUS_STATEMENT), "消费流水"),
+    // 校园卡 / 付款码（iOS 移植 Y1，2026-11-25）：两条都在 Android 侧栏有钱包区入口
+    // （「一卡通账号」行进校园卡设置，右下角「付款码」进付款码页），相对顺序照 Android。
+    // 追加在既有两条之后，不动「电费 / 消费流水」的既有位置。
+    IosDrawerEntry("钱包", IosRoute(SubpageScreen.CAMPUS_CARD_SETTINGS), "校园卡"),
+    IosDrawerEntry("钱包", IosRoute(SubpageScreen.PAY_CODE), "付款码"),
     // 生活
     IosDrawerEntry("生活", IosRoute(SubpageScreen.INBOX), "收件箱"),
     IosDrawerEntry("生活", IosRoute(SubpageScreen.DORM_REPAIR), "宿舍报修"),
@@ -434,6 +444,75 @@ internal fun IosRouteContent(
                 )
             }
             StatementScreen(viewModel = vm, onBack = pop)
+        }
+
+        // 校园卡设置（iOS 移植 Y1，2026-11-25）：**这是 iOS 上第一处能真录入学号密码的地方**。
+        // 凭证进 Keychain（`IosYktCredentialStore`，service `secure_ykt`），
+        // 存成功之后「消费流水」「电费」两页的「凭证未配置」才会消失、真去拉数据。
+        //
+        // 两个平台槽位传 null（§11.2 ④，都是「本平台确实没有」而非待补）：
+        // - `onOpenPaymentUrl = null`：这一版不做充值。拉起微信/收银台要
+        //   `LSApplicationQueriesSchemes` + 外部应用跳转，`Info.plist` 还没有
+        //   （`design/ios-port.md` §12.3「支付调起」），所以「充值」按钮整块不渲染，
+        //   余额卡上只留「消费流水」；
+        // - `notificationPermission = null`：iOS 还没有 `UNUserNotificationCenter` 与后台
+        //   周期任务（§12.1），没有提醒可排，「余额提醒」整节不渲染。
+        //
+        // `powerRoomPicker` 给的是真实现：电费仓库与凭证存储两端都有，所以 iOS 用户
+        // **能选/改绑寝室房间**——电费查询与充值都以缴费平台确认的房间为准（DESIGN §4.24）。
+        SubpageScreen.CAMPUS_CARD_SETTINGS -> {
+            val credentialStore = services.yktCredentialStore()
+            if (credentialStore == null) {
+                // 没有加密凭证存储时这一页是个空壳：不给录入界面，而不是让人填完存不住
+                IosNotPortedScreen(screen = route.screen, onBack = pop)
+            } else {
+                val vm = remember {
+                    CampusCardViewModel(
+                        repo = services.yktRepository(),
+                        credentialStore = credentialStore,
+                        prefs = services.displayPrefs(),
+                        db = services.database(),
+                    )
+                }
+                val roomPicker = remember {
+                    PowerRoomPickerViewModel(services.powerRepository(), credentialStore)
+                }
+                CampusCardSettingsScreen(
+                    viewModel = vm,
+                    onBack = pop,
+                    onOpenStatement = { push(IosRoute(SubpageScreen.CAMPUS_STATEMENT)) },
+                    onOpenPaymentUrl = null,
+                    notificationPermission = null,
+                    powerRoomPicker = roomPicker,
+                )
+            }
+        }
+
+        // 付款码（Y1 搬进共享层）：码图由共享层的 `BarcodeMatrixImage` 用 Compose 画布绘制，
+        // 位阵来自 `YktPayCode.matrices`（iOS 侧走 CoreImage），所以**码本身能出**。
+        // `windowGuard = null`：防截屏（`FLAG_SECURE`）与亮度拉满都没有 iOS 实现（§12.8），
+        // 这一版只是不加这两道保护，页面不空。
+        // 扫码扣款命中的 `vibrate` 也不传：iOS 侧没有 UIKit 触感反馈实现。
+        SubpageScreen.PAY_CODE -> {
+            val credentialStore = services.yktCredentialStore()
+            if (credentialStore == null) {
+                IosNotPortedScreen(screen = route.screen, onBack = pop)
+            } else {
+                val vm = remember {
+                    PayCodeViewModel(
+                        repo = services.yktRepository(),
+                        credentialStore = credentialStore,
+                        prefs = services.displayPrefs(),
+                        db = services.database(),
+                    )
+                }
+                PayCodeScreen(
+                    viewModel = vm,
+                    onBack = pop,
+                    onOpenStatement = { push(IosRoute(SubpageScreen.CAMPUS_STATEMENT)) },
+                    windowGuard = null,
+                )
+            }
         }
 
         // ---------------------------------------------------------------- 生活
