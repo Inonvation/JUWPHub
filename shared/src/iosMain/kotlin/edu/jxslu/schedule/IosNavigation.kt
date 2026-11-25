@@ -48,6 +48,7 @@ import edu.jxslu.schedule.ui.me.ShortcutSettingsScreen
 import edu.jxslu.schedule.ui.me.ShortcutSettingsViewModel
 import edu.jxslu.schedule.ui.me.hub.AboutUpdateScreen
 import edu.jxslu.schedule.ui.me.hub.AppearanceSettingsScreen
+import edu.jxslu.schedule.ui.me.hub.IosPermissionsStorageScreen
 import edu.jxslu.schedule.ui.me.hub.QuietHoursScreen
 import edu.jxslu.schedule.ui.me.hub.SupportDevScreen
 import edu.jxslu.schedule.ui.me.hub.TermsDeclarationsScreen
@@ -207,6 +208,7 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     IosDrawerEntry("设置", IosRoute(SubpageScreen.JW_ACCOUNT), "教务账号"),
     IosDrawerEntry("设置", IosRoute(SubpageScreen.ABOUT_UPDATE), "关于与更新"),
     IosDrawerEntry("设置", IosRoute(SubpageScreen.TERMS_DECLARATIONS), "条款与声明"),
+    IosDrawerEntry("设置", IosRoute(SubpageScreen.PERMISSIONS_STORAGE), "权限与存储"),
     IosDrawerEntry("设置", IosRoute(SubpageScreen.SUPPORT_DEV), "支持开发"),
     // 账号
     IosDrawerEntry("账号", IosRoute(SubpageScreen.ACCOUNTS), "账号中心"),
@@ -669,6 +671,10 @@ internal fun IosRouteContent(
                 focusItemId = route.arg,
             )
         }
+
+        // 权限与存储（iOS 版）：权限块传 null（电池优化白名单 / 自启动在 iOS 上不存在），
+        // 存储诊断三行 + 清缓存 + 导出诊断日志是真实现。见 IosPermissionsStorageScreen。
+        SubpageScreen.PERMISSIONS_STORAGE -> IosPermissionsStorageScreen(onBack = pop)
 
         SubpageScreen.ABOUT_UPDATE -> AboutUpdateScreen(
             onBack = pop,

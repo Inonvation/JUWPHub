@@ -338,9 +338,12 @@ private fun IosRoot(services: IosServices) {
                                 // 顶栏左侧汉堡 → 左侧抽屉。这一页在 iOS 上是根 Tab（没有返回键），
                                 // 所以 navigationIcon 位归汉堡；`onBack` 不传 = null
                                 onOpenDrawer = openDrawer,
-                                // 精简版：AI 调课与百宝箱整块下线，两行不渲染
+                                // 精简版：AI 调课与百宝箱整块下线，两行不渲染；
+                                // 桌面小组件是 Glance（Android 的 Compose-for-appwidget），
+                                // iOS 要 Swift 扩展 target + App Group，本轮不做 → 整行不渲染
                                 showAiSchedule = false,
                                 showToolbox = false,
+                                showWidget = false,
                             )
                         }
                     }
