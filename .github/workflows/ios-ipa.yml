@@ -143,6 +143,39 @@ jobs:
           unzip -l JUWPHub-unsigned.ipa | head -20
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" Payload/JUWPHub.app/Info.plist || true
 
+      # 2026-11-26 加：真机的现象是「图标一闪就回桌面、没有任何崩溃报告、文件 App 里
+      # 连 logs 目录都没有」——这三点合起来说明崩在 Kotlin 之前（dyld / 包体 / 签名）。
+      # 用户拿不到设备日志，所以把包体事实打进 CI 日志，下次排查不用再靠猜。
+      #
+      # 全部只读打印，不改产物、不加任何构建参数。**别删这一段**：它是这条链上唯一
+      # 能看到「产出的到底是个什么样的包」的地方。
+      - name: 打印包体事实（闪退排查用）
+        run: |
+          APP="out/Payload/JUWPHub.app"
+          echo "=== 可执行文件架构 ==="
+          lipo -info "$APP/JUWPHub" || true
+          echo "=== 最低系统版本（minos / LC_BUILD_VERSION）==="
+          otool -l "$APP/JUWPHub" | grep -A4 -E "LC_BUILD_VERSION|LC_VERSION_MIN_IPHONEOS" || true
+          echo "=== rpath（指向不存在的目录会让 dyld 直接杀进程）==="
+          otool -l "$APP/JUWPHub" | grep -A2 LC_RPATH || true
+          echo "=== 依赖的动态库 ==="
+          otool -L "$APP/JUWPHub" || true
+          echo "=== 包内目录 ==="
+          ls -la "$APP" || true
+          echo "=== 嵌套 framework / dylib（Shared 是静态链接，这里应该一个都没有）==="
+          find "$APP" \( -name "*.framework" -o -name "*.dylib" \) | head -20 || true
+          echo "=== Info.plist 关键项 ==="
+          for k in CFBundleIdentifier CFBundleExecutable CFBundlePackageType \
+                   CFBundleShortVersionString CFBundleVersion MinimumOSVersion \
+                   LSRequiresIPhoneOS UILaunchScreen CADisableMinimumFrameDurationOnPhone \
+                   UIRequiredDeviceCapabilities UISupportedInterfaceOrientations \
+                   UIFileSharingEnabled; do
+            printf '%s = ' "$k"
+            /usr/libexec/PlistBuddy -c "Print :$k" "$APP/Info.plist" 2>/dev/null || echo "(缺)"
+          done
+          echo "=== Assets.car（App 图标与 LaunchBackground 都在里面）==="
+          ls -la "$APP/Assets.car" 2>/dev/null || echo "(缺 Assets.car)"
+
       - uses: actions/upload-artifact@v4
         with:
           name: JUWPHub-unsigned-ipa
