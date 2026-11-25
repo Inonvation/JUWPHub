@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package edu.jxslu.schedule.ui.ebike
 
 import edu.jxslu.schedule.domain.AppClock
