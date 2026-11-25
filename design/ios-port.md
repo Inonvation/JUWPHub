@@ -1088,7 +1088,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 
 | 阻塞 | 挡住的页面 |
 |---|---|
-| `com.amap` 高德 SDK | **2026-11-25 E2 复核后只剩视图与页面**：地图契约（`BikeMapInput`）/ 槽位（`BikeMapSlot`）与两端实现都在共享层，地图页的 ViewModel（`BikeMapViewModel`）与本机用车编排（`KvcxRideController`）也已搬完。`:app` 里还压着的只有三块：**高德 / osmdroid 视图本身**（`AmapMapView` / `OsmMapView` / `BikeMapHost` / `BikeMarkerOverlay` / `AmapMarkerBitmaps` / `AmapMaps`）、**页面**（`RideScreen` / `RidePanels` / `EbikeSettingsSheet` / 出码页 `EbikeViewModel`）、**通知那四件**（`EbikeFreeRideReminder` / `EbikeAutoReturnReminder` / `EbikeAutoReturnRunner` / 两个 Notifier + `EbikeFreeRideService`）。**P4（2026-11-25）起账号页与历史订单页已不在这一行**：`KvcxScreen` / `KvcxViewModel` / `KvcxOrdersScreen` / `KvcxOrdersViewModel` 都在 `commonMain`，它们只要求宿主建 ViewModel + 注入三处（自动还车排程、历史订单入口、品牌位图），签名见 §11.2 ① |
+| `com.amap` 高德 SDK | **2026-11-25 E2 复核后只剩视图与页面**：地图契约（`BikeMapInput`）/ 槽位（`BikeMapSlot`）与两端实现都在共享层，地图页的 ViewModel（`BikeMapViewModel`）与本机用车编排（`KvcxRideController`）也已搬完。`:app` 里还压着的只有三块：**高德 / osmdroid 视图本身**（`AmapMapView` / `OsmMapView` / `BikeMapHost` / `BikeMarkerOverlay` / `AmapMarkerBitmaps` / `AmapMaps`）、**页面**（`RideScreen` / `RidePanels` / `EbikeSettingsSheet` / 出码页 `EbikeViewModel`）、**通知那四件**（`EbikeFreeRideReminder` / `EbikeAutoReturnReminder` / `EbikeAutoReturnRunner` / 两个 Notifier + `EbikeFreeRideService`）。**P4（2026-11-26）起页面层已不在这一行**：`KvcxScreen` / `KvcxViewModel` / `KvcxOrdersScreen` / `KvcxOrdersViewModel` / `RideScreen` / `RidePanels` / `EbikeSettingsSheet` / `EbikeViewModel` 都在 `commonMain`，它们只要求宿主建 ViewModel + 注入若干可空槽位，签名见 §11.2 ①。`:app` 现在压着的只有高德 / osmdroid 视图、通知那四件，以及两个宿主文件（`AppRideScreen.kt`、`AndroidEbikeCodePlatform.kt`） |
 | `android.bluetooth`（`QzxyGattLink`） | 趣智开阀的传输层；协议与状态机已在共享层 |
 | `androidx.glance` | `ui/widget` 12 文件 / 3,112 行（桌面小组件） |
 | 通知 + `WorkManager` | `ui/reminder` 15 文件 / 4,107 行 |
@@ -1182,7 +1182,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份）；底栏三格「今日 / 课表 / 教务」（M3 `NavigationBar` + 图标 + 文字，选中主色 / 未选中 `onSurface` 0.6）。**2026-11-25 晚（S1）抽屉排版整块对齐 Android**：身份卡 → 账号与登录 → 我的·设置 → 分隔线 → 钱包卡 → 生活服务区 → 二级页紧凑分组 → 付款码，段头 / 行 / 钱包卡 / 付款码**全部是 `shared/commonMain/ui/life/SideDrawerParts.kt` 的同一份 Composable**（钱包卡文案走 `walletCardTexts`，服务行走 `lifeServiceRows`，缺服务的平台传 null 即整行不渲染）。白名单 41 条仍在且全部可达，其中 8 条由卡片 / 行直接承担。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的**手势视差**（iOS 用 `ModalNavigationDrawer`，是另一套实现）；**主卡的缩放 / 圆角 / 阴影 2026-11-25 晚已对齐**，侧栏宽也统一成 300dp，Tab 与二级页的进出场补了过渡（§14）；服务行右侧的实时状态（开水余额 / U净 空闲数）未接——聚合逻辑还在 `:app` 的 `SideDrawerContent`；钱包卡的「充值」按钮不渲染（充值宿主 `RechargeHost` / `PowerBankPayScreen` 仍在 `:app`）；余额取数是「首次组合拉一次」而不是「抽屉展开时」（`IosDrawer` 签名固定三参数，拿不到 `DrawerState`） |
 | 教务登录后的自动填表 | iOS 用 `WKWebView` 让用户手点登录，登录成功落地后自动 `archive` | Android 有自动填表；iOS 需要注入 JS，能做 |
 | 凭证存储 | `IosKeychain`（CoreFoundation）+ 八个存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI / **一卡通** / **教务**）已写，**iOS 编译验证卡在 runner 容量** | 教务（CAS）2026-11-25 晚起也是真的（`IosCredentialVault`，service `secure_jw`，见 §12.10）——此前恒为 `null`，因为 iOS 从不保存教务密码、登录只在 `WKWebView` 里；一卡通已接（`IosYktCredentialStore`，service `secure_ykt`，含落盘 token 与失效标记），账号中心 / 消费流水 / 电费读得到学号。**2026-11-25 晚起录入界面也搬完了**（校园卡设置页 + 付款码页进 `commonMain`，见 §12.8），四处入口不再停在「凭证未配置」 |
-| 第三方仓库 | **胖乖 / U净 / 问渠 / 快趣会话已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账）。快趣：**数据层两端已是同一份**（`KqcxSessionCore` + `IosKqcxCredentialStore`，S23 起 `IosServices.kqcxSession()` 给真实现），账号中心的快趣行能读登录态 / 退出；**差的是页面**——`ui/ebike` 被高德 Android SDK 挡住（§12.1），所以快趣账号页 / 订单页 / 骑行页在 iOS 上仍不路由（地图层已用 MapKit 打通，见 §12.11） |
+| 第三方仓库 | **胖乖 / U净 / 问渠 / 快趣会话已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账）。快趣：**数据层与页面层两端现在都是同一份**（`KqcxSessionCore` + `IosKqcxCredentialStore`；页面 P4 2026-11-26 搬完）。iOS 上账号页 / 订单页 / 出行页**都能进**，侧栏也有「快趣出行」行；缺的是车标（MapKit 绑定限制，见 §12.13）与提醒（`EbikeReminderPort` 未实现） |
 | 支付调起 | 一卡通走「收银台 URL 进 `WKWebView`」；胖乖 / 趣智走 `alipays://` 深链 | `Info.plist` 还没有 `LSApplicationQueriesSchemes`（`alipays` / `weixin`），深链会被系统拦 |
 | App 图标 | **已补**（2026-11-25）：`iosApp/JUWPHub/Assets.xcassets/AppIcon.appiconset`，1024 单尺寸 universal。用 `tools/app-icon/source.png` 的**前景层**重新合成满幅图——原图把圆角与投影烤进了像素，直接用会与 iOS 遮罩叠成双层圆角 | 启动屏 2026-11-25 晚补上（§14.4）：`UILaunchScreen` 指向命名色 `LaunchBackground`，两档色值 = 主题 `background` |
 
@@ -1281,7 +1281,7 @@ Cookie + Ktor 降为兜底（WebView 已销毁时，例如从成绩页触发的�
 
 | 项 | 决定 | 理由 |
 |---|---|---|
-| 快趣单车地图（`ui/ebike` 15,542 行） | **不做**，保持现状（iOS 点骑行落「这一页还在 Android 侧」） | 底图是高德 **Android** SDK，iOS 只有 MapKit 或另买高德 iOS key；重写 2–3k 行且只能真机验。等主链路稳了再评估 |
+| 快趣单车**底图**（高德 / osmdroid 视图，约 2k 行） | **不做**；页面本身 2026-11-26 已搬完（P4），iOS 上进得去但没有车标 | 底图是高德 **Android** SDK，iOS 只有 MapKit 或另买高德 iOS key；而本仓的 Kotlin 2.1.21 绑定里 MapKit 放不了标注（`MKAnnotationProtocol.coordinate` final、`MKPointAnnotation.coordinate` 是 `val`、`addOverlay(s)` 全 Unresolved），所以「换个底图」也不是一条能走的路。当前形态见 §12.13 |
 | 桌面小组件（Glance 2,740 行） | **不做** | iOS 要 Swift 扩展 target + App Group + 改 `project.yml`，是另一套构建配置，风险不在 Kotlin 侧 |
 | 趣智蓝牙（CoreBluetooth） | **不做** | 没有水控设备，写完验不了 |
 | 第一批并行流 | **A 一卡通凭证 / B 教务单页导入 / D 首启引导** | 全是纯 HTTP / Keychain / 位图，不碰 WebView 桥与后台调度，覆盖入口最多、风险最低 |
@@ -1543,6 +1543,22 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 **序号不要重排**，新增就往后续——用户截图里的「⑤」和代码里的「⑤」必须是同一件事。
 排查入口：`日志里 grep IosBoot`，最后一句就是死因所在的阶段。
 
+### 12.13 快趣出行在 iOS 上的真实形态（2026-11-26，P4）
+
+页面层（`RideScreen` / `RidePanels` / `EbikeSettingsSheet` / `EbikeViewModel` / 账号页 / 订单页）
+**已经全部在 `commonMain`**，iOS 能进、能按车号查车、能开锁 / 锁车 / 还车 / 结算、能看订单。
+装不上的是下面这些，每一条都在宿主那一侧传 `null`，对应入口整块不渲染（§11.2 ④）：
+
+| 缺的 | 为什么现在给不出 | 升级条件 |
+|---|---|---|
+| **地图车标**（`bikeMap`） | 本仓 Kotlin 2.1.21 的 MapKit 绑定里 `MKAnnotationProtocol.coordinate` 是 final、`MKPointAnnotation.coordinate` 是 `val`、`addOverlay(s)` 全 Unresolved——标注与覆盖物都放不上去。没有车标的地图不如不摆，页面在地图位置渲染空态 | 换 Kotlin 版本后重试绑定；或改用 `MKAnnotationView` 当普通子视图 + `convertCoordinate(_:toPointToView:)`，或用 Compose Canvas 自绘 + 手算投影 |
+| **扫车身码** | 没有相机取景页（Android 是 zxing `EbikeScanActivity`）。`onScanBodyCode` 为 null | 接 `AVCaptureSession` 或复用 `ui/web` 那条 `<input type=file>` 的路 |
+| **拉起微信**（扫码取车 / 去微信结清） | `Info.plist` 没有 `LSApplicationQueriesSchemes`，`weixin://` 打不开 | 补 plist + `UIApplication.openURL` |
+| **免费时长提醒 / 自动还车** | `EbikeReminderPort` 没有 iOS 实现。免费时长到点用 `UNTimeIntervalNotificationTrigger` 是够的（`IosLocalNotifications` 已有现成的排 / 撤），**自动还车不行**：它要「到点执行代码」，iOS 只有 `BGTaskScheduler`，系统不保证触发时刻 | 先只做免费时长提醒那一半（排一条到点通知），自动还车留 Android 独占 |
+| **存相册 / 扫完即焚** | `EbikeQrGallery` 没有 iOS 实现（要 `UIImageWriteToSavedPhotosAlbum`） | 接 PhotoKit 写入权限 |
+| **瓦片缓存**（`mapCache`） | 没有底图就没有瓦片可缓存 | 随地图一起 |
+
+口径：**码照出、计时照走、订单照查**——上面每一条缺的都是「入口不渲染」，不是「点了没反应」。
 ## 14. 外观与交互打磨（2026-11-25 晚，U1）
 
 用户的判断是对的：「外形还是非常粗糙」。这一轮只动**看得见的层级与过渡**，不碰页面内容。
@@ -1614,6 +1630,23 @@ lambda 里每帧新建一个对象。台阶 ≤1dp、肉眼不可见，代价是
 所以这一项只能写在 `Info.plist`（`project.yml` 里没有可写的位置）；颜色资源本身由
 `Assets.xcassets` 承担——工程把整个 `JUWPHub` 目录当 sources，新 colorset 由 actool 自动收。
 
+### 14.4b 外观四项与字体缩放：iOS 从「死开关」变成真生效（2026-11-26）
+
+Android 的 `JuwRoot`（`MainActivity.kt`）把四件事都接上：`ThemeMode`（强制浅 / 深 / 跟随系统）、
+动态取色、内置配色、以及 `ProvideFixedFontScale`（「固定字体大小」，默认开，全站 `sp` 钉在 **0.9×**）。
+iOS 根在 2026-11-26 之前是裸的 `JuwTheme { }`，后果是三条**看得见**的差异：
+
+| 面 | 改前（iOS） | 改后 | 依据 |
+|---|---|---|---|
+| 字号 | `sp` 恒 **1.0×**，全站比 Android 大 11% | 与 Android 同一份 `ProvideFixedFontScale`，0.9× | `domain/FontScalePolicy.kt` 的 `LockedScale` |
+| 深浅色 | 只跟随系统，外观页的「深色」开关拨了没用 | 按 `ThemeMode` 解析，与 Android 同一条 `when` | `MainActivity.kt` 的 `JuwRoot` |
+| 配色 | 恒晴空蓝 | 读 `themePalette`；动态取色在 iOS 上等价于「永远走内置配色」（`platformDynamicColorScheme` 返回 null） | 同上 |
+
+`ProvideFixedFontScale` 从 `:app` 的私有函数搬进 `shared/commonMain/ui/theme/FontScale.kt`
+（**唯一实现**，两个根各调一次）——`FontScalePolicy` 那条「落点只有一处」的口径不变。
+
+**首帧保真**：Android 有「进程快照 + 阻塞读」的先手，iOS 这边在组合期不能阻塞，所以选了深色的
+用户极端情况下会看到一帧浅色（DataStore 首个值通常在第一帧内到达）。拿这个换「不阻塞首帧」。
 ### 14.5 状态栏与底部净空：这一轮**不改**，理由是它们本来就是对的
 
 - **顶部**：Compose 树没有顶到刘海下面，靠的不是 Compose 的 insets，而是 **SwiftUI 宿主**。
