@@ -23,9 +23,19 @@
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<!-- 不声明 UILaunchScreen 的话 iOS 会给应用加黑边，界面按小尺寸渲染 -->
+	<!-- 不声明 UILaunchScreen 的话 iOS 会给应用加黑边，界面按小尺寸渲染。
+	     空的 <dict/> = 系统兜底纯色（浅色下是一块与 App 无关的白），启动到首帧之间会闪一下。
+	     2026-11-25 改成指命名颜色：`UIColorName` 取 Assets.xcassets 里的 LaunchBackground，
+	     它的两档色值就是主题的 `background`（晴空蓝浅色 #F9F9FF / 深色 #0F1419，
+	     见 shared/.../ui/theme/Palettes.kt），深浅色都跟着系统走。
+	     **这条只能在 Info.plist 里写**：`UILaunchScreen` 是嵌套字典，XcodeGen 的
+	     `INFOPLIST_KEY_*` 构建设置表达不了；颜色资源本身则由 Assets.xcassets 承担
+	     （工程把整个 JUWPHub 目录当 sources，新 colorset 会被 actool 自动收进来）。 -->
 	<key>UILaunchScreen</key>
-	<dict/>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
 	<!-- Compose Multiplatform 的 PlistSanityCheck 在启动时强制校验这一项，缺了直接抛异常
 	     终止进程（侧载包一启动就闪退，栈顶是 PlistSanityCheck）。顺带解锁 ProMotion 120Hz。 -->
 	<key>CADisableMinimumFrameDurationOnPhone</key>
