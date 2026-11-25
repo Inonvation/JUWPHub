@@ -142,6 +142,12 @@ private fun IosRoot(services: IosServices) {
                             shellScope.launch { drawerState.close() }
                             pushRoute(route)
                         },
+                        // 「我的 / 设置」那一行：Android 的侧栏里也是这一行进设置首页，
+                        // 不是底栏。切换完顺手关抽屉。
+                        onOpenMe = {
+                            shellScope.launch { drawerState.close() }
+                            tab = IosTab.Me
+                        },
                     )
                 },
             ) {
@@ -282,8 +288,35 @@ private fun IosRoot(services: IosServices) {
                                 )
                             }
 
-                            // 「我的」= 设置首页（S17 搬进共享层）。每个入口都 push 一个路由，
-                            // 没搬的页面落在 IosNotPortedScreen（一句确定的话，不是点了没反应）。
+                            // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
+                            // 十二个入口全部接真页面；评教与「在教务网页核对」要 WebView 浏览窗口，
+                            // 传 null 即整条不渲染。
+                            IosTab.Jw -> JwHubScreen(
+                                onOpenTheorySchedule = {
+                                    pushRoute(IosRoute(SubpageScreen.THEORY_SCHEDULE))
+                                },
+                                onOpenLabSchedule = {
+                                    pushRoute(IosRoute(SubpageScreen.LAB_SCHEDULE))
+                                },
+                                onOpenScores = { pushRoute(IosRoute(SubpageScreen.SCORES)) },
+                                onOpenExams = { pushRoute(IosRoute(SubpageScreen.EXAMS)) },
+                                onOpenTextbooks = { pushRoute(IosRoute(SubpageScreen.TEXTBOOKS)) },
+                                onOpenScholar = { pushRoute(IosRoute(SubpageScreen.SCHOLAR)) },
+                                onOpenCurriculum = { pushRoute(IosRoute(SubpageScreen.CURRICULUM)) },
+                                onOpenSelection = { pushRoute(IosRoute(SubpageScreen.SELECTIONS)) },
+                                onOpenInternship = {
+                                    pushRoute(IosRoute(SubpageScreen.INTERNSHIP_BASES))
+                                },
+                                onOpenTeachingCalendar = {
+                                    pushRoute(IosRoute(SubpageScreen.TEACHING_CALENDAR))
+                                },
+                                onOpenLeaveHub = { pushRoute(IosRoute(SubpageScreen.LEAVE_HUB)) },
+                                onOpenRepair = { pushRoute(IosRoute(SubpageScreen.DORM_REPAIR)) },
+                                onOpenCalendar = { pushRoute(IosRoute(SubpageScreen.CAMPUS_CALENDAR)) },
+                            )
+
+                            // 「我的」= 设置首页（S17 搬进共享层）。**不在底栏**，从抽屉进。
+                            // 每个入口都 push 一个路由，没搬的页面落在 IosNotPortedScreen。
                             IosTab.Me -> SettingsScreen(
                                 onOpen = { screen -> pushRoute(IosRoute(screen)) },
                                 viewModel = meViewModel,
@@ -298,14 +331,8 @@ private fun IosRoot(services: IosServices) {
                     }
                 }
                 // 底栏只在根层出现：二级页有自己的返回键，再压一条底栏会把返回路径搞混。
-                // 三格与 Android 一致（今日 / 课表 / 我的），抽屉靠各页顶栏的汉堡或左缘右滑打开。
-                //
-                // 2026-11-25 晚：从「纯文字 TextButton」换成与 Android **同一个组件**
-                // （`NavigationBar` + `NavigationBarItem`）的「图标 + 文字」两行式。
-                // Android 那三格是 `Calendar01` / `Book01` / `School01`（`MainActivity.kt`
-                // 的 `AppBottomBar` 调用点）；iOS 第三格是「我的」而不是「教务」，所以用
-                // `UserAccount`——教务汇总页在 iOS 上已经并进抽屉的「教务」分组。
-                // 选中态主色、未选中 `onSurface` 0.6 透明度（用户口径）。
+                // 三格 = 今日 / 课表 / 教务，与 Android `AppBottomBar` 逐格对齐；
+                // 「我的」不在底栏（`inBottomBar = false`），从左侧抽屉进，与 Android 一致。
                 if (top == null) {
                     // 选中主色 / 未选中 `onSurface` 0.6（用户口径）；指示块仍是 M3 默认的
                     // `secondaryContainer` 胶囊，与 Android 的选中块同一族。
@@ -314,7 +341,7 @@ private fun IosRoot(services: IosServices) {
                     NavigationBar(
                         containerColor = MaterialTheme.colorScheme.surface,
                     ) {
-                        IosTab.entries.forEach { entry ->
+                        IosTab.entries.filter { it.inBottomBar }.forEach { entry ->
                             NavigationBarItem(
                                 selected = tab == entry,
                                 onClick = { tab = entry },
@@ -342,22 +369,28 @@ private fun IosRoot(services: IosServices) {
 }
 
 /**
- * iOS 底栏的三个 Tab（2026-11-25 晚改回三格）。
+ * iOS 的 Tab 清单（2026-11-25 晚，用户指定）。
  *
- * 与 Android 对齐：**今日 / 课表 / 我的**。教务汇总页不再是 Tab——它下面的每一个入口
- * 都在左侧抽屉的「教务」分组里，少一层跳转反而更快。抽屉靠各页顶栏的汉堡或左缘右滑打开。
+ * **底栏三格 = 今日 / 课表 / 教务**，与 Android `MainActivity.AppBottomBar` 逐格对齐
+ * （`Calendar01` / `Book01` / `School01`，图标名在 `shared/.../ui/icon/AppIcons.kt` 里查得到）。
  *
- * 图标名**不是猜的**：`Calendar01` / `Book01` 与 Android `MainActivity.AppBottomBar`
- * 的三格前两格同名同源；第三格 Android 是「教务」（`School01`），iOS 这一格是「我的」，
- * 用 `UserAccount`。全部在 `shared/.../ui/icon/AppIcons.kt` 里查得到。
+ * 「我的」不在底栏：Android 那边它是**左侧抽屉里的一行**，iOS 现在也照这个走——
+ * [inBottomBar] = false 让它只从抽屉进。这不是降级：设置首页在 Android 上本来也不是 Tab，
+ * 上一版把它放进底栏是我自己的取舍，与用户要的「对齐 Android」不符。
  *
- * 今日页的**进行中服务卡**已接上（只接开水与 U净）；快趣骑行 / 趣智开水 / 趣智面板 /
- * 扫码在 iOS 上没有实现，槽位传 `null`，对应内容整块不渲染（§11.2 ④）。
+ * 抽屉里点「我的」→ `tab = IosTab.Me`；用户再点底栏任一格就离开。底栏那一排在「我的」页
+ * 仍然渲染（三格都不高亮），因为 iOS 没有 Android 的独立 SettingsActivity 窗口可以退回去。
  */
-private enum class IosTab(val label: String, val icon: ImageVector) {
+private enum class IosTab(
+    val label: String,
+    val icon: ImageVector,
+    /** 是否出现在底部导航栏。false = 只能从左侧抽屉进。 */
+    val inBottomBar: Boolean = true,
+) {
     Today("今日", AppIcons.Calendar01),
     Week("课表", AppIcons.Book01),
-    Me("我的", AppIcons.UserAccount),
+    Jw("教务", AppIcons.School01),
+    Me("我的", AppIcons.UserAccount, inBottomBar = false),
 }
 
 /**

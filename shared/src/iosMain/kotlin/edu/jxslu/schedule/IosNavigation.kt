@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -917,7 +918,18 @@ private fun IosNotPortedScreen(screen: SubpageScreen, onBack: () -> Unit) {
  * 点了没反应的圆钮好。
  */
 @Composable
-internal fun IosDrawer(services: IosServices, onPick: (IosRoute) -> Unit) {
+internal fun IosDrawer(
+    services: IosServices,
+    onPick: (IosRoute) -> Unit,
+    /**
+     * 「我的 · 设置」那一行。
+     *
+     * 2026-11-25 晚（用户指定）：底栏只剩 今日 / 课表 / 教务 三格，「我的」改从抽屉进 ——
+     * 与 Android 一致（那边设置首页也不在底栏）。放在身份卡正下方而不是列表底部：
+     * 身份卡点进去是学籍信息（只读），紧跟着一行「我的 · 设置」才符合「头像是我的」这个直觉。
+     */
+    onOpenMe: () -> Unit,
+) {
     val entries = remember { iosDrawerEntries() }
     val sections = remember(entries) { entries.groupBy { it.section } }
     // 身份区数据源与 Android 侧栏同一份 `DisplayPrefsStore`（iOS 落在沙箱私有目录的 DataStore）
@@ -938,6 +950,42 @@ internal fun IosDrawer(services: IosServices, onPick: (IosRoute) -> Unit) {
         )
         // 分隔线用 1dp 的 Box 而不是 HorizontalDivider：后者在不同 material3 小版本里名字与
         // 可用性都变过（`Divider` → `HorizontalDivider`），不值得为一条线赌一次 CI。
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        )
+        // 「我的 · 设置」固定行（不在底栏，只从这里进）
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClickLabel = "打开我的", onClick = onOpenMe)
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                AppIcons.UserAccount,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                text = "我的 · 设置",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+            )
+            Icon(
+                AppIcons.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
         Box(
             Modifier
                 .fillMaxWidth()
