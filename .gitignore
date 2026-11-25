@@ -60,3 +60,6 @@ tmp_shots/
 # 正式包发布在 GitHub Release 上；本地副本统一放 dist/，不入库
 dist/
 .re-tmp/
+
+# 编辑器/工具留下的临时备份（2026-11-25 两次误入库）
+*~RF*.TMP

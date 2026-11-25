@@ -103,8 +103,10 @@ fun AccountsHubScreen(
     onOpenKvcx: () -> Unit,
     /** 快趣的小程序方式下没有账号可登：点行进骑行页切使用方式（DESIGN §3.9）。 */
     onOpenRide: () -> Unit,
-    onOpenWenqu: () -> Unit,
-    onOpenAiSettings: () -> Unit,
+    /** 问渠行。null = 本平台没有问渠（iOS 精简版），整行不渲染（§11.2 ④）。 */
+    onOpenWenqu: (() -> Unit)? = null,
+    /** AI 调课行。null = 本平台没有 AI 调课，整行不渲染。 */
+    onOpenAiSettings: (() -> Unit)? = null,
 ) {
     val services = Services.current
     val haptics = rememberAppHaptics()
@@ -347,29 +349,37 @@ fun AccountsHubScreen(
                             onClick = if (kvcxAccountMode) onOpenKvcx else onOpenRide,
                         )
                     }
-                    AccountRow(
-                        title = "问渠 · 志愿服务",
-                        subtitle = "志愿工时 · 活动报名",
-                        icon = AppIcons.HeartHandshake,
-                        state = wenquState,
-                        onClick = onOpenWenqu,
-                    )
+                    if (onOpenWenqu != null) {
+                        AccountRow(
+                            title = "问渠 · 志愿服务",
+                            subtitle = "志愿工时 · 活动报名",
+                            icon = AppIcons.HeartHandshake,
+                            state = wenquState,
+                            onClick = onOpenWenqu,
+                        )
+                    }
                 }
             }
 
-            StaggeredReveal(3) {
-                SettingsSection(
-                    title = "可选",
-                    subtitle = "不用也不影响其他功能",
-                ) {
-                    AccountRow(
-                        title = "AI 调课",
-                        subtitle = "自带 API Key · 可选功能",
-                        icon = AppIcons.AiBrain01,
-                        state = if (aiKey.isNullOrBlank()) LoginState.NotLoggedIn else LoginState.LoggedIn,
-                        labels = StatusLabels(loggedIn = "已配置", login = "去配置"),
-                        onClick = onOpenAiSettings,
-                    )
+            if (onOpenAiSettings != null) {
+                StaggeredReveal(3) {
+                    SettingsSection(
+                        title = "可选",
+                        subtitle = "不用也不影响其他功能",
+                    ) {
+                        AccountRow(
+                            title = "AI 调课",
+                            subtitle = "自带 API Key · 可选功能",
+                            icon = AppIcons.AiBrain01,
+                            state = if (aiKey.isNullOrBlank()) {
+                                LoginState.NotLoggedIn
+                            } else {
+                                LoginState.LoggedIn
+                            },
+                            labels = StatusLabels(loggedIn = "已配置", login = "去配置"),
+                            onClick = onOpenAiSettings,
+                        )
+                    }
                 }
             }
 

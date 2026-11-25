@@ -202,10 +202,10 @@ fun TodayScreen(
     onOpenWeek: () -> Unit = {},
     /** 作业中心（今日页作业卡入口，DESIGN §3.11） */
     onOpenHomeworkTodo: () -> Unit = {},
-    /** 某课程的笔记·课件（课程详情弹窗入口，DESIGN §3.11） */
-    onOpenCourseNotes: (Course) -> Unit = {},
-    /** 某课程的作业（课程详情弹窗入口，DESIGN §3.11） */
-    onOpenCourseHomework: (Course) -> Unit = {},
+    /** 某课程的笔记·课件（课程详情弹窗入口，DESIGN §3.11）。null = 本平台没有笔记，按钮不渲染。 */
+    onOpenCourseNotes: ((Course) -> Unit)? = null,
+    /** 某课程的作业（课程详情弹窗入口，DESIGN §3.11）。null 的语义同上。 */
+    onOpenCourseHomework: ((Course) -> Unit)? = null,
     /** 与开水页共享的 Activity 作用域实例；开水卡的解锁进度与登录态两页一致 */
     waterViewModel: WaterViewModel? = null,
     // ── 槽位（见类 KDoc 的表；null = 本平台没有这块能力）──
@@ -632,13 +632,21 @@ fun TodayScreen(
                 detailCourse = null
                 pendingDelete = course
             },
-            onOpenNotes = {
-                detailCourse = null
-                onOpenCourseNotes(course)
+            onOpenNotes = if (onOpenCourseNotes == null) {
+                null
+            } else {
+                {
+                    detailCourse = null
+                    onOpenCourseNotes(course)
+                }
             },
-            onOpenHomework = {
-                detailCourse = null
-                onOpenCourseHomework(course)
+            onOpenHomework = if (onOpenCourseHomework == null) {
+                null
+            } else {
+                {
+                    detailCourse = null
+                    onOpenCourseHomework(course)
+                }
             },
             onDismiss = { detailCourse = null },
         )

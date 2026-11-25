@@ -92,6 +92,13 @@ class TodayViewModel(
      * 可空注入：单测与旧构造点不传时按默认档 / 无计时处理，行为与改动前一致。
      */
     private val ebikePrefs: DisplayPrefsStore? = null,
+    /**
+     * 「猜你想用」要排除的目标。默认空集 = 全部候选都参与（Android 现状）。
+     *
+     * 用途只有一个：某平台上某个功能整个不存在时，别把它推上推荐卡——推一个点不动的入口，
+     * 比不推更糟（iOS 精简版用它摘掉已下线的问渠）。
+     */
+    private val blockedGuessTargets: Set<GuessTarget> = emptySet(),
 ) : ViewModel() {
 
     private val tick = MutableStateFlow(0L)
@@ -365,7 +372,7 @@ class TodayViewModel(
                 usages = usages,
                 nowMillis = now.toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds(),
                 roll = Random.nextDouble(),
-                blocked = if (riding) setOf(GuessTarget.KVCX) else emptySet(),
+                blocked = (if (riding) setOf(GuessTarget.KVCX) else emptySet()) + blockedGuessTargets,
             )
         }
         // 上课信号的倒计时必须跟实时状态走；其余来源没有分钟数

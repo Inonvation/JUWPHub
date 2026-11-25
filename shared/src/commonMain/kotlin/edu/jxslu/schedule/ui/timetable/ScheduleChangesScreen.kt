@@ -96,7 +96,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun ScheduleChangesScreen(
     onBack: () -> Unit,
-    onOpenHistory: () -> Unit,
+    /** 顶栏「调课记录」。null = 本平台没有调课记录（iOS 精简版去掉了 AI 调课），按钮不渲染。 */
+    onOpenHistory: (() -> Unit)? = null,
     /**
      * 提醒开关变化后的重排（Android：`ensurePeriodicWork` + 开启时 `enqueueCheck`）。
      * null = 本平台没有后台核对与通知调度（见上方 KDoc）。
@@ -275,8 +276,10 @@ fun ScheduleChangesScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onOpenHistory) {
-                        Icon(AppIcons.History, contentDescription = "调课记录")
+                    if (onOpenHistory != null) {
+                        IconButton(onClick = onOpenHistory) {
+                            Icon(AppIcons.History, contentDescription = "调课记录")
+                        }
                     }
                     // 本平台没有教务直取链时整个「重新检查」不渲染（§11.2 ④）
                     if (sync != null) {

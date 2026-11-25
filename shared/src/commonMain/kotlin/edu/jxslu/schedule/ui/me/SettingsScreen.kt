@@ -68,6 +68,15 @@ fun SettingsScreen(
     viewModel: MeViewModel,
     /** 从侧栏齿轮进来时给返回箭头（独立窗口，恒有）。 */
     onBack: (() -> Unit)? = null,
+    /**
+     * 「AI 调课」入口。false = 本平台没有这一页（iOS 精简版），整行不渲染。
+     *
+     * 与 `onOpen` 的 null 语义不同：这一行是**页面自己**的清单项，不是宿主回调，
+     * 所以用开关而不是可空回调（`onOpen` 恒非空，挡不住清单里的一行）。
+     */
+    showAiSchedule: Boolean = true,
+    /** 「百宝箱」开关行。false = 本平台没有百宝箱，整行不渲染。语义同上。 */
+    showToolbox: Boolean = true,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -140,13 +149,15 @@ fun SettingsScreen(
                     icon = AppIcons.Flash,
                     onClick = { onOpen(SubpageScreen.SHORTCUTS) },
                 )
-                SettingSwitchRow(
-                    title = "百宝箱",
-                    subtitle = "左侧栏「百宝箱」入口：水印 · 拼接 · 菜鸟批量查",
-                    checked = state.displayPrefs.toolboxEnabled,
-                    onCheckedChange = viewModel::setToolboxEnabled,
-                    icon = AppIcons.Toolbox,
-                )
+                if (showToolbox) {
+                    SettingSwitchRow(
+                        title = "百宝箱",
+                        subtitle = "左侧栏「百宝箱」入口：水印 · 拼接 · 菜鸟批量查",
+                        checked = state.displayPrefs.toolboxEnabled,
+                        onCheckedChange = viewModel::setToolboxEnabled,
+                        icon = AppIcons.Toolbox,
+                    )
+                }
             }
 
             SettingsSection(title = "课表") {
@@ -170,12 +181,14 @@ fun SettingsScreen(
                     icon = AppIcons.Alert02,
                     onClick = { onOpen(SubpageScreen.SCHEDULE_CHANGES) },
                 )
-                SettingItem(
-                    title = "AI 调课",
-                    subtitle = "适合国庆等大规模调课，需自备 API Key",
-                    icon = AppIcons.AiBrain01,
-                    onClick = { onOpen(SubpageScreen.AI_SCHEDULE) },
-                )
+                if (showAiSchedule) {
+                    SettingItem(
+                        title = "AI 调课",
+                        subtitle = "适合国庆等大规模调课，需自备 API Key",
+                        icon = AppIcons.AiBrain01,
+                        onClick = { onOpen(SubpageScreen.AI_SCHEDULE) },
+                    )
+                }
             }
 
             SettingsSection(title = "提醒") {
