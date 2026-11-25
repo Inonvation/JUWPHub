@@ -68,3 +68,8 @@ targets:
           # 静态 framework 不带 load command，漏了这一行链接时报 Undefined symbols。
           - -framework
           - UniformTypeIdentifiers
+          # `UNUserNotificationCenter` / `UNTimeIntervalNotificationTrigger`（洗衣完成提醒，
+          # 2026-11-25 晚）在这个框架里。同一条纪律：静态 framework 不自带 load command，
+          # 少了这行是链接期 Undefined symbols，不会在 Kotlin 编译期报出来。
+          - -framework
+          - UserNotifications

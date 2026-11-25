@@ -78,6 +78,8 @@ import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.platform.AccountCredentials
 import edu.jxslu.schedule.platform.AiApiKeyStore
 import edu.jxslu.schedule.platform.AppServices
+import edu.jxslu.schedule.platform.IosNotificationPermission
+import edu.jxslu.schedule.platform.IosUjingReminder
 import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
@@ -584,11 +586,9 @@ class IosServices : AppServices {
     override fun hasJwWebSession(): Boolean? = IosJwSessionFlag.hasSession
     // ---- U净（S21，2026-11-25） ----
     //
-    // 页面与 ViewModel 已经搬进共享层，但 iOS 侧还**建不起仓库与两个本地表**：
-    // 它们要「凭证存储 + `KeyValuePrefs` 落点」两样介质，这边都还没有。三处返回 null，
-    // 口径同 [yktCredentialStore]：入口整块不出现，而不是点进去才崩。
-
-
+    // 仓库与两个本地表（订单快照 / 历史账单）2026-11-25 已接上：凭证走 Keychain、
+    // 两份快照走 `NSUserDefaults`（[IosKeyValuePrefs]）。支付不在这一层——`PayTask` 只能在
+    // `Activity` 上拉起，iOS 侧恒为 null（见 `UjingPay` 的 KDoc）。
 
     /**
      * U净 扫码草稿：纯内存 `StateFlow`，两端同一份实现——**非空**。
@@ -601,13 +601,24 @@ class IosServices : AppServices {
     override fun ujingDraftStore(): UjingDraftStore = ujingDraft
 
     /**
-     * 洗衣完成提醒：**iOS 侧还没有实现，返回 null**。
+     * 洗衣完成提醒：`UNUserNotificationCenter` 实现（N1，2026-11-25 晚），**非空**。
      *
-     * 升级条件：`UNUserNotificationCenter` 授权 + `UNTimeIntervalNotificationTrigger` 排闹钟，
-     * `removePendingNotificationRequests` / `removeDeliveredNotifications` 对应
-     * Android 的 cancel / revoke 两个动作。在那之前订单卡与 15 秒轮询照常，只是没有「洗好提醒」。
+     * 上一版返回 null，理由是「iOS 还没有通知能力」。现在有了：授权 + `UNTimeIntervalNotificationTrigger`
+     * 排一条到点通知，两个 `remove…NotificationsWithIdentifiers` 对应 Android 的 cancel / revoke。
+     * 权限被拒时 [IosUjingReminder] 自己降级成 no-op（不抛异常），结论记在
+     * [IosNotificationPermission] 里给页面读。
+     *
+     * **非 lazy 是刻意的**：它的构造函数要把前台横幅代理挂到 `UNUserNotificationCenter.delegate`
+     * （那是 weak，必须由长命对象持有），而 [IosServices] 在 `MainViewController` 里是启动第一行。
+     * 换成 `by lazy` 就一直等到用户第一次进 U净 页才装代理——此前前台收到的通知不弹横幅。
+     * 构造只取一次系统单例，没有 IO，也没有副作用顺序问题。
+     *
+     * 这一端仍然**不能下单**（`UjingPay` 为 null，见 `UjingViewModel.createAndPay`），所以这条提醒
+     * 在 iOS 上要等「有在案订单」才会被排到——闭环缺口不在提醒这一层。
      */
-    override fun ujingReminder(): UjingReminder? = null
+    private val ujingReminderSink: UjingReminder = IosUjingReminder()
+
+    override fun ujingReminder(): UjingReminder? = ujingReminderSink
     // ---- 今日页（V1，2026-11-25） ----
 
     /**

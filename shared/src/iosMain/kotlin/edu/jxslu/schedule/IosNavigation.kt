@@ -815,6 +815,11 @@ internal fun IosRouteContent(
                         historyStore = services.ujingHistoryStore(),
                         draftStore = services.ujingDraftStore(),
                         prefs = services.displayPrefs(),
+                        // 洗衣完成提醒（N1，2026-11-25 晚）：`UNUserNotificationCenter` 实现已接上，
+                        // ViewModel 里排 / 撤提醒的那三处（`refreshOrder` / `dismissOrder` / 登出）
+                        // 因此自然生效。支付缝仍不传——iOS 没有支付宝 SDK，下单链在创建订单前就被拦，
+                        // 所以这一端「有在案订单」只能来自别的路径，见 `IosUjingReminder` 的 KDoc。
+                        reminder = services.ujingReminder(),
                     )
                 }
                 UjingScreen(
