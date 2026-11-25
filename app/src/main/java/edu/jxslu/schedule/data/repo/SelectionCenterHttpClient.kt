@@ -1,6 +1,6 @@
 package edu.jxslu.schedule.data.repo
 
-import edu.jxslu.schedule.data.jw.JwHttpSession.JwHttpException
+import edu.jxslu.schedule.data.jw.JwHttpException
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.jw.SelectionCenterParser
 import edu.jxslu.schedule.data.session.CasFetchResult

@@ -64,7 +64,7 @@ class CredentialVault(context: Context) : CredentialStore, YktTokenCache, YktCre
         return casCache
     }
 
-    fun saveCas(username: String, password: String) {
+    override fun saveCas(username: String, password: String) {
         write(casPrefs, username, password)
         casCache = SessionCredentials(username.trim(), password)
         casCached = true

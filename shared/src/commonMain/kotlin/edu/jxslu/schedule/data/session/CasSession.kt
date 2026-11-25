@@ -1,7 +1,7 @@
 package edu.jxslu.schedule.data.session
 
-import edu.jxslu.schedule.data.jw.JwHttpSession
-import edu.jxslu.schedule.data.jw.JwHttpSession.JwHttpException
+import edu.jxslu.schedule.data.jw.JwHttpException
+import edu.jxslu.schedule.domain.AppClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -12,10 +12,20 @@ import kotlinx.coroutines.sync.withLock
  * 覆盖教务、学工、签章三个系统——它们共用一套 CAS，但**各自的业务会话要各自建立**
  * （教务 `JSESSIONID`、学工 localStorage、签章 `sid`）。本类只负责 CAS 那一层。
  *
- * iOS 移植 S4（2026-11-24）：`CasEnsureResult` / `CasFetchResult` / `bodyOrNull` /
- * `notReadyReason` 与 [JwReadSession] 已搬到 `shared/commonMain`（同包），仓库层的
- * `*Sync` 只认那个接口；本类仍是**Android 侧唯一**的实现（iOS 侧是 `IosJwReadSession`，
- * 只读 `WKWebView` 的 Cookie），传输与凭证闸门一字未改。
+ * iOS 移植（2026-11-25）：本类从 `:app` 整段搬进 `shared/commonMain`，三条策略、失败闸门、
+ * `Mutex` 串行化逐条照抄，一行行为没改。搬家的原因写在 [CasTransport] 的 KDoc 里：
+ * 会话策略与传输层原本被一个 `okhttp3.Cookie` 绑在一起，iOS 因此只有「读 WebView cookie」
+ * 这一条路——导入页一关，所有抓取都回「还没有登录教务」。
+ *
+ * 现在的装配：
+ *
+ * | 端 | [http] | [webCookies] | [vault] |
+ * |---|---|---|---|
+ * | Android | `JwHttpSession`（OkHttp） | `WebViewCookieBridge` | `:app` `CredentialVault` |
+ * | iOS | `IosCasTransport`（Ktor） | `IosWebCookieBridge` | `IosCredentialVault`（Keychain） |
+ *
+ * 三个构造参数**都没有默认值**：默认值只能是某一端的实现，把它留在共享层等于让另一端
+ * 悄悄编译不过或者拿到错误的对象。装配根各写一行更清楚（`Graph.casSession` / `IosServices`）。
  *
  * 三条策略：
  * 1. **可信期**：最近一次成功在 `LoginGateRules.SESSION_TRUST_MS` 内直接放行，不发请求；
@@ -28,8 +38,8 @@ import kotlinx.coroutines.sync.withLock
  */
 class CasSession(
     private val vault: CredentialStore,
-    private val http: CasTransport = JwHttpSession.create(),
-    private val webCookies: WebCookieBridge = WebViewCookieBridge,
+    private val http: CasTransport,
+    private val webCookies: WebCookieBridge,
     /**
      * 代理 / VPN 探测（DESIGN §4.27 兜底矩阵）。
      *
@@ -37,10 +47,11 @@ class CasSession(
      * 命中时**直接返回、连请求都不发**——省一次必然失败的往返，也避免把「代理的锅」
      * 记到凭证头上（那会白消耗一次失败计数）。
      *
-     * 抽成函数只为可测：真实现要 Context（`JwVpnDetector.isVpnActive`）。
+     * 抽成函数只为可测：Android 的实现要 Context（`JwVpnDetector.isVpnActive`）；
+     * iOS 没有等价物，留默认 false。
      */
     private val isProxyActive: () -> Boolean = { false },
-    private val clock: () -> Long = System::currentTimeMillis,
+    private val clock: () -> Long = AppClock::nowMillis,
 ) : JwReadSession {
 
     private val loginMutex = Mutex()
@@ -103,7 +114,7 @@ class CasSession(
         if (credentials == null) {
             // 没存过统一认证密码。但 WebView 里可能有一份**用出来的**会话：引导跳过教务、
             // 后来在导入页手登一次的人就是这个形状（DESIGN §4.27 回灌是唯一方向）。
-            // 认下它，学籍卡 / 成绩 / 学业完成情况这些 OkHttp 取数才不是「未登录」。
+            // 认下它，学籍卡 / 成绩 / 学业完成情况这些原生取数才不是「未登录」。
             //
             // 上面已经探过 jar 里那份（有 cookie 才会探），到这里还留着 cookie 就是探不通；
             // 只有 jar 空着才值得抄一次，避免每次调用都探两遍。
@@ -310,7 +321,7 @@ class CasSession(
      * 取数失败 → 一句给用户的话（调用方再补「没取到 XX」前缀）。
      *
      * 只归类、不改写：`Protocol` / `SessionInvalid` 的 message 本身就是人话（「教务登录没走通
-     * …」「账号在其它地方登录」），原样透出比换成笼统说法有用；网络层那句是 OkHttp 原文
+     * …」「账号在其它地方登录」），原样透出比换成笼统说法有用；网络层那句是引擎原文
      * （`timeout` / `Failed to connect to …`），前面补「网络不可用」才看得出该换网络还是重登。
      */
     private fun reasonOf(error: Throwable?): String = when (error) {
@@ -370,12 +381,12 @@ class CasSession(
     }
 
     /**
-     * 退出教务登录：清 OkHttp 会话、WebView cookie、凭证（一卡通那套不受影响）。
+     * 退出教务登录：清原生会话、WebView cookie、凭证（一卡通那套不受影响）。
      *
      * **WebView 那侧必须一起清**（2026-09-28 用户实测）：不清的话，之前手登/自动填表
-     * 留在 `CookieManager` 里的会话仍然有效——导入页探针通过照常直进教务，
+     * 留在 cookie 库里的会话仍然有效——导入页探针通过照常直进教务，
      * 「我的」页状态卡（`hasAnyCookie`）也一直报「已登录」，退出形同虚设。
-     * 挂起因为 `CookieManager` 的读写要在有 Looper 的线程上（桥内部已切 Main）。
+     * 挂起因为两端的 cookie 库都不一定能同步读（Android 要有 Looper、iOS 是异步回调）。
      *
      * **必须在 [loginMutex] 里做**（2026-09-28 审查）：否则与在途登录并发时，
      * 登录协程返回成功后会把 cookie 写回 jar、闸门记成 `afterSuccess`——

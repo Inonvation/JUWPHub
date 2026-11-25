@@ -13,6 +13,19 @@ interface CredentialStore {
 
     fun readCas(): SessionCredentials?
 
+    /**
+     * 落库一份统一认证凭证（引导第 2 步 / 教务账户页「保存账号密码」）。
+     *
+     * **调用方必须先验证再过这一关**（`CasSession.tryLogin` 返回 `Ready` 才算过）：
+     * 错密码存进来会让后续自动续登反复撞 CAS 失败计数，累计到阈值账号就被停用
+     * （`.agents/rules/login-session.md`「先验后存」）。
+     *
+     * 写侧放在这个接口里而不是另起一个：读与写在两端都是同一份介质
+     * （Android `EncryptedSharedPreferences`、iOS Keychain），拆开只会让两个实现各自
+     * 拼一遍键名。
+     */
+    fun saveCas(username: String, password: String)
+
     fun clearCas()
 
     fun readGate(target: LoginTarget): LoginGateState

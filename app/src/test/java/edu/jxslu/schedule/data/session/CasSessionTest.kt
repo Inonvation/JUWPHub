@@ -1,12 +1,11 @@
 package edu.jxslu.schedule.data.session
 
-import edu.jxslu.schedule.data.jw.JwHttpSession.JwHttpException
+import edu.jxslu.schedule.data.jw.JwHttpException
 import java.io.IOException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
-import okhttp3.Cookie
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -82,8 +81,7 @@ class CasSessionTest {
     @Test
     fun noCredential_adoptsWebSessionAndVerifies() = runBlocking {
         web.adoptResult = listOf(
-            Cookie.Builder().name("JSESSIONID").value("x")
-                .hostOnlyDomain("jiaowu.juwp.edu.cn").path("/").build(),
+            SessionCookie(name = "JSESSIONID", value = "x", host = "jiaowu.juwp.edu.cn"),
         )
         http.verifyResult = true
         assertEquals(CasEnsureResult.Ready(), newSession().ensureValid())
@@ -110,8 +108,7 @@ class CasSessionTest {
     @Test
     fun noCredentialNonSessionCookie_doesNotAdopt() = runBlocking {
         web.adoptResult = listOf(
-            Cookie.Builder().name("bzb_njw").value("1")
-                .hostOnlyDomain("jiaowu.juwp.edu.cn").path("/").build(),
+            SessionCookie(name = "bzb_njw", value = "1", host = "jiaowu.juwp.edu.cn"),
         )
         web.hasAnyCookieResult = false
         assertEquals(CasEnsureResult.NoCredential, newSession().ensureValid())
@@ -128,8 +125,7 @@ class CasSessionTest {
     @Test
     fun noCredential_staleWebSessionDoesNotArmTrust() = runBlocking {
         web.adoptResult = listOf(
-            Cookie.Builder().name("JSESSIONID").value("stale")
-                .hostOnlyDomain("jiaowu.juwp.edu.cn").path("/").build(),
+            SessionCookie(name = "JSESSIONID", value = "stale", host = "jiaowu.juwp.edu.cn"),
         )
         http.verifyResult = false
         val session = newSession()
@@ -505,8 +501,7 @@ class CasSessionTest {
     @Test
     fun adoptFromWebView_armsTrustWindow() = runBlocking {
         web.adoptResult = listOf(
-            Cookie.Builder().name("JSESSIONID").value("x")
-                .hostOnlyDomain("jiaowu.juwp.edu.cn").path("/").build(),
+            SessionCookie(name = "JSESSIONID", value = "x", host = "jiaowu.juwp.edu.cn"),
         )
         val session = newSession()
         session.adoptFromWebView()
@@ -551,6 +546,11 @@ private class FakeCredentialStore(var cas: SessionCredentials? = null) : Credent
     var gate = LoginGateState()
 
     override fun readCas(): SessionCredentials? = cas
+
+    /** 本用例集不测写侧（那是 `CredentialVaultTest` 与引导 / 账户页的事），只需满足契约。 */
+    override fun saveCas(username: String, password: String) {
+        cas = SessionCredentials(username, password)
+    }
 
     override fun clearCas() {
         cas = null
@@ -617,9 +617,9 @@ private class FakeCasTransport : CasTransport {
 
     override fun hasCookies(): Boolean = cookiePresent
 
-    override fun cookies(): List<Cookie> = emptyList()
+    override fun cookies(): List<SessionCookie> = emptyList()
 
-    override fun adoptCookies(cookies: List<Cookie>) {
+    override fun adoptCookies(cookies: List<SessionCookie>) {
         cookiePresent = true
     }
 
@@ -631,13 +631,13 @@ private class FakeCasTransport : CasTransport {
 }
 
 private class FakeWebCookieBridge : WebCookieBridge {
-    var adoptResult: List<Cookie> = emptyList()
+    var adoptResult: List<SessionCookie> = emptyList()
     var adoptCalls = 0
     /** null = 按 [adoptResult] 是否为空推，够用；要单独造「有 cookie 但不是会话」时显式赋值。 */
     var hasAnyCookieResult: Boolean? = null
     var clearAllCalls = 0
 
-    override suspend fun adopt(urls: List<String>): List<Cookie> {
+    override suspend fun adopt(urls: List<String>): List<SessionCookie> {
         adoptCalls++
         return adoptResult
     }
