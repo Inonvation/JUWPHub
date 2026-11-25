@@ -49,6 +49,7 @@ import edu.jxslu.schedule.domain.EbikeCardExpiry
 import edu.jxslu.schedule.domain.EbikeCardSavings
 import edu.jxslu.schedule.domain.EbikeRideStats
 import edu.jxslu.schedule.domain.KqcxAuth
+import edu.jxslu.schedule.domain.YearMonthKey
 import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.ui.common.AccountHeroCard
 import edu.jxslu.schedule.ui.common.AppCard
@@ -67,7 +68,6 @@ import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.time.Instant
-import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -95,7 +95,17 @@ fun KvcxScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val viewModel: KvcxViewModel = viewModel(factory = KvcxViewModel.factory(context))
+    // ViewModel 已搬进共享层（iOS 移植 P4）：构造改由宿主负责（design/ios-port.md §11.2 ①）。
+    // 「自动还车」的排程是平台件（AlarmManager + WorkManager），以可空回调注入。
+    val viewModel: KvcxViewModel = viewModel {
+        KvcxViewModel(
+            session = Graph.kqcxCore(context.applicationContext),
+            records = Graph.rideRecordStore(context.applicationContext),
+            prefs = Graph.displayPrefs(context.applicationContext),
+            orderCache = Graph.kqcxOrderStore(context.applicationContext),
+            onReconcileAutoReturn = { EbikeAutoReturnReminder.reconcile(context.applicationContext) },
+        )
+    }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -538,8 +548,8 @@ private fun StatsSumRow(
 @Composable
 private fun StatsDetailDialog(
     summary: EbikeRideStats.Summary,
-    from: YearMonth,
-    to: YearMonth,
+    from: YearMonthKey,
+    to: YearMonthKey,
     months: List<String>,
     coverage: String?,
     scanLine: String?,

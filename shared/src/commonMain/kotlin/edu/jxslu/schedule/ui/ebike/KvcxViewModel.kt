@@ -1,21 +1,24 @@
 package edu.jxslu.schedule.ui.ebike
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.kqcx.KqcxOrderStore
 import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.RideRecordStore
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.EbikeCardExpiry
 import edu.jxslu.schedule.domain.EbikeRideStats
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KqcxRefreshPolicy
 import edu.jxslu.schedule.domain.KvcBusinessError
+import edu.jxslu.schedule.domain.YearMonthKey
 import edu.jxslu.schedule.domain.capabilities
 import edu.jxslu.schedule.ui.common.NoticeTone
+import io.ktor.client.network.sockets.ConnectTimeoutException
+import io.ktor.client.network.sockets.SocketTimeoutException
+import io.ktor.client.plugins.HttpRequestTimeoutException
+import io.ktor.utils.io.errors.IOException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,10 +28,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.IOException
-import java.io.InterruptedIOException
-import java.net.SocketTimeoutException
-import java.time.YearMonth
 
 /** 一次性提示事件（对齐 WaterViewModel 模式：缓冲 Channel，页面负责收集）。 */
 sealed interface KvcxEvent {
@@ -65,8 +64,8 @@ data class KvcxUiState(
      */
     val stats: EbikeRideStats.Summary? = null,
     /** 统计覆盖的月份区间（早停时起点晚于 2017-01，界面要写出来）。 */
-    val statsFrom: YearMonth? = null,
-    val statsTo: YearMonth? = null,
+    val statsFrom: YearMonthKey? = null,
+    val statsTo: YearMonthKey? = null,
     val statsLoading: Boolean = false,
     /** 统计进度：已查月数（界面显示「已查 N 个月」）。 */
     val statsScannedMonths: Int = 0,
@@ -80,11 +79,22 @@ data class KvcxUiState(
     val statsError: String? = null,
 )
 
+/**
+ * 快趣账号页的 ViewModel（iOS 移植 P4，2026-11-25 搬进共享层）。
+ *
+ * 搬运时的四处改写（都是「平台 API 出不了 JVM」的机械替换，行为不变）：
+ * - `YearMonth` → [YearMonthKey]（`java.time` 在 Kotlin/Native 上不存在，口径见它的 KDoc）；
+ * - `System.currentTimeMillis()` → [AppClock.nowMillis]；
+ * - `java.io.IOException` 一族 → Ktor / `io.ktor.utils.io.errors` 的同类（`:app` 的客户端
+ *   早已换成 Ktor，抛的本来就是这几类）；
+ * - `Graph.xxx(context)` → 构造注入（依赖由装配根按 [edu.jxslu.schedule.platform.AppServices]
+ *   取好后传进来，见 `design/ios-port.md` §11.2 ①③）。
+ */
 class KvcxViewModel(
     /**
      * 会话**本体**（iOS 移植 E2，2026-11-25）：原先吃的是 `:app` 的 `KqcxSessionRepository`
      * 兼容壳，壳只做 `YearMonth` 换算。本页真正用到的一年月交接只有统计区间
-     * （[scanAllOrders] 的 `fromKey` / `toKey`），就地换成 `YearMonth` 更直接。
+     * （[scanAllOrders] 的 `fromKey` / `toKey`），就地换成 [YearMonthKey] 更直接。
      */
     private val session: KqcxSessionCore,
     private val records: RideRecordStore,
@@ -96,6 +106,18 @@ class KvcxViewModel(
     private val prefs: DisplayPrefsStore,
     /** 服务端订单缓存（2026-11-05）：统计在本地算，网络只负责增量刷新。 */
     private val orderCache: KqcxOrderStore,
+    /**
+     * 按当前偏好重排 / 撤销「自动还车」的排程（进页兜底、登录成功后各调一次）。
+     *
+     * **null = 本平台没有精确闹钟 + 后台任务**：Android 给
+     * `{ EbikeAutoReturnReminder.reconcile(app) }`（`AlarmManager.setAlarmClock` +
+     * WorkManager 加急任务）；iOS 侧 `BGTaskScheduler` 不保证触发时机（`design/ios-port.md`
+     * §2），排了也是假承诺，所以给 null——本页照常工作，只是不做那次兜底对账。
+     *
+     * 为什么收成回调而不是往共享层搬实现：那一份实现整个是 `AlarmManager` / `PendingIntent` /
+     * `WorkManager`，见 §11.2 ④ 的口径（不可移植的能力不进共享层）。
+     */
+    private val onReconcileAutoReturn: (suspend () -> Unit)? = null,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -114,6 +136,12 @@ class KvcxViewModel(
 
     private fun notice(text: String, tone: NoticeTone = NoticeTone.Info) =
         _events.trySend(KvcxEvent.Notice(text, tone))
+
+    /** 自动还车那次兜底对账；本平台没有排程能力时是空操作（见构造参数 KDoc）。 */
+    private fun reconcileAutoReturn() {
+        val reconcile = onReconcileAutoReturn ?: return
+        viewModelScope.launch { reconcile() }
+    }
 
     init {
         // 自动还车 Worker 结束订单后，本页的 ride 不会自己变——订阅进程内信号清卡
@@ -151,10 +179,8 @@ class KvcxViewModel(
             }
         }
         // 自动还车兜底：进账号页也做一次对账（闹钟丢了补跑 / 退出登录、切方式后撤销），
-        // 幂等，见 [EbikeAutoReturnReminder.reconcile]
-        viewModelScope.launch {
-            EbikeAutoReturnReminder.reconcile(Graph.appContext)
-        }
+        // 幂等，见 `EbikeAutoReturnReminder.reconcile`（Android 侧）。
+        reconcileAutoReturn()
     }
 
     /** 当前是否账号登录方式（读原始流；读失败按「不是」处理，宁可不查）。 */
@@ -191,7 +217,7 @@ class KvcxViewModel(
                 recheckUnsettledRecords()
                 viewModelScope.launch { syncStats() }
                 // 登录成功后按设置重排自动还车（登录前它不会排）
-                EbikeAutoReturnReminder.reconcile(Graph.appContext)
+                reconcileAutoReturn()
             }
             .onFailure {
                 _uiState.update { it.copy(loggingIn = false) }
@@ -203,9 +229,7 @@ class KvcxViewModel(
         rideQuerySeq++
         session.logout()
         // 退出登录后凭证没了：自动还车排着也执行不了，撤销（reconcile 内部按登录态判断）
-        viewModelScope.launch {
-            EbikeAutoReturnReminder.reconcile(Graph.appContext)
-        }
+        reconcileAutoReturn()
         // 订单缓存属于这个手机号，退出即清（换账号不能串号）
         viewModelScope.launch { runCatching { orderCache.clear() } }
         // 仓库流会回灌归零；这里不重复改 uiState
@@ -266,7 +290,7 @@ class KvcxViewModel(
     /** 算一次「该提醒的到期卡券」并落状态；空列表不动（别把已展示的提醒抹掉）。 */
     private suspend fun maybeRemindCardExpiry(coupons: List<KqcxAuth.AssetCoupon>) {
         val notified = runCatching { prefs.ebikeCardExpiryNotifiedKeys.first() }.getOrDefault(emptySet())
-        val pending = EbikeCardExpiry.pendingReminders(coupons, notified, System.currentTimeMillis())
+        val pending = EbikeCardExpiry.pendingReminders(coupons, notified, AppClock.nowMillis())
         if (pending.isNotEmpty()) {
             _uiState.update { it.copy(cardExpiry = pending) }
         }
@@ -333,7 +357,7 @@ class KvcxViewModel(
                         statsScannedMonths = scan.scannedMonths,
                         statsFetchedRows = scan.fetchedRows,
                         // 共享层回的是 `yyyy-MM` 键（[KqcxOrderScan] 的 fromKey / toKey），
-                        // 本页状态仍用 `YearMonth`：换算失败的只可能是代码 bug，退回旧值
+                        // 本页状态用 [YearMonthKey]：换算失败的只可能是代码 bug，退回旧值
                         statsFrom = it.statsFrom ?: monthOf(scan.fromKey),
                         statsTo = it.statsTo ?: monthOf(scan.toKey),
                     )
@@ -345,9 +369,8 @@ class KvcxViewModel(
             }
     }
 
-    /** `yyyy-MM` 键 → 本页状态用的 `YearMonth`（见 [scanAllOrders]）。 */
-    private fun monthOf(key: String): YearMonth? =
-        runCatching { YearMonth.parse(key) }.getOrNull()
+    /** `yyyy-MM` 键 → 本页状态用的 [YearMonthKey]（见 [scanAllOrders]）。 */
+    private fun monthOf(key: String): YearMonthKey? = YearMonthKey.parse(key)
 
     /** 读缓存本地算一遍（不联网）；缓存空则保持现状（首次进页由 [scanAllOrders] 补）。 */
     private suspend fun recomputeStats() {
@@ -357,8 +380,8 @@ class KvcxViewModel(
         _uiState.update {
             it.copy(
                 stats = EbikeRideStats.summarize(orders),
-                statsFrom = range?.first?.let(YearMonth::parse) ?: it.statsFrom,
-                statsTo = range?.second?.let(YearMonth::parse) ?: it.statsTo,
+                statsFrom = range?.first?.let(YearMonthKey::parse) ?: it.statsFrom,
+                statsTo = range?.second?.let(YearMonthKey::parse) ?: it.statsTo,
                 statsUniqueOrders = orders.size,
                 statsMonths = EbikeRideStats.monthlyLines(orders),
                 statsCoverage = EbikeRideStats.coverageLine(orders),
@@ -371,17 +394,14 @@ class KvcxViewModel(
         if (!session.loggedIn.value || !accountMode()) return false
         // 节流：缓存半小时内刚写过就不再发请求；force 用于手点刷新与「刚还完车」
         val lastSync = runCatching { orderCache.lastSyncedAt() }.getOrNull()
-        if (!force && KqcxRefreshPolicy.isFresh(lastSync, System.currentTimeMillis())) return false
-        val thisMonth = YearMonth.now()
+        if (!force && KqcxRefreshPolicy.isFresh(lastSync, AppClock.nowMillis())) return false
+        val thisMonth = YearMonthKey.fromDate(AppClock.today())
         val fetched = buildList {
-            for (month in listOf(thisMonth, thisMonth.minusMonths(1))) {
-                for (device in intArrayOf(
-                    KvcxOrdersViewModel.DEVICE_EBIKE,
-                    KvcxOrdersViewModel.DEVICE_BIKE,
-                )) {
+            for (month in listOf(thisMonth, thisMonth.plusMonths(-1))) {
+                for (device in intArrayOf(KvcxDevice.EBIKE, KvcxDevice.BIKE)) {
                     addAll(
                         runCatching {
-                            session.queryOrderHistory(month.year, month.monthValue, device)
+                            session.queryOrderHistory(month.year, month.month, device)
                         }.getOrDefault(emptyList()),
                     )
                 }
@@ -416,36 +436,45 @@ class KvcxViewModel(
         }
     }
 
-    /** 登录失败的文案分类：业务错误给服务端原文，网络类给可操作建议。 */
+    /**
+     * 登录失败的文案分类：业务错误给服务端原文，网络类给可操作建议。
+     *
+     * iOS 移植 P4 的写法变化：原来是 `java.net.SocketTimeoutException` /
+     * `java.io.InterruptedIOException` / `java.io.IOException` 三支——JVM 专有类型进不了
+     * `commonMain`。判别口径与 [kvcxErrorText] 完全一致（Ktor 的两类超时 + 引擎的
+     * `SocketTimeoutException` + 它们的共同父类 `IOException`，JVM 上就是 `java.io.IOException`
+     * 的类型别名），**文案逐字不变**。
+     */
     private fun loginErrorText(error: Throwable): String = when (error) {
         is KvcBusinessError -> error.message ?: "登录失败"
+        is HttpRequestTimeoutException -> "登录超时，请检查网络后重试"
         is SocketTimeoutException -> "登录超时，请检查网络后重试"
-        is InterruptedIOException -> "登录超时，请检查网络后重试"
+        is ConnectTimeoutException -> "登录超时，请检查网络后重试"
         is IOException -> "网络不可用，请检查网络后重试"
-        else -> "登录异常：${error.message ?: error.javaClass.simpleName}"
+        else -> "登录异常：${error.message ?: error::class.simpleName}"
     }
 
     private fun queryErrorText(error: Throwable): String = when (error) {
         is KvcBusinessError ->
             if (error.message?.contains("未登录") == true) "快趣登录已失效，请重新登录"
             else error.message ?: "查询失败"
+        is HttpRequestTimeoutException -> "查询超时，请稍后重试"
         is SocketTimeoutException -> "查询超时，请稍后重试"
-        is InterruptedIOException -> "查询超时，请稍后重试"
+        is ConnectTimeoutException -> "查询超时，请稍后重试"
         is IOException -> "网络不可用，请检查网络后重试"
-        else -> "查询异常：${error.message ?: error.javaClass.simpleName}"
+        else -> "查询异常：${error.message ?: error::class.simpleName}"
     }
+}
 
-    companion object {
-        fun factory(context: Context): ViewModelProvider.Factory =
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    KvcxViewModel(
-                        session = Graph.kqcxCore(context.applicationContext),
-                        records = Graph.rideRecordStore(context.applicationContext),
-                        prefs = Graph.displayPrefs(context.applicationContext),
-                        orderCache = Graph.kqcxOrderStore(context.applicationContext),
-                    ) as T
-            }
-    }
+/**
+ * 快趣车型档（服务端 `deviceType` 的唯一出处：电单车 / 单车）。
+ *
+ * 账号页的「超时费累计」与订单页的车型 tab 用的是同一组数字，且**必须一致**——
+ * 各写一份字面量时，改一处就会让统计只算其中一种车。原先它是
+ * `KvcxOrdersViewModel` 的伴生常量；账号页 ViewModel 先搬进共享层时把它提出来，
+ * 两个页面（以及 iOS）从此共用一个来源。
+ */
+object KvcxDevice {
+    const val EBIKE = 1
+    const val BIKE = 2
 }
