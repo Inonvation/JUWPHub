@@ -110,6 +110,7 @@ import edu.jxslu.schedule.ui.ai.AiApiKeys
 import edu.jxslu.schedule.ui.ebike.BikeLocationSource
 import edu.jxslu.schedule.ui.ebike.IosBikeLocation
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 
 /**
  * iOS 侧的共享服务装配（iOS 移植 M1 起，M2 补齐教务三件套）。
@@ -806,6 +807,30 @@ class IosServices : AppServices {
         // 失败（没登录 / 没网）不该拖住上面两件事。
         runCatching { scoreReminderImpl.checkOnLaunch() }
             .onFailure { Logger.w(TAG, "成绩提醒核对失败：$it") }
+        // 课表变化后自动重排上课提醒（2026-11-26 补，§12.14 记的那条唯一功能缺口的收口）。
+        //
+        // 没有这一条时：改完课、换课表、加停课/调休之后，`class.` 那批仍按旧课表排着，
+        // 要等**下次冷启动**才纠正。用户刚在「课表管理」里调过课，当晚的提醒却是旧的，这是 bug。
+        //
+        // **必须挂在这里而不是 `warmUp`**：Room 的首个值可能在 App 进 active 之前就发射，
+        // 那时碰 `UNUserNotificationCenter` 正是 `design/ios-port.md` §12.12 记的闪退嫌疑。
+        // `warmUpReminders` 由首帧之后的 `LaunchedEffect` 拉起，主线程，已经过了那一关。
+        //
+        // 为什么不做节流：`reschedule()` 本身是「按前缀清空 + 重排」，幂等且同标识符覆盖；
+        // 一次课表导入会连发十几次，每次都扫一遍待发队列——几十毫秒量级，换来的是
+        // 「零延迟纠正」，比压这个数更值。真要压就加 `debounce`，那要先 OptIn `FlowPreview`。
+        scope.launch {
+            runCatching {
+                combine(
+                    repository.courses,
+                    repository.semester,
+                    repository.timeSlots,
+                    repository.overrides,
+                ) { _, _, _, _ -> Unit }.collect {
+                    classReminder().reschedule()
+                }
+            }.onFailure { Logger.w(TAG, "课表变化后重排上课提醒失败：$it") }
+        }
         Logger.i(TAG, "⑩ 提醒四件完成，启动结束")
     }
 
