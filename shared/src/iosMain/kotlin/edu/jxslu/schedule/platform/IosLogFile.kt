@@ -294,7 +294,7 @@ private var crashHookInstalled = false
  * 删掉 [installCrashHook] 的调用处即可（只有 `IosServices.init` 一处），日志落盘不受影响。
  */
 @OptIn(kotlin.ExperimentalNativeApi::class)
-fun installCrashHook() {
+internal fun installCrashHook() {
     if (crashHookInstalled) return
     crashHookInstalled = true
     kotlin.native.setUnhandledExceptionHook { error ->
