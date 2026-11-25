@@ -1511,6 +1511,38 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 在本仓 Kotlin 2.1.21 上尚未经 macOS 编译（若不可用，删 `IosServices.init` 那一行调用即可，
 落盘不受影响）。
 
+### 12.12 启动路径的纪律：构造期不碰系统框架（2026-11-26）
+
+2026-11-26 用户第二次报「装上一开就闪退」。上一批（N1/N2/B1）唯一新增的启动期系统调用是
+`UNUserNotificationCenter.currentNotificationCenter()` 与那次 `delegate` 赋值，而它们写在
+`IosServices.init` 里——那是 Swift `makeUIViewController` 执行期间，**App 还没进 active**。
+
+现在定成纪律，以后任何新能力都照这一条：
+
+| 阶段 | 允许做什么 | 不允许做什么 |
+|---|---|---|
+| `IosServices.init`（`makeUIViewController` 期间） | 装崩溃钩子、给 `WebCookies.source` 赋一个 Kotlin 对象 | 建 `UNUserNotificationCenter` / `WKWebView` / `CLLocationManager` / 任何要 App 进 active 的框架单例 |
+| `IosServices.warmUp()`（后台协程，紧接其后） | 本地 Room 写入 `ensureDefaults`、读 **已切主队列** 的 WebKit cookie 库 | 排通知、请求授权、打教务网络 |
+| `IosServices.warmUpReminders()`（`MainViewController` 的 `LaunchedEffect` + 1.2 秒） | 通知三件：装前台横幅代理、重排作业截止提醒、成绩核对 | — |
+
+`IosLocalNotifications` 这一层再加两道保险：`center` 是 `lazy`（加载类不建实例），
+每个入口先 `dispatch_async(dispatch_get_main_queue())`。所以调用方跑在
+`Dispatchers.Default` 上的协程里、或系统后台队列的授权回调里，都不需要自己关心线程。
+
+#### 启动时间线留痕（①–⑩）
+
+真机闪退拿不到栈时，唯一可用的是沙箱日志。所以启动路径上每一道关写一句 `IosBoot`：
+
+| 序 | 位置 | 读到它说明 |
+|---|---|---|
+| ①–⑤ | `MainViewController()` | 构造 → `Services.install` → `warmUp` 派发 → `ComposeUIViewController` 创建，全过去了 |
+| ⑥ | `IosRoot` 组合开始 | 首帧在画了，问题不在装配 |
+| ⑦–⑧ | `warmUp` 协程 | 默认作息 / 学期已落库、cookie 探活结束 |
+| ⑨–⑩ | `warmUpReminders` | 通知三件跑完，启动结束 |
+
+**序号不要重排**，新增就往后续——用户截图里的「⑤」和代码里的「⑤」必须是同一件事。
+排查入口：`日志里 grep IosBoot`，最后一句就是死因所在的阶段。
+
 ## 14. 外观与交互打磨（2026-11-25 晚，U1）
 
 用户的判断是对的：「外形还是非常粗糙」。这一轮只动**看得见的层级与过渡**，不碰页面内容。
