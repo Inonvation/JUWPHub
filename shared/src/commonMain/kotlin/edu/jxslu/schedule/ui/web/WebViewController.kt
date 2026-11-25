@@ -4,11 +4,30 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 /**
- * 教务导入用的 WebView 平台缝（iOS 移植，2026-11-24）。
+ * 内置 WebView 的平台缝（iOS 移植，2026-11-24 立；2026-11-25 从「教务导入够用」扩到
+ * 「学工表单 / 盖章成绩单 / 评教 / 收银台跑得起来」）。
  *
- * 只做教务导入需要的那六件事：加载 URL、读当前 URL、`reload()`、执行 JS、读某个 URL 的
- * Cookie 请求头、页面加载完成/失败的两种回调。**JS 桥、下载拦截、多窗口、文件上传一律不做**：
- * 现在没有任何调用方需要它们，先加进来就是一整套自己验不了（iOS 侧本机编不了）的面。
+ * 四个函数（加载、读当前 URL、`reload()`、执行 JS、读 Cookie 头）是**动作**，
+ * 由调用方发起；剩下五个是**事件**，由宿主装成可空回调，平台侧在对应的原生回调里转发。
+ *
+ * | 事件 | 学工表单 | 成绩单 | 评教 | 收银台 |
+ * |---|---|---|---|---|
+ * | [onPickFiles] 附件上传 | 需要 | — | — | — |
+ * | [onGeolocationPrompt] 位置签到 | 需要 | — | — | — |
+ * | [onDownload] PDF 另存 | — | 需要 | — | — |
+ * | [onPageReady] 加载后注入 | — | — | 需要 | — |
+ * | [onExternalScheme] 非 http(s) | — | — | — | 需要 |
+ *
+ * ## 可空回调 = 本平台 / 本调用方没有这项能力（`design/ios-port.md` §11.2 ④）
+ *
+ * 这条缝里 `null` 的含义要分两种读法，别混：
+ *
+ * - **能决定入口渲染的**（页面由我们画）：`null` → 入口整行不渲染。
+ * - **决定不了入口的**（网页自己画 `<input type=file>`、自己发定位请求）：`null` →
+ *   **平台侧必须给出一个确定结果**，不能让网页挂着：文件选择给「取消」，定位给「拒绝」，
+ *   外链给「不拦」（保持现状，WebView 自己报 `ERR_UNKNOWN_URL_SCHEME`）。唯一例外是
+ *   [onDownload]：`null` 时两端都保持现状（Android 的 `DownloadListener` 不设、iOS 允许导航），
+ *   因为「宿主没装下载处理器」时并没有什么更合理的默认动作。
  *
  * ## 为什么是「普通 class + actual 侧安装一堆 lambda」，而不是 `expect class`
  *
@@ -20,6 +39,10 @@ import androidx.compose.ui.Modifier
  * 这里沿用同一个形状——[impl] 由 actual 的 `WebContentView` 在创建原生视图时安装，
  * 视图销毁时清掉。于是 commonMain 只剩下纯 Kotlin 的转发，元数据编译门禁能完整覆盖它。
  *
+ * 注意五个**事件**回调不进 [Impl]：它们由平台侧在原生回调里直接读
+ * `controller.onXxx`（与既有的 [onPageFinished] / [onError] 同一个做法）。所以本轮扩缝
+ * **没有动 [Impl] 的签名**，两个平台之间少一类要对着改的东西。
+ *
  * ## 生命周期（调用方必须照做）
  *
  * 1. `remember { WebViewController() }` 持有，**不要每次重组都 new**：视图是围着句柄建的。
@@ -27,11 +50,12 @@ import androidx.compose.ui.Modifier
  * 3. WebView 离开组合时 actual 侧会销毁原生视图并把 [impl] 置空。**之后**再调 [loadUrl] /
  *    [reload] / [evaluateJavascript] 都是静默 no-op（[evaluateJavascript] 与 [getCookieHeader]
  *    会立刻回一个 null，免得调用方永远等不到回调）。
+ * 4. 事件回调建议在 `remember { }` 里一次装好；平台侧每次事件都读当前值，中途换也生效。
  *
  * ## 线程
  *
  * [loadUrl] / [reload] / [evaluateJavascript] 必须在主线程调（两端 WebView 都要求如此）；
- * 本缝不做线程切换。两个回调（[onPageFinished] / [onError]）都在主线程触发。
+ * 本缝不做线程切换。全部回调（含五个事件）都在主线程触发。
  * [getCookieHeader] 的 `onResult` 在**两端都是**「异步或稍后」语义，调用方不要假设同步返回。
  */
 class WebViewController {
@@ -46,6 +70,94 @@ class WebViewController {
 
     /** 主 frame 加载失败（断网、DNS、证书、HTTP 层错误），参数是给用户看的一句话。 */
     var onError: ((message: String) -> Unit)? = null
+
+    /**
+     * 网页里点了 `<input type=file>`：**宿主负责选文件**，选完把字节回给平台。
+     *
+     * 平台侧只做「原生文件选择器 ↔ WebView」的协议部分（Android 的
+     * `ValueCallback<Array<Uri>>` + `onShowFileChooser`、iOS 的
+     * `runOpenPanelWithParameters:`），选什么是宿主的事——两端的选文件 UI 差别太大
+     * （SAF / `UIDocumentPickerViewController`），收进共享层只会变成两份平台分支。
+     *
+     * - `accept`：Android 取 `FileChooserParams.acceptTypes`（逗号分隔的 mime 列表）；
+     *   **iOS 恒为空串**（`WKOpenPanelParameters` 不暴露 accept 过滤，WebKit 自己按
+     *   `<input accept>` 校验）。宿主按自己的选择器能力尽力过滤即可。
+     * - `allowMultiple`：`<input type=file multiple>`。
+     * - `onResult`：**必须回**（回空表 = 用户取消）。平台侧已经保证只认第一次调用；
+     *   宿主自己也要保证不重复回——网页那边的回调只能消费一次。
+     *
+     * `null` = 本调用方不支持上传：网页的按钮点了没反应（Android 的
+     * `onShowFileChooser` 返回 false / iOS 的 `runOpenPanel` 立刻回「取消」）。
+     *
+     * 字节为什么要带文件名：附件上传的服务器端常常按 filename 判后缀与显示名，
+     * 只给字节流等于把上传做废一半。
+     */
+    var onPickFiles: ((accept: String, allowMultiple: Boolean, onResult: (List<WebPickedFile>) -> Unit) -> Unit)? =
+        null
+
+    /**
+     * 主 frame 要跳到**非 http(s)** 的地址（`alipays://` / `weixin://` / `tel:` /
+     * `intent://` …）：交给宿主决定「用系统打开」还是「忽略」。
+     *
+     * 返回 `true` = 已接管，平台侧取消这次导航；`false` = 你没管它，平台侧照样取消
+     * （网页不会自己去加载 `alipays:`，放行等于让它进错误页）。
+     *
+     * `null` = 不拦，**保持现状**：Android 由 WebView 自己报 `ERR_UNKNOWN_URL_SCHEME`，
+     * iOS 由 WebKit 交给系统（`Info.plist` 没配 `LSApplicationQueriesSchemes` 时打不开）。
+     * 判据用 [shouldHandOffToSystem]——两端同一份，别在平台侧另写。
+     */
+    var onExternalScheme: ((url: String) -> Boolean)? = null
+
+    /**
+     * 页面加载完成后要**自动注入**的脚本文本；返回 `null` 或空白 = 不注入。
+     *
+     * 评教那套要的就是这个：URL 里带 token 的 SPA 页面自己不会去取 token，
+     * 得在落地之后注入一段「`$.ajax` 取 token → `location.href` 同窗口跳」的脚本。
+     * 手动调 [evaluateJavascript] 的调用方**不要**同时开这个回调，否则同一段跑两遍。
+     *
+     * 注入点在两端都是主文档 `load` 之后（Android `onPageFinished`、iOS
+     * `didFinishNavigation:`）。子 frame 完成不触发。
+     */
+    var onPageReady: ((url: String) -> String?)? = null
+
+    /**
+     * 网页要下载一个文件（盖章成绩单的 PDF、附件、`Content-Disposition: attachment`）。
+     *
+     * 两端的**时机不同**，`localPath` 因此不同：
+     *
+     * | | 何时回调 | `localPath` |
+     * |---|---|---|
+     * | Android | 下载**即将开始**（`DownloadListener.onDownloadStart`） | 恒 `null`：Android 侧没有下载器，宿主自己取 |
+     * | iOS | 拦到不可展示的响应（`decidePolicyForNavigationResponse`）后立刻回调 | 恒 `null`：见「iOS 缺什么」 |
+     *
+     * `suggestedName` 是「服务器 / URL 透出来的文件名」，可能为 `null`
+     * （Android 用 `URLUtil.guessFileName`，iOS 用 `NSURLResponse.suggestedFilename`）。
+     *
+     * `null` = 不拦下载，保持现状（Android 不设 `DownloadListener`：点了没反应；
+     * iOS 允许导航：WKWebView 显示不了就留一页空白）。
+     */
+    var onDownload: ((url: String, suggestedName: String?, mimeType: String?, localPath: String?) -> Unit)? = null
+
+    /**
+     * 网页要定位（`navigator.geolocation`）：请假销假的位置签到、门户里的学习通签到。
+     *
+     * 平台侧把原生的定位授权回调转成 [respond]：
+     *
+     * - Android：`WebChromeClient.onGeolocationPermissionsShowPrompt`。`respond` 对应
+     *   `callback.invoke(origin, granted, retain = false)`——**不**把授权持久化到 WebView。
+     * - iOS：`WKUIDelegate` 的定位授权回调（`requestMediaCapturePermissionFor` 那条路**不**管定位；
+     *   WKWebView 的 `navigator.geolocation` 要宿主持有 `CLLocationManager`），**本轮未做**，
+     *   见下面「iOS 缺什么」。
+     *
+     * 宿主拿到 [respond] 后**必须**在拿到结果时调一次（`true` / `false` 都行）；
+     * 网页撤销请求（Android `onGeolocationPermissionsHidePrompt`）时平台侧会替宿主补一次
+     * `false`，所以宿主不需要额外接「撤销」这条信号。
+     *
+     * `null` = 本调用方不参与定位授权，平台侧的默认动作：Android 已授予系统定位权限就
+     * 直接放行、没有就**立刻拒绝**（比「网页永远等不到坐标」好，页面能自己给出提示）；
+     * iOS 同 `null` 的默认（拒绝）。
+     */
+    var onGeolocationPrompt: ((origin: String?, respond: (Boolean) -> Unit) -> Unit)? = null
 
     /**
      * 平台实现。`null` = 原生视图还没建好或已经销毁。
@@ -85,9 +197,9 @@ class WebViewController {
      * 读 [url] 这个域的 Cookie，拼成 HTTP 请求头的值：`"k=v; k2=v2"`，没有 Cookie 时给 null。
      *
      * 用途只有一个：把 WebView 里登出来的会话交给共享层的 Ktor 用（教务的
-     * `JSESSIONID` / CAS 的 `TGC` 都在这条路上）。**只读**——不往 WebView 写 Cookie：
-     * `design/04c-services.md` 已定案「WebView 的会话只能由 WebView 自己登出来，
-     * 注入无效」，反过来回灌才是唯一方向。
+     * `JSESSIONID` / CAS 的 `TGC` 都在这条路上，签章系统的 `sid` 同理）。
+     * **只读**——不往 WebView 写 Cookie：`design/04c-services.md` 已定案
+     * 「WebView 的会话只能由 WebView 自己登出来，注入无效」，反过来回灌才是唯一方向。
      */
     fun getCookieHeader(url: String, onResult: (String?) -> Unit) {
         val target = impl ?: return onResult(null)
@@ -108,6 +220,17 @@ class WebViewController {
         val cookieHeader: (String, (String?) -> Unit) -> Unit,
     )
 }
+
+/**
+ * 网页上传控件选到的一个文件：[bytes] 是全部内容，[name] 是建议文件名（含扩展名）。
+ *
+ * 为什么是一次性把字节读进内存：两端 WebView 的附件控件都要求「给文件」而不是「给路径」，
+ * 而 Android 的 SAF 与 iOS 的文件选择器给出的是两种不可互通的东西（`content://` Uri /
+ * 文件 `NSURL`）。字节是唯一能过这条缝的货币。
+ * 代价是上传大文件（几十 MB 的扫描件）会整份驻留内存——学工表单的附件实测在几 MB 量级，
+ * 真要传大文件那天，这条契约得换成「溅出到临时文件 + 只传路径」。
+ */
+class WebPickedFile(val name: String, val bytes: ByteArray)
 
 /**
  * 把 [controller] 对应的原生 WebView 放进组合。

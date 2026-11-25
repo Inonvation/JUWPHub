@@ -126,22 +126,13 @@ fun rememberWebViewGeolocationBridge(
 /**
  * 非 http(s) 链接该不该交给系统。
  *
- * 排除 WebView 自己能处理 / 不能外发的路径（`about:` / `javascript:` / `data:` /
- * `blob:` / `file:`），其余（`tel:` / `mailto:` / `sms:` / `weixin://` /
- * `alipays://` / `intent://` / `market://` …）都交给系统解析——留在 WebView 里只会
- * 显示 `ERR_UNKNOWN_URL_SCHEME` 错误页，等于把入口做死。
+ * **判据已收口到共享层** [edu.jxslu.schedule.ui.web.shouldHandOffToSystem]（2026-11-25）：
+ * 平台缝 `WebViewController` 的两端也要这条规则（Android 的 `shouldOverrideUrlLoading`、
+ * iOS 的 `decidePolicyForNavigationAction:`），抄两份必然分叉。这里只剩转发，
+ * 学工 / 收银台 / 教务导入几个窗口的调用点与 `WebViewSupportTest` 一行没动。
  */
-fun shouldHandOffToSystem(url: String?): Boolean {
-    val u = url.orEmpty().trim()
-    if (u.isEmpty()) return false
-    val lower = u.lowercase()
-    if (lower.startsWith("http://") || lower.startsWith("https://")) return false
-    return !lower.startsWith("about:") &&
-        !lower.startsWith("javascript:") &&
-        !lower.startsWith("data:") &&
-        !lower.startsWith("blob:") &&
-        !lower.startsWith("file:")
-}
+fun shouldHandOffToSystem(url: String?): Boolean =
+    edu.jxslu.schedule.ui.web.shouldHandOffToSystem(url)
 
 /**
  * 把非 http(s) 链接交给系统（与收银台窗口同一实现）。

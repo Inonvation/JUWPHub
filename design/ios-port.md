@@ -1084,6 +1084,49 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | `androidx.glance` | `ui/widget` 12 文件 / 3,112 行（桌面小组件） |
 | 通知 + `WorkManager` | `ui/reminder` 15 文件 / 4,107 行 |
 
+### 11.4 WebView 缝的五个事件（2026-11-25 定）
+
+`ui/web/WebViewController` 原先是「教务导入够用」的六件事，学工表单 / 盖章成绩单 / 评教 /
+收银台四类页面都进不去。现在扩成「动作 + 事件」两层：动作仍由调用方发起（加载、`reload`、
+执行 JS、读 Cookie），事件由宿主装成可空回调、平台侧在原生回调里转发。
+
+| 事件 | 谁需要它 | `null` 时平台给什么 |
+|---|---|---|
+| `onPickFiles(accept, allowMultiple, onResult)` | 学工表单附件 | 网页的上传按钮点了没反应（Android `onShowFileChooser` 回 false / iOS 立刻回「取消」） |
+| `onGeolocationPrompt(origin, respond)` | 请假销假的位置签到 | Android：已授权就放行、没授权**立刻拒绝**；iOS：不响应 |
+| `onExternalScheme(url) -> Boolean` | 收银台的 `alipays://` | 不拦，保持现状 |
+| `onDownload(url, suggestedName, mimeType, localPath)` | 盖章成绩单的 PDF | 不拦，保持现状 |
+| `onPageReady(url) -> String?` | 评教的「取 token 再跳」 | 不注入 |
+
+**`null` 的语义要分两种读法**（§11.2 ④ 在这里得补一句）：能由我们画入口的页面，
+`null` = 入口整行不渲染；但网页自己画 `<input type=file>`、自己发定位请求时，App
+**决定不了入口渲不渲染**，这时 `null` 必须让平台给出一个确定结果，不能让网页挂着。
+所以文件选择给「取消」、定位给「拒绝」、外链给「不拦」。唯一的例外是下载：`null` 就是
+保持现状，因为「宿主没装下载处理器」时没有更合理的默认动作。
+
+**选文件为什么是「宿主选、平台吃字节」**：两端的选文件 UI 差别太大（SAF vs
+`UIDocumentPickerViewController`），收进共享层只会变成两份平台分支；而两端 WebView 的附件
+控件要的都是「文件」而不是「路径」，字节是唯一能过这条缝的货币。代价见
+`WebPickedFile` 的 KDoc（大文件整份驻留内存）。
+
+**两端的状态**（2026-11-25）：
+
+| | Android | iOS |
+|---|---|---|
+| 上传 | `onShowFileChooser` + 字节落 `cacheDir/webview_upload` 再交 `Uri` | `runOpenPanelWithParameters` + 字节落临时目录再交 `file://` URL |
+| 外链 | `shouldOverrideUrlLoading`（只主 frame） | `decidePolicyForNavigationAction`（只主 frame） |
+| 下载 | `DownloadListener`，`localPath` 恒 `null`（宿主自己取） | `canShowMIMEType=false` 才拦，`localPath` 恒 `null` |
+| 注入 | `onPageFinished` 之后 | `didFinishNavigation` 之后 |
+| 定位 | 接 `onGeolocationPermissionsShowPrompt` / `…HidePrompt` | **没接**：要 `CLLocationManager` + `NSLocationWhenInUseUsageDescription` |
+
+外链判据 `shouldHandOffToSystem` 收口到 `ui/web/WebViewUrls.kt`：`:app` 那一份降成一行转发，
+两端 WebView 从此走同一个函数。
+
+**iOS 侧还缺的两块**（结构性，不是没搬完）：下载落盘要走 `WKNavigationDownload`
+（iOS 14.5+）与 `WKNavigationDownloadDelegateProtocol`，另存到「文件」App 还要
+`UIDocumentPickerViewController` —— 本轮 `localPath` 恒 `null`，落盘交给宿主
+（`IosWebCookieSource` 读 Cookie + 共享层 Ktor + `platform/AppDirs` 写沙箱）。
+
 ## 12. iOS 上做不到 / 今晚没做的（2026-11-25 盘点）
 
 这一节是**承诺边界**：哪些功能在 iOS 上不会出现、为什么、要补需要什么。
