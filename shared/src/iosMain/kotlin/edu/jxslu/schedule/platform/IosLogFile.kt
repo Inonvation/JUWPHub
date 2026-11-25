@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.platform
 
 import edu.jxslu.schedule.data.ykt.YktDiagnostics
+import edu.jxslu.schedule.domain.SizeText
 import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
@@ -87,21 +88,28 @@ internal object IosLogFile {
         }
     }
 
-    /** `appDataDir()/logs`。「存储占用」与导出都读它。 */
-    internal fun dir(): Path = (appDataDir() + "/" + DIR_NAME).toPath()
+    /** `appDataDir()/logs`。「存储占用」与导出都读它。惰性算一次，别每行日志都问一次 NSFileManager。 */
+    private val dirPath: Path by lazy { (appDataDir() + "/" + DIR_NAME).toPath() }
+
+    internal fun dir(): Path = dirPath
 
     private fun logPath(): Path = dir() / FILE_NAME
 
+    /** 现有日志文件，**从新到旧**（`app.log` → `app.log.1` → `app.log.2`，不存在的跳过）。 */
+    private fun filesLocked(): List<Path> =
+        listOf(logPath()) + (1 until MAX_FILES).map { dir() / "$FILE_NAME.$it" }
+            .filter { runCatching { fs.exists(it) }.getOrDefault(false) }
+
     /**
-     * 现有日志文件，**从新到旧**（`app.log` → `app.log.1` → `app.log.2`，不存在的跳过）。
+     * 现有日志文件，**从新到旧**。
      *
      * 导出与「有几份日志」都按这个顺序，用户先看到的是刚刚发生的那一段。
+     * `NSLock` 不可重入：锁内只调 [filesLocked]，别在这里再套一层。
      */
     internal fun files(): List<Path> {
         lock.lock()
         return try {
-            listOf(logPath()) + (1 until MAX_FILES).map { dir() / "$FILE_NAME.$it" }
-                .filter { runCatching { fs.exists(it) }.getOrDefault(false) }
+            filesLocked()
         } finally {
             lock.unlock()
         }
@@ -111,7 +119,7 @@ internal object IosLogFile {
     internal fun totalBytes(): Long {
         lock.lock()
         return try {
-            files().sumOf { runCatching { fs.metadataOrNull(it)?.size ?: 0L }.getOrDefault(0L) }
+            filesLocked().sumOf { runCatching { fs.metadataOrNull(it)?.size ?: 0L }.getOrDefault(0L) }
         } finally {
             lock.unlock()
         }
@@ -123,10 +131,11 @@ internal object IosLogFile {
      * [level] 是 `D` / `I` / `W` / `E` 单字母，[detail] 已由调用方拼好 message 与异常类型。
      */
     fun append(level: String, tag: String, detail: String) {
-        val line = "${stamp()} $level/$tag: ${redact(detail)}\n"
+        // 脱敏是纯计算，放在锁外；时间戳必须在锁内取（NSDateFormatter 不是线程安全的）
+        val safe = redact(detail)
         lock.lock()
         try {
-            writeLineLocked(line)
+            writeLineLocked("${stamp()} $level/$tag: $safe\n")
         } catch (_: Throwable) {
             // 见类注释「失败模式」：写不进去就算了，别把业务带走
         } finally {
@@ -142,14 +151,15 @@ internal object IosLogFile {
      */
     fun appendBlock(level: String, tag: String, text: String) {
         if (text.isEmpty()) return
-        val block = buildString {
-            text.lines().forEach { raw ->
-                append(stamp()).append(' ').append(level).append('/').append(tag)
-                append(": ").append(redact(raw)).append('\n')
-            }
-        }
+        val safeLines = text.lines().map { redact(it) }
         lock.lock()
         try {
+            val block = buildString {
+                safeLines.forEach { line ->
+                    append(stamp()).append(' ').append(level).append('/').append(tag)
+                    append(": ").append(line).append('\n')
+                }
+            }
             writeLineLocked(block)
         } catch (_: Throwable) {
             // 同上
@@ -164,40 +174,58 @@ internal object IosLogFile {
      * [maxChars] 是硬上限：三个文件满量是 768 KB，整份塞给 `UIActivityViewController`
      * 既慢又可能被系统拒。截断时在开头写明「只导出了前 N 字」，别让用户以为日志就那么点。
      * 顺序是**新的在后**（老文件先写），读到末尾就是崩溃前的那几行。
+     *
+     * 全程持锁：`NSDateFormatter` 不是线程安全的，而日志写入在别的线程上也会调 [stamp]。
+     * 导出最多几百毫秒，期间落盘的那几条会等一等——这比让两个线程同时用同一个
+     * formatter 崩掉好（`NSLock` 不可重入，所以锁内一律走 `*Locked` 的私有版本）。
      */
-    internal fun exportText(maxChars: Int = 300_000): String = buildString {
-        val paths = files()
-        append("诊断日志导出\n")
-        append("时间: ").append(stamp()).append('\n')
-        append("目录: ").append(dir()).append('\n')
-        append("文件: ")
-            .append(paths.joinToString("、") { it.name + "（" + sizeLabel(it) + "）" }
-                .ifEmpty { "无" })
-        .append("\n\n")
-        paths.asReversed().forEach { path ->
-            val body = runCatching { fs.read(path) { readUtf8() } }.getOrNull() ?: return@forEach
-            if (length >= maxChars) return@forEach
-            append("---- ").append(path.name).append(" ----\n")
-            val room = maxChars - length
-            if (body.length <= room) {
-                append(body)
-            } else {
-                append(body.take(room))
-                append("\n…（后面还有 ").append(body.length - room).append(" 字没导出）\n")
+    internal fun exportText(maxChars: Int = 300_000): String {
+        lock.lock()
+        return try {
+            buildString {
+                val paths = filesLocked()
+                append("诊断日志导出\n")
+                append("时间: ").append(stamp()).append('\n')
+                append("目录: ").append(dir()).append('\n')
+                append("文件: ")
+                    .append(
+                        paths.joinToString("、") { it.name + "（" + sizeLabel(it) + "）" }
+                            .ifEmpty { "无" },
+                    )
+                    .append("\n\n")
+                paths.asReversed().forEach { path ->
+                    val body = runCatching { fs.read(path) { readUtf8() } }.getOrNull()
+                        ?: return@forEach
+                    if (length >= maxChars) return@forEach
+                    append("---- ").append(path.name).append(" ----\n")
+                    val room = maxChars - length
+                    if (body.length <= room) {
+                        append(body)
+                    } else {
+                        append(body.take(room))
+                        append("\n…（后面还有 ").append(body.length - room).append(" 字没导出）\n")
+                    }
+                    append('\n')
+                }
             }
-            append('\n')
+        } finally {
+            lock.unlock()
         }
     }
 
     private fun sizeLabel(path: Path): String =
-        runCatching { fs.metadataOrNull(path)?.size ?: 0L }.getOrDefault(0L)
-            .let { "$it B" }
+        SizeText.format(runCatching { fs.metadataOrNull(path)?.size ?: 0L }.getOrDefault(0L))
 
     private fun stamp(): String = formatter.stringFromDate(NSDate())
 
-    /** 脱敏：键值形态（`token=…` / `"password":"…"`）整值抹掉，空白压成单空格。 */
+    /**
+     * 脱敏：键值形态（`token=…` / `"password":"…"`）整值抹掉，空白压成单空格。
+     *
+     * 脱敏本身抛了宁可把这一行换成一句占位符，也不原样落盘——红线是「日志里不出现凭证」，
+     * 不是「日志一定完整」。
+     */
     private fun redact(text: String): String {
-        val clean = runCatching { YktDiagnostics.redactBody(text) }.getOrDefault("")
+        val clean = runCatching { YktDiagnostics.redactBody(text) }.getOrElse { "<脱敏失败>" }
         return if (clean.length <= MAX_MESSAGE_CHARS) clean else clean.take(MAX_MESSAGE_CHARS) + "…"
     }
 

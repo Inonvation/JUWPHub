@@ -1159,7 +1159,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | `ui/jwvw` | 2 | 2,445 | `JwImportScreen`：教务导入总入口，WebView 全套 API + 文件选择 |
 | `ui/common` | 21 | 1,835 | 剩下的都是位图与 WebView 辅助（`DecodeSampled` / `CodeBitmaps` / `WebViewSupport` / `ImageViewerDialog`） |
 | `ui/today` | 3 | 705 | `TodayHost`（槽位填充：四项真相源、RESUMED 静默查询、确认弹窗）、`ActiveServiceRows`（快趣行 / 已还车行，数据在 `ui/ebike`）、`GuessYouWantCardPlatform`（品牌位图）：都已按可空槽位反转成宿主注入 |
-| `ui/me` | 5 | 1,760 | 小组件设置（Glance）、权限与存储（七个 Android 权限 launcher + FileProvider + 缓存清理） |
+| `ui/me` | 5 | 1,576 | 只剩 Glance 小组件设置（`WidgetSettingsScreen` / `WidgetCapabilities`）与三份纯平台件（`MeScreenPlatform` 的日历/提醒/快捷方式 launcher、`AboutPlatform` 的 `ACTION_VIEW` 与赞赏码落相册）。**权限与存储页 2026-11-25 已搬**：页框 + 「存储与诊断」在 `commonMain`，权限块与缓存/崩溃实现收成 `StorageDiagnostics` 描述器 + `permissionSections` 槽位（`app/.../ui/me/hub/PermissionsStorageAndroid.kt`）；iOS 侧三行存储占用 / 清缓存 / 导出诊断日志见 `shared/iosMain/.../ui/me/hub/IosPermissionsStorage.kt` |
 | `ui/wenqu` | 5 | 1,737 | 蹲点提醒 / 前台服务 / `AlarmManager`（见 12.1 通知那一行） |
 | `ui/week` | 4 | 1,568 | 课表页的平台槽（文件选择、日历写入、背景图） |
 | `ui/life` | 5 | 1,311 | `RechargeHost` / `PowerBankPayScreen`（`android.webkit` 全家 + `@JavascriptInterface`） |
@@ -1425,3 +1425,28 @@ App）在这个 App 的实际使用里成立（查课表、看今日页都会进
 | 导入页登录 → 关页 → 当天取数 | ①（WebView 在）或 ②（jar 里已有会话）能覆盖 |
 | 隔天冷启动 → 成绩 / 教材 / 学业 | ② jar 为空 → ③ 用 Keychain 凭证自动登录；**这一步只能在真机验**（Keychain 读写 + CAS 链路 + 真账号） |
 | iOS 的 Ktor 登录链本身 | **未验**：Windows 上编不了 iOS，CI 只验编译；真机若出现「重复 Cookie 头」，修法见 `IosCasTransport` 的「未验」段 |
+
+### 12.11 iOS 崩溃与运行日志（2026-11-25 晚，B1/B3）
+
+2026-11-25 那次「安装后一开就闪退」之所以只能靠猜，是因为 iOS 侧此前**只有 `NSLog`**：
+它进 Xcode 控制台与 Console.app，用户手里那个包闪退之后不留任何东西。现在有三层：
+
+| 层 | 落点 | 代码 |
+|---|---|---|
+| 控制台 | `NSLog`（照旧，开发者看） | `platform/Logger.ios.kt` |
+| 文件 | `appDataDir()/logs/app.log`，**单文件 256 KB、最多 3 个**（`app.log.1` / `.2` 最旧）；写满就滚，进程内第一次写不截断上一轮的尾巴，再补一条 `===== session … =====` | `platform/IosLogFile.kt` |
+| 未捕获异常 | `kotlin.native.setUnhandledExceptionHook` 在终止进程前把栈落进同一个文件；只落盘不吞异常 | 同上 + `IosServices.init` 调用一次 |
+
+**脱敏是硬口径**：每一行落盘前过 `data/ykt/YktDiagnostics` 的键值脱敏（键名清单含
+password / token / cardno / account / username / sno / phone…），崩溃栈按行脱敏以保留结构。
+脱敏本身失败时整行替换成占位符，**不原样落盘**。
+
+**导出**：设置 → 数据与权限 → 权限与存储 → 「导出诊断日志」把三个文件打成一整段文本
+（上限 30 万字，截断会写明），经 `ui/common/ShareIntents` 的 `IosShareTarget` 交给系统。
+宿主 VC 从组合里取（`androidx.compose.ui.interop.LocalUIViewController`），不猜
+`UIApplication.keyWindow`；**不写全局 `ShareSettings.target`**（那条缝留给将来的 Swift 壳）。
+
+同一页另外两项 iOS 能力与三行体积见 §12.2 的 `ui/me` 行。三个都**未在真机验过**：
+目录体积随系统写入变化、分享面板必须真 VC present、`setUnhandledExceptionHook` 的符号
+在本仓 Kotlin 2.1.21 上尚未经 macOS 编译（若不可用，删 `IosServices.init` 那一行调用即可，
+落盘不受影响）。
