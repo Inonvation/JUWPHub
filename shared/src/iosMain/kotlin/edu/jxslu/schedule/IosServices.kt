@@ -48,6 +48,7 @@ import edu.jxslu.schedule.data.repo.ScholarProgressRepository
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.repo.TeachingCalendarSync
 import edu.jxslu.schedule.data.repo.TextbookSync
+import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.data.session.IosCasTransport
 import edu.jxslu.schedule.data.session.IosCredentialVault
@@ -492,6 +493,21 @@ class IosServices : AppServices {
             // 而 iOS 侧的一卡通走「token 401 就重登」、胖乖没有闸门。教务那格的闸门
             // 由 [jwSessionLogout]（`CasSession.logout`）自己清。
         }
+
+        /**
+         * 校验一对教务凭据：先清闸门再试登（与 Android 侧、引导第 2 步逐字同款）。
+         *
+         * 成功与否都只影响登录态与闸门，**不落库**——落库是 [saveJw]，由弹层在
+         * `Ready` 之后调（「先验后存」，错密码存进来会把账号试到停用）。
+         */
+        override suspend fun verifyJw(username: String, password: String): CasEnsureResult {
+            jwCas.onCredentialsUpdated()
+            val result = jwCas.tryLogin(username, password)
+            if (result is CasEnsureResult.Ready) IosJwSessionFlag.markUsable()
+            return result
+        }
+
+        override fun saveJw(username: String, password: String) = jwVault.saveCas(username, password)
     }
 
     override fun accountCredentials(): AccountCredentials = iosAccountCredentials

@@ -42,6 +42,7 @@ import edu.jxslu.schedule.data.repo.ScholarProgressRepository
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.repo.TeachingCalendarSync
 import edu.jxslu.schedule.data.repo.TextbookSync
+import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.LoginGateRules
 import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionExpirySink
@@ -262,9 +263,10 @@ class GraphServices(private val context: Context) : AppServices {
 
     /**
      * 凭证快照与登录闸门：`CredentialVault` 是 `EncryptedSharedPreferences` + `MasterKey`，
-     * 只能在 Android 侧，这里把它收窄成「读学号 / 清一卡通 / 重置闸门」三件事。
+     * 只能在 Android 侧，这里把它收窄成「读学号 / 清一卡通 / 重置闸门 / 验存教务密码」几件事。
      *
-     * 密码不出这个适配器——共享层拿到的只是学号。
+     * 密码不出这个适配器——`readJwUsername` 只给学号；写入（[AccountCredentials.saveJw]）
+     * 由页面经 `CasLoginDialog` 走「先验后存」，与引导第 2 步同一条链。
      */
     private val accountCredentials: AccountCredentials by lazy {
         val vault = Graph.credentialVault(appContext)
@@ -280,6 +282,19 @@ class GraphServices(private val context: Context) : AppServices {
                 vault.writeGate(LoginTarget.Ykt, LoginGateRules.reset())
                 vault.writeGate(LoginTarget.Qiekj, LoginGateRules.reset())
             }
+
+            /**
+             * 先清闸门再试登（与 `AndroidOnboardingJwLogin.verify` 逐字同款）：
+             * 用户重新输入等于重新开始计数，不清的话上一次的失败次数会把刚敲对的密码顶掉。
+             */
+            override suspend fun verifyJw(username: String, password: String): CasEnsureResult {
+                val cas = Graph.casSession(appContext)
+                cas.onCredentialsUpdated()
+                // 取消异常原样抛：弹层被关掉时这条链不该在后台跑完再落一次库
+                return cas.tryLogin(username, password)
+            }
+
+            override fun saveJw(username: String, password: String) = vault.saveCas(username, password)
         }
     }
 

@@ -49,6 +49,26 @@
   不写闸门**：那是 GET 学生主页的探活，不是一次登录。升级兼容：`login_gate` 没有
   `last_failure` 键时读作 `None`、窗口 0，别改回「无键按失败算」。
 
+## 凭证直登两端共用（2026-11-25）
+
+- **`CasSession` / `CasTransport` / `WebCookieBridge` 都在 `shared/commonMain`**，两端共用一套
+  会话策略（可信期 / 闸门 / 重登 / 回灌），只换传输层与 cookie 库：Android 是
+  `JwHttpSession`（OkHttp）+ `WebViewCookieBridge`，iOS 是 `IosCasTransport`（Ktor）+
+  `IosWebCookieBridge`。`CasTransport` 的 cookie 类型是中性 `SessionCookie`——
+  **别在这里引入 `okhttp3.Cookie`**：那会把整个类按死在 `:app`，iOS 又只剩「读 WebView cookie」
+  一条路，导入页关掉就回「还没有登录教务」（2026-11-25 用户报的就是这个）。
+- **iOS 现在也存教务凭证**：Keychain service `secure_jw`，account 沿用 `username` / `password`；
+  登录闸门落 `NSUserDefaults`（前缀 `login_gate`），键名与 Android 逐字一致。
+  录入入口是「我的 → 教务账户 → 自动续登 → 保存账号密码」，弹层用共享层 `CasLoginDialog`
+  （先验后存：`AccountCredentials.verifyJw` 里先 `onCredentialsUpdated()` 再 `tryLogin`）。
+- **没有 `clearJw()`**：清教务凭证必须连 WebView 的 cookie 一起清，那条链是 `JwSessionLogout`
+  （iOS 侧 2026-11-25 起非 null）。单开一个只删密码的入口就是个假退出。
+- **`IosJwReadSession.ensureValid` 四档顺序不能反**：WebView 活着 → jar 里已有会话 → 存过凭证
+  自动登一次 → 转人工登录（文案带 cookie 库现状）。WebView 优先是因为用户可能刚在网页里
+  登了另一个账号；凭证直登只在「真的没有会话」时才触发。
+- **登录页 / 被顶 JSON / 学生主页的判据只有一份**（`JwPageRules`）。别在某个传输层里再写一遍：
+  一边认得出登录页、另一边把登录页当课表交给解析器，是已经踩过两次的事故形态。
+
 ## 网页会话也算登录态（2026-09-27 修「我的」页一直显示未登录）
 
 用户报：首启引导跳过教务，后来在导入课表页手登过一次，之后「我的」页账户卡一直写
