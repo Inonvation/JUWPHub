@@ -71,6 +71,7 @@ import edu.jxslu.schedule.ui.common.rememberDrawerCardTransform
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jw.JwHubScreen
 import edu.jxslu.schedule.ui.jwvw.JwWebFit
+import edu.jxslu.schedule.ui.jwvw.TeachingEvalScreen
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.SettingsScreen
@@ -449,7 +450,15 @@ private fun IosRoot(services: IosServices) {
                                         // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
                                         // 十二个入口全部接真页面；评教与「在教务网页核对」要 WebView 浏览窗口，
                                         // 传 null 即整条不渲染。
-                                        IosTab.Jw -> JwHubScreen(
+                                        // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
+                                        // 十三个入口；评教 2026-11-26 搬进共享层后也接上了（见下）。
+                                        // 「在教务网页核对」仍旧没有内置浏览窗口 → 传 null，那条不渲染。
+                                        IosTab.Jw -> {
+                                        // 学生评教（2026-11-26）：整页在共享层，走同一条 WebView 缝。
+                                        // 本地状态顶掉 hub 列表，返回即回列表——与请假表单、课表分享同一做法。
+                                        var evalOpen by remember { mutableStateOf(false) }
+                                        JwHubScreen(
+                                            onOpenTeachingEval = { evalOpen = true },
                                             onOpenTheorySchedule = {
                                                 pushRoute(IosRoute(SubpageScreen.THEORY_SCHEDULE))
                                             },
@@ -472,6 +481,16 @@ private fun IosRoot(services: IosServices) {
                                             onOpenRepair = { pushRoute(IosRoute(SubpageScreen.DORM_REPAIR)) },
                                             onOpenCalendar = { pushRoute(IosRoute(SubpageScreen.CAMPUS_CALENDAR)) },
                                         )
+                                        // 评教整页盖在 hub 之上（同一容器内的兄弟节点，全屏不透明）。
+                                        // 两个平台槽位都传 null：
+                                        // - `casFillScript`：iOS 的教务登录在 WKWebView 里由用户自己完成，
+                                        //   没有「注入脚本自动填表」这条通道（`IosJwReadSession` 只管取数）；
+                                        // - `onJwSessionReady`：那是给人看的「登录已就绪」钩子，iOS 没有对应的
+                                        //   toast 位；评教本身不依赖它就能跑（会话在 `JwReadSession` 里）。
+                                        if (evalOpen) {
+                                            TeachingEvalScreen(onBack = { evalOpen = false })
+                                        }
+                                        }
 
                                         // 「我的」= 设置首页（S17 搬进共享层）。**不在底栏**，从抽屉进。
                                         // 每个入口都 push 一个路由，没搬的页面落在 IosNotPortedScreen。
