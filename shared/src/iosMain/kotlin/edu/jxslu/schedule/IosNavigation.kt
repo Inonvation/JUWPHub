@@ -24,6 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.data.kqcx.KqcxOrderStore
+import edu.jxslu.schedule.data.repo.RideRecordStore
 import edu.jxslu.schedule.data.xg.XgForm
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.ui.ai.AiChatScreen
@@ -79,6 +81,10 @@ import edu.jxslu.schedule.ui.tweak.CourseTweakViewModel
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
+import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
+import edu.jxslu.schedule.ui.ebike.KvcxOrdersViewModel
+import edu.jxslu.schedule.ui.ebike.KvcxScreen
+import edu.jxslu.schedule.ui.ebike.KvcxViewModel
 import edu.jxslu.schedule.ui.exam.ExamScreen
 import edu.jxslu.schedule.ui.exam.ExamSettingsScreen
 import edu.jxslu.schedule.ui.homework.HomeworkCourseScreen
@@ -555,6 +561,49 @@ internal fun IosRouteContent(
             onOpenKvcx = { push(IosRoute(SubpageScreen.KVCX)) },
             onOpenRide = { push(IosRoute(SubpageScreen.RIDE)) },
         )
+
+        // ---------------------------------------------------------------- 快趣 · 账号页与订单页
+        //
+        // 2026-11-26 搬进共享层（K2）。两页在 iOS 上**完整可用**：会话本体是
+        // `IosServices.kqcxSession()`（Keychain 凭证 + 进程内 token），订单缓存与本机骑行记录
+        // 都落在同一个 Room 库，与 Android 同一份代码。
+        //
+        // 两处平台能力缺口，按 §11.2 ④ 传 null（不是「以后补」的占位）：
+        // - `onReconcileAutoReturn = null`：Android 用 `AlarmManager.setAlarmClock` + WorkManager
+        //   加急任务做自动还车的精确排程，iOS 的 `BGTaskScheduler` 不保证触发时刻，
+        //   排了是假承诺。传 null 后「进页 / 登录时那一轮兜底对账」不跑，页面其余照常。
+        // - `brandIcon = null`：`R.drawable.ic_brand_kqcx` 只有 Android 有，头像位整块不占位。
+        //
+        // 订单页的入口这次给**真回调**（iOS 有二级页栈），所以账号页的「骑行记录」整块会渲染。
+        SubpageScreen.KVCX -> {
+            val database = services.database()
+            val viewModel = remember {
+                KvcxViewModel(
+                    session = services.kqcxSession(),
+                    records = RideRecordStore(database.rideRecordDao()),
+                    prefs = services.displayPrefs(),
+                    orderCache = KqcxOrderStore(database.kqcxOrderDao()),
+                    onReconcileAutoReturn = null,
+                )
+            }
+            KvcxScreen(
+                viewModel = viewModel,
+                onBack = pop,
+                onOpenOrders = { push(IosRoute(SubpageScreen.KVCX_ORDERS)) },
+                brandIcon = null,
+            )
+        }
+
+        SubpageScreen.KVCX_ORDERS -> {
+            val database = services.database()
+            val viewModel = remember {
+                KvcxOrdersViewModel(
+                    session = services.kqcxSession(),
+                    orderCache = KqcxOrderStore(database.kqcxOrderDao()),
+                )
+            }
+            KvcxOrdersScreen(viewModel = viewModel, onBack = pop)
+        }
 
         // ---------------------------------------------------------------- AI 调课
         //
