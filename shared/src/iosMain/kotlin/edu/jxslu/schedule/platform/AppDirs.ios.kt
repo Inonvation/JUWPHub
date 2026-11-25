@@ -2,9 +2,8 @@ package edu.jxslu.schedule.platform
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import platform.Foundation.NSApplicationSupportDirectory
-import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
-import platform.Foundation.NSSearchPathForDirectoriesInDomains
+import platform.Foundation.NSHomeDirectory
 import platform.Foundation.NSTemporaryDirectory
 import platform.Foundation.NSUserDomainMask
 
@@ -55,16 +54,12 @@ actual fun appDataDir(): String {
     }.getOrNull()
     if (!support.isNullOrBlank()) return support
 
-    // 2. Documents：同一个沙箱，但不是 URLForDirectory 那条容易返回 null 的路
-    val documents = runCatching {
-        // 位置参数，不写具名参数：这是 ObjC 的 C 函数，Kotlin/Native 侧的参数名不一定叫
-        // `directory` / `domainMask` / `expandTilde`，猜错就是编译错误，而本机编不了 iOS。
-        NSSearchPathForDirectoriesInDomains(
-            NSDocumentDirectory,
-            NSUserDomainMask,
-            true,
-        ).firstOrNull() as? String
-    }.getOrNull()
+    // 2. 沙箱根下的 Documents：同一个沙箱，但不走 URLForDirectory 那条会返回 null 的路。
+    //    刻意用 `NSHomeDirectory()` 拼、不用 `NSSearchPathForDirectoriesInDomains`：
+    //    后者在 Kotlin/Native 里回的是 `List<*>`，要强转 + 猜 C 函数的参数名，而本机编不了 iOS，
+    //    少一个不确定符号就少一次白跑的 CI。`<home>/Documents` 是 iOS 沙箱的固定布局，
+    //    `UIFileSharingEnabled` 暴露的正是它——日志因此能被用户自己在「文件」App 里取到。
+    val documents = runCatching { NSHomeDirectory() + "/Documents" }.getOrNull()
     if (!documents.isNullOrBlank()) return documents
 
     // 3. 临时目录：活不过重启，但至少日志写得进去
