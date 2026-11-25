@@ -58,6 +58,7 @@ import edu.jxslu.schedule.ui.jwvw.JwWebFit
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.SettingsScreen
+import edu.jxslu.schedule.ui.onboarding.IosOnboardingJwLogin
 import edu.jxslu.schedule.ui.onboarding.OnboardingScreen
 import edu.jxslu.schedule.ui.theme.JuwTheme
 import edu.jxslu.schedule.ui.today.ActiveServiceCard
@@ -118,13 +119,26 @@ private fun IosRoot(services: IosServices) {
         if (jwOpen) {
             JwLoginScreen(services = services, onClose = { jwOpen = false })
         } else if (onboardingSeen == false) {
-            // 首启引导：六屏里 iOS 只给得起两样（`onOpenJwLogin` + `onFinish`）。
-            // 其余四个槽位传 null，对应的原生表单 / 品牌位图 / 完成页「其他可选账号」整块不渲染
-            // （`OnboardingScreen` 的槽位表，见其 KDoc 与 design/ios-port.md §10.6）。
-            // 第 2 步换成「去导入页登录」一个按钮 —— 因为 iOS 用的是 WKWebView 手登，
-            // 没有 Android 那套 CAS 自动填表与凭证保险箱。
+            // 首启引导：六屏里 iOS 现在给得起三样（`jwLogin` / `onOpenJwLogin` / `onFinish`）。
+            //
+            // `jwLogin` 非空 ⇒ 第 2 步是**页面内的原生表单**（与 Android 一样：填学号密码 →
+            // 真登一次 CAS → 过了才存进 Keychain）。这是 2026-11-25 用户报的那个问题的正解：
+            // 上一版只给「去导入页登录」一个按钮，点开 WebView 登完回来，引导页不知道成没成，
+            // 于是永远显示「去登录」，用户以为白登了。
+            //
+            // `onOpenJwLogin` 仍然传：只在 `jwLogin` 为 null（凭证存储建不起来）时才会渲染成
+            // 按钮，作为兜底出口。
+            //
+            // 其余三个槽位传 null：品牌位图（iOS 没有那套素材）、完成页「其他可选账号」
+            // （二级页栈已由抽屉承担）、欢迎页返回 / 声明弹窗退出（iOS 没有返回键、也没有
+            // `finishAffinity` 这种「整任务退场」）——对应内容整块不渲染（§11.2 ④）。
+            val onboardingCredentials = remember { services.accountCredentials() }
+            val onboardingJwLogin = remember(onboardingCredentials) {
+                onboardingCredentials?.let { IosOnboardingJwLogin(it) }
+            }
             OnboardingScreen(
                 onFinish = { onboardingSeen = true },
+                jwLogin = onboardingJwLogin,
                 onOpenJwLogin = { jwOpen = true },
             )
         } else {

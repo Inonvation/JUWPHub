@@ -86,40 +86,60 @@ class IosJwReadSession(
     }
 
     override suspend fun fetchHtml(url: String): CasFetchResult {
-        // ① 优先：在已登录的 WebView 里同源取（唯一不依赖 Cookie 提取的路径）
-        if (IosWebFetch.available && JwUrls.isJwHost(url)) {
+        // ① 先试活着的 WebView（同源取，登录态由 WebKit 带）。
+        //
+        //    **失败不能当场返回**：这是 2026-11-25 用户报「明明登录过、也存了凭据，点导入还是要
+        //    我登录」的真正原因。上一版在这里 `return CasFetchResult.Failed(...)`，于是「WebView
+        //    在但里面没登录」（用户刚打开导入页，页面上还是登录表单）就把整条链判定为失败，
+        //    下面两条有凭证的路一条都走不到。
+        var webViewFailure: CasFetchResult.Failed? = null
+        if (!preferNative && IosWebFetch.available && JwUrls.isJwHost(url)) {
             val got = IosWebFetch.fetch(url)
             if (got != null) {
                 val (status, body) = got
-                return when {
-                    status !in 200..299 -> CasFetchResult.Failed("教务返回 HTTP $status")
-                    isLoggedOut(body) -> {
-                        IosJwSessionFlag.markLost()
-                        CasFetchResult.Failed("教务会话已失效，请重新登录一次")
-                    }
+                when {
+                    status !in 200..299 ->
+                        webViewFailure = CasFetchResult.Failed("教务返回 HTTP $status")
+                    isLoggedOut(body) ->
+                        webViewFailure = CasFetchResult.Failed(LOGIN_PAGE_SEEN)
                     else -> {
                         IosJwSessionFlag.markUsable()
-                        CasFetchResult.Ok(body)
+                        return CasFetchResult.Ok(body)
                     }
                 }
             }
-            // 取不到（视图刚销毁 / 超时）就往下走，不直接失败
         }
-        // ② 原生会话里已有 cookie：交给共享会话（它验会话，被顶时还能用凭证重登一次）
-        if (cas.hasCookies()) return cas.fetchHtml(url)
+        // ② 原生会话（Ktor + Keychain 凭证）：WebView 没登录时的主路径，它自己会验会话、
+        //    会话过期还会用存下的学号密码重登一次。
+        val viaCas = cas.fetchHtml(url)
+        if (viaCas is CasFetchResult.Ok) {
+            // 一旦这条走通，本进程后续取页直接找它：一次归档要取十几个学期的两页，
+            // 每页都先去 WebView 撞一次登录页纯属浪费（也拖慢进度条）。
+            preferNative = true
+            IosJwSessionFlag.markUsable()
+            return viaCas
+        }
         // ③ 只在网页里登过、还没回灌：直接带着那份 cookie 发（老路径，没有重登能力）
         val cookie = WebCookies.headerFor(url)
         if (cookie != null) {
             val viaCookie = fetchWithCookie(url, cookie)
             if (viaCookie is CasFetchResult.Ok) return viaCookie
-            // 网页会话过期了但存过学号密码：让共享会话用凭证直登一次，别让用户看到
-            // 「请重新登录」——那正是这次要修的那条链
-            val viaCas = cas.fetchHtml(url)
-            return if (viaCas is CasFetchResult.Ok) viaCas else viaCookie
         }
-        // ④ 没有 WebView、没有网页 cookie：交给共享会话（有凭证就自动登录，没凭证它会回原因）
-        return cas.fetchHtml(url)
+        // ④ 全都不行：优先报原生会话给出的原因（它更具体，例如「凭证错误已被停用」），
+        //    其次才是 WebView 那条，最后兜一句通用原因
+        return (viaCas as? CasFetchResult.Failed)
+            ?: webViewFailure
+            ?: CasFetchResult.Failed("没有可用的教务会话，请先登录或到「我的 → 教务账户」保存学号密码")
     }
+
+    /**
+     * 本进程内是否已经确认「原生会话可用」。
+     *
+     * 只要 [cas] 取成功过一次就置真：此后 [fetchHtml] 跳过 WebView 那一跳。它只是加速用的
+     * 缓存——置真之后若会话过期，`cas.fetchHtml` 自己会用凭证重登；重登也失败时它会回明确原因，
+     * 不会静默。
+     */
+    private var preferNative: Boolean = false
 
     /**
      * 进程内有没有教务会话（只读，一个请求都不发）。
@@ -221,6 +241,16 @@ class IosJwReadSession(
          * 而正常课表页有几十 KB——全串 `contains` 六次是白烧 CPU。
          */
         const val SEARCH_HEAD_CHARS = 8_000
+
+        /**
+         * WebView 里还是登录页时给用户看的一句话。
+         *
+         * 措辞刻意不是「会话已失效」：用户可能**从没在这个 WebView 里登过**（只是刚打开导入页），
+         * 而我们会在这之后自动用存下的凭据去登。所以这句只在「凭证那条路也失败」时才会露出来，
+         * 它得同时覆盖两种可能。
+         */
+        const val LOGIN_PAGE_SEEN =
+            "网页里还没有登录教务（正在尝试用已保存的学号密码自动登录）"
 
         /** 与 `IosCasTransport` / `JwHttpSession` 同一串桌面 UA。 */
         const val DESKTOP_UA =
