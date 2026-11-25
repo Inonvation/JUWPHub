@@ -140,7 +140,7 @@ fun RideScreen(
      */
     initialFocusCarNum: String? = null,
     viewModel: BikeMapViewModel = viewModel(
-        factory = BikeMapViewModel.Factory(
+        factory = BikeMapViewModelFactory(
             Graph.kqcxBikeClient(LocalContext.current),
             Graph.displayPrefs(LocalContext.current),
         ),

@@ -18,6 +18,7 @@ import edu.jxslu.schedule.data.kqcx.ZoneCacheStore
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.InboxKind
+import edu.jxslu.schedule.ui.ebike.AppKvcxSideEffects
 import edu.jxslu.schedule.ui.ebike.KvcxNotice
 import edu.jxslu.schedule.ui.ebike.KvcxRideController
 import edu.jxslu.schedule.data.power.PowerClient
@@ -1003,7 +1004,7 @@ object Graph {
                 // 从第一帧就留在顶部，不等第一次订单查询回包才归位。
                 val rideHint = KvcxRideHintPrefsStore(context.applicationContext)
                 KvcxRideController(
-                    session = runCatching { kqcx(context) }.getOrNull(),
+                    session = runCatching { kqcxCore(context) }.getOrNull(),
                     scope = scope,
                     // 事件只走共享流（控制器见流即不再回调；这里给空实现防重复投递）
                     onNotice = { _, _ -> },
@@ -1011,6 +1012,9 @@ object Graph {
                     rideNotices = notices,
                     rideUnlocked = unlocked,
                     remoteRideReminder = remoteReminder,
+                    // 计时 / 提醒 / 善后 / 记账：控制器搬进共享层后这个槽位没有默认实现，
+                    // Android 在这里显式装配（iOS 传 null = 本平台没有通知能力）
+                    effects = AppKvcxSideEffects,
                     // 「猜你想用」：建单成功记一次真实订单（不是打开骑行页）
                     onOrderCreated = { recordGuessOrder(GuessTarget.KVCX) },
                     launchHadRide = rideHint.hadRide,
