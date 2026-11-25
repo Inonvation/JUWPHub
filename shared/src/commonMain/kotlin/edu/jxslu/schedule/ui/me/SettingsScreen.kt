@@ -69,6 +69,15 @@ fun SettingsScreen(
     /** 从侧栏齿轮进来时给返回箭头（独立窗口，恒有）。 */
     onBack: (() -> Unit)? = null,
     /**
+     * 左侧抽屉入口（iOS 壳的 `ModalNavigationDrawer`）：非 null 且 [onBack] 为 null 时，
+     * 顶栏最左侧渲染汉堡。
+     *
+     * **两者同时非空以 [onBack] 优先**：二级页有返回键时，同一个位置再放汉堡会让
+     * 「回上一页」和「开抽屉」两个语义挤在一格；而本页在 Android 侧是独立窗口（恒有返回键），
+     * 所以 Android 不传这个参数，顶栏与图标顺序**逐字不变**。
+     */
+    onOpenDrawer: (() -> Unit)? = null,
+    /**
      * 「AI 调课」入口。false = 本平台没有这一页（iOS 精简版），整行不渲染。
      *
      * 与 `onOpen` 的 null 语义不同：这一行是**页面自己**的清单项，不是宿主回调，
@@ -89,6 +98,11 @@ fun SettingsScreen(
                     if (onBack != null) {
                         IconButton(onClick = onBack) {
                             Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
+                        }
+                    } else if (onOpenDrawer != null) {
+                        // 与今日页顶栏同一只（`TodayScreen` 的 navigationIcon）：同一个抽屉、同一套口径
+                        IconButton(onClick = onOpenDrawer) {
+                            Icon(AppIcons.Menu01, contentDescription = "打开生活侧栏")
                         }
                     }
                 },

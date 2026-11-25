@@ -97,8 +97,9 @@ private fun IosRoot(services: IosServices) {
         } else {
             ModalNavigationDrawer(
                 drawerState = drawerState,
-                // 手势开着：课表 / 我的 两页没有汉堡位（共享页顶栏的槽位不由 iOS 决定），
-                // 左缘右滑是那两页唯一的抽屉入口，与 iOS 原生习惯一致。
+                // 手势开着：左缘右滑随时可用。三个 Tab 页的顶栏也都有汉堡
+                //（`TodayScreen` / `WeekScreen` / `SettingsScreen` 的 `onOpenDrawer`），
+                // 手势只是第二条路，不再是唯一的入口。
                 gesturesEnabled = true,
                 drawerContent = {
                     IosDrawer(
@@ -217,6 +218,8 @@ private fun IosRoot(services: IosServices) {
                                 val viewModel = remember { WeekViewModel(services.scheduleRepository()) }
                                 WeekScreen(
                                     viewModel = viewModel,
+                                    // 顶栏左侧汉堡 → 左侧抽屉（三个 Tab 页同一入口）
+                                    onOpenDrawer = openDrawer,
                                     // 空态的「去导入课表」→ 教务登录页（WKWebView 登录后自动抓取落库）
                                     onOpenJwImport = { jwOpen = true },
                                     // 切换课表弹层里的「管理课表…」与顶栏「检测 → 查看」：
@@ -249,6 +252,9 @@ private fun IosRoot(services: IosServices) {
                             IosTab.Me -> SettingsScreen(
                                 onOpen = { screen -> pushRoute(IosRoute(screen)) },
                                 viewModel = meViewModel,
+                                // 顶栏左侧汉堡 → 左侧抽屉。这一页在 iOS 上是根 Tab（没有返回键），
+                                // 所以 navigationIcon 位归汉堡；`onBack` 不传 = null
+                                onOpenDrawer = openDrawer,
                                 // 精简版：AI 调课与百宝箱整块下线，两行不渲染
                                 showAiSchedule = false,
                                 showToolbox = false,
@@ -257,7 +263,7 @@ private fun IosRoot(services: IosServices) {
                     }
                 }
                 // 底栏只在根层出现：二级页有自己的返回键，再压一条底栏会把返回路径搞混。
-                // 三格与 Android 一致（今日 / 课表 / 我的），抽屉靠左缘右滑或今日页的汉堡打开。
+                // 三格与 Android 一致（今日 / 课表 / 我的），抽屉靠各页顶栏的汉堡或左缘右滑打开。
                 if (top == null) {
                     Row(
                         Modifier
@@ -280,7 +286,7 @@ private fun IosRoot(services: IosServices) {
  * iOS 底栏的三个 Tab（2026-11-25 晚改回三格）。
  *
  * 与 Android 对齐：**今日 / 课表 / 我的**。教务汇总页不再是 Tab——它下面的每一个入口
- * 都在左侧抽屉的「教务」分组里，少一层跳转反而更快。抽屉靠左缘右滑或今日页的汉堡打开。
+ * 都在左侧抽屉的「教务」分组里，少一层跳转反而更快。抽屉靠各页顶栏的汉堡或左缘右滑打开。
  *
  * 今日页的**进行中服务卡**已接上（只接开水与 U净）；快趣骑行 / 趣智开水 / 趣智面板 /
  * 扫码在 iOS 上没有实现，槽位传 `null`，对应内容整块不渲染（§11.2 ④）。
@@ -304,7 +310,7 @@ private enum class IosTab(val label: String) {
  * |---|---|---|
  * | 主体 | 二级页栈顶（[IosRouteContent]）或三个 Tab 之一 | 栈空时显示 Tab，栈非空时显示栈顶 |
  * | 底栏 | 今日 / 课表 / 我的 | 只在栈空时出现，三格与 Android 一致 |
- * | 抽屉 | [IosDrawer]（`ModalNavigationDrawer`） | 左缘右滑或今日页汉堡打开；分组列出**已经搬过来**的二级页（白名单在 `IosNavigation.kt`） |
+ * | 抽屉 | [IosDrawer]（`ModalNavigationDrawer`） | 各页顶栏的汉堡或左缘右滑打开；分组列出**已经搬过来**的二级页（白名单在 `IosNavigation.kt`） |
  * | 覆盖层 | [JwLoginScreen] | 点「去导入」进来的教务登录 WebView（WKWebView） |
  *
  * 路由键用的是共享层的 [SubpageScreen]（Android 的 `SubpageActivity` 消费同一份），
