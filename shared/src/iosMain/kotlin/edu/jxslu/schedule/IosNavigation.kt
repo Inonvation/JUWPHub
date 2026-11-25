@@ -833,10 +833,11 @@ internal fun IosRouteContent(
             ReminderSettingsScreen(
                 onBack = pop,
                 viewModel = vm,
-                // 上课提醒在 iOS 上还没有排程（§12.9.2：缺「课表 → 绝对时刻」的换算与 64 条分配），
-                // 所以 onReschedule 与授权入口都仍是 null——开关照常落库，这一侧不排闹钟，
-                // 也不为一个排不出东西的开关去弹系统授权框。
-                // 作业截止提醒 2026-11-26 起真能用：进本页与改开关都会重排一次（授权在重排里一并请求）。
+                // 上课提醒（2026-11-26 起 iOS 真有排程，见 `IosClassReminder`）：
+                // `class.` 前缀、未来 4 天、上限 40 条；改开关就按前缀清空重排一次。
+                // 授权在这一步顺带请求（三个提醒族共用一次系统弹框），被拒则静默不排。
+                onReschedule = { services.classReminder().reschedule() },
+                // 作业截止提醒：进本页与改开关都会重排一次。
                 onRecheckHomework = { services.homeworkReminder().reschedule() },
             )
         }
