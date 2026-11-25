@@ -44,9 +44,12 @@
 - 结构在 `MainActivity` 的 `JuwApp` 里，内容在 `ui/life/SideDrawer.kt`，手势状态在
   `ui/common/StackedDrawerState.kt`。**层级是「主页面在前、侧栏在后」**：
   - 侧栏是 `Box` 里的**静态后层**（300dp 宽、`surfaceContainerLow`、不位移）；
-  - 主页面是前层 `Surface`：`translationX = 300dp·p − (1−scale)·宽/2`、`scale = 1 − 0.06·p`、
-    圆角与阴影随 `p` 渐显。**位移补的是缩放绕中心少走的那一半**——少了它页面左缘会离侧栏
-    差一截；改缩放比例时这条式子要一起改；
+  - 主页面是前层 `Surface`，挂 `Modifier.drawerCardTransform(cardTransform) { drawer.progress }`。
+    **缩放 / 圆角 / 阴影 / 位移的唯一实现在共享层的 `ui/common/DrawerCardTransform.kt`**
+    （2026-11-25 从 `MainActivity` 收口，iOS 的 `ModalNavigationDrawer` 吃同一份代码：
+    数值、算式、1dp 量化档位都在那里，**别在任一端再写一份**）。
+    位移里补的是「缩放绕中心少走的那一半」，少了它页面左缘会离侧栏差一截——
+    改缩放比例时这条式子要一起改（不变量：`progress = 1` 时左缘正好落在侧栏右缘）；
   - 根 `Box` 的底色 = 侧栏底色，否则页面缩小后上下露出的留白会是另一种颜色。
 - 手势：`Modifier.draggable`（**不要**换回 `detectHorizontalDragGestures`，会和纵向滚动抢手势）
   + 20dp 方向锁 + 32dp 落定阈值 + 临界阻尼弹簧（`StiffnessMediumLow`、无回弹、速度按

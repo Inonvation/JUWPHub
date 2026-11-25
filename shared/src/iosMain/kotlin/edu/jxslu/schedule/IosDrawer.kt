@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +40,27 @@ import edu.jxslu.schedule.ui.life.PaymentCodeEntry
 import edu.jxslu.schedule.ui.life.WalletHero
 import edu.jxslu.schedule.ui.life.lifeServiceRows
 import edu.jxslu.schedule.ui.life.walletCardTexts
+
+/**
+ * iOS 抽屉宽度（2026-11-25 定 **300dp**，与 Android 侧栏同宽）。
+ *
+ * 为什么不用 `ModalDrawerSheet` 的默认值（M3 是 360dp）：
+ *
+ * 1. **内容是按 300dp 排的**。抽屉里的身份卡 / 钱包卡 / 服务行全是共享层的
+ *    `ui/life/SideDrawerParts.kt`，与 Android 侧栏同一份代码，那套排版的口径就是 300dp；
+ * 2. **主卡让位才读得出来**。展开时主卡整体右移「侧栏宽」并缩到 94%
+ *    （`ui/common/DrawerCardTransform.kt`），侧栏占满 360dp 时 iPhone 上只剩一条 30pt 的
+ *    卡片边缘，层级效果等于看不见；300dp 时能看见约 90pt，与 Android 一致。
+ *
+ * 这个值同时是主卡位移的上限，**两处必须是同一个数**：`MainViewController` 里
+ * `rememberDrawerCardTransform(maxSlidePx = …)` 读的就是它。改宽度只改这一处。
+ *
+ * 宽度靠 `Modifier.width` 钉住：M3 在 `DrawerSheet` 里加的是
+ * `sizeIn(min = MinimumDrawerWidth, max = MaximumDrawerWidth)`，把固定宽度套在外层即可
+ * 收敛到 300dp（`sizeIn` 不再反抗）。抽屉的拖动锚点由 M3 自己按**实测宽度**更新，
+ * 所以开到底时 `currentOffset` 正好是 −300dp，归一化不会越界。
+ */
+internal val IosDrawerWidth = 300.dp
 
 /**
  * 抽屉里**由上面的卡片 / 行直接进**的页面，不再重复出现在下面的紧凑分组列表里。
@@ -198,7 +220,7 @@ internal fun IosDrawer(
         onOpenUjing = { onPick(IosRoute(SubpageScreen.UJING)) },
     )
 
-    ModalDrawerSheet {
+    ModalDrawerSheet(modifier = Modifier.width(IosDrawerWidth)) {
         Column(Modifier.fillMaxSize()) {
             // 上半区（身份卡 / 账号与登录 / 我的·设置 / 分隔线 / 钱包卡）也放进 `LazyColumn`：
             // Android 的侧栏是「整列滚动、底部付款码钉住」，段头与钱包区跟着内容一起滚。

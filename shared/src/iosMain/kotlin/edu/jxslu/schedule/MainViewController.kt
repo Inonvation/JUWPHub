@@ -1,5 +1,13 @@
 package edu.jxslu.schedule
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -35,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -52,6 +61,8 @@ import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppBackHandler
+import edu.jxslu.schedule.ui.common.drawerCardTransform
+import edu.jxslu.schedule.ui.common.rememberDrawerCardTransform
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jw.JwHubScreen
 import edu.jxslu.schedule.ui.jwvw.JwWebFit
@@ -61,6 +72,7 @@ import edu.jxslu.schedule.ui.me.SettingsScreen
 import edu.jxslu.schedule.ui.onboarding.IosOnboardingJwLogin
 import edu.jxslu.schedule.ui.onboarding.OnboardingScreen
 import edu.jxslu.schedule.ui.theme.JuwTheme
+import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.today.ActiveServiceCard
 import edu.jxslu.schedule.ui.today.TodayScreen
 import edu.jxslu.schedule.ui.today.TodayServiceSlot
@@ -87,10 +99,18 @@ private fun IosRoot(services: IosServices) {
         val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
         val shellScope = rememberCoroutineScope()
         val openDrawer: () -> Unit = { shellScope.launch { drawerState.open() } }
+        // 主卡的缩放 / 圆角 / 阴影（2026-11-25 晚）：与 Android 的层叠抽屉**同一份算式与同一组
+        // 数值**，都在 `ui/common/DrawerCardTransform.kt`。位移上限就是侧栏宽度——侧栏开到底时
+        // 主卡左缘正好落在侧栏右缘（Android 那条不变量，见该文件的类 KDoc）。
+        val drawerWidthPx = with(LocalDensity.current) { IosDrawerWidth.toPx() }
+        val cardTransform = rememberDrawerCardTransform(maxSlidePx = drawerWidthPx)
         // 「我的」与课表显示设置共用同一个 VM（Android 侧是 Activity 作用域，两边等价）。
         // iOS 没有配置变更重建，`remember` 的生命周期就是这一屏；见 design/ios-port.md §11.2 ①。
         val meViewModel = remember { MeViewModel(services.scheduleRepository()) }
-        val top = stack.lastOrNull()
+        // 栈的「形状」= 深度 + 栈顶。**深度进键**是为了让 push 与 pop 走不同的转场：
+        // `stack` 是 `mutableStateListOf`，直接拿它当 `AnimatedContent` 的键永远判成「没变」
+        //（SnapshotStateList 没有结构相等），所以这里取两个快照值拼一个 `Pair`。
+        val stackShape = stack.size to stack.lastOrNull()
 
         // 首启引导（2026-11-25 晚接上）：Android 在 `onboarding_seen` 为 false 时用独立
         // `OnboardingActivity` 拉起，iOS 没有第二个窗口，所以盖在根上。
@@ -144,10 +164,22 @@ private fun IosRoot(services: IosServices) {
         } else {
             ModalNavigationDrawer(
                 drawerState = drawerState,
+                // 后层底色 = 侧栏底色（`ModalDrawerSheet` 的默认容器色也是它）：主卡缩小后
+                // 露出的上下留白读起来要是「同一层」，而不是两套颜色。Android 的根 Box 同理。
+                // 挂在 `ModalNavigationDrawer` 的 modifier 上而不是再套一层 Box：内容层与
+                // 侧栏层都画在它上面，一层就够。
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
                 // 手势开着：左缘右滑随时可用。三个 Tab 页的顶栏也都有汉堡
                 //（`TodayScreen` / `WeekScreen` / `SettingsScreen` 的 `onOpenDrawer`），
                 // 手势只是第二条路，不再是唯一的入口。
                 gesturesEnabled = true,
+                // **遮罩透明**（2026-11-25）：Android 的侧栏展开时不压暗主卡，而是把主卡缩小
+                // 让位（`ui/common/DrawerCardTransform.kt`）。同一个效果在 iOS 上如果叠一层
+                // M3 默认的 32% 黑遮罩，主卡会一边缩小一边变暗，观感是「弹了个模态框」。
+                // 遮罩本身仍留着：点它关抽屉的行为与命中区都不变，只是不画颜色。
+                scrimColor = Color.Transparent,
                 drawerContent = {
                     IosDrawer(
                         // 身份区（顶部）读的是 `services.displayPrefs()` 里学籍卡落库的三行，
@@ -169,189 +201,242 @@ private fun IosRoot(services: IosServices) {
                 Column(
                     Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background),
+                        .background(MaterialTheme.colorScheme.background)
+                        // 主卡层级效果（与 Android 的层叠抽屉同一份算式）：`currentOffset`
+                        // 是侧栏自己的位移（全开 = −侧栏宽，单位 px），归一化成 0…1 交给共享层。
+                        // **读在绘制期**：`drawerCardTransform` 内部把它放在 `graphicsLayer` 的
+                        // lambda 里求值，侧栏拖动时不会让整棵页面树重组。
+                        .drawerCardTransform(cardTransform) {
+                            -drawerState.currentOffset / drawerWidthPx
+                        },
                 ) {
                 Box(
                     Modifier
                         .weight(1f)
                         .fillMaxWidth(),
                 ) {
-                    if (top != null) {
-                        IosRouteContent(
-                            route = top,
-                            services = services,
-                            meViewModel = meViewModel,
-                            push = pushRoute,
-                            pop = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) },
-                        )
-                    } else {
-                        when (tab) {
-                            // 今日 Tab（V1 搬进共享层）：主屏。课程 / 作业 / 收件箱 /
-                            // 猜你想用 / 开水面板 / 进行中服务卡都在共享层，直接可用；
-                            // 快趣骑行、趣智开水、趣智面板、扫码、品牌位图在 iOS 上没有实现，
-                            // 槽位留 null = 整块不渲染（design/ios-port.md §11.2 ④）。
-                            IosTab.Today -> {
-                                // iOS 没有配置变更重建，`remember` 的生命周期就是这一屏（§11.2 ①）
-                                val viewModel = remember {
-                                    TodayViewModel(
-                                        repo = services.scheduleRepository(),
-                                        homeworkRepo = services.homeworkRepository(),
-                                        weatherRepo = services.weatherRepository(),
-                                        // 精简版去掉了问渠：推荐卡不能推一个点不动的入口
-                                        blockedGuessTargets = setOf(GuessTarget.WENQU),
+                    // 二级页栈与根层 Tab 合成**一个** AnimatedContent：`null` 就是根层。
+                    // 键取「深度 + 栈顶」而不是 `stack` 本身——`mutableStateListOf` 没有结构相等，
+                    // 拿它当键永远判成"没变"。
+                    AnimatedContent(
+                        targetState = stackShape,
+                        // 铺满：滑入的位移量按容器宽度算（`{ it }` 就是整屏），不铺满会滑不到位
+                        modifier = Modifier.fillMaxSize(),
+                        transitionSpec = {
+                            // 浅了是 pop、深了是 push。同一深度换页（不经过根层）也算 push。
+                            if (targetState.first > initialState.first) {
+                                (slideInHorizontally(Motion.page()) { it } + fadeIn(Motion.page()))
+                                    .togetherWith(fadeOut(Motion.exit()))
+                            } else {
+                                fadeIn(Motion.exit()).togetherWith(
+                                    slideOutHorizontally(Motion.pageExit()) { it } +
+                                        fadeOut(Motion.pageExit()),
+                                )
+                            }
+                        },
+                        label = "IosStack",
+                    ) { shape ->
+                        val route = shape.second
+                        if (route != null) {
+                            IosRouteContent(
+                                route = route,
+                                services = services,
+                                meViewModel = meViewModel,
+                                push = pushRoute,
+                                // 退栈走 `stack`：与 `AppBackHandler` 同一条路径
+                                pop = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) },
+                            )
+                        } else {
+                            AnimatedContent(
+                                targetState = tab,
+                                // 同上：上浮量按容器高度算（`it / 32`），不铺满会偏
+                                modifier = Modifier.fillMaxSize(),
+                                transitionSpec = {
+                                    // 淡入 + 轻微上浮（屏高的 1/32，约 26pt）：Android 那边是纯
+                                    // 交叉淡入（`MainActivity.tabEnter()`），这里多给一点方向感。
+                                    // 退场只淡出、不再位移——两段都动会被读成"页面在滑动"。
+                                    (fadeIn(Motion.state()) +
+                                        slideInVertically(Motion.state()) { it / 32 }).togetherWith(
+                                        fadeOut(Motion.exit()),
+                                    )
+                                },
+                                label = "IosTab",
+                            ) { currentTab ->
+                                when (currentTab) {
+                                    // 今日 Tab（V1 搬进共享层）：主屏。课程 / 作业 / 收件箱 /
+                                    // 猜你想用 / 开水面板 / 进行中服务卡都在共享层，直接可用；
+                                    // 快趣骑行、趣智开水、趣智面板、扫码、品牌位图在 iOS 上没有实现，
+                                    // 槽位留 null = 整块不渲染（design/ios-port.md §11.2 ④）。
+                                    IosTab.Today -> {
+                                        // iOS 没有配置变更重建，`remember` 的生命周期就是这一屏（§11.2 ①）
+                                        val viewModel = remember {
+                                            TodayViewModel(
+                                                repo = services.scheduleRepository(),
+                                                homeworkRepo = services.homeworkRepository(),
+                                                weatherRepo = services.weatherRepository(),
+                                                // 精简版去掉了问渠：推荐卡不能推一个点不动的入口
+                                                blockedGuessTargets = setOf(GuessTarget.WENQU),
+                                            )
+                                        }
+                                        // 进行中服务卡（V2，2026-11-25 晚）：卡片本体已在共享层，
+                                        // iOS 只接**开水（胖乖，HTTP）**与 **U净 洗衣**两条链；
+                                        // 快趣骑行（高德 SDK）/ 趣智开水（蓝牙）/ 品牌位图在 iOS 上没有
+                                        // 实现，对应槽位传 null = 整行不渲染（§11.2 ④）。
+                                        // `ujingRepository()` 是可空的（落点缺失时为 null）：没有仓库就是
+                                        // 一条恒空的订单流，卡片照旧只显示开水那行。
+                                        val ujingRepo = remember { services.ujingRepository() }
+                                        val ujingOrderFlow = remember(ujingRepo) {
+                                            ujingRepo?.orderState
+                                                ?: MutableStateFlow<UjingOrderSnapshot?>(null)
+                                        }
+                                        val ujingOrder by ujingOrderFlow.collectAsStateWithLifecycle()
+                                        val wateringFlow = remember {
+                                            services.qiekjWateringSessions().watering
+                                        }
+                                        val watering by wateringFlow.collectAsStateWithLifecycle()
+                                        TodayScreen(
+                                            viewModel = viewModel,
+                                            // 顶栏汉堡 → 左侧抽屉（Android 同一入口）
+                                            onOpenDrawer = openDrawer,
+                                            // 顶栏课表句 / 「当前课表不在本学期」的 CTA → 课表 Tab
+                                            onOpenWeek = { tab = IosTab.Week },
+                                            // 空态「从教务导入」→ 教务登录页（WKWebView 登录后自动抓取落库）
+                                            onOpenJwImport = { jwOpen = true },
+                                            // 其余入口一律进二级页栈；还没搬的页面落在
+                                            // `IosNotPortedScreen`（一句确定的话，不是点了没反应）。
+                                            onOpenTimetableSettings = {
+                                                stack.add(IosRoute(SubpageScreen.TIMETABLE_HUB))
+                                            },
+                                            onOpenWater = { stack.add(IosRoute(SubpageScreen.WATER)) },
+                                            onOpenQzxy = { stack.add(IosRoute(SubpageScreen.QZXY)) },
+                                            onOpenEbike = { stack.add(IosRoute(SubpageScreen.RIDE)) },
+                                            onOpenUjing = { stack.add(IosRoute(SubpageScreen.UJING)) },
+                                            onOpenDormRepair = { stack.add(IosRoute(SubpageScreen.DORM_REPAIR)) },
+                                            onOpenInbox = { stack.add(IosRoute(SubpageScreen.INBOX)) },
+                                            onOpenWeather = { stack.add(IosRoute(SubpageScreen.WEATHER)) },
+                                            // 笔记 / 作业 / 问渠在精简版下线：可空回调传 null（= 入口不渲染），
+                                            // 不再像上一版那样传一个「推了也不进栈」的 lambda
+                                            // 收件箱卡点消息行：iOS 有二级页栈，所以这个槽位填得上
+                                            onOpenSubpage = { screen, focus ->
+                                                pushRoute(IosRoute(screen, focus))
+                                            },
+                                            // 进行中服务卡：只给开水与 U净。
+                                            // `pinned` 恒 false——位置判据是「有在案快趣骑行」，iOS 没有快趣。
+                                            serviceCards = TodayServiceSlot(
+                                                pinned = false,
+                                                content = { cardModifier ->
+                                                    ActiveServiceCard(
+                                                        waterSession = watering,
+                                                        ujingOrder = ujingOrder,
+                                                        onOpenWater = {
+                                                            stack.add(IosRoute(SubpageScreen.WATER))
+                                                        },
+                                                        onOpenUjing = {
+                                                            stack.add(IosRoute(SubpageScreen.UJING))
+                                                        },
+                                                        // 「我已取走」只清订单快照：iOS 没有通知链路，
+                                                        // 没有「撤完成闹钟 / 撤已发通知」那一步可做
+                                                        onUjingDismiss = { ujingRepo?.dismissOrder() },
+                                                        modifier = cardModifier,
+                                                    )
+                                                },
+                                            ),
+                                            // 扫码（onScanCode）与品牌位图（brandIcon）在 iOS 侧还没有实现，
+                                            // 留 null：U净 弹窗的扫码钮点不动、猜你想用卡片没有图标位。
+                                            // 升级条件写在 ui/today/TodaySlots.kt 的 KDoc 里。
+                                        )
+                                    }
+
+                                    IosTab.Week -> {
+                                        val viewModel = remember { WeekViewModel(services.scheduleRepository()) }
+                                        WeekScreen(
+                                            viewModel = viewModel,
+                                            // 顶栏左侧汉堡 → 左侧抽屉（三个 Tab 页同一入口）
+                                            onOpenDrawer = openDrawer,
+                                            // 空态的「去导入课表」→ 教务登录页（WKWebView 登录后自动抓取落库）
+                                            onOpenJwImport = { jwOpen = true },
+                                            // 切换课表弹层里的「管理课表…」与顶栏「检测 → 查看」：
+                                            // 两页都已在 iOS 上可进，只是上一版没接线，点了落在空 lambda 上
+                                            onOpenTimetableManage = {
+                                                stack.add(IosRoute(SubpageScreen.TIMETABLE_MANAGE))
+                                            },
+                                            onOpenScheduleChanges = {
+                                                stack.add(IosRoute(SubpageScreen.SCHEDULE_CHANGES))
+                                            },
+                                            // 课程长按菜单里的「笔记 / 作业」在精简版下线：两个回调传 null，
+                                            // 弹窗里那两行不渲染（shared 侧 CourseDetailSheet 的可空槽位）
+                                            // 显示设置面板（S17 搬进共享层）：顶栏那只眼睛从此在 iOS 上也有入口。
+                                            // 面板里的「背景」整组不出现——iOS 还没有 UIImage 解码实现，
+                                            // 装配根的 scheduleBackgroundFiles() 返回 null。
+                                            displaySettings = { headerMinDp, dismiss ->
+                                                IosDisplaySettingsOverlay(
+                                                    viewModel = meViewModel,
+                                                    headerMinDp = headerMinDp,
+                                                    onDismiss = dismiss,
+                                                )
+                                            },
+                                            // 其余平台动作（时间表管理 / 调课 / 分享 / 日历同步 / 文件选择）
+                                            // 在 iOS 侧还没有实现，留默认值——对应入口本来就不渲染。
+                                        )
+                                    }
+
+                                    // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
+                                    // 十二个入口全部接真页面；评教与「在教务网页核对」要 WebView 浏览窗口，
+                                    // 传 null 即整条不渲染。
+                                    IosTab.Jw -> JwHubScreen(
+                                        onOpenTheorySchedule = {
+                                            pushRoute(IosRoute(SubpageScreen.THEORY_SCHEDULE))
+                                        },
+                                        onOpenLabSchedule = {
+                                            pushRoute(IosRoute(SubpageScreen.LAB_SCHEDULE))
+                                        },
+                                        onOpenScores = { pushRoute(IosRoute(SubpageScreen.SCORES)) },
+                                        onOpenExams = { pushRoute(IosRoute(SubpageScreen.EXAMS)) },
+                                        onOpenTextbooks = { pushRoute(IosRoute(SubpageScreen.TEXTBOOKS)) },
+                                        onOpenScholar = { pushRoute(IosRoute(SubpageScreen.SCHOLAR)) },
+                                        onOpenCurriculum = { pushRoute(IosRoute(SubpageScreen.CURRICULUM)) },
+                                        onOpenSelection = { pushRoute(IosRoute(SubpageScreen.SELECTIONS)) },
+                                        onOpenInternship = {
+                                            pushRoute(IosRoute(SubpageScreen.INTERNSHIP_BASES))
+                                        },
+                                        onOpenTeachingCalendar = {
+                                            pushRoute(IosRoute(SubpageScreen.TEACHING_CALENDAR))
+                                        },
+                                        onOpenLeaveHub = { pushRoute(IosRoute(SubpageScreen.LEAVE_HUB)) },
+                                        onOpenRepair = { pushRoute(IosRoute(SubpageScreen.DORM_REPAIR)) },
+                                        onOpenCalendar = { pushRoute(IosRoute(SubpageScreen.CAMPUS_CALENDAR)) },
+                                    )
+
+                                    // 「我的」= 设置首页（S17 搬进共享层）。**不在底栏**，从抽屉进。
+                                    // 每个入口都 push 一个路由，没搬的页面落在 IosNotPortedScreen。
+                                    IosTab.Me -> SettingsScreen(
+                                        onOpen = { screen -> pushRoute(IosRoute(screen)) },
+                                        viewModel = meViewModel,
+                                        // 顶栏左侧汉堡 → 左侧抽屉。这一页在 iOS 上是根 Tab（没有返回键），
+                                        // 所以 navigationIcon 位归汉堡；`onBack` 不传 = null
+                                        onOpenDrawer = openDrawer,
+                                        // 精简版：AI 调课与百宝箱整块下线，两行不渲染；
+                                        // 桌面小组件是 Glance（Android 的 Compose-for-appwidget），
+                                        // iOS 要 Swift 扩展 target + App Group，本轮不做 → 整行不渲染
+                                        showAiSchedule = false,
+                                        showToolbox = false,
+                                        showWidget = false,
                                     )
                                 }
-                                // 进行中服务卡（V2，2026-11-25 晚）：卡片本体已在共享层，
-                                // iOS 只接**开水（胖乖，HTTP）**与 **U净 洗衣**两条链；
-                                // 快趣骑行（高德 SDK）/ 趣智开水（蓝牙）/ 品牌位图在 iOS 上没有
-                                // 实现，对应槽位传 null = 整行不渲染（§11.2 ④）。
-                                // `ujingRepository()` 是可空的（落点缺失时为 null）：没有仓库就是
-                                // 一条恒空的订单流，卡片照旧只显示开水那行。
-                                val ujingRepo = remember { services.ujingRepository() }
-                                val ujingOrderFlow = remember(ujingRepo) {
-                                    ujingRepo?.orderState
-                                        ?: MutableStateFlow<UjingOrderSnapshot?>(null)
-                                }
-                                val ujingOrder by ujingOrderFlow.collectAsStateWithLifecycle()
-                                val wateringFlow = remember {
-                                    services.qiekjWateringSessions().watering
-                                }
-                                val watering by wateringFlow.collectAsStateWithLifecycle()
-                                TodayScreen(
-                                    viewModel = viewModel,
-                                    // 顶栏汉堡 → 左侧抽屉（Android 同一入口）
-                                    onOpenDrawer = openDrawer,
-                                    // 顶栏课表句 / 「当前课表不在本学期」的 CTA → 课表 Tab
-                                    onOpenWeek = { tab = IosTab.Week },
-                                    // 空态「从教务导入」→ 教务登录页（WKWebView 登录后自动抓取落库）
-                                    onOpenJwImport = { jwOpen = true },
-                                    // 其余入口一律进二级页栈；还没搬的页面落在
-                                    // `IosNotPortedScreen`（一句确定的话，不是点了没反应）。
-                                    onOpenTimetableSettings = {
-                                        stack.add(IosRoute(SubpageScreen.TIMETABLE_HUB))
-                                    },
-                                    onOpenWater = { stack.add(IosRoute(SubpageScreen.WATER)) },
-                                    onOpenQzxy = { stack.add(IosRoute(SubpageScreen.QZXY)) },
-                                    onOpenEbike = { stack.add(IosRoute(SubpageScreen.RIDE)) },
-                                    onOpenUjing = { stack.add(IosRoute(SubpageScreen.UJING)) },
-                                    onOpenDormRepair = { stack.add(IosRoute(SubpageScreen.DORM_REPAIR)) },
-                                    onOpenInbox = { stack.add(IosRoute(SubpageScreen.INBOX)) },
-                                    onOpenWeather = { stack.add(IosRoute(SubpageScreen.WEATHER)) },
-                                    // 笔记 / 作业 / 问渠在精简版下线：可空回调传 null（= 入口不渲染），
-                                    // 不再像上一版那样传一个「推了也不进栈」的 lambda
-                                    // 收件箱卡点消息行：iOS 有二级页栈，所以这个槽位填得上
-                                    onOpenSubpage = { screen, focus ->
-                                        pushRoute(IosRoute(screen, focus))
-                                    },
-                                    // 进行中服务卡：只给开水与 U净。
-                                    // `pinned` 恒 false——位置判据是「有在案快趣骑行」，iOS 没有快趣。
-                                    serviceCards = TodayServiceSlot(
-                                        pinned = false,
-                                        content = { cardModifier ->
-                                            ActiveServiceCard(
-                                                waterSession = watering,
-                                                ujingOrder = ujingOrder,
-                                                onOpenWater = {
-                                                    stack.add(IosRoute(SubpageScreen.WATER))
-                                                },
-                                                onOpenUjing = {
-                                                    stack.add(IosRoute(SubpageScreen.UJING))
-                                                },
-                                                // 「我已取走」只清订单快照：iOS 没有通知链路，
-                                                // 没有「撤完成闹钟 / 撤已发通知」那一步可做
-                                                onUjingDismiss = { ujingRepo?.dismissOrder() },
-                                                modifier = cardModifier,
-                                            )
-                                        },
-                                    ),
-                                    // 扫码（onScanCode）与品牌位图（brandIcon）在 iOS 侧还没有实现，
-                                    // 留 null：U净 弹窗的扫码钮点不动、猜你想用卡片没有图标位。
-                                    // 升级条件写在 ui/today/TodaySlots.kt 的 KDoc 里。
-                                )
                             }
-
-                            IosTab.Week -> {
-                                val viewModel = remember { WeekViewModel(services.scheduleRepository()) }
-                                WeekScreen(
-                                    viewModel = viewModel,
-                                    // 顶栏左侧汉堡 → 左侧抽屉（三个 Tab 页同一入口）
-                                    onOpenDrawer = openDrawer,
-                                    // 空态的「去导入课表」→ 教务登录页（WKWebView 登录后自动抓取落库）
-                                    onOpenJwImport = { jwOpen = true },
-                                    // 切换课表弹层里的「管理课表…」与顶栏「检测 → 查看」：
-                                    // 两页都已在 iOS 上可进，只是上一版没接线，点了落在空 lambda 上
-                                    onOpenTimetableManage = {
-                                        stack.add(IosRoute(SubpageScreen.TIMETABLE_MANAGE))
-                                    },
-                                    onOpenScheduleChanges = {
-                                        stack.add(IosRoute(SubpageScreen.SCHEDULE_CHANGES))
-                                    },
-                                    // 课程长按菜单里的「笔记 / 作业」在精简版下线：两个回调传 null，
-                                    // 弹窗里那两行不渲染（shared 侧 CourseDetailSheet 的可空槽位）
-                                    // 显示设置面板（S17 搬进共享层）：顶栏那只眼睛从此在 iOS 上也有入口。
-                                    // 面板里的「背景」整组不出现——iOS 还没有 UIImage 解码实现，
-                                    // 装配根的 scheduleBackgroundFiles() 返回 null。
-                                    displaySettings = { headerMinDp, dismiss ->
-                                        IosDisplaySettingsOverlay(
-                                            viewModel = meViewModel,
-                                            headerMinDp = headerMinDp,
-                                            onDismiss = dismiss,
-                                        )
-                                    },
-                                    // 其余平台动作（时间表管理 / 调课 / 分享 / 日历同步 / 文件选择）
-                                    // 在 iOS 侧还没有实现，留默认值——对应入口本来就不渲染。
-                                )
-                            }
-
-                            // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
-                            // 十二个入口全部接真页面；评教与「在教务网页核对」要 WebView 浏览窗口，
-                            // 传 null 即整条不渲染。
-                            IosTab.Jw -> JwHubScreen(
-                                onOpenTheorySchedule = {
-                                    pushRoute(IosRoute(SubpageScreen.THEORY_SCHEDULE))
-                                },
-                                onOpenLabSchedule = {
-                                    pushRoute(IosRoute(SubpageScreen.LAB_SCHEDULE))
-                                },
-                                onOpenScores = { pushRoute(IosRoute(SubpageScreen.SCORES)) },
-                                onOpenExams = { pushRoute(IosRoute(SubpageScreen.EXAMS)) },
-                                onOpenTextbooks = { pushRoute(IosRoute(SubpageScreen.TEXTBOOKS)) },
-                                onOpenScholar = { pushRoute(IosRoute(SubpageScreen.SCHOLAR)) },
-                                onOpenCurriculum = { pushRoute(IosRoute(SubpageScreen.CURRICULUM)) },
-                                onOpenSelection = { pushRoute(IosRoute(SubpageScreen.SELECTIONS)) },
-                                onOpenInternship = {
-                                    pushRoute(IosRoute(SubpageScreen.INTERNSHIP_BASES))
-                                },
-                                onOpenTeachingCalendar = {
-                                    pushRoute(IosRoute(SubpageScreen.TEACHING_CALENDAR))
-                                },
-                                onOpenLeaveHub = { pushRoute(IosRoute(SubpageScreen.LEAVE_HUB)) },
-                                onOpenRepair = { pushRoute(IosRoute(SubpageScreen.DORM_REPAIR)) },
-                                onOpenCalendar = { pushRoute(IosRoute(SubpageScreen.CAMPUS_CALENDAR)) },
-                            )
-
-                            // 「我的」= 设置首页（S17 搬进共享层）。**不在底栏**，从抽屉进。
-                            // 每个入口都 push 一个路由，没搬的页面落在 IosNotPortedScreen。
-                            IosTab.Me -> SettingsScreen(
-                                onOpen = { screen -> pushRoute(IosRoute(screen)) },
-                                viewModel = meViewModel,
-                                // 顶栏左侧汉堡 → 左侧抽屉。这一页在 iOS 上是根 Tab（没有返回键），
-                                // 所以 navigationIcon 位归汉堡；`onBack` 不传 = null
-                                onOpenDrawer = openDrawer,
-                                // 精简版：AI 调课与百宝箱整块下线，两行不渲染；
-                                // 桌面小组件是 Glance（Android 的 Compose-for-appwidget），
-                                // iOS 要 Swift 扩展 target + App Group，本轮不做 → 整行不渲染
-                                showAiSchedule = false,
-                                showToolbox = false,
-                                showWidget = false,
-                            )
                         }
                     }
                 }
                 // 底栏只在根层出现：二级页有自己的返回键，再压一条底栏会把返回路径搞混。
                 // 三格 = 今日 / 课表 / 教务，与 Android `AppBottomBar` 逐格对齐；
                 // 「我的」不在底栏（`inBottomBar = false`），从左侧抽屉进，与 Android 一致。
-                if (top == null) {
+                // 显隐走淡入淡出（`Motion.state()`，与 Android 壳层收底栏那一处同一档）：
+                // 硬切的话，退栈时底栏会在页面滑走之前先蹦出来。
+                AnimatedVisibility(
+                    visible = stack.isEmpty(),
+                    enter = fadeIn(Motion.state()),
+                    exit = fadeOut(Motion.state()),
+                ) {
                     // 选中主色 / 未选中 `onSurface` 0.6（用户口径）；指示块仍是 M3 默认的
                     // `secondaryContainer` 胶囊，与 Android 的选中块同一族。
                     val selectedTint = MaterialTheme.colorScheme.primary
