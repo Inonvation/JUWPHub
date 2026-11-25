@@ -48,11 +48,18 @@ object BikeCompass {
     const val ROTATION_180 = 2
     const val ROTATION_270 = 3
 
-    /** 坐标轴（取值与 Android `android.hardware.SensorManager.AXIS_*` 一致）。 */
-    const val AXIS_X = 0
-    const val AXIS_Y = 1
-    const val AXIS_MINUS_X = 2
-    const val AXIS_MINUS_Y = 3
+    /**
+     * 坐标轴（取值与 Android `android.hardware.SensorManager.AXIS_*` **逐个相同**：
+     * 正向 1/2，反向是 `0x80 or 1/2` = 129/130 —— 不是 0..3，也不是 1..4）。
+     *
+     * 常量的数值是硬口径：`BikeCompassTest` 直接拿 `SensorManager.AXIS_*` 与
+     * [remapAxes] 的输出对账，两边差一个数就是罗盘朝向整个错位。
+     * 2026-11-25 搬迁时就踩过一次：先按 0/1/2/3 写，单测当场红。
+     */
+    const val AXIS_X = 1
+    const val AXIS_Y = 2
+    const val AXIS_MINUS_X = 129
+    const val AXIS_MINUS_Y = 130
 
     /**
      * 页面可见期间的罗盘朝向流（度，0–360，北 = 0 顺时针）。
