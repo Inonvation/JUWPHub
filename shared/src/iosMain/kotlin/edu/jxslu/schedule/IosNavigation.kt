@@ -17,12 +17,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.data.xg.XgForm
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.ui.ai.AiChatScreen
 import edu.jxslu.schedule.ui.ai.AiChatViewModel
@@ -69,6 +71,7 @@ import edu.jxslu.schedule.ui.wenqu.WenquRecordsViewModel
 import edu.jxslu.schedule.ui.wenqu.WenquScreen
 import edu.jxslu.schedule.ui.wenqu.WenquSettingsScreen
 import edu.jxslu.schedule.ui.wenqu.WenquViewModel
+import edu.jxslu.schedule.ui.xg.XgFormScreen
 import edu.jxslu.schedule.ui.water.WaterViewModel
 import edu.jxslu.schedule.ui.toolbox.ToolboxScreen
 import edu.jxslu.schedule.ui.tweak.CourseTweakScreen
@@ -707,9 +710,23 @@ internal fun IosRouteContent(
         // ---------------------------------------------------------------- 学工 / 校历 / 实习
         //
         // 三页的数据层今晚搬进共享层了（学工 URL 规则、报修解析、校历存储、实习基地抓取）。
-        // 平台动作一律 null：请假要打开学工表单窗口、校历要位图解码、实习基地要内置浏览器，
-        // iOS 都还没有，对应入口整行不渲染。
-        SubpageScreen.LEAVE_HUB -> LeaveHubScreen(onBack = pop)
+        // 校历与实习基地的平台动作仍传 null（前者要位图解码、后者要内置浏览器），对应入口整行不渲染。
+        //
+        // **请假三张表单 2026-11-26 起能开**：`XgFormScreen` 搬进共享层，走 `WKWebView` 那条缝
+        // （`ui/web/WebViewController`），所以 `onOpenForm` 给真回调后三行入口会渲染。
+        // 表单窗口不是独立二级页：它在 hub 这一层用本地状态顶掉列表，返回即回列表——
+        // 这样不用给 `SubpageScreen` 加一个带参数的枚举（那要 `:app` 同步改）。
+        // iOS 上仍缺两件：附件上传（`onPickFiles` 在 K/N 绑定里没有 `WKOpenPanelParameters`）
+        // 与销假的定位（`onGeolocationPrompt` 未接）。不带附件的单子能填能提交。
+        SubpageScreen.LEAVE_HUB -> {
+            val openForm = remember { mutableStateOf<XgForm?>(null) }
+            val form = openForm.value
+            if (form == null) {
+                LeaveHubScreen(onBack = pop, onOpenForm = { openForm.value = it })
+            } else {
+                XgFormScreen(form = form, onBack = { openForm.value = null })
+            }
+        }
 
         SubpageScreen.CAMPUS_CALENDAR -> CampusCalendarScreen(onBack = pop)
 

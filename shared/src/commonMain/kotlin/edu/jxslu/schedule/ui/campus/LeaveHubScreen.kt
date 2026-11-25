@@ -39,6 +39,7 @@ import edu.jxslu.schedule.ui.icon.AppIcons
  * iOS 移植 W2（2026-11-25）：本页搬进共享层，开表单是平台动作（Android 走
  * `XgFormActivity`），收成 [onOpenForm] 可空回调——**null = 本平台没有学工表单窗口**，
  * 三行入口整块不渲染，只留下面那句说明（口径同 `design/ios-port.md` §11.2 ④）。
+ * 2026-11-26 起两端都非 null：iOS 的表单窗口是共享层的 `ui/xg/XgFormScreen`（`WKWebView`）。
  */
 @Composable
 fun LeaveHubScreen(
