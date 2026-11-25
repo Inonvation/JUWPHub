@@ -939,7 +939,7 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 | `ui/common` | 61 个文件：对话框、卡片、Markdown 栈、附件图槽、快捷方式、账户卡、`KeepScreenOn`、`AppBackHandler`、`LegalDialogs`（S22 随引导一起搬上来，`rememberCloseLock` 由此全仓只剩一份）等 |
 | `ui/today` | `TodayScreen` + `TodayViewModel` + 进行中服务卡（`ActiveServiceCard`）+ 猜你想用卡 + 收件箱卡 + `TodaySlots`（V1 2026-11-25；服务卡 V2 同日：开水 / 趣智 / U净 三行随之搬走，快趣行仍由 `:app` 注入槽位） |
 | `ui/onboarding` | 首启引导六屏（`OnboardingScreen`，S22 2026-11-25）+ 两个平台槽位类型 `OnboardingJwLogin` / `OnboardingBrandIcons`；接法见 §10.6 |
-| `ui/ebike` | **E2（2026-11-25）**：`BikeMapViewModel`（附近单车地图页的 VM，产出 `BikeMapInput`）、`KvcxRideController`（本机用车编排，出码页与地图页共用一份）、`performReturnBike`（还车 + 结算口径的唯一实现）、`EbikeRideSignal`、以及 `ui/ebike` 的位置 / 罗盘三件（S23）。**页面本身（`RideScreen` / `RidePanels` / `KvcxScreen` / 出码页）与高德视图仍在 `:app`**，见 §11.3 |
+| `ui/ebike` | **E2（2026-11-25）**：`BikeMapViewModel`（附近单车地图页的 VM，产出 `BikeMapInput`）、`KvcxRideController`（本机用车编排，出码页与地图页共用一份）、`performReturnBike`（还车 + 结算口径的唯一实现）、`EbikeRideSignal`、以及 `ui/ebike` 的位置 / 罗盘三件（S23）。**P4（2026-11-25）**：账号页 `KvcxScreen` + `KvcxViewModel`、历史订单页 `KvcxOrdersScreen` + `KvcxOrdersViewModel` 也搬了（4 文件 / 1,880 行）。**页面本身（`RideScreen` / `RidePanels` / 出码页）与高德视图仍在 `:app`**，见 §11.3 |
 | `ui/xg` | **2026-11-26**：`XgFormScreen`（学工表单窗口，报修 / 请假 / 销假 / 续假共用一张页，走 `ui/web/WebViewController` 那条缝）。iOS 上能开、能填、能提交；附件上传与销假的定位仍缺（§11.4 那两格 iOS 未接）。`:app` 那张同名页**暂留**——它压着接缝给不了的四件（`goBack` / `cacheMode` / 直取 `ClipData` 的选文件 / 定位授权），删了 Android 会丢附件上传与返回回退；升级条件写在文件头 `// shortcut:` |
 
 跨模块 `internal` 会失效：`TopBarHeight`、`GridTypography`、`quickCheckFeedback`、`OutcomeQueue`、
@@ -1088,7 +1088,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 
 | 阻塞 | 挡住的页面 |
 |---|---|
-| `com.amap` 高德 SDK | **2026-11-25 E2 复核后只剩视图与页面**：地图契约（`BikeMapInput`）/ 槽位（`BikeMapSlot`）与两端实现都在共享层，地图页的 ViewModel（`BikeMapViewModel`）与本机用车编排（`KvcxRideController`）也已搬完。`:app` 里还压着的只有三块：**高德 / osmdroid 视图本身**（`AmapMapView` / `OsmMapView` / `BikeMapHost` / `BikeMarkerOverlay` / `AmapMarkerBitmaps` / `AmapMaps`）、**页面**（`RideScreen` / `RidePanels` / `KvcxScreen` / `KvcxOrdersScreen` / `EbikeSettingsSheet` / 出码页 `EbikeViewModel`）、**通知那四件**（`EbikeFreeRideReminder` / `EbikeAutoReturnReminder` / `EbikeAutoReturnRunner` / 两个 Notifier + `EbikeFreeRideService`） |
+| `com.amap` 高德 SDK | **2026-11-25 E2 复核后只剩视图与页面**：地图契约（`BikeMapInput`）/ 槽位（`BikeMapSlot`）与两端实现都在共享层，地图页的 ViewModel（`BikeMapViewModel`）与本机用车编排（`KvcxRideController`）也已搬完。`:app` 里还压着的只有三块：**高德 / osmdroid 视图本身**（`AmapMapView` / `OsmMapView` / `BikeMapHost` / `BikeMarkerOverlay` / `AmapMarkerBitmaps` / `AmapMaps`）、**页面**（`RideScreen` / `RidePanels` / `EbikeSettingsSheet` / 出码页 `EbikeViewModel`）、**通知那四件**（`EbikeFreeRideReminder` / `EbikeAutoReturnReminder` / `EbikeAutoReturnRunner` / 两个 Notifier + `EbikeFreeRideService`）。**P4（2026-11-25）起账号页与历史订单页已不在这一行**：`KvcxScreen` / `KvcxViewModel` / `KvcxOrdersScreen` / `KvcxOrdersViewModel` 都在 `commonMain`，它们只要求宿主建 ViewModel + 注入三处（自动还车排程、历史订单入口、品牌位图），签名见 §11.2 ① |
 | `android.bluetooth`（`QzxyGattLink`） | 趣智开阀的传输层；协议与状态机已在共享层 |
 | `androidx.glance` | `ui/widget` 12 文件 / 3,112 行（桌面小组件） |
 | 通知 + `WorkManager` | `ui/reminder` 15 文件 / 4,107 行 |
