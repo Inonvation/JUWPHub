@@ -185,14 +185,14 @@ private fun secondsUntil(triggerAtMillis: Long): Double {
     return if (remaining < 1_000L) 1.0 else remaining / 1_000.0
 }
 
-/** 待发队列里的 U净 标识符。 */
-private fun List<*>.pendingUjingIdentifiers(): List<String> =
-    mapNotNull { (it as? UNNotificationRequest)?.identifier }
+/** 待发队列里的 U净 标识符。入参是可空的 `List<*>?`（ObjC 的 NSArray 没做非空标注，2026-11-25 CI 实测）。 */
+private fun List<*>?.pendingUjingIdentifiers(): List<String> =
+    orEmpty().mapNotNull { (it as? UNNotificationRequest)?.identifier }
         .filter { it.startsWith(UJING_ID_PREFIX) }
 
-/** 已投递队列里的 U净 标识符（同一个请求标识，挂在 `UNNotification.request` 上）。 */
-private fun List<*>.deliveredUjingIdentifiers(): List<String> =
-    mapNotNull { (it as? UNNotification)?.request?.identifier }
+/** 已投递队列里的 U净 标识符（同一个请求标识，挂在 `UNNotification.request` 上）。入参同上，可空。 */
+private fun List<*>?.deliveredUjingIdentifiers(): List<String> =
+    orEmpty().mapNotNull { (it as? UNNotification)?.request?.identifier }
         .filter { it.startsWith(UJING_ID_PREFIX) }
 
 /**

@@ -26,8 +26,6 @@ import platform.WebKit.WKNavigationActionPolicy
 import platform.WebKit.WKNavigationDelegateProtocol
 import platform.WebKit.WKNavigationResponse
 import platform.WebKit.WKNavigationResponsePolicy
-import platform.WebKit.WKOpenPanelParameters
-import platform.WebKit.WKUIDelegateProtocol
 import platform.WebKit.WKUserContentController
 import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
@@ -117,40 +115,45 @@ import platform.darwin.dispatch_get_main_queue
  *
  * ## 五、销毁
  *
- * `WKWebView.navigationDelegate` / `UIDelegate` 都是 **weak**，代理必须由本文件的 holder
- * 强引用，否则代理会被立刻回收、回调一次都不来。离开组合时：停加载 → 摘两个代理 →
+ * `WKWebView.navigationDelegate` 是 **weak**，代理必须由本文件的 holder 强引用，
+ * 否则代理会被立刻回收、回调一次都不来。离开组合时：停加载 → 摘代理 →
  * 断开 [WebViewController.impl]，再把强引用清掉。
  *
  * ## 六、2026-11-25 扩缝：五个事件接到哪
  *
  * | 事件 | iOS 侧入口 | `null` 时 |
  * |---|---|---|
- * | [WebViewController.onPickFiles] | `WKUIDelegate` 的 `runOpenPanelWithParameters:` | 立刻回「取消」（网页的上传按钮点了没反应，与今天一致） |
- * | [WebViewController.onGeolocationPrompt] | **未接**：`navigator.geolocation` 要宿主持有 `CLLocationManager` 并自己弹权限，本文不动它 | 一律不响应（与今天一致） |
+ * | [WebViewController.onPickFiles] | **未接**（见下条） | 网页的上传按钮点了没反应，与接缝之前一致 |
+ * | [WebViewController.onGeolocationPrompt] | **未接**：`navigator.geolocation` 要宿主持有 `CLLocationManager` 并自己弹权限 | 一律不响应 |
  * | [WebViewController.onExternalScheme] | `decidePolicyForNavigationAction:`（只主 frame） | `Allow`，交给 WebKit（`Info.plist` 没配 `LSApplicationQueriesSchemes` 时打不开） |
  * | [WebViewController.onDownload] | `decidePolicyForNavigationResponse:` 里判 `canShowMIMEType` | `Allow`，WKWebView 显示不了就留一页空白 |
  * | [WebViewController.onPageReady] | `didFinishNavigation:` 之后 `evaluateJavaScript` | 不注入 |
  *
- * 这些方法本机同样**没有编译过**（Windows 无 Kotlin/Native），符号按「最保守写法」选，
- * 万一与绑定不符，按下表改一行即可：
+ * ### `onPickFiles` 为什么没接（2026-11-25 CI 实测）
  *
- * | 符号 | 写法 | 万一不对怎么改 |
- * |---|---|---|
- * | `runOpenPanelWithParameters` 的 completion | `(List<NSURL>?) -> Unit` | 改成 `(List<*>?) -> Unit`（ObjC 轻量泛型在部分绑定里被擦成 `List<*>`） |
- * | `decisionHandler(WKNavigationActionPolicy…)` | `decisionHandler(WKNavigationActionPolicy.WKNavigationActionPolicyAllow)` | 若枚举被暴露成常量，改成裸 `WKNavigationActionPolicyAllow` |
- * | `NSData.dataWithBytes` + `NSData.writeToURL` | `usePinned { NSData.dataWithBytes(it.addressOf(0), size.toULong()) }` 再 `writeToURL(url, atomically = true)` | 换成 POSIX（`platform.posix.fopen` / `fwrite`），符号更稳但要多管一次关闭 |
- * | `WKFrameInfo.mainFrame` | `targetFrame?.mainFrame` | 换成 `targetFrame?.isMainFrame`（旧绑定里就是这个名字） |
- * | `WKNavigationResponse` 的主 frame 判定 | `response.forMainFrame`（ObjC 属性名 `forMainFrame`，getter 是 `isForMainFrame`） | 换成 `isForMainFrame`，或整条判据删掉（下载本来就都在主 frame） |
+ * `WKUIDelegateProtocol` 的 `runOpenPanelWithParameters:` 在 Kotlin/Native 的 WebKit 绑定里
+ * **没有 `WKOpenPanelParameters` 这个类型**（`import platform.WebKit.WKOpenPanelParameters`
+ * 直接 Unresolved），于是那条 override 编译不过。写过一版 100 多行的实现（字节 → 临时文件 →
+ * `NSURL`）已经整块删掉，不留半成品。
+ *
+ * 影响面为零：**iOS 上现在没有任何页面提交文件**（学工表单的宿主页还没搬，教务导入用的是
+ * Android 的 `JwImportScreen`）。等真要接时，有两条路：
+ * 1. 在 `WKWebView` 的 `configuration.userContentController` 里注入一段 JS 替换
+ *    `<input type=file>` 的点击，走 `WKScriptMessageHandler` 把「用户选了哪些文件」传下去
+ *    —— 绕开缺失的 `WKOpenPanelParameters`；
+ * 2. 确认 `platform.WebKit` 里那个类叫什么（可能是 `WKOpenPanelParameters` 之外的别名），
+ *    对着 macOS 编译器改一行。
  *
  * ## 七、iOS 侧明确**没做**的（本轮范围外，别当成 bug）
  *
  * - **下载落盘 / 另存到「文件」App**：接下去要 `WKNavigationDownload`（iOS 14.5+）+
  *   `WKNavigationDownloadDelegateProtocol` 决定落盘路径，再要 `UIDocumentPickerViewController`
  *   才能让用户选「存到哪」。本轮只在 [WebViewController.onDownload] 里把 URL / 建议文件名 /
- *   mime 交出去（`localPath` 恒 `null`），**落盘交给宿主**：拿 `IosWebCookieSource` 读同一个域
+ *   MIME 交出去（`localPath` 恒 `null`），**落盘交给宿主**：拿 `IosWebCookieSource` 读同一个域
  *   的 Cookie、用共享层 Ktor 取，再用 `platform/AppDirs` 写进沙箱。
- * - **定位**：需要 `CLLocationManager` + `Info.plist` 的 `NSLocationWhenInUseUsageDescription`
- *   + `WKUIDelegate` 那条授权回调，另算一轮。
+ * - **文件上传**：见上一条。
+ * - **定位**：需要 `CLLocationManager` + `Info.plist` 的 `NSLocationWhenInUseUsageDescription`，
+ *   另算一轮。
  * - **JS 桥（`WKScriptMessageHandler`）**：`configuration.userContentController` 现在是空的，
  *   没有任何页面需要往原生发消息。
  * - **多窗口**（`createWebViewWithConfiguration:`）：教务 / 学工都是同窗口导航（评教那套
@@ -176,9 +179,6 @@ private class IosWebHost {
 
     private var webView: WKWebView? = null
     private var navigationDelegate: NavigationDelegate? = null
-
-    /** `<input type=file>` 的代理（`UIDelegate` 同样是 weak，必须强引用）。 */
-    private var uiDelegate: UiDelegate? = null
     private var loadedUrl: String? = null
     private var installed: WebViewController.Impl? = null
 
@@ -195,9 +195,6 @@ private class IosWebHost {
         val delegate = NavigationDelegate(controller)
         view.navigationDelegate = delegate
         navigationDelegate = delegate
-        val panel = UiDelegate(controller)
-        view.UIDelegate = panel
-        uiDelegate = panel
         val impl = WebViewController.Impl(
             load = { target -> loadInto(view, target) },
             reload = { view.reload() },
@@ -232,14 +229,12 @@ private class IosWebHost {
         val view = webView ?: return
         view.stopLoading()
         view.navigationDelegate = null
-        view.UIDelegate = null
         // 只清自己装的那一份：另一个视图接管过桥时，别把它的拆掉
         val bridge = fetchBridge
         if (bridge != null && IosWebFetch.runScript === bridge) IosWebFetch.runScript = null
         fetchBridge = null
         webView = null
         navigationDelegate = null
-        uiDelegate = null
         loadedUrl = null
         if (controller.impl === installed) controller.impl = null
         installed = null
@@ -333,7 +328,9 @@ private class NavigationDelegate(
             handler(
                 webView.URL?.absoluteString.orEmpty(),
                 response.suggestedFilename,
-                response.mimeType,
+                // `mimeType` 在 Kotlin/Native 的 `NSURLResponse` 绑定里叫 `MIMEType`
+                // （ObjC 属性名原样保留）。写成小写 `mimeType` 会 Unresolved（2026-11-25 CI 实测）。
+                response.MIMEType,
                 null,
             )
             decisionHandler(WKNavigationResponsePolicy.WKNavigationResponsePolicyCancel)
@@ -362,70 +359,5 @@ private class NavigationDelegate(
         withError: NSError,
     ) {
         controller.onError?.invoke(withError.localizedDescription)
-    }
-}
-
-/**
- * `<input type=file>` 的代理（`runOpenPanelWithParameters:`）。**必须被强引用**。
- *
- * 只实现这一个方法：`runJavaScriptAlert` / `Confirm` / `TextInput` 都不接——学工与教务的页面
- * 弹窗走的是页面自己的 layui 层，原生 alert 一旦被拦截反而会静默吞掉页面的确认对话框。
- * 恰好这三个方法不与本方法冲突（第二参类型不同），所以不需要 `@ObjCSignatureOverride`。
- *
- * 选文件由宿主决定（见 [WebViewController.onPickFiles]）：本类只负责「字节 → 临时文件 →
- * WebKit 收得了的 `NSURL`」和「没有宿主 → 立刻回取消」。
- */
-private class UiDelegate(
-    private val controller: WebViewController,
-) : NSObject(), WKUIDelegateProtocol {
-
-    /** 同一页连点两次上传时别互相覆盖临时文件。 */
-    private var counter = 0
-
-    override fun webView(
-        webView: WKWebView,
-        runOpenPanelWithParameters: WKOpenPanelParameters,
-        initiatedByFrame: WKFrameInfo,
-        completionHandler: (List<NSURL>?) -> Unit,
-    ) {
-        val picker = controller.onPickFiles
-        if (picker == null) {
-            // 回 null = 用户取消：网页那边的 change 事件不会触发，但也不会永远挂着
-            completionHandler(null)
-            return
-        }
-        val allowMultiple = runOpenPanelWithParameters.allowsMultipleSelection
-        // accept 恒为空串：WKOpenPanelParameters 不暴露 accept 过滤（见契约 KDoc）
-        picker.invoke("", allowMultiple) { files ->
-            val urls = files.mapIndexedNotNull { index, file ->
-                stageUploadFile(++counter, index, file)
-            }
-            completionHandler(urls.ifEmpty { null })
-        }
-    }
-
-    /**
-     * 把宿主给的字节写进临时目录，交出 `file://` URL。
-     *
-     * 不建子目录：`NSTemporaryDirectory()` 本身就可写，少一处 `NSFileManager` 的目录创建
-     * （那一步的 Kotlin 绑定要传 `error` 指针，符号面更大）。名字带序号防重名。
-     */
-    private fun stageUploadFile(batch: Int, index: Int, file: WebPickedFile): NSURL? {
-        if (file.bytes.isEmpty()) return null
-        val dir = NSTemporaryDirectory() ?: return null
-        val path = dir.trimEnd('/') + "/webview-upload-$batch-$index-" + safeName(file.name)
-        val written = file.bytes.usePinned { pinned ->
-            NSData.dataWithBytes(pinned.addressOf(0), file.bytes.size.toULong())
-                .writeToURL(NSURL.fileURLWithPath(path), atomically = true)
-        }
-        return if (written) NSURL.fileURLWithPath(path) else null
-    }
-
-    /** 只留文件名主体 + 后缀，去掉路径分隔符（网页给的名字里可能带 `/` 或 `..`）。 */
-    private fun safeName(raw: String): String {
-        val base = raw.substringAfterLast('/').substringAfterLast('\\').trim()
-            .replace(Regex("[^A-Za-z0-9._\\-\\u4e00-\\u9fa5]"), "_")
-            .take(60)
-        return base.trimStart('.').ifEmpty { "upload" }
     }
 }

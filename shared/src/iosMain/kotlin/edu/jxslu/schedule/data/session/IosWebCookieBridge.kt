@@ -85,7 +85,10 @@ internal object IosWebCookieBridge : WebCookieBridge {
             dispatch_async(dispatch_get_main_queue()) {
                 WKWebsiteDataStore.defaultDataStore().removeDataOfTypes(
                     types,
-                    NSDate(timeIntervalSince1970 = 0.0),
+                    // Kotlin/Native 的 `NSDate` 只有「参考日期」构造器（2001-01-01 起算），
+                    // 没有 `timeIntervalSince1970`（2026-11-25 CI 实测）。要清全部历史数据就传
+                    // 一个远早于任何数据的参考时刻：-2e9 秒 ≈ 1938 年，比设备上任何 cookie 都早。
+                    NSDate(timeIntervalSinceReferenceDate = -2.0e9),
                 ) {
                     IosJwSessionFlag.markLost()
                     if (continuation.isActive) continuation.resume(Unit)
