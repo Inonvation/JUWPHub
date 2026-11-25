@@ -491,6 +491,11 @@
   ② 网页定位（`onGeolocationPermissionsShowPrompt`，学习通位置签到会用）；
   ③ 非 http(s) 链接（`tel:` / `mailto:` / `weixin://` / `intent://`）交系统处理。
   三者的实现都在 `ui/common/WebViewSupport.kt`，与学工窗口共用，别在页面里另写一份。
+- **共享层的页面走另一条缝**（2026-11-25）：`ui/web/WebViewController` 补齐了同样五件
+  （附件上传 / 定位 / 非 http(s) 外链 / 下载 / 加载后注入）。`:app` 里那几个内联 WebView 窗口
+  **不**迁过去（它们还压着进度条、`onRenderProcessGone` 重建、SSL 放行、桌面视口自愈），
+  新搬进共享层的页面才用它；`null` 语义与两端状态见 `design/ios-port.md` §11.4。
+  `shouldHandOffToSystem` 只有共享层一份（`ui/web/WebViewUrls.kt`），`:app` 的是转发。
 - **cookie 过期后的自动重登与落页**（2026-10-21，用户报「网页核对入口重登后不自动跳」）：
   ① Browse 的「落点」不再只认 `xsMainV`——`startAutoNavOnLanding` 接受教务域里任何
   已登录的普通页（`JwUrls.isAuthHop` 排除 `sso.jsp` / `LoginToXk`，`isLoginLikeUrl`
