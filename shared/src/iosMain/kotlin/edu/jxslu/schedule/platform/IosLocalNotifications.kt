@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.platform
 
 import edu.jxslu.schedule.domain.AppClock
+import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import platform.Foundation.NSError
@@ -18,6 +19,8 @@ import platform.UserNotifications.UNTimeIntervalNotificationTrigger
 import platform.UserNotifications.UNUserNotificationCenter
 import platform.UserNotifications.UNUserNotificationCenterDelegateProtocol
 import platform.darwin.NSObject
+import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_main_queue
 
 /**
  * 本地通知的四件共用小件（N2，2026-11-26）：授权、排一条、按前缀撤、前台横幅代理。
@@ -46,16 +49,48 @@ import platform.darwin.NSObject
  * **不再请求、也不排**，调用方据此静默降级成「没有提醒」，业务链路照常工作；结论记进
  * [IosNotificationPermission]（进程内，不落盘——权限结论由系统持有，我们只缓存这次进程读到的）。
  *
+ * ## 谁在什么时候碰系统通知中心
+ *
+ * **启动路径上一处都不能碰。** 2026-11-26 用户报「装上后一开就闪退」，同一天这一批唯一新增的
+ * 启动期系统调用就是本对象里的 `UNUserNotificationCenter.currentNotificationCenter()` 与
+ * 那次 `delegate` 赋值（原来写在 `IosServices.init`，也就是 Swift `makeUIViewController`
+ * 执行期间）。现在两道闸：
+ *
+ * 1. [center] 是 `lazy`，加载类不建实例；
+ * 2. 每个入口都先切主队列（[onMain]），且首次调用点在**首帧之后**
+ *    （`IosServices.warmUpReminders`，由 `MainViewController` 的 `LaunchedEffect` 延迟拉起）。
+ *
  * ## 所有符号都已在 CI 上编译过
  *
  * N1 那一版的 `requestAuthorizationWithOptions` / `addNotificationRequest` /
  * `getPendingNotificationRequestsWithCompletionHandler` / `remove…WithIdentifiers` /
  * `triggerWithTimeInterval` 与 `content.setTitle/setBody/setSound` 全部按 CI 编译通过的形状
- * 搬过来，没有改写调用形式。本机（Windows）编不了 iOS，改动后只能靠 CI 验编译。
+ * 搬过来，没有改写调用形式。`dispatch_async` + `dispatch_get_main_queue` 的用法照抄自
+ * `IosWebCookieSource`（已在真机上跑通）。本机（Windows）编不了 iOS，改动后只能靠 CI 验编译。
  */
+@OptIn(ExperimentalForeignApi::class)
 internal object IosLocalNotifications {
 
-    private val center = UNUserNotificationCenter.currentNotificationCenter()
+    /**
+     * 系统通知中心单例。**`lazy` 是刻意的**：写成 `= UNUserNotificationCenter…()` 的话，
+     * 只要碰到本对象的任何成员就会在构造期把它建出来——包括启动路径上的第一次 `delegate` 赋值。
+     * 现在改成「真正要用时才建」，启动期只加载类、不碰系统框架。
+     */
+    private val center: UNUserNotificationCenter by lazy { UNUserNotificationCenter.currentNotificationCenter() }
+
+    /**
+     * 把 [block] 丢到主队列上跑。
+     *
+     * 2026-11-25 晚的闪退复核结论：`UNUserNotificationCenter` 本身标了线程安全，但
+     * 「什么时候碰它」有硬约束——必须等 App 真的启动了。所以本对象的每个入口都**先切主队列**，
+     * 调用方（协程作用域在 `Dispatchers.Default` 上、授权回调在系统后台队列上）不用关心这件事。
+     * 这与 `IosWebCookieSource` 处理 WebKit 是同一个纪律。
+     *
+     * `dispatch_async` 的 lambda 已经是 `@convention(block)` 的 `() -> Unit`，不需要额外包装。
+     */
+    private fun onMain(block: () -> Unit) {
+        dispatch_async(dispatch_get_main_queue()) { block() }
+    }
 
     /** 授权请求在途：系统弹窗只该出现一次，调用方可能每几秒就来一次。 */
     private var requesting = false
@@ -64,14 +99,17 @@ internal object IosLocalNotifications {
     private val afterGrant = mutableListOf<() -> Unit>()
 
     /**
-     * 装上「App 开着时也弹横幅」的代理。**启动期必须调一次**。
+     * 装上「App 开着时也弹横幅」的代理。**首帧之后调一次**（`IosServices.warmUpReminders`）。
      *
      * `UNUserNotificationCenter.delegate` 是 **weak**，写成局部对象会被 ObjC 回收，回调一次都不会来
      * （与 `WebViewController.ios.kt` 的 `navigationDelegate` 同一个坑），所以持有者必须是进程级
-     * 对象 [presenter]。`IosServices.init` 里调，那里是 `MainViewController` 的第一行。
+     * 对象 [presenter]。
+     *
+     * **不要挪回 `IosServices.init`**：那是 `MainViewController()` 里 `makeUIViewController`
+     * 执行期间，App 还没进 active，此时碰通知中心是「装到真机上一开就闪退」的直接嫌疑。
      */
     fun installForegroundPresentation() {
-        center.delegate = presenter
+        onMain { center.delegate = presenter }
     }
 
     /**
@@ -89,9 +127,10 @@ internal object IosLocalNotifications {
         when (IosNotificationPermission.state.value) {
             IosNotificationPermissionState.Allowed -> onResult(true)
             IosNotificationPermissionState.Denied -> onResult(false)
-            IosNotificationPermissionState.Unknown -> {
+            IosNotificationPermissionState.Unknown -> onMain {
+                // 走到这里才第一次真正碰系统通知中心（见 [onMain] 的说明）
                 afterGrant += { onResult(true) }
-                requestOnce()
+                requestOnceLocked()
             }
         }
     }
@@ -111,7 +150,7 @@ internal object IosLocalNotifications {
         val request = UNNotificationRequest.requestWithIdentifier(identifier, content, trigger)
         // 回执（NSError）只可能是标识符重复或内容非法，两者都是我们的编程错误；
         // 提醒不发出去也不该让调用方崩，所以不做回调、只由系统日志留痕。
-        center.addNotificationRequest(request, null)
+        onMain { center.addNotificationRequest(request, null) }
     }
 
     /**
@@ -120,10 +159,12 @@ internal object IosLocalNotifications {
      * 为什么按前缀扫而不是记在内存里：进程被杀后那点记忆就没了，而系统队列还在。
      */
     fun removePending(prefix: String, then: () -> Unit = {}) {
-        center.getPendingNotificationRequestsWithCompletionHandler { requests ->
-            val ids = requests.identifierPrefixMatches(prefix)
-            if (ids.isNotEmpty()) center.removePendingNotificationRequestsWithIdentifiers(ids)
-            then()
+        onMain {
+            center.getPendingNotificationRequestsWithCompletionHandler { requests ->
+                val ids = requests.identifierPrefixMatches(prefix)
+                if (ids.isNotEmpty()) center.removePendingNotificationRequestsWithIdentifiers(ids)
+                then()
+            }
         }
     }
 
@@ -134,14 +175,20 @@ internal object IosLocalNotifications {
      * 业务侧确认收摊时通知栏里那条还杵着（同 Android 的 `revoke`）。
      */
     fun removeDelivered(prefix: String) {
-        center.getDeliveredNotificationsWithCompletionHandler { delivered ->
-            val ids = delivered.deliveredIdentifierPrefixMatches(prefix)
-            if (ids.isNotEmpty()) center.removeDeliveredNotificationsWithIdentifiers(ids)
+        onMain {
+            center.getDeliveredNotificationsWithCompletionHandler { delivered ->
+                val ids = delivered.deliveredIdentifierPrefixMatches(prefix)
+                if (ids.isNotEmpty()) center.removeDeliveredNotificationsWithIdentifiers(ids)
+            }
         }
     }
 
-    /** 授权回调。**拒绝不是异常**：`granted = false` 与请求本身失败（[NSError]）都按「这次进程里不排提醒」处理。 */
-    private fun requestOnce() {
+    /**
+     * 授权回调。**拒绝不是异常**：`granted = false` 与请求本身失败（[NSError]）都按「这次进程里不排提醒」处理。
+     *
+     * 只能在主队列上调用——名字里的 `Locked` 说的就是这个约束，不是锁。
+     */
+    private fun requestOnceLocked() {
         if (requesting) return
         requesting = true
         center.requestAuthorizationWithOptions(

@@ -58,6 +58,7 @@ import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.ScheduleCalculator
+import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppBackHandler
@@ -81,6 +82,7 @@ import edu.jxslu.schedule.ui.web.WebContentView
 import edu.jxslu.schedule.ui.web.WebViewController
 import edu.jxslu.schedule.ui.week.WeekScreen
 import edu.jxslu.schedule.ui.week.WeekViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -88,6 +90,9 @@ import platform.UIKit.UIViewController
 
 @Composable
 private fun IosRoot(services: IosServices) {
+    // ⑥ 组合开始（B2 启动留痕）：这一句只要出现，说明首帧已经在画了，
+    // 闪退就不在「构造 / 装配」那几步上。`remember` 保证每次进程只写一条。
+    remember { Logger.i(TAG_BOOT, "⑥ IosRoot 开始组合"); true }
     JuwTheme {
         var jwOpen by remember { mutableStateOf(false) }
         var tab by remember { mutableStateOf(IosTab.Today) }
@@ -531,12 +536,48 @@ private enum class IosTab(
  * 与 Android 侧 `JuwApplication.onCreate` 里的 `Services.install(GraphServices(this))` 对称。
  */
 fun MainViewController(): UIViewController {
+    // ---- 启动阶段留痕（B2，2026-11-26） ----
+    //
+    // 真机闪退时唯一能拿到的东西是沙箱里 `logs/app.log` 的最后几行（「设置 → 权限与存储 →
+    // 导出诊断日志」）。所以启动路径上每一道关都留一句话：**死在哪一句之后，就是哪一步**。
+    // 序号不要重排，加了新的就往后续，用户截图里的「⑤」和代码里的「⑤」必须是同一件事。
+    Logger.i(TAG_BOOT, "① 进入 MainViewController")
     val services = IosServices()
+    Logger.i(TAG_BOOT, "② IosServices 构造完成")
     Services.install(services)
-    // 首启把作息表与默认学期写进库（Android 在 JuwApplication.ensureDefaults 里做同一件事）
+    Logger.i(TAG_BOOT, "③ Services 已安装")
+    // 首启把作息表与默认学期写进库（Android 在 JuwApplication.ensureDefaults 里做同一件事）。
+    // 这一步只碰本地库与 WebKit 的 cookie 库（后者自己切主队列），**不碰通知中心**。
     services.warmUp()
-    return ComposeUIViewController { IosRoot(services) }
+    Logger.i(TAG_BOOT, "④ warmUp 已派发（后台协程）")
+    val controller = ComposeUIViewController {
+        // 提醒三件（前台横幅代理 / 作业截止重排 / 成绩核对）挪到**首帧之后、主线程**上。
+        // 2026-11-26 之前它们藏在 `IosServices.init` 与 `warmUp` 里，等于在 Swift
+        // `makeUIViewController` 执行期间就去碰 `UNUserNotificationCenter`，而那时 App
+        // 还没进 active——这是真机「一开就闪退」的直接嫌疑。延迟不是为了慢，
+        // 是为了让第一帧真的渲染出来（`LaunchedEffect` 在首次组合之后才跑）。
+        LaunchedEffect(services) {
+            delay(REMINDERS_DELAY_MS)
+            services.warmUpReminders()
+        }
+        IosRoot(services)
+    }
+    Logger.i(TAG_BOOT, "⑤ ComposeUIViewController 已创建")
+    return controller
 }
+
+/**
+ * 启动留痕的 tag：`grep IosBoot logs/app.log` 就是一条完整的启动时间线。
+ */
+internal const val TAG_BOOT = "IosBoot"
+
+/**
+ * 首帧之后隔多久再动提醒。
+ *
+ * 1.2 秒是「首帧已经画完」的经验值：`LaunchedEffect` 本身在首次组合之后才启动，
+ * 这段时间只是留给首帧上屏与页面首个数据流落地，避免刚进来就和系统通知队列抢主线程。
+ */
+private const val REMINDERS_DELAY_MS = 1_200L
 
 /**
  * iOS 侧的显示设置覆盖面板（S17，2026-11-25）。

@@ -737,38 +737,69 @@ class IosServices : AppServices {
     private val qzxyFlowLockInstance: Mutex = Mutex()
 
     init {
-        // 前台横幅代理（N2 起从 `IosUjingReminder` 提出来，三类提醒共用）：iOS 默认前台不弹横幅，
-        // 必须实现 `willPresentNotification` 并回 `banner | sound`。`delegate` 是 weak，
-        // 持有者必须是进程级对象，所以由这里（`MainViewController` 的第一行）装一次。
-        IosLocalNotifications.installForegroundPresentation()
-        // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
-        // 用户关掉导入页之后课表页的「检测」照样能读登录态。
-        WebCookies.source = IosWebCookieSource
-        // 未捕获异常落盘（B1，2026-11-25）：上面那个 CoroutineExceptionHandler 只接得住
+        // 未捕获异常落盘（B1，2026-11-25）：下面那个 CoroutineExceptionHandler 只接得住
         // 协程作用域里的异常；UIKit 回调 / 组合期抛出来的走「进程终止」那条路，
         // 只能靠 `setUnhandledExceptionHook` 在死前留一份栈到 `logs/app.log`。
-        // 这里是最好的位置：本类是 `MainViewController` 的第一行，比任何一个页面都早。
+        // **必须第一个装**：后面任何一步出问题，日志里才留得下现场。
         installCrashHook()
+        // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
+        // 用户关掉导入页之后课表页的「检测」照样能读登录态。纯 Kotlin 赋值，不碰系统框架。
+        WebCookies.source = IosWebCookieSource
+        // 通知那一套（前台横幅代理 / 排提醒 / 成绩核对）**不在这里装**：
+        // 本类的构造发生在 `MainViewController()` 里，即 Swift `makeUIViewController`
+        // 执行期间，那时 App 还没进 active。2026-11-26 真机「一开就闪退」的嫌疑就是它。
+        // 现在挪到首帧之后的主线程上，见 [warmUpReminders]。
     }
 
     /** 首次打开时把作息表与默认学期写进库（与 Android 的 `ensureDefaults` 同步口径）。 */
     fun warmUp() {
         scope.launch {
-            repository.ensureDefaults()
+            // 两步都只碰本地库与 WebKit cookie 库（后者自己切主队列），不碰通知中心。
+            // 各自 runCatching：一步失败不该让另一步也不跑，更不该让进程陪着走。
+            runCatching { repository.ensureDefaults() }
+                .onFailure { Logger.w(TAG, "写入默认作息 / 学期失败：$it") }
+            // 启动留痕：见 MainViewController 的编号说明（①–⑥ 在那边，⑦ 起在这边）
+            Logger.i(TAG, "⑦ 默认作息与学期已就绪")
             // 顺手探一次「教务网页会话还在不在」：账号中心 / 教务账号页据此显示已登录，
             // 而不是因为读 Cookie 是异步就永远显示「未登录」（见 [hasJwWebSession]）
-            if (session.hasCookies()) {
-                IosJwSessionFlag.markUsable()
-            } else {
-                IosJwSessionFlag.markLost()
-            }
-            // 作业截止提醒：冷启动重排一次。iOS 的本地通知到点不执行代码，必须**提前**排上；
-            // 上一次进程排的那批可能已被投递，作业也可能已被勾完成 / 删掉（重排会按前缀清空重来）。
-            homeworkReminder().reschedule()
-            // 成绩提醒（降级形态）：进 App 查一次，有新成绩立刻弹一条。放在最后——它要打教务，
-            // 失败（没登录 / 没网）不该拖住上面两件事。
-            scoreReminderImpl.checkOnLaunch()
+            runCatching {
+                if (session.hasCookies()) {
+                    IosJwSessionFlag.markUsable()
+                } else {
+                    IosJwSessionFlag.markLost()
+                }
+            }.onFailure { Logger.w(TAG, "探测教务网页会话失败：$it") }
+            Logger.i(TAG, "⑧ warmUp 完成")
         }
+    }
+
+    /**
+     * 首帧之后、主线程上跑的「提醒三件」（2026-11-26）。
+     *
+     * 与 [warmUp] 分开是因为**时机**而不是因为它们不重要：
+     *
+     * | 件 | 为什么不能更早 |
+     * |---|---|
+     * | [IosLocalNotifications.installForegroundPresentation] | `UNUserNotificationCenter` 在 App 进 active 之前碰是闪退嫌疑（见该方法的 KDoc） |
+     * | 作业截止提醒重排 | 要读写系统待发队列，同上 |
+     * | 成绩提醒核对 | 会打教务网络，不该和首帧抢时间 |
+     *
+     * 每一步各自 `runCatching`：提醒是**锦上添花**，任何一步失败都不该影响开 App。
+     * 调用点在 `MainViewController` 的 `LaunchedEffect` 里（`delay` 之后），所以这里不用再切线程。
+     */
+    suspend fun warmUpReminders() {
+        Logger.i(TAG, "⑨ 开始装通知与排提醒")
+        runCatching { IosLocalNotifications.installForegroundPresentation() }
+            .onFailure { Logger.w(TAG, "安装通知横幅代理失败：$it") }
+        // 作业截止提醒：冷启动重排一次。iOS 的本地通知到点不执行代码，必须**提前**排上；
+        // 上一次进程排的那批可能已被投递，作业也可能已被勾完成 / 删掉（重排会按前缀清空重来）。
+        runCatching { homeworkReminder().reschedule() }
+            .onFailure { Logger.w(TAG, "重排作业截止提醒失败：$it") }
+        // 成绩提醒（降级形态）：进 App 查一次，有新成绩立刻弹一条。放在最后——它要打教务，
+        // 失败（没登录 / 没网）不该拖住上面两件事。
+        runCatching { scoreReminderImpl.checkOnLaunch() }
+            .onFailure { Logger.w(TAG, "成绩提醒核对失败：$it") }
+        Logger.i(TAG, "⑩ 提醒三件完成，启动结束")
     }
 
     // ---- 学业完成情况 / 培养方案（iOS 移植 V4，2026-11-25） ----
