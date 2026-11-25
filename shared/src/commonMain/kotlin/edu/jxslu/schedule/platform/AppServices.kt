@@ -174,8 +174,9 @@ interface AppServices {
      *
      * 返回 null 而不是抛：付款码 / 流水 / 设置三页据此整块隐藏「开启校园卡」入口，
      * 而不是点下去才发现存不住密码。Android 侧是 `EncryptedSharedPreferences`
-     * （`CredentialVault`）；iOS 要等 Keychain 实现（`kSecClassGenericPassword`），
-     * 升级条件写在 `IosServices` 的 KDoc 里。
+     * （`CredentialVault`）；iOS 侧是 Keychain（`iosMain` 的 `IosYktCredentialStore`，
+     * service `secure_ykt`），两端都已实现，所以这个 `?` 现在只为「将来某个平台确实没有
+     * 加密存储」留着。
      */
     fun yktCredentialStore(): YktCredentialStore?
 
@@ -337,7 +338,9 @@ interface AppServices {
      * 教务 / 一卡通的凭证快照与登录闸门；**null = 本平台没有加密凭证存储**。
      *
      * null 时账号中心的两行按「未配置」显示（与「凭证不在」同一档）——这是真实结论，
-     * 不是假实现。
+     * 不是假实现。两端现在都给实现（Android `GraphServices`、iOS `IosServices`），
+     * 差别只在**能读到哪几个字段**：iOS 不存教务密码，所以那边 `readJwUsername()` 恒为 null
+     * （页面回退到学籍卡的学号），一卡通学号是真的。
      */
     fun accountCredentials(): AccountCredentials?
 

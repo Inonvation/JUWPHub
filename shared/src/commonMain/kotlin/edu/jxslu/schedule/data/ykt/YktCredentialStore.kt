@@ -12,9 +12,10 @@ package edu.jxslu.schedule.data.ykt
  * 构造点**只有装配根一处**（Android 是 `Graph.yktCredentialStore`）——保险箱必须是单例，
  * 否则两份 `EncryptedSharedPreferences` 实例各持一份内存缓存，一边写入另一边看不见。
  *
- * iOS 移植 S14（2026-11-25）：搬进 `:shared`。平台差异全部收进 [YktCredentialVault]；
- * iOS 侧还没有 Keychain 实现，`IosServices.yktCredentialStore()` 返回 null（页面据此
- * 隐藏「开启校园卡」入口），所以本类在 iOS 上不会被构造。
+ * iOS 移植 S14（2026-11-25）：搬进 `:shared`。平台差异全部收进 [YktCredentialVault]：
+ * Android 是 `CredentialVault`（`EncryptedSharedPreferences`），iOS 是
+ * `IosYktCredentialStore`（Keychain，service `secure_ykt`），两端的 `IosServices` /
+ * `GraphServices` 各构造一份，页面代码一行不分叉。
  */
 class YktCredentialStore(private val vault: YktCredentialVault) {
 

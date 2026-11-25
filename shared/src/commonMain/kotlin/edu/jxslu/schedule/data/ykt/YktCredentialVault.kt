@@ -18,11 +18,10 @@ package edu.jxslu.schedule.data.ykt
  * | 平台 | 实现 | 状态 |
  * |---|---|---|
  * | Android | `data/session/CredentialVault`（`EncryptedSharedPreferences`，文件 `ykt_credentials.xml`，键名 `username`/`password` 沿用旧版） | 现役 |
- * | iOS | **暂无**。`IosServices.yktCredentialStore()` 返回 null，页面据此隐藏「开启」入口 | 待接 Keychain |
+ * | iOS | `iosMain/data/session/IosYktCredentialStore`（Keychain，service `secure_ykt`，account 与 Android 同名） | 现役 |
  *
- * iOS 侧的升级条件写在 `IosServices` 的 KDoc 里（`kSecClassGenericPassword` +
- * `kSecAttrAccessibleAfterFirstUnlock`，键名与 Android 对齐成 `username`/`password`）。
- * 在那之前**不要**给一个假实现：凭证进明文 `NSUserDefaults` 比不存更糟。
+ * 两端都不许退回明文介质（`NSUserDefaults` / 普通 `SharedPreferences`）：凭证进明文比不存更糟。
+ * 实现类的键名规则写在 `IosYktCredentialStore` 的类注释里，换平台排查时对得上号。
  *
  * ## 为什么不是 `fun interface`
  *

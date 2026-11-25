@@ -54,8 +54,11 @@ import edu.jxslu.schedule.data.session.IosSessionExpirySink
 import edu.jxslu.schedule.data.session.IosUjingSessionStore
 import edu.jxslu.schedule.data.session.IosWenquSessionStore
 import edu.jxslu.schedule.data.session.IosWebCookieSource
+import edu.jxslu.schedule.data.session.IosYktCredentialStore
 import edu.jxslu.schedule.data.session.JwReadSession
+import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionExpirySink
+import edu.jxslu.schedule.data.session.SessionStatus
 import edu.jxslu.schedule.data.session.WebCookies
 import edu.jxslu.schedule.data.ujing.UjingDraftStore
 import edu.jxslu.schedule.data.ujing.UjingHistoryStore
@@ -68,6 +71,7 @@ import edu.jxslu.schedule.data.wenqu.WenquRepository
 import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
+import edu.jxslu.schedule.data.ykt.YktSuspension
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.platform.AccountCredentials
 import edu.jxslu.schedule.platform.AiApiKeyStore
@@ -247,20 +251,45 @@ class IosServices : AppServices {
     // ---- 一卡通 / 寝室电费（S14，2026-11-25） ----
     //
     // 两个仓库非空：数据层已经是纯 Ktor + 本地表，iOS 直接建得起来。
-    // 但**都不带落盘 token、也不带「失效标记」**——那两样各要一条平台能力（见下）。
+    // 2026-11-25 晚补齐了两份可选加速：落盘 token（Keychain）与「失效标记」（进程内）。
+
+    /**
+     * 一卡通凭证与 token 的 Keychain 实现（[IosYktCredentialStore]）。
+     *
+     * 必须是单例：凭证存储没有内存缓存，但 token 缓存与「清凭证」都落在同一个 Keychain
+     * service 上，两个实例会让「这里清了、那里还认为有」。
+     */
+    private val yktVault: IosYktCredentialStore by lazy { IosYktCredentialStore() }
+
+    /** 共享层的一卡通凭证门面（唯一构造点在这里，见 `YktCredentialStore` 的 KDoc）。 */
+    private val yktCredentials: YktCredentialStore by lazy { YktCredentialStore(yktVault) }
+
+    /**
+     * 「凭证被判失效」的标记：写共享层的 [SessionStatus]（进程级，不落盘）。
+     *
+     * 账号中心页的校园卡行读的就是它（`LoginStateRules.derive` 的 `suspended` 那一档），
+     * 与 Android 的 `GraphServices` 逐字同款。**这不是「以后补」的占位**：没有它，密码错到
+     * 停用时 iOS 上只会一直显示「已开启」，用户不知道该去重填密码。
+     */
+    private val yktSuspension: YktSuspension = YktSuspension { suspended ->
+        SessionStatus.syncSuspended(LoginTarget.Ykt, suspended)
+    }
 
     /**
      * 一卡通仓库。
      *
-     * `tokenCache = null`：落盘 token 只能进 Android 的 `EncryptedSharedPreferences`，
-     * iOS 侧要等 Keychain（同 [yktCredentialStore] 的升级条件）。缺了它只是每次冷启动
-     * 多登一次（取安全键盘 + 换 token 两条请求），对外行为不变。
+     * `tokenCache = yktVault`：落盘 token 进 Keychain（与 Android 的 `CredentialVault`
+     * 同一份语义），冷启动少一次登录。新鲜度判定在 `TokenFreshness`，读到废 token 也只是
+     * 多一次 401 重登，不影响正确性。
      *
-     * `suspension = null`：iOS 还没有「我的」页账户卡，没有地方显示「登录状态已失效」。
-     * 失效判定本身仍由服务端 401 驱动。
+     * `suspension = yktSuspension`：见上。
      */
     private val yktRepo: YktRepository by lazy {
-        YktRepository(YktClient.create(), tokenCache = null, suspension = null)
+        YktRepository(
+            YktClient.create(),
+            tokenCache = yktVault,
+            suspension = yktSuspension,
+        )
     }
 
     /** 电表读数本机记录（与课表共用一个 Room）。 */
@@ -268,24 +297,29 @@ class IosServices : AppServices {
         PowerReadingStore(juwDatabase().powerReadingDao())
     }
 
-    /** 电费仓库：读数落本地表，协议留痕 release/debug 都不写。 */
+    /**
+     * 电费仓库：读数落本地表，协议留痕 release/debug 都不写。
+     *
+     * `suspension = yktSuspension`：电费与一卡通共用同一份凭证（学号 + 查询密码），
+     * 所以失效标记也是同一格（`LoginTarget.Ykt`），与 Android 一致。
+     */
     private val powerRepo: PowerRepository by lazy {
-        PowerRepository(PowerClient.create(), powerReadings, debugDump = null, suspension = null)
+        PowerRepository(PowerClient.create(), powerReadings, debugDump = null, suspension = yktSuspension)
     }
 
     override fun yktRepository(): YktRepository = yktRepo
 
     /**
-     * 校园卡凭证存储：**iOS 侧还没有实现，返回 null**。
+     * 校园卡凭证存储：Keychain 实现（2026-11-25 晚接上）。
      *
-     * 升级条件（照 `data/ykt/YktCredentialVault.kt` 的约定）：用 Keychain 实现
-     * `YktCredentialVault`——`kSecClassGenericPassword`，service 取包名、
-     * account 沿用 Android 的 `username` / `password` 两个键名，
-     * `kSecAttrAccessibleAfterFirstUnlock`（后台刷新要用，不能是 `WhenUnlocked`），
-     * `clear()` 里连 token 项一起删。在那之前**不要**退回 `NSUserDefaults`：
-     * 明文存密码比不存更糟，而三页的「开启校园卡」入口在 null 时会整块隐藏。
+     * 介质是 `kSecClassGenericPassword`、service `secure_ykt`、account 沿用 Android 的
+     * `username` / `password`（另加 token 两项），见 [IosYktCredentialStore]。
+     *
+     * 接上之后付款码 / 消费流水 / 电费 / 校园卡四处的「开启校园卡」不再是死路：`null` 时
+     * 那几页整块隐藏入口，非空时读到的是真的 Keychain。**别退回 `NSUserDefaults`**
+     * ——明文存密码比不存更糟。
      */
-    override fun yktCredentialStore(): YktCredentialStore? = null
+    override fun yktCredentialStore(): YktCredentialStore? = yktCredentials
 
     override fun powerRepository(): PowerRepository = powerRepo
 
@@ -391,18 +425,44 @@ class IosServices : AppServices {
 
     // ---- 账号与登录（账号中心页，iOS 移植 S20，2026-11-25） ----
     //
-    // 这一组只有「已过期留痕」与「应用级作用域」两端都能给；其余按能力缺口返回 null，
-    // 账号中心页据此整行 / 整块不渲染（`design/ios-port.md` §11.2 ④）。
+    // 本端能给的四项：凭证快照（一卡通那一半，Keychain）、过期留痕、AI Key、应用级作用域；
+    // 给不出的按能力缺口返回 null，账号中心页据此整行 / 整块不渲染
+    // （`design/ios-port.md` §11.2 ④）。
 
     /**
-     * 教务 / 一卡通的凭证快照：**iOS 侧返回 null**。
+     * 教务 / 一卡通的凭证快照（账号中心与「我的」页的账户卡读它）。
      *
-     * 一卡通那份已经有 Keychain 实现（`IosSessionStores`），但这里还要「教务 CAS 的学号」
-     * 与「登录闸门状态」两样，它们都在 `:app` 的 `CredentialVault` 里。等 iOS 侧补齐
-     * 闸门落盘（`appDataDir()` 下的 JSON）再给实现——两者要一起做，否则账号中心说
-     * 「已配置」、功能页却说「没登录」。在那之前账号中心的两行按「未配置」显示。
+     * **一卡通那一半是真的**：学号来自 [yktVault]（Keychain，`secure_ykt` 的 `username`）。
+     *
+     * **教务那一半恒为 null**，不是漏做：iOS 从不保存教务密码（登录只在导入页的
+     * `WKWebView` 里由用户完成，见 `IosJwReadSession`），`CredentialVault` 里的 CAS 学号
+     * 在本端没有对应的写入方。给它一个值就只能靠「拿一卡通学号顶上」这类推定，
+     * 那正是 `login-session.md` 里「别猜」那条。两个页面都有兜底：`JwAccountScreen` 的
+     * 学号位回退到学籍卡的 `profileStudentId`，账号中心的教务行靠 [hasJwWebSession]
+     * 显示「已登录」——所以这里给 null 不会让那一行变成假话。
+     *
+     * `resetLoginGates` 在本端是空实现：登录闸门（连续失败次数 / 停用标记）只服务于
+     * `CasSession` 的自动填表，iOS 没有那套，也没有第二处落盘。唯一存在的「闸门类状态」
+     * 是 [SessionStatus] 里的进程内停用标记，它已由 [AccountCredentials.clearYkt] 那条路
+     * （`IosYktCredentialStore.clear()`）撤掉，这里再清一次只是重复。
      */
-    override fun accountCredentials(): AccountCredentials? = null
+    private val iosAccountCredentials: AccountCredentials = object : AccountCredentials {
+
+        override fun readJwUsername(): String? = null
+
+        override fun readYktUsername(): String? = yktVault.read()?.username
+
+        /** 凭证 + 落盘 token + 运行时失效标记一起清（口径同 `CredentialVault.clearYkt`）。 */
+        override fun clearYkt() {
+            yktVault.clear()
+        }
+
+        override fun resetLoginGates() {
+            // 本端没有落盘闸门，见本段 KDoc。
+        }
+    }
+
+    override fun accountCredentials(): AccountCredentials = iosAccountCredentials
 
     /** 「已过期」留痕：只存布尔，`NSUserDefaults` 够用（见 [IosSessionExpirySink]）。 */
     override fun sessionExpirySink(): SessionExpirySink = sessionExpiry
