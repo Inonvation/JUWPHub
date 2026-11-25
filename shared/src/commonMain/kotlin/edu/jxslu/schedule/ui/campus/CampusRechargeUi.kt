@@ -24,10 +24,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import edu.jxslu.schedule.domain.Money
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.YktPayment
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AmountHeroText
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppInfoDialog

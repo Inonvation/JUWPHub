@@ -41,6 +41,7 @@ import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.ShortcutSettings
 import edu.jxslu.schedule.ui.campus.CampusCardViewModel
+import edu.jxslu.schedule.ui.campus.campusCardViewModel
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.ShortcutLauncher
 import edu.jxslu.schedule.ui.common.ShortcutPinner
@@ -194,10 +195,10 @@ fun SideDrawerContent(
     val yktUsername = remember(resumeTick) { vault.readYkt()?.username }
     val username = casUsername ?: yktUsername ?: profileStudentId
 
-    val campusVm: CampusCardViewModel = viewModel(
+    val campusVm: CampusCardViewModel = viewModel {
         // 侧栏是常驻组合：不在冷启动取数，展开时由下面的 effect 显式刷新
-        factory = CampusCardViewModel.Factory(context.applicationContext, autoFetch = false),
-    )
+        campusCardViewModel(context.applicationContext, autoFetch = false)
+    }
     val lifeVm: LifeViewModel = viewModel(factory = lifeViewModelFactory(context))
     val campusEnabled by campusVm.enabled.collectAsStateWithLifecycle()
     // 百宝箱总开关（设置 → 功能）：2026-10-22 顶栏「+」删除后，入口只剩侧栏这一行，

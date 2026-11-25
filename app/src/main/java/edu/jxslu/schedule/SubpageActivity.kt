@@ -61,6 +61,11 @@ import edu.jxslu.schedule.ui.me.hub.TimetableHubScreen
 import edu.jxslu.schedule.ui.campus.CampusCalendarScreen
 import edu.jxslu.schedule.ui.campus.campusCalendarImageUi
 import edu.jxslu.schedule.ui.campus.CampusCardSettingsScreen
+import edu.jxslu.schedule.ui.campus.CampusCardViewModel
+import edu.jxslu.schedule.ui.campus.PayCodeViewModel
+import edu.jxslu.schedule.ui.campus.campusCardViewModel
+import edu.jxslu.schedule.ui.campus.rememberCampusNotificationPermission
+import edu.jxslu.schedule.ui.campus.rememberPayCodeWindowGuard
 import edu.jxslu.schedule.ui.campus.DormRepairScreen
 import edu.jxslu.schedule.ui.campus.DormRepairRefresh
 import edu.jxslu.schedule.ui.campus.LeaveHubScreen
@@ -92,6 +97,7 @@ import edu.jxslu.schedule.ui.exam.ExamSettingsScreen
 import edu.jxslu.schedule.ui.life.PowerBillScreen
 import edu.jxslu.schedule.ui.life.PowerBillViewModel
 import edu.jxslu.schedule.ui.life.openExternal
+import edu.jxslu.schedule.ui.life.powerRoomPickerFactory
 import edu.jxslu.schedule.ui.homework.HomeworkCourseScreen
 import edu.jxslu.schedule.ui.homework.HomeworkDetailScreen
 import edu.jxslu.schedule.ui.homework.HomeworkLibraryScreen
@@ -109,6 +115,7 @@ import edu.jxslu.schedule.ui.notes.NoteCourseScreen
 import edu.jxslu.schedule.ui.notes.NoteDetailScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.reminder.ClassReminder
+import edu.jxslu.schedule.ui.reminder.ReminderVibration
 import edu.jxslu.schedule.ui.reminder.ScoreAlertReminder
 import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.score.rememberScoreScreenActions
@@ -658,10 +665,27 @@ class SubpageActivity : ComponentActivity() {
             // focusItemId 对 RIDE 复用为「进页即定位的车号」（2026-09-29）：识别 / 深链
             // 带车号进来，第一笔查询找到就高亮定位（不轮询）
             SubpageScreen.RIDE -> RideScreen(onBack = onBack, initialFocusCarNum = focusItemId)
-            SubpageScreen.CAMPUS_CARD_SETTINGS -> CampusCardSettingsScreen(
-                onBack = onBack,
-                onOpenStatement = { SubpageActivity.start(this, SubpageScreen.CAMPUS_STATEMENT) },
-            )
+            // 校园卡设置（iOS 移植 Y1 搬进共享层）：VM 与寝室选择器由宿主建，
+            // 三处平台动作（拉起外部支付 / 通知权限 / 付款码窗口）从这里注入，
+            // 共享层那边只声明「要什么」（`ui/campus/CampusCardPlatform.kt`）。
+            SubpageScreen.CAMPUS_CARD_SETTINGS -> {
+                val settingsViewModel: CampusCardViewModel = viewModel {
+                    campusCardViewModel(this@SubpageActivity)
+                }
+                CampusCardSettingsScreen(
+                    viewModel = settingsViewModel,
+                    onBack = onBack,
+                    onOpenStatement = { SubpageActivity.start(this, SubpageScreen.CAMPUS_STATEMENT) },
+                    // 拉起微信 / 官方收银台；`openExternal` 顺手把本窗口的推入/滑出过渡换成静止
+                    onOpenPaymentUrl = { url ->
+                        openExternal(this, url) { message, _ -> Logger.w("YktRecharge", message) }
+                    },
+                    notificationPermission = rememberCampusNotificationPermission(),
+                    powerRoomPicker = viewModel(
+                        factory = powerRoomPickerFactory(this.applicationContext),
+                    ),
+                )
+            }
             // 教务账户页已在 shared/commonMain（iOS 移植 W1）：VM 由宿主建，
             // 四个平台窗口（引导页 / 两个导入窗口 / 成绩单窗口）由本侧注入。
             SubpageScreen.JW_ACCOUNT -> JwAccountScreen(
@@ -841,10 +865,27 @@ class SubpageActivity : ComponentActivity() {
                 onSaveToGallery = { saveRewardQrToGallery(this) },
                 onOpenWechatScan = { onError -> openWechatScan(this, onError) },
             )
-            SubpageScreen.PAY_CODE -> PayCodeScreen(
-                onBack = onBack,
-                onOpenStatement = { SubpageActivity.start(this, SubpageScreen.CAMPUS_STATEMENT) },
-            )
+            // 付款码（Y1 搬进共享层）：VM 由宿主建；防截屏 + 亮度拉满由
+            // `rememberPayCodeWindowGuard` 注入（离页成对恢复）
+            SubpageScreen.PAY_CODE -> {
+                val services = Services.current
+                val payCodeViewModel: PayCodeViewModel = viewModel {
+                    PayCodeViewModel(
+                        repo = services.yktRepository(),
+                        credentialStore = Graph.yktCredentialStore(this@SubpageActivity),
+                        prefs = services.displayPrefs(),
+                        db = services.database(),
+                        vibrate = { ReminderVibration.vibrate(this@SubpageActivity) },
+                        vpnActive = { JwVpnDetector.isVpnActive(this@SubpageActivity) },
+                    )
+                }
+                PayCodeScreen(
+                    viewModel = payCodeViewModel,
+                    onBack = onBack,
+                    onOpenStatement = { SubpageActivity.start(this, SubpageScreen.CAMPUS_STATEMENT) },
+                    windowGuard = rememberPayCodeWindowGuard(),
+                )
+            }
             // 缴费账单（iOS 移植 S20 搬进共享层）：VM 由宿主建（共享层没有 `viewModel()`），
             // 凭证存储 / VPN 探测 / 拉起浏览器都是 Android 侧能力，从这里注入。
             // 用 `viewModel {}` 而不是 `remember`：本页跑在独立 Activity 里，旋转时保住 VM。

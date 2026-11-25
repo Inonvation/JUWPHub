@@ -1,36 +1,32 @@
 package edu.jxslu.schedule.ui.campus
 
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.jw.JwVpnDetector
 import edu.jxslu.schedule.data.local.JuwDatabase
+import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.prefs.PendingRecharge
 import edu.jxslu.schedule.data.session.NetworkHint
 import edu.jxslu.schedule.data.ykt.YktCard
+import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktException
 import edu.jxslu.schedule.data.ykt.YktRechargeOrder
-import edu.jxslu.schedule.data.ykt.YktRechargeStart
 import edu.jxslu.schedule.data.ykt.YktRepository
 import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer
-import edu.jxslu.schedule.domain.YktArrival
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.BalanceAlertSource
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.Money
 import edu.jxslu.schedule.domain.MoneyFormat
+import edu.jxslu.schedule.domain.YktArrival
 import edu.jxslu.schedule.SubpageScreen
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.ui.reminder.BalanceAlertReminder
-import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -41,30 +37,65 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.concurrent.Volatile
 
 /**
  * 校园卡状态与动作：凭证启停、余额/到账、充值编排、两个余额提醒。
  *
  * 页面（[CampusCardSettingsScreen]）只做展示与收集输入；侧栏钱包、付款码页、充值宿主
  * 复用本类时用 `autoFetch = false`，避免冷启动多打一轮余额请求。
+ *
+ * ## 为什么搬进 commonMain（iOS 移植 Y1，2026-11-25）
+ *
+ * 这个类原来吃一个 `Context`，只为四件事：`Graph` 装配、VPN 探测、余额提醒排程、
+ * 充值拉起外部应用。四件里有三件在共享层已经有落点：
+ *
+ * | 原来 | 现在 |
+ * |---|---|
+ * | `Graph.yktRepository` / `yktCredentialStore` / `displayPrefs` / `juwDatabase` | 构造参数（宿主从 `Services.current` 取） |
+ * | `Graph.inboxRepository` | `Services.current.inboxRepository()` |
+ * | `LifeWidgetSync.pushCampusBalance` | `Services.current.pushCampusBalance`（iOS 默认空实现） |
+ * | `JwVpnDetector.isVpnActive` | [vpnActive] 可空回调（null = 本平台判断不了，提示退回「换一条网络」） |
+ * | `BalanceAlertReminder` | [alerts] 可空槽位（null = 本平台没有余额提醒） |
+ * | `Intent` / `Uri` | [recharge] 的 `launchExternal` 改成**吃 URL 的回调**，Intent 由宿主拼 |
+ *
+ * **没有**改动任何状态机口径：到账判定（余额 + 流水双口径）、基线恢复、轮询节奏、
+ * 连点去重、开关联动全部逐行照搬，`:app` 的行为与视觉不变。
  */
 class CampusCardViewModel(
-    private val appContext: Context,
+    private val repo: YktRepository,
+    /**
+     * 凭证存储。**非空**：付款码 / 流水 / 设置三页没有它就是个空壳，宿主在拿到
+     * `Services.current.yktCredentialStore()` 为 null 时直接不路由到这几页
+     * （iOS 与 Android 现在都给得出来：前者 Keychain，后者 `EncryptedSharedPreferences`）。
+     */
+    private val credentialStore: YktCredentialStore,
+    private val prefs: DisplayPrefsStore,
+    private val db: JuwDatabase,
     /**
      * 是否在 init 里自动拉一次余额。侧栏 / 充值宿主那份传 false：冷启动没人看，
      * 等侧栏展开或充值弹层打开时再刷；校园卡设置页保持默认 true，进页行为不变。
      */
     private val autoFetch: Boolean = true,
+    /**
+     * 余额提醒的排程钩子；**null = 本平台没有余额提醒**（`design/ios-port.md` §12.1：
+     * 通知 + 后台周期任务）。null 时两个开关的整节在页面上不渲染，本类里六处
+     * `setXxx` 也只是写偏好、不排程。
+     */
+    private val alerts: CampusAlertScheduler? = null,
+    /**
+     * 当前是否经由 VPN / 代理出网；**null = 本平台判断不了**。
+     *
+     * 只影响失败文案里那半句（开着代理就点名关掉，没开就换一条网络，见 [NetworkHint]）：
+     * null 时按 false 处理，也就是给「换一条网络」——对判断不了的平台，这是唯一不说假话的选择。
+     */
+    private val vpnActive: (() -> Boolean)? = null,
 ) : ViewModel() {
 
     /** 取数失败时的排查提示按它分支：开着代理点名关掉，没开就换一条网络（口径见 `NetworkHint`）。 */
-    private val isVpnActive: () -> Boolean = { JwVpnDetector.isVpnActive(appContext) }
+    private fun isVpnActive(): Boolean = vpnActive?.invoke() ?: false
 
-    private val prefs = Graph.displayPrefs(appContext)
-    private val credentialStore = Graph.yktCredentialStore(appContext)
-    private val repo = Graph.yktRepository(appContext)
-    private val db = edu.jxslu.schedule.data.local.juwDatabase(appContext)
-    private val syncer = edu.jxslu.schedule.data.ykt.YktTurnoverSyncer(repo, db) {
+    private val syncer = YktTurnoverSyncer(repo, db) {
         // 到账核对轮询拉到的新扣款顺带入箱（2026-10-23，与流水页/付款码页同一挂点）
         postYktPaymentInbox(it)
     }
@@ -182,42 +213,42 @@ class CampusCardViewModel(
     fun setPowerAlertEnabled(value: Boolean) {
         viewModelScope.launch {
             prefs.setPowerAlertEnabled(value)
-            BalanceAlertReminder.onSettingsChanged(appContext, BalanceAlertSource.Power)
+            alerts?.onSettingsChanged(BalanceAlertSource.Power)
         }
     }
 
     fun setPowerAlertYuan(value: Int) {
         viewModelScope.launch {
             prefs.setPowerAlertYuan(value)
-            BalanceAlertReminder.onSettingsChanged(appContext, BalanceAlertSource.Power)
+            alerts?.onSettingsChanged(BalanceAlertSource.Power)
         }
     }
 
     fun setYktAlertEnabled(value: Boolean) {
         viewModelScope.launch {
             prefs.setYktAlertEnabled(value)
-            BalanceAlertReminder.onSettingsChanged(appContext, BalanceAlertSource.Ykt)
+            alerts?.onSettingsChanged(BalanceAlertSource.Ykt)
         }
     }
 
     fun setYktAlertYuan(value: Int) {
         viewModelScope.launch {
             prefs.setYktAlertYuan(value)
-            BalanceAlertReminder.onSettingsChanged(appContext, BalanceAlertSource.Ykt)
+            alerts?.onSettingsChanged(BalanceAlertSource.Ykt)
         }
     }
 
     fun setPowerAlertIntervalHours(value: Int) {
         viewModelScope.launch {
             prefs.setPowerAlertIntervalHours(value)
-            BalanceAlertReminder.onSettingsChanged(appContext, BalanceAlertSource.Power)
+            alerts?.onSettingsChanged(BalanceAlertSource.Power)
         }
     }
 
     fun setYktAlertIntervalHours(value: Int) {
         viewModelScope.launch {
             prefs.setYktAlertIntervalHours(value)
-            BalanceAlertReminder.onSettingsChanged(appContext, BalanceAlertSource.Ykt)
+            alerts?.onSettingsChanged(BalanceAlertSource.Ykt)
         }
     }
 
@@ -242,11 +273,11 @@ class CampusCardViewModel(
     val balanceLoaded: StateFlow<Boolean> = _balanceLoaded
 
     /**
- * 刷新余额（生活页进页、点余额卡、生活页下拉刷新都走它）。无凭证/开关关时静默直返；
+     * 刷新余额（生活页进页、点余额卡、生活页下拉刷新都走它）。无凭证/开关关时静默直返；
      * 失败静默（与 init 的口径一致，卡片副行维持旧值或「暂不可用」）。
      *
      * [force] = false 只给**进页**那条路用：吃 `YktRepository` 的 60 秒余额缓存
- * （DESIGN §4.24「请求节流」）。用户点卡片 / 下拉刷新传 true，照旧拿实时值。
+     * （DESIGN §4.24「请求节流」）。用户点卡片 / 下拉刷新传 true，照旧拿实时值。
      */
     fun refreshBalance(force: Boolean = true) {
         // 取数中忽略重复触发（连点余额卡 / 反复下拉不再叠请求，2026-10-09）
@@ -347,9 +378,10 @@ class CampusCardViewModel(
         _balance.value = snapshot
         // 余额变了 = 刚发生过扣款/入账：补拉一页最新流水，新消费随流水同步入收件箱
         //（2026-11-06；挂点口径见 YktBalanceChangeSync 的 KDoc）
-        YktBalanceChangeSync.onBalanceObserved(appContext, snapshot.cardFen)
+        YktBalanceChangeSync.onBalanceObserved(snapshot.cardFen)
         viewModelScope.launch {
-            runCatching { LifeWidgetSync.pushCampusBalance(appContext, snapshot.cardFen) }
+            // 桌面生活小组件：iOS 是默认空实现（没有 Glance），Android 转接 LifeWidgetSync
+            runCatching { Services.current.pushCampusBalance(snapshot.cardFen) }
         }
     }
 
@@ -366,7 +398,7 @@ class CampusCardViewModel(
                 val pending = runCatching { prefs.pendingRecharge.first() }.getOrNull()
                 if (pending != null) {
                     val saved = credentialStore.read()
-                    if (saved == null || System.currentTimeMillis() - pending.startedAt >= ARRIVAL_WATCH_MS) {
+                    if (saved == null || AppClock.nowMillis() - pending.startedAt >= ARRIVAL_WATCH_MS) {
                         prefs.clearPendingRecharge()
                     } else {
                         restoreArrivalBaseline(pending)
@@ -432,7 +464,7 @@ class CampusCardViewModel(
             return NoticeFeedback(e.message ?: "登录失败，请检查账号密码", NoticeTone.Error)
         } catch (e: Exception) {
             return NoticeFeedback(
-                "登录异常：${e.javaClass.simpleName} ${e.message.orEmpty()}".trim(),
+                "登录异常：${e::class.simpleName.orEmpty()} ${e.message.orEmpty()}".trim(),
                 NoticeTone.Error,
             )
         }
@@ -469,7 +501,7 @@ class CampusCardViewModel(
             // 连内存里的 token 缓存一起清：敏感值不留进程内存（2026-09-28 审查补）
             repo.clearTokenCache()
             // 两个提醒都关了 → 内部会撤销每日周期任务，不白唤醒设备
-            BalanceAlertReminder.ensurePeriodicWork(appContext)
+            alerts?.ensurePeriodicWork()
             onDone()
         }
     }
@@ -477,16 +509,17 @@ class CampusCardViewModel(
     /**
      * 充值：下单 → 拉起微信/收银台 → 回流轮询到账（DESIGN §4.19「充值」）。
      *
-     * [launchExternal] 由 UI 层注入（[startActivityOutsideApp]：拉起前把二级页窗口的
-     * 推入/滑出过渡换成静止——微信是 singleTask、开不进调用方 task，从它返回时本页的
-     * 右推入过渡会被重放，2026-09-26 修「充值回来页面跳动」）。返回 false = 无法打开
-     * （未装微信等），调用方给文案。
+     * [launchExternal] 由 UI 层注入：**吃 URL 的回调，不是 `Intent`**——`Intent` 是 Android
+     * 专有类型，搬进共享层后只能由宿主拼（Android 侧顺手把二级页窗口的推入/滑出过渡换成
+     * 静止，见 `startActivityOutsideApp`；微信是 singleTask、开不进调用方 task，从它返回时
+     * 本页的右推入过渡会被重放，2026-09-26 修「充值回来页面跳动」）。
+     * 返回 false = 无法打开（未装微信等），调用方给文案。
      */
     fun recharge(
         yuan: String,
         /** 电子账户 type（`<account>-000`）；null = 充正式卡。见 [electricAccountType]。 */
         targetAccount: String? = null,
-        launchExternal: (android.content.Intent) -> Boolean,
+        launchExternal: (String) -> Boolean,
         onResult: (NoticeFeedback) -> Unit,
     ) {
         viewModelScope.launch {
@@ -520,7 +553,7 @@ class CampusCardViewModel(
             } catch (e: Exception) {
                 onResult(
                     NoticeFeedback(
-                        "下单异常：${e.javaClass.simpleName}（平台可能已改版）",
+                        "下单异常：${e::class.simpleName.orEmpty()}（平台可能已改版）",
                         NoticeTone.Error,
                     ),
                 )
@@ -534,7 +567,7 @@ class CampusCardViewModel(
             // 到账检测基线（付款前的该卡余额 + 卡号，随下单一起拿到）+
             // 持久化未确认充值（进程被杀后可恢复，DESIGN §4.19「充值」）
             val orderFen = parsedFenOf(yuan)
-            val startedAt = System.currentTimeMillis()
+            val startedAt = AppClock.nowMillis()
             _arrivalBaseFen = placed.cardBalanceBeforeFen
             _arrivalAccount = placed.cardAccount
             _arrivalTarget = placed.targetAccount
@@ -550,11 +583,7 @@ class CampusCardViewModel(
             when (order) {
                 is YktRechargeOrder.WechatPay -> {
                     // 直拉微信（跳过浏览器与收银台页；weixin://wap/pay 由微信客户端接手）
-                    val intent = android.content.Intent(
-                        android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse(order.wechatUrl),
-                    )
-                    if (launchExternal(intent)) {
+                    if (launchExternal(order.wechatUrl)) {
                         onResult(NoticeFeedback("已拉起微信支付，支付完成后回到本页等待到账", NoticeTone.Info))
                     } else {
                         onResult(NoticeFeedback("未找到微信，请确认已安装微信后重试", NoticeTone.Error))
@@ -562,11 +591,7 @@ class CampusCardViewModel(
                 }
                 is YktRechargeOrder.Cashier -> {
                     // 兜底：打开官方收银台（服务端 302 下发的完整 URL）
-                    val intent = android.content.Intent(
-                        android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse(order.cashierUrl),
-                    )
-                    if (!launchExternal(intent)) {
+                    if (!launchExternal(order.cashierUrl)) {
                         onResult(NoticeFeedback("无法打开浏览器，请检查设备后重试", NoticeTone.Error))
                         return@launch
                     }
@@ -600,13 +625,11 @@ class CampusCardViewModel(
         watchJob = viewModelScope.launch {
             val deadline = startedAt + ARRIVAL_WATCH_MS
             var round = 0
-            while (isActive && System.currentTimeMillis() < deadline) {
+            while (isActive && AppClock.nowMillis() < deadline) {
                 // 渐进间隔（YktArrival.arrivalPollIntervalMs）：前 2 分钟 5 秒，之后 15 秒、
                 // 60 秒——30 分钟窗口约 100 条 vs 固定 5 秒的约 480 条；流水「每 3 轮」
                 // 的比例不变，间隔拉长后流水频率自动等比下降
-                kotlinx.coroutines.delay(
-                    YktArrival.arrivalPollIntervalMs(System.currentTimeMillis() - startedAt),
-                )
+                delay(YktArrival.arrivalPollIntervalMs(AppClock.nowMillis() - startedAt))
                 round++
                 if (checkArrivalOnce(username, password, orderFen, startedAt)) return@launch
                 // 流水同步降频：每 3 轮（15s）一次，减轻服务端压力
@@ -690,7 +713,7 @@ class CampusCardViewModel(
     private suspend fun markArrived(orderFen: Long, newBalanceFen: Long?, startedAt: Long) {
         // 充值到账留痕收件箱（2026-10-22）：「钱进了卡」是可回查的事实，静默入箱不点红点。
         // post 内部吞错（旁路纪律），留痕失败不影响到账收尾。
-        Graph.inboxRepository(appContext).post(
+        Services.current.inboxRepository().post(
             kind = InboxKind.YKT_RECHARGE,
             dedupeKey = InboxKeys.YKT_RECHARGE_PREFIX + startedAt,
             title = "一卡通充值到账",
@@ -698,7 +721,7 @@ class CampusCardViewModel(
                 append("充值 ").append(MoneyFormat.fromFen(orderFen))
                 newBalanceFen?.let { append(" · 余额 ").append(MoneyFormat.fromFen(it)) }
             },
-            // 落点 = 消费流水页（充值记录以收入行在那里可回查）；静默留痕不点红点
+            // 落点 = 消费流水页（充值记录以收入行在那里可回查）；静默留痕不点红心
             route = SubpageScreen.CAMPUS_STATEMENT.name,
             silent = true,
         )
@@ -754,7 +777,7 @@ class CampusCardViewModel(
      * 页面回到前台（从微信返回等）：立即补检一轮——不等下一个 5 秒周期，
      * 这是「支付完回来马上看到结果」的关键；进程被杀重启时同时恢复等待态。
      *
-     * 本回调在**每次**进页/回前台都会触发（生命周期观察者补齐时会补发 ON_RESUME），
+     * 本回调在**每次**进页/回前台都会触发（Android 侧由 `rememberResumeTick` 驱动），
      * 所以「正在确认到账」弹窗按**每笔充值一次**弹：弹过就落库标记，之后同一笔充值
      * 不再弹，等待态改由余额卡的「正在等待到账」行承载。用户关掉弹窗不影响轮询。
      */
@@ -785,7 +808,7 @@ class CampusCardViewModel(
             // 未立即到账：给出「正在确认」反馈弹窗——延迟一拍（等返回动画/窗口稳定），
             // 避免回到前台瞬间弹窗引发顶栏 insets 重算跳动（2026-09-21 实测）
             if (pending != null && !pending.confirmShown) {
-                kotlinx.coroutines.delay(PENDING_CONFIRM_DELAY_MS)
+                delay(PENDING_CONFIRM_DELAY_MS)
                 if (_arrivalState.value is ArrivalState.Arrived) return@launch
                 _pendingConfirmVisible.value = true
                 prefs.markPendingRechargeConfirmShown()
@@ -806,7 +829,7 @@ class CampusCardViewModel(
      * 不弹」）：本 VM 只在 `_arrivalState` 不是 Watching（= 没有活跃轮询，内存基线必是
      * **上一笔充值残留**）时才走到这里。上一笔基线偏高时，下一笔的判定门槛被抬成
      * 「旧基线 + 新订单额」，钱到了也判不到——一直卡「正在确认」直到超时。典型触发：
-     * 两笔充值从不同入口发起（生活页与设置页是两个 Activity 各持一份 VM），另一份
+     * 两笔充值从不同入口发起（侧栏与设置页是两个窗口各持一份 VM），另一份
      * VM 恢复 pending 时沿用了自己残留的旧基线。每笔充值的基线唯一来源 = 持久化
      * pending；活跃轮询路径（st is Watching）不经过这里，正在跑的那条链不受影响。
      */
@@ -899,11 +922,5 @@ class CampusCardViewModel(
 
         /** 返回前台后「确认中」弹窗的延迟（ms）：避开返回动画期的窗口/insets 重排。 */
         private const val PENDING_CONFIRM_DELAY_MS = 800L
-
-        fun Factory(context: Context, autoFetch: Boolean = true) = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                CampusCardViewModel(context.applicationContext, autoFetch) as T
-        }
     }
 }

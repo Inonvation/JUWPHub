@@ -1,21 +1,18 @@
 package edu.jxslu.schedule.ui.campus
 
-import android.app.Activity
-import android.view.WindowManager
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -38,17 +35,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.domain.MoneyFormat
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.BarcodeMatrixImage
 import edu.jxslu.schedule.ui.common.SkeletonBox
 import edu.jxslu.schedule.ui.common.lineHeightDp
 import edu.jxslu.schedule.ui.common.postNotice
@@ -58,24 +53,32 @@ import edu.jxslu.schedule.ui.icon.AppIcons
 /**
  * 校园卡付款码页（DESIGN §3.10）：进页自动取码，大 QR + Code128 双展示。
  *
- * **防截屏**：窗口加 `FLAG_SECURE`（截屏/录屏/最近任务缩略图全黑）——付款码等同现金，
- * 网页端 H5 同样防截屏；离开页面即清除。**亮度拉满**：食堂/超市扫码枪对亮度敏感，
- * 进页把 `screenBrightness` 顶到 1f，离开恢复原值。
+ * **防截屏与亮度拉满**：由宿主注入 [windowGuard]（Android 走 `FLAG_SECURE` +
+ * `screenBrightness`，付款码等同现金；食堂/超市扫码枪对亮度敏感）。按
+ * `design/ios-port.md` §11.2 ④，**null = 本平台没有这两项能力**——iOS 这版既没接
+ * `UIScreen.brightness` 也没做录屏防护，传 null 时只是不加这两道保护，码本身照常显示。
+ * 不给空实现：那会让人以为做了防护。
+ *
+ * iOS 移植 Y1（2026-11-25）搬进 `shared/commonMain`。两处变化都写在对应位置：
+ * ViewModel 由宿主建（§11.2 ①），码图改由 [BarcodeMatrixImage] 用 Compose 画布画
+ * （不再经过 `android.graphics.Bitmap`，理由见那份渲染件的 KDoc）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PayCodeScreen(
+    viewModel: PayCodeViewModel,
     onBack: () -> Unit = {},
     /** 跳消费流水页（DESIGN §4.19 B4） */
     onOpenStatement: () -> Unit = {},
-    viewModel: PayCodeViewModel = viewModel(factory = PayCodeViewModel.Factory(LocalContext.current)),
+    /** 防截屏 + 亮度拉满；**null = 本平台没有这两项能力**（见类注释）。 */
+    windowGuard: PayCodeWindowGuard? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val bitmaps by viewModel.bitmaps.collectAsStateWithLifecycle()
+    val matrices by viewModel.matrices.collectAsStateWithLifecycle()
+    val dark by viewModel.dark.collectAsStateWithLifecycle()
     val balance by viewModel.balance.collectAsStateWithLifecycle()
     val balanceLoaded by viewModel.balanceLoaded.collectAsStateWithLifecycle()
     val payment by viewModel.detectedPayment.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val haptics = rememberAppHaptics()
@@ -100,23 +103,10 @@ fun PayCodeScreen(
         }
     }
 
-    // FLAG_SECURE + 亮度拉满：离开即恢复（两段各管各的窗口属性）
-    DisposableEffect(Unit) {
-        val window = (context as? Activity)?.window
-        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        val previousBrightness =
-            window?.attributes?.screenBrightness ?: WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-        window?.let { w ->
-            w.attributes = w.attributes.apply {
-                screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL
-            }
-        }
-        onDispose {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-            window?.let { w ->
-                w.attributes = w.attributes.apply { screenBrightness = previousBrightness }
-            }
-        }
+    // 防截屏 + 亮度拉满：离开即恢复（成对副作用由 [windowGuard] 的实现方收口）
+    DisposableEffect(windowGuard) {
+        windowGuard?.enter()
+        onDispose { windowGuard?.exit() }
     }
 
     Scaffold(
@@ -143,7 +133,8 @@ fun PayCodeScreen(
         ) {
             PayCodeBody(
                 state = state,
-                bitmaps = bitmaps,
+                matrices = matrices,
+                dark = dark,
                 onNext = {
                     haptics.tap()
                     viewModel.next()
@@ -216,14 +207,15 @@ private fun BalanceRow(
 @Composable
 private fun PayCodeBody(
     state: PayCodeUiState,
-    bitmaps: PayCodeBitmaps?,
+    matrices: PayCodeMatrices?,
+    dark: Boolean,
     onNext: () -> Unit,
     onRetry: () -> Unit,
 ) {
     val onSurface = MaterialTheme.colorScheme.onSurface
     val error = state as? PayCodeUiState.Error
     val success = state as? PayCodeUiState.Success
-    val showCode = success != null && bitmaps != null
+    val showCode = success != null && matrices != null
     val loading = !showCode && error == null
     // 两行文本位的高度取自样式本身，系统字体调大时骨架跟着长，不会又差一截
     val infoLine = lineHeightDp(MaterialTheme.typography.bodySmall)
@@ -272,8 +264,9 @@ private fun PayCodeBody(
                     )
                 }
 
-                bitmaps != null -> Image(
-                    bitmap = bitmaps.qr.asImageBitmap(),
+                matrices != null -> BarcodeMatrixImage(
+                    matrix = matrices.qr,
+                    dark = dark,
                     contentDescription = "校园卡付款码二维码",
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -292,8 +285,9 @@ private fun PayCodeBody(
             when {
                 error != null -> Unit
 
-                bitmaps != null -> Image(
-                    bitmap = bitmaps.barcode.asImageBitmap(),
+                matrices != null -> BarcodeMatrixImage(
+                    matrix = matrices.barcode,
+                    dark = dark,
                     contentDescription = "校园卡付款码条形码",
                     modifier = Modifier.fillMaxSize(),
                 )

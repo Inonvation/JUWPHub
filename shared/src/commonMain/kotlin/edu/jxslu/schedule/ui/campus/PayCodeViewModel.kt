@@ -1,28 +1,24 @@
 package edu.jxslu.schedule.ui.campus
 
-import android.content.Context
-import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.jw.JwVpnDetector
+import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.session.NetworkHint
-import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer
-import edu.jxslu.schedule.data.ykt.toWatchRow
 import edu.jxslu.schedule.data.ykt.YktCard
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktException
 import edu.jxslu.schedule.data.ykt.YktRepository
+import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer
+import edu.jxslu.schedule.data.ykt.toWatchRow
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.BarcodeMatrix
 import edu.jxslu.schedule.domain.ThemeMode
-import edu.jxslu.schedule.domain.YktPayWatch
 import edu.jxslu.schedule.domain.YktPayCode
+import edu.jxslu.schedule.domain.YktPayWatch
 import edu.jxslu.schedule.domain.YktPayment
-import edu.jxslu.schedule.ui.common.CodeBitmaps
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.ui.reminder.ReminderVibration
-import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -58,7 +54,7 @@ sealed class PayCodeUiState {
 
     /**
      * 取码成功。[codes] 为本批全部码（含当前），[index] 当前展示位；
-     * 位图由 ViewModel 异步渲染在 [PayCodeViewModel.bitmaps]，不进状态类。
+     * 码图由 ViewModel 异步生成在 [PayCodeViewModel.matrices]，不进状态类。
      */
     data class Success(
         val codes: List<String>,
@@ -71,8 +67,14 @@ sealed class PayCodeUiState {
     }
 }
 
-/** 当前展示码的渲染位图（null = 渲染中）。 */
-data class PayCodeBitmaps(val qr: Bitmap, val barcode: Bitmap)
+/**
+ * 当前展示码的码图位阵（null = 生成中）。
+ *
+ * 这里是 **`BarcodeMatrix`**，不是位图：`android.graphics.Bitmap` 进不了 commonMain，
+ * 而两端本来就有同一份位阵（`YktPayCode.matrices` → 平台出码）。绘制由
+ * `ui/common/BarcodeMatrixImage` 用 Compose 画布完成，见那里的 KDoc。
+ */
+data class PayCodeMatrices(val qr: BarcodeMatrix, val barcode: BarcodeMatrix)
 
 /** 一次性事件（换批失败等）。 */
 sealed interface PayCodeEvent {
@@ -84,27 +86,51 @@ sealed interface PayCodeEvent {
  *
  * 进页自动取码：内存 token → 401/无 token 自动重登 → CARD 账户 → 一批 10 码。
  * 「下一个」只在**批内**递增；耗尽才重新取一批（防反复申请攒码）。
- * 码矩阵在 Default 线程渲染，位图随 ViewModel 生命周期回收。
+ * 码矩阵在 Default 线程生成，随 ViewModel 生命周期回收。
+ *
+ * ## 为什么搬进 commonMain（iOS 移植 Y1，2026-11-25）
+ *
+ * 同类里那几件平台件按 `design/ios-port.md` §11.2 ④ 收成构造参数：
+ *
+ * | 原来 | 现在 |
+ * |---|---|
+ * | `Context` + `Graph.*` | 构造参数（宿主从 `Services.current` 取） |
+ * | `JwVpnDetector.isVpnActive` | [vpnActive]（null = 判断不了，退回「换一条网络」） |
+ * | `LifeWidgetSync.pushCampusBalance` | `Services.current.pushCampusBalance`（iOS 空实现） |
+ * | `ReminderVibration.vibrate(context)` | [vibrate]（null = 本平台不震） |
+ * | `CodeBitmaps.render` → `android.graphics.Bitmap` | **删掉**：状态里改存 `BarcodeMatrix`，绘制交给共享层的 `BarcodeMatrixImage` |
+ *
+ * 最后一条是本类唯一改实现的地方，理由写在那份渲染件的 KDoc 里：码位阵两端本来就是
+ * 同一份（`domain/BarcodeMatrix`），Android 独有的只是「位阵 → Bitmap」那一步，
+ * 而那一步只为把一个 `ImageBitmap` 交给 `Image()`——Compose 画布直接按位阵画方块
+ * 能得到逐像素相同的图，还省掉一次大对象分配与 `recycle()`。
  */
 class PayCodeViewModel(
-    private val appContext: Context,
     private val repo: YktRepository,
+    /** 凭证存储；非空（宿主拿不到它时不该路由到本页，口径同 `CampusCardViewModel`）。 */
     private val credentialStore: YktCredentialStore,
     private val prefs: DisplayPrefsStore,
-    private val db: edu.jxslu.schedule.data.local.JuwDatabase,
+    private val db: JuwDatabase,
+    /**
+     * 扫码扣款命中那一刻的振动；**null = 本平台不做这件事**（iOS 这版没接 UIKit 触感反馈，
+     * 与 `ui/common/Haptics` 那条 Compose 缝是两回事：这里发生在协程里，不是点击回调）。
+     */
+    private val vibrate: (() -> Unit)? = null,
+    /** VPN / 代理探测；null = 本平台判断不了（见 `CampusCardViewModel.vpnActive`）。 */
+    private val vpnActive: (() -> Boolean)? = null,
 ) : ViewModel() {
 
     private val syncer = YktTurnoverSyncer(repo, db) { postYktPaymentInbox(it) }
 
     /** 取码失败时的排查提示按它分支（口径见 `NetworkHint`）。 */
-    private val isVpnActive: () -> Boolean = { JwVpnDetector.isVpnActive(appContext) }
+    private fun isVpnActive(): Boolean = vpnActive?.invoke() ?: false
 
     // 初值 Idle：付款码页进页就 load()（Loading 立刻接上），生活页内嵌用法则停在占位态不取码
     private val _uiState = MutableStateFlow<PayCodeUiState>(PayCodeUiState.Idle)
     val uiState: StateFlow<PayCodeUiState> = _uiState.asStateFlow()
 
-    private val _bitmaps = MutableStateFlow<PayCodeBitmaps?>(null)
-    val bitmaps: StateFlow<PayCodeBitmaps?> = _bitmaps.asStateFlow()
+    private val _matrices = MutableStateFlow<PayCodeMatrices?>(null)
+    val matrices: StateFlow<PayCodeMatrices?> = _matrices.asStateFlow()
 
     /**
      * 卡余额快照（DESIGN §4.19 余额展示 + §3.10 账户口径）：null = 未取到 / 取失败
@@ -122,7 +148,7 @@ class PayCodeViewModel(
         /** 电子账户余额（ACCOUNT 行，2026-09-23 实测与 CARD 同接口返回）。 */
         val accountFen: Long,
         /** 快照生成时刻（生活页卡片更新时间行用，2026-09-24）。 */
-        val fetchedAtMs: Long = System.currentTimeMillis(),
+        val fetchedAtMs: Long = AppClock.nowMillis(),
     )
 
     private val _balance = MutableStateFlow<BalanceSnapshot?>(null)
@@ -184,7 +210,7 @@ class PayCodeViewModel(
                     expiresSeconds = data.expires,
                     accountMasked = maskAccount(data.account),
                 )
-                renderBitmaps(data.barcode.first())
+                renderMatrices(data.barcode.first())
                 loadBalance(credentials.username, credentials.password)
                 // 码已经拿在手上，开始盯这笔消费（DESIGN §3.10「扫码后自动退出」）
                 startPayWatch(credentials.username, credentials.password)
@@ -258,11 +284,11 @@ class PayCodeViewModel(
         _balance.value = snapshot
         // 余额变了 = 刚发生过扣款/入账：补拉一页最新流水（2026-11-06）。付款码页的
         // payWatch 紧随其后也会同步，但用户看完余额立刻退出时它未必跑完第一轮；同键幂等。
-        YktBalanceChangeSync.onBalanceObserved(appContext, snapshot.cardFen)
+        YktBalanceChangeSync.onBalanceObserved(snapshot.cardFen)
         // 桌面生活小组件（DESIGN §3.6 二条目改版）：余额数据已经在手上，顺手推一次
-        // （零额外请求）
+        // （零额外请求）；iOS 是默认空实现（没有 Glance）
         runCatching {
-            LifeWidgetSync.pushCampusBalance(Graph.appContext, cardFen = snapshot.cardFen)
+            Services.current.pushCampusBalance(snapshot.cardFen)
         }
     }
 
@@ -296,9 +322,9 @@ class PayCodeViewModel(
         payWatchJob = viewModelScope.launch {
             val dao = db.yktTurnoverDao()
             val watch = YktPayWatch()
-            val startedAt = System.currentTimeMillis()
+            val startedAt = AppClock.nowMillis()
             val deadline = startedAt + PAY_WATCH_MS
-            while (isActive && System.currentTimeMillis() < deadline) {
+            while (isActive && AppClock.nowMillis() < deadline) {
                 if (syncTurnovers(username, password)) {
                     if (!watch.established) {
                         // 第一轮只建立水位：这一轮入库的记录全算「进页前就有」，不判定
@@ -315,13 +341,13 @@ class PayCodeViewModel(
                             // 命中一刻直接震（2026-10-07）：轮询特意不跟页面可见性，付款码页
                             // 可能锁屏停留，用户不一定在看手机；页面里的 LaunchedEffect 会被
                             // collectAsStateWithLifecycle 的 STARTED 闸门挂起、晚到亮屏才响，
-                            // 放这里才是「钱刚动」的那一刻。震不出来不算错（同 ReminderVibration）。
-                            ReminderVibration.vibrate(appContext)
+                            // 放这里才是「钱刚动」的那一刻。震不出来不算错。
+                            vibrate?.invoke()
                             return@launch
                         }
                     }
                 }
-                delay(YktPayWatch.pollIntervalMs(System.currentTimeMillis() - startedAt))
+                delay(YktPayWatch.pollIntervalMs(AppClock.nowMillis() - startedAt))
             }
         }
     }
@@ -341,7 +367,7 @@ class PayCodeViewModel(
         false
     }
 
-    /** 展示下一个备用码（批内递增 + 本地渲染）；批内耗尽时重新取一批。 */
+    /** 展示下一个备用码（批内递增 + 本地生成码图）；批内耗尽时重新取一批。 */
     fun next() {
         val current = _uiState.value as? PayCodeUiState.Success ?: return
         if (current.hasMore) {
@@ -349,7 +375,7 @@ class PayCodeViewModel(
             _uiState.update { state ->
                 (state as? PayCodeUiState.Success)?.copy(index = newIndex) ?: state
             }
-            renderBitmaps(current.codes[newIndex])
+            renderMatrices(current.codes[newIndex])
             return
         }
         val credentials = credentialStore.read() ?: return
@@ -362,7 +388,7 @@ class PayCodeViewModel(
                     expiresSeconds = data.expires,
                     accountMasked = maskAccount(data.account),
                 )
-                renderBitmaps(data.barcode.first())
+                renderMatrices(data.barcode.first())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -371,18 +397,17 @@ class PayCodeViewModel(
         }
     }
 
-    /** 渲染当前码（Default 线程）；换码时回收旧位图。 */
-    private fun renderBitmaps(code: String) {
-        val darkNow = dark.value
+    /**
+     * 生成当前码的双位阵（Default 线程）。换码时直接整份替换——位阵是可回收的普通数组，
+     * 不再有需要手动 `recycle()` 的原生位图。
+     */
+    private fun renderMatrices(code: String) {
         viewModelScope.launch {
-            val (qr, bc) = withContext(Dispatchers.Default) {
+            val pair = withContext(Dispatchers.Default) {
                 val matrices = YktPayCode.matrices(code)
-                CodeBitmaps.render(matrices.qr, darkNow) to CodeBitmaps.render(matrices.barcode, darkNow)
+                PayCodeMatrices(qr = matrices.qr, barcode = matrices.barcode)
             }
-            val old = _bitmaps.value
-            _bitmaps.value = PayCodeBitmaps(qr, bc)
-            old?.qr?.recycle()
-            old?.barcode?.recycle()
+            _matrices.value = pair
         }
     }
 
@@ -394,9 +419,7 @@ class PayCodeViewModel(
     }
 
     override fun onCleared() {
-        _bitmaps.value?.qr?.recycle()
-        _bitmaps.value?.barcode?.recycle()
-        _bitmaps.value = null
+        _matrices.value = null
         super.onCleared()
     }
 
@@ -406,16 +429,5 @@ class PayCodeViewModel(
 
         /** 扫码消费检测的窗口上限（15 分钟；付款码页不会停留更久）。 */
         private const val PAY_WATCH_MS = 15 * 60_000L
-    }
-
-    class Factory(private val context: Context) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T = PayCodeViewModel(
-            context.applicationContext,
-            Graph.yktRepository(context.applicationContext),
-            Graph.yktCredentialStore(context.applicationContext),
-            Graph.displayPrefs(context.applicationContext),
-            edu.jxslu.schedule.data.local.juwDatabase(context.applicationContext),
-        ) as T
     }
 }

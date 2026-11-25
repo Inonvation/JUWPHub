@@ -166,7 +166,7 @@ internal object LifeWidgetSync {
             val cardFen = cards.sumOf { it.cardBalanceFen }
             // 余额变了 = 期间发生过扣款/入账：补拉一页最新流水（消费入收件箱，2026-11-06）。
             // 后台 tick 也会走到这里，收件箱因此不必等用户打开账单页。
-            YktBalanceChangeSync.onBalanceObserved(appContext, cardFen)
+            YktBalanceChangeSync.onBalanceObserved(cardFen)
             pushCampusBalance(appContext, cardFen)
             true
         }.getOrDefault(false)

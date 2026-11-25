@@ -25,6 +25,7 @@ import edu.jxslu.schedule.ui.campus.CampusArrivalDialog
 import edu.jxslu.schedule.ui.campus.CampusCardViewModel
 import edu.jxslu.schedule.ui.campus.CampusPendingConfirmDialog
 import edu.jxslu.schedule.ui.campus.RechargeSheet
+import edu.jxslu.schedule.ui.campus.campusCardViewModel
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.RechargeDisclaimerDialog
@@ -64,10 +65,10 @@ fun RechargeHost(
 
     // 一卡通侧（余额、到账轮询、充值）复用 CampusCardViewModel：那套状态机已经在
     // 「我的 -> 校园卡」跑通，这里只做入口与展示。
-    val campusViewModel: CampusCardViewModel = viewModel(
+    val campusViewModel: CampusCardViewModel = viewModel {
         // 宿主常驻：冷启动不取数；打开充值弹层时 refreshBalance(force = false) 会按需拉
-        factory = CampusCardViewModel.Factory(context.applicationContext, autoFetch = false),
-    )
+        campusCardViewModel(context.applicationContext, autoFetch = false)
+    }
     val campusEnabled by campusViewModel.enabled.collectAsStateWithLifecycle()
     val balance by campusViewModel.balance.collectAsStateWithLifecycle()
     val arrival by campusViewModel.arrivalState.collectAsStateWithLifecycle()
@@ -226,8 +227,10 @@ fun RechargeHost(
                         targetAccount = target,
                         // 与一卡通设置页同口径：统一走 startActivityOutsideApp，
                         // 拉起外部应用前先把本窗口的过渡覆盖换成静止（2026-09-26 修页面跳动）
-                        launchExternal = { intent ->
-                            runCatching { context.startActivityOutsideApp(intent) }.isSuccess
+                        launchExternal = { url ->
+                            runCatching {
+                                context.startActivityOutsideApp(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            }.isSuccess
                         },
                     ) { notice -> showNotice(notice.text, notice.tone) }
                 }
