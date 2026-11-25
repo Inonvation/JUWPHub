@@ -86,6 +86,18 @@ fun SettingsScreen(
     showAiSchedule: Boolean = true,
     /** 「百宝箱」开关行。false = 本平台没有百宝箱，整行不渲染。语义同上。 */
     showToolbox: Boolean = true,
+    /**
+     * 「桌面小组件」入口（DESIGN §3.6）。false = 本平台没有桌面小组件，整行不渲染。
+     *
+     * 桌面小组件是 `androidx.glance`（Compose-for-appwidget），iOS 的对应物 WidgetKit + SwiftUI
+     * 是另一套渲染与数据共享模型（要 App Group + Timeline Provider），`WidgetSettingsScreen`
+     * 那 909 行搬不动也搬不该（`design/ios-port.md` §12.1）。所以 iOS 侧传 false：
+     * `SubpageScreen.WIDGET_SETTINGS` 在 iOS 上**没有页面**，留着这一行就是个死入口。
+     *
+     * 语义同 [showAiSchedule]：这一行是**页面自己**的清单项，不是宿主回调，所以用开关而不是
+     * 可空回调（`onOpen` 恒非空，挡不住清单里的一行）。
+     */
+    showWidget: Boolean = true,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -221,12 +233,14 @@ fun SettingsScreen(
             }
 
             SettingsSection(title = "桌面与日历") {
-                SettingItem(
-                    title = "桌面小组件",
-                    subtitle = "课表 · 校园卡电费 · 开水卡 · 一键添加",
-                    icon = AppIcons.GridView,
-                    onClick = { onOpen(SubpageScreen.WIDGET_SETTINGS) },
-                )
+                if (showWidget) {
+                    SettingItem(
+                        title = "桌面小组件",
+                        subtitle = "课表 · 校园卡电费 · 开水卡 · 一键添加",
+                        icon = AppIcons.GridView,
+                        onClick = { onOpen(SubpageScreen.WIDGET_SETTINGS) },
+                    )
+                }
                 SettingItem(
                     title = "日历同步",
                     subtitle = "课表写入系统日历 · 提前提醒随同步写入",
