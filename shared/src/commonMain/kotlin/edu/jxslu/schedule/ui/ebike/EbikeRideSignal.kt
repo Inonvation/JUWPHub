@@ -13,8 +13,11 @@ import kotlinx.coroutines.flow.asSharedFlow
  *
  * 只在同一进程内有效：页面没开时没有订阅者，下次进页本来就会查一次在案订单；不做持久化，
  * 避免下一轮骑行读到上一轮的结束事件。
+ *
+ * iOS 移植 E2（2026-11-25）：从 `:app` 搬进共享层（地图页 ViewModel 已搬过来，要订阅它）。
+ * 写入方（自动还车 Worker）仍在 `:app`——同一个进程里 `:app` 写、共享层读。
  */
-internal object EbikeRideSignal {
+object EbikeRideSignal {
 
     private val _ended = MutableSharedFlow<String>(extraBufferCapacity = 1)
 

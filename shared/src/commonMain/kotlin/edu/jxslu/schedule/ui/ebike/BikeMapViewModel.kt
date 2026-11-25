@@ -1,17 +1,13 @@
 package edu.jxslu.schedule.ui.ebike
 
-import android.os.SystemClock
-import android.util.Log
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.BuildConfig
 import edu.jxslu.schedule.data.kqcx.KqcxBikeClient
-import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
+import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.data.kqcx.KvcxZoneSource
 import edu.jxslu.schedule.data.kqcx.ZoneCacheStore
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.BikeCluster
 import edu.jxslu.schedule.domain.BikeFailure
 import edu.jxslu.schedule.domain.BikeMapViewport
@@ -25,7 +21,9 @@ import edu.jxslu.schedule.domain.NearbyBikeCacheEntry
 import edu.jxslu.schedule.domain.NearbyParseResult
 import edu.jxslu.schedule.domain.ZoneCache
 import edu.jxslu.schedule.domain.ZoneCacheEntry
+import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.domain.capabilities
+import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.ui.common.NoticeTone
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlin.time.TimeSource
 
 // [CameraRequest] 与地图层的其余参数契约已搬进 `shared/commonMain`
 // （`ui/ebike/BikeMapContract.kt`，2026-11-25）：那份类型要同时喂给高德、osmdroid 与 iOS 的
@@ -237,6 +236,14 @@ data class BikeMapUiState(
  * 一次刷新可能发多个请求（见 [query] / [mergeSamples]）：接口只给"离查询点最近的 20 辆"，
  * 单点查不全。稀疏区域只发 1 个，车多的区域才会加撒一圈采样点。中心 + 环 + 大桩补全
  * **并行跑、合并后只落一次**（见 [query]），数字不会一段一段往上跳。
+ *
+ * ## 为什么它在 `commonMain`（iOS 移植 E2，2026-11-25）
+ *
+ * 这一页**没有一处高德类型**：地图参数全走 [BikeMapInput]（三端共用的契约），
+ * 状态全是 domain 里的纯数据。原来挡着它的是三个 `:app` 兼容壳，S23 那一轮已换成共享类型；
+ * 平台专有的只剩四处，都收了缝：底图（宿主注入 [BikeMapSlot]）、定位（`AppServices.bikeLocation`）、
+ * 罗盘（`AppServices.bikeHeading`）、通知类副作用（构造函数里的 `sideEffects`）。
+ * Android 的 `ViewModelProvider.Factory` 留在 `:app`（见 `BikeMapViewModelFactory`）。
  */
 class BikeMapViewModel(
     private val client: KqcxBikeClient,
@@ -244,9 +251,18 @@ class BikeMapViewModel(
     /**
      * 快趣会话（DESIGN §4.32）：本机开锁 / 锁车 / 还车与「当前用车」标记都靠它；
      * 「按车号查单车」（2026-09-30）也走它——那是个不需要凭证的读接口。
+     *
+     * 类型是会话**本体** [KqcxSessionCore]（iOS 移植 E2，2026-11-25）：原先是 `:app` 的
+     * `KqcxSessionRepository` 兼容壳，而壳只是 core 的 `YearMonth` 视图——本页早就没有
+     * `YearMonth` 交接了，吃壳只会让这一页搬不动。壳仍留在 `:app` 给还没搬的两页用。
      */
-    private val kqcx: KqcxSessionRepository? = null,
-    /** 还车点 / 禁停区图层的数据源（只读；未登录时为 null）。 */
+    private val kqcx: KqcxSessionCore? = null,
+    /**
+     * 还车点 / 禁停区图层的数据源（只读；未登录时为 null）。
+     *
+     * 与 [kqcx] 是同一个实例（[KqcxSessionCore] 同时实现 [KvcxRideSession] 与
+     * [KvcxZoneSource]）：分成两个参数是为了在单测 / 特殊宿主里只喂其中一面。
+     */
     private val zoneSource: KvcxZoneSource? = null,
     /**
      * 图层的落盘缓存（DESIGN §3.9「停车点缓存」）：命中就先摆上、新鲜就不联网；
@@ -254,10 +270,17 @@ class BikeMapViewModel(
      */
     private val zoneCache: ZoneCacheStore? = null,
     /**
-     * 本机用车控制器（2026-10-21 单例化）：Factory 注入 [Graph.kvcxRide]；
-     * 传 null（本文件外的测试 / 特殊路径）时走旧路——本 VM 自建一份实例。
+     * 本机用车控制器（2026-10-21 单例化）：宿主注入 `Graph.kvcxRide`；
+     * 传 null（测试 / 特殊路径）时走旧路——本 VM 自建一份实例，副作用取 [sideEffects]。
      */
     private val rideController: KvcxRideController? = null,
+    /**
+     * 自建控制器时用的外部副作用（计时 / 提醒 / 记账）；**null = 本平台没有这套能力**。
+     * 宿主注入了 [rideController] 时这里没用——那份单例自己带着装配好的副作用。
+     * iOS 侧给 null：开锁 / 还车照常，只是没有通知栏倒计时与自动还车
+     * （`design/ios-port.md` §11.2 ④）。
+     */
+    private val sideEffects: KvcxSideEffects? = null,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BikeMapUiState())
@@ -282,7 +305,7 @@ class BikeMapViewModel(
      * 地图页在本页就能开锁、锁车、还车——官方小程序也是在地图上直接操作当前用车。
      * **只在账号登录方式下使用**，见 [useMode] / [queryRideQuietly]。
      *
-     * 2026-10-21 起控制器是 **Graph 单例**（[Graph.kvcxRide]）：今日页「进行中服务」卡
+     * 2026-10-21 起控制器是 **进程单例**（Android 是 `Graph.kvcxRide`，iOS 由宿主自建）：今日页「进行中服务」卡
      * 与骑行页必须看到同一份骑行状态，两个实例会各查各的、互相覆盖。本页只负责把
      * 单例的事件流接进自己的事件通道（notice → Snackbar、unlocked → 成功触感）；
      * [rideController] 为 null 时退回自建实例（旧消费形态，事件直走本通道）。
@@ -295,6 +318,7 @@ class BikeMapViewModel(
             scope = viewModelScope,
             onNotice = { text, tone -> _events.trySend(BikeMapEvent.Notice(text, tone)) },
             onUnlocked = { _events.trySend(BikeMapEvent.Unlocked) },
+            effects = sideEffects,
         )
         if (rideController != null) {
             viewModelScope.launch {
@@ -1412,7 +1436,7 @@ class BikeMapViewModel(
         lng: Double,
         zoomedOut: Boolean,
     ): NearbyBikeCacheEntry? =
-        NearbyBikeCache.bestCovering(nearbyCache, lat, lng, System.currentTimeMillis(), zoomedOut)
+        NearbyBikeCache.bestCovering(nearbyCache, lat, lng, AppClock.nowMillis(), zoomedOut)
 
     /**
      * 用上一批结果落地：车辆接口一个请求都不发，图层照旧走它自己的落盘缓存 / 网络。
@@ -1428,9 +1452,7 @@ class BikeMapViewModel(
         forceZones: Boolean,
     ) {
         fetchZones(lat, lng, forceZones)
-        if (BuildConfig.DEBUG) {
-            Log.d(TAG, "缓存命中（${entry.bikes.size} 条 · 缩小视图=${entry.zoomedOut}）")
-        }
+            Logger.d(TAG, "缓存命中（${entry.bikes.size} 条 · 缩小视图=${entry.zoomedOut}）")
         applyResult(
             lat = lat,
             lng = lng,
@@ -1458,7 +1480,7 @@ class BikeMapViewModel(
             NearbyBikeCacheEntry(
                 lat = lat,
                 lng = lng,
-                fetchedAt = System.currentTimeMillis(),
+                fetchedAt = AppClock.nowMillis(),
                 bikes = bikes,
                 zoomedOut = zoomedOut,
             ),
@@ -1467,7 +1489,7 @@ class BikeMapViewModel(
 
     private suspend fun query(lat: Double, lng: Double, forceZones: Boolean) {
         // 两段耗时只在 debug 打：量「松手 → 首屏落地」与「→ 撒点合并落地」，用法见 rules/ebike.md
-        val startedAt = SystemClock.elapsedRealtime()
+        val startedAt = TimeSource.Monotonic.markNow()
         // 缩放**开工时定一次**：查询期间用户可能又捏了一下，这批结果该按开工时那个范围解释
         val zoom = pendingZoom
         val zoomedOut = BikeNearby.isZoomedOut(zoom)
@@ -1524,22 +1546,18 @@ class BikeMapViewModel(
         if (zoomedOut) {
             applyResult(lat, lng, centerBikes, stillLoading = false, zoom = zoom)
             rememberNearby(lat, lng, centerBikes, zoomedOut = true)
-            if (BuildConfig.DEBUG) {
-                Log.d(
+                Logger.d(
                     TAG,
-                    "落地 +${SystemClock.elapsedRealtime() - startedAt}ms" +
-                        "（缩小视图中心 ${centerBikes.size} 条 · z${"%.1f".format(zoom)}）",
+                    "落地 +${startedAt.elapsedNow().inWholeMilliseconds}ms" +
+                        "（缩小视图中心 ${centerBikes.size} 条 · z${TextFmt.decimals(zoom, 1)}）",
                 )
-            }
             return
         }
 
         if (!sampling) {
             applyResult(lat, lng, centerBikes, stillLoading = false, zoom = zoom)
             rememberNearby(lat, lng, centerBikes, zoomedOut = false)
-            if (BuildConfig.DEBUG) {
-                Log.d(TAG, "落地 +${SystemClock.elapsedRealtime() - startedAt}ms（${centerBikes.size} 条）")
-            }
+                Logger.d(TAG, "落地 +${startedAt.elapsedNow().inWholeMilliseconds}ms（${centerBikes.size} 条）")
             return
         }
 
@@ -1569,14 +1587,12 @@ class BikeMapViewModel(
         val merged = BikeNearby.mergeBikes(ringBikes, fillBikes)
         applyResult(lat, lng, merged, stillLoading = false, zoom = zoom)
         rememberNearby(lat, lng, merged, zoomedOut = false)
-        if (BuildConfig.DEBUG) {
-            Log.d(
+            Logger.d(
                 TAG,
-                "落地 +${SystemClock.elapsedRealtime() - startedAt}ms" +
+                "落地 +${startedAt.elapsedNow().inWholeMilliseconds}ms" +
                     "（中心 ${centerBikes.size} → 合并 ${ringBikes.size} → 补全 ${merged.size} 条" +
-                    " · 环 $ring 点 · 半径 ${radius.toInt()} 米 · z${"%.1f".format(zoom)}）",
+                    " · 环 $ring 点 · 半径 ${radius.toInt()} 米 · z${TextFmt.decimals(zoom, 1)}）",
             )
-        }
     }
 
     /**
@@ -1648,7 +1664,7 @@ class BikeMapViewModel(
         fetchedZones = cached.zones
         applyZones()
         if (force) return true
-        return !ZoneCache.isFresh(cached, System.currentTimeMillis())
+        return !ZoneCache.isFresh(cached, AppClock.nowMillis())
     }
 
     /** 缓存读回来 / 补发之前，把覆盖当前中心的图层先摆上（网上还没结果时才摆）。 */
@@ -1716,14 +1732,12 @@ class BikeMapViewModel(
             if (zones.isEmpty) return@launch
             zonesFromNetwork = true
             fetchedZones = zones
-            if (BuildConfig.DEBUG) {
-                Log.d(TAG, "zone net ok: spots=${zones.parkSpots.size} campus=${context.campusName}")
-            }
+                Logger.d(TAG, "zone net ok: spots=${zones.parkSpots.size} campus=${context.campusName}")
             applyZones()
             // 成功结果写回缓存（只存非空，上面已挡掉空表）
             zoneEntries = ZoneCache.put(
                 zoneEntries,
-                ZoneCacheEntry(lat, lng, System.currentTimeMillis(), zones),
+                ZoneCacheEntry(lat, lng, AppClock.nowMillis(), zones),
             )
             zoneCache?.save(zoneEntries)
         }
@@ -1742,15 +1756,13 @@ class BikeMapViewModel(
         }
         // 还车点图层的自证日志（debug 才有）：用户报「一片 P 都没有」时先看这一行——
         // fetched=0 是没拿到数据，fetched>0 而落进状态为 0 是筛选吃掉的，两者修法完全不同。
-        if (BuildConfig.DEBUG) {
-            Log.d(
+            Logger.d(
                 TAG,
                 "zones: fetched=${fetchedZones.parkSpots.size}/${fetchedZones.nogoZones.size}" +
                     " -> applied=${zones.parkSpots.size}/${zones.nogoZones.size}" +
                     "（onlyOurCampus=${_uiState.value.onlyOurCampus}" +
                     " ourCampus=${zonesOfOurCampus} campus=${lastZoneCar?.campusName}）",
             )
-        }
         _uiState.update { it.copy(zones = zones) }
     }
 
@@ -1771,7 +1783,7 @@ class BikeMapViewModel(
         stillLoading: Boolean,
         zoom: Double,
         zoomedOut: Boolean = BikeNearby.isZoomedOut(zoom),
-        updatedAtMillis: Long = System.currentTimeMillis(),
+        updatedAtMillis: Long = AppClock.nowMillis(),
     ) {
         withContext(Dispatchers.Default) {
             fetched = bikes
@@ -1836,7 +1848,13 @@ class BikeMapViewModel(
         val extra = coroutineScope {
             rings.map { point -> async { sampleAt(point.lat, point.lng) } }.awaitAll()
         }
-        extra.forEach { list -> list.forEach { bike -> merged.putIfAbsent(bike.carNum, bike) } }
+        // `putIfAbsent` 是 JVM 专有（`java.util.Map` 的默认方法）：共享层改写成等价的
+        // 「没有才写」，`LinkedHashMap` 的插入序不变，先到的那个点赢的语义也不变
+        extra.forEach { list ->
+            list.forEach { bike ->
+                if (!merged.containsKey(bike.carNum)) merged[bike.carNum] = bike
+            }
+        }
         return merged.values.toList()
     }
 
@@ -1868,7 +1886,7 @@ class BikeMapViewModel(
                 maxDistanceMeters = SPOT_FILL_MAX_DISTANCE_METERS,
             )
         } ?: return emptyList()
-        val now = System.currentTimeMillis()
+        val now = AppClock.nowMillis()
         val cached = spotFills[spot.key]?.takeIf { now - it.at in 0..SPOT_FILL_TTL_MS }
         if (cached != null) return cached.bikes
         val fetched = fetchSpotFill(spot.lat, spot.lng)
@@ -1982,24 +2000,13 @@ class BikeMapViewModel(
         }
     }
 
-    class Factory(
-        private val client: KqcxBikeClient,
-        private val prefs: DisplayPrefsStore,
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            // 快趣会话按 context 现取（Graph 单例）；不可用时用户只是看不到本机用车入口。
-            // 图层缓存同样包在 runCatching 里：它只是"省一个往返"的优化，取不到就不缓存，
-            // 不该把 VM 的创建整个拖崩（旁边那条 kqcx 也是这个口径）
-            BikeMapViewModel(
-                client,
-                prefs,
-                runCatching { Graph.kqcx(Graph.appContext) }.getOrNull(),
-                runCatching { Graph.kqcx(Graph.appContext) }.getOrNull(),
-                runCatching { Graph.zoneCacheStore(Graph.appContext) }.getOrNull(),
-                runCatching { Graph.kvcxRide(Graph.appContext) }.getOrNull(),
-            ) as T
-    }
+    /**
+     * Android 侧的 `ViewModelProvider.Factory` **不在这里**（iOS 移植 E2，2026-11-25）：
+     * 它要 `ViewModelProvider`（JVM 类型）与 `Graph`（`Context`），搬不进 `commonMain`。
+     * 现在它落在 `app/.../ui/ebike/BikeMapViewModelFactory.kt`，由 `RideScreen` 的
+     * `viewModel { ... }` 用；iOS 侧按 `design/ios-port.md` §11.2 ① 用
+     * `remember { BikeMapViewModel(...) }` 自己建，不需要 Factory。
+     */
 }
 
 /**
@@ -2018,9 +2025,9 @@ class BikeMapViewModel(
  * 底部的总高度是「面板 + 常驻块」，不把默认值收回来，地图会比改动前少一块。
  * 这只是默认值，用户拖过的档位（[panelHeightDp]）照旧保留，只受上限约束。
  */
-internal const val DEFAULT_PANEL_HEIGHT_DP = 270f
-internal const val MIN_PANEL_HEIGHT_DP = 240f
-internal const val MAX_PANEL_HEIGHT_DP = 620f
+const val DEFAULT_PANEL_HEIGHT_DP = 270f
+const val MIN_PANEL_HEIGHT_DP = 240f
+const val MAX_PANEL_HEIGHT_DP = 620f
 
 /**
  * 列表用「距你」而不是「距查询中心」排的半径（米，2026-09-30）。
@@ -2029,4 +2036,4 @@ internal const val MAX_PANEL_HEIGHT_DP = 620f
  * 超出 = 用户把地图拖到别处了，按查询中心算——顺序才和地图对得上，也不会因为蓝点在动
  * 而反复重排。
  */
-internal const val USER_ANCHOR_RADIUS_METERS = 150.0
+const val USER_ANCHOR_RADIUS_METERS = 150.0

@@ -12,12 +12,13 @@ import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
 import edu.jxslu.schedule.data.kqcx.KqxCredentialStore
 import edu.jxslu.schedule.data.kqcx.KqcxBikeClient
-import edu.jxslu.schedule.data.kqcx.KqcxOrderCache
+import edu.jxslu.schedule.data.kqcx.KqcxOrderStore
 import edu.jxslu.schedule.data.kqcx.KvcxRideHintPrefsStore
 import edu.jxslu.schedule.data.kqcx.ZoneCacheStore
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.InboxKind
+import edu.jxslu.schedule.ui.ebike.AppKvcxSideEffects
 import edu.jxslu.schedule.ui.ebike.KvcxNotice
 import edu.jxslu.schedule.ui.ebike.KvcxRideController
 import edu.jxslu.schedule.data.power.PowerClient
@@ -283,7 +284,7 @@ object Graph {
     @Volatile
     private var rideRecordStore: RideRecordStore? = null
     @Volatile
-    private var kqcxOrderCache: KqcxOrderCache? = null
+    private var kqcxOrderStore: KqcxOrderStore? = null
     @Volatile
     private var homeworkRepository: HomeworkRepository? = null
 
@@ -608,11 +609,15 @@ object Graph {
     /**
      * 快趣服务端订单缓存单例（2026-11-05，表 `kqcx_orders`，DB v21）：超时费统计改在
      * 本地算——账号页与历史订单页共用这份缓存，统计不再每次重扫全部月份。
+     *
+     * 类型是共享层的 [KqcxOrderStore]（iOS 移植 E2，2026-11-25）：原来这层壳
+     * `KqcxOrderCache` 只做 `YearMonth` 换算，而两个消费方（[KvcxViewModel] /
+     * [KvcxOrdersViewModel]）已改为直接用共享类型并就地换算——壳随之没有调用方。
      */
-    fun kqcxOrderCache(context: Context): KqcxOrderCache =
-        kqcxOrderCache ?: synchronized(this) {
-            kqcxOrderCache ?: KqcxOrderCache(juwDatabase(context).kqcxOrderDao())
-                .also { kqcxOrderCache = it }
+    fun kqcxOrderStore(context: Context): KqcxOrderStore =
+        kqcxOrderStore ?: synchronized(this) {
+            kqcxOrderStore ?: KqcxOrderStore(juwDatabase(context).kqcxOrderDao())
+                .also { kqcxOrderStore = it }
         }
 
     /** 作业仓库单例（DESIGN §4.20）：与笔记共用一套附件与渲染口径。 */
@@ -999,7 +1004,7 @@ object Graph {
                 // 从第一帧就留在顶部，不等第一次订单查询回包才归位。
                 val rideHint = KvcxRideHintPrefsStore(context.applicationContext)
                 KvcxRideController(
-                    session = runCatching { kqcx(context) }.getOrNull(),
+                    session = runCatching { kqcxCore(context) }.getOrNull(),
                     scope = scope,
                     // 事件只走共享流（控制器见流即不再回调；这里给空实现防重复投递）
                     onNotice = { _, _ -> },
@@ -1007,6 +1012,9 @@ object Graph {
                     rideNotices = notices,
                     rideUnlocked = unlocked,
                     remoteRideReminder = remoteReminder,
+                    // 计时 / 提醒 / 善后 / 记账：控制器搬进共享层后这个槽位没有默认实现，
+                    // Android 在这里显式装配（iOS 传 null = 本平台没有通知能力）
+                    effects = AppKvcxSideEffects,
                     // 「猜你想用」：建单成功记一次真实订单（不是打开骑行页）
                     onOrderCreated = { recordGuessOrder(GuessTarget.KVCX) },
                     launchHadRide = rideHint.hadRide,

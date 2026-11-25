@@ -23,6 +23,13 @@ import java.time.YearMonth
  *
  * 除了月份换算，**下面每个方法都是一行转发**：不要在这里加逻辑，否则又变成两份口径。
  * iOS 侧不经过这个类，直接用 [KqcxSessionCore]。
+ *
+ * ## 现状（iOS 移植 E2，2026-11-25）：**已经没有调用方**
+ *
+ * `KvcxViewModel` / `KvcxOrdersViewModel` / `BikeMapViewModel` 三个消费方已把构造参数换成
+ * [KqcxSessionCore] 并就地做那几处 `yyyy-MM` ↔ `YearMonth` 换算，所以这一层连同
+ * [OrderHistoryScan] 与 `Graph.kqcx` 都可以删——**留到搬完那三页的下一轮一起删**，
+ * 免得出现「壳已删、某条还没搬的路径回头又要它」。在那之前不要给它加新成员。
  */
 class KqcxSessionRepository(
     private val core: KqcxSessionCore,

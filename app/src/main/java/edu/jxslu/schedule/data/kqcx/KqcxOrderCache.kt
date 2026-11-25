@@ -12,6 +12,12 @@ import java.time.YearMonth
  * 与共享层的 `yyyy-MM` 字符串键之间换算——`ui/ebike` 的 `KvcxOrdersViewModel` 直接把
  * `YearMonth` 传进来、把返回的月份列表当 `List<YearMonth>` 用，而那些页面本轮不许改。
  * iOS 侧不经过这个类，直接用 [KqcxOrderStore]。
+ *
+ * ## 现状（iOS 移植 E2，2026-11-25）：**已经没有调用方**
+ *
+ * `KvcxViewModel` / `KvcxOrdersViewModel` 已直接吃 [KqcxOrderStore]（月份在页面侧就地换算），
+ * `Graph.kqcxOrderCache` 也随之改成 `Graph.kqcxOrderStore`。这一层可以删，
+ * **留到搬完那两页的下一轮一起删**；在那之前不要给它加新成员。
  */
 class KqcxOrderCache(dao: KqcxOrderDao) {
 

@@ -1,16 +1,14 @@
 package edu.jxslu.schedule.ui.ebike
 
-import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.kqcx.KvcxRideSession
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.InboxKeys
 import edu.jxslu.schedule.domain.InboxKind
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.data.kqcx.LockOutcome
-import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.data.kqcx.UnlockOutcome
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeRideCard
@@ -20,8 +18,14 @@ import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KvcBusinessError
 import edu.jxslu.schedule.domain.KvcProtocolException
 import edu.jxslu.schedule.domain.RideRecord
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.data.kqcx.KqcxBikeClient.KqcxTimeoutException
 import edu.jxslu.schedule.ui.common.rememberResumedNow
 import edu.jxslu.schedule.ui.common.NoticeTone
+import io.ktor.client.network.sockets.ConnectTimeoutException
+import io.ktor.client.network.sockets.SocketTimeoutException
+import io.ktor.client.plugins.HttpRequestTimeoutException
+import io.ktor.utils.io.errors.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -36,13 +40,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import java.io.IOException
-import java.io.InterruptedIOException
-import java.net.SocketTimeoutException
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
+import kotlin.concurrent.Volatile
 
 /**
  * 开锁成功后的「锁车 / 还车」冷却时长。
@@ -58,13 +56,13 @@ import java.util.Locale
  * **「重新使用该车」也挂它**：那条两段式开启之后服务端还在落两条账（判据见
  * [KvcxRideController.unlock]）。
  */
-internal const val UNLOCK_COOLDOWN_MS = 3_000L
+const val UNLOCK_COOLDOWN_MS = 3_000L
 
 /**
  * 冷却剩余秒数（纯函数，单测锁定）：`until - now` **向上取整**到整秒——还剩 2.1 秒
  * 显示 3s，数字宁可多显示一下、不提前跳 0；≤ 0（无冷却 / 已结束 / 时钟回拨）一律回 0。
  */
-internal fun unlockCooldownSecondsLeft(until: Long, now: Long): Int {
+fun unlockCooldownSecondsLeft(until: Long, now: Long): Int {
     val remain = until - now
     if (remain <= 0L) return 0
     return ((remain + 999L) / 1000L).toInt()
@@ -78,8 +76,8 @@ internal fun unlockCooldownSecondsLeft(until: Long, now: Long): Int {
  * **不是常驻轮询**：只在开锁动作后跑、有界，且在后台不占动作按钮。单测注入 0 让
  * Unconfined 同步跑完。
  */
-internal const val UNLOCK_SYNC_ATTEMPTS = 5
-internal const val UNLOCK_SYNC_INTERVAL_MS = 1_500L
+const val UNLOCK_SYNC_ATTEMPTS = 5
+const val UNLOCK_SYNC_INTERVAL_MS = 1_500L
 
 /**
  * 开锁前「有没有可用骑行卡」的检查（2026-10-22）：卡券快照的缓存口径。
@@ -90,9 +88,9 @@ internal const val UNLOCK_SYNC_INTERVAL_MS = 1_500L
  * - [RIDE_CARD_WAIT_MS] 是开锁时等这次查询的上限：超时就按「不确定」放行（不弹提醒），
  *   不能因为一次读接口把用户挡在车外。
  */
-internal const val RIDE_CARD_CACHE_TTL_MS = 10 * 60 * 1000L
-internal const val RIDE_CARD_RECHECK_MS = 60_000L
-internal const val RIDE_CARD_WAIT_MS = 2_500L
+const val RIDE_CARD_CACHE_TTL_MS = 10 * 60 * 1000L
+const val RIDE_CARD_RECHECK_MS = 60_000L
+const val RIDE_CARD_WAIT_MS = 2_500L
 
 /**
  * 空回包确认「订单真的没了」的间隔（见 [KvcxRideController.confirmOrderGone]）。
@@ -101,7 +99,7 @@ internal const val RIDE_CARD_WAIT_MS = 2_500L
  * 「订单已结束」就是**不可逆**收尾（清计时 / 撤自动还车 / 焚码）。等半秒再问一次，
  * 足够让落账那条请求走完，也不至于让还车后的收尾明显变慢。
  */
-internal const val ORDER_GONE_CONFIRM_DELAY_MS = 600L
+const val ORDER_GONE_CONFIRM_DELAY_MS = 600L
 
 /** 快趣用车动作（DESIGN §4.32，B/C 档）：同一时刻只允许一个在跑。 */
 enum class KvcxAction {
@@ -263,8 +261,16 @@ data class KvcxReturnSummary(
  * 用车动作的外部副作用（计时 / 提醒开关 / 还车善后 / 记账）——**抽出来是为了能在单测里换掉**：
  * 它们都要 Context 与 DataStore，JVM 单测里拿不到，而"开锁成功要顺手打开提醒开关"这类编排
  * 恰恰是责任边界，值得钉住（`KvcxRideControllerTest`）。
+ *
+ * ## iOS 移植 E2（2026-11-25）：这个接口搬进共享层，实现留在 `:app`
+ *
+ * 五个动作里有四个是**通知 / 闹钟**（`EbikeFreeRideReminder` / `EbikeAutoReturnReminder`
+ * 都要 `AlarmManager` + 通知渠道），按 `design/ios-port.md` §11.2 ④ 的同一把尺子，
+ * 控制器收的是 **`null`**：本平台没有这套能力时整体不调用，而不是给一个点了没反馈的空实现。
+ * 所以 [KvcxRideController.effects] 是可空的 —— iOS 上开锁照样落卡、照样计费，
+ * 只是没有通知栏倒计时、没有自动还车。
  */
-internal interface KvcxSideEffects {
+interface KvcxSideEffects {
     /** 起免费时长计时；返回提示文案与语气（见 [startFreeRideNotice]）。 */
     suspend fun startRideTimer(): Pair<String, NoticeTone>
 
@@ -301,67 +307,6 @@ internal interface KvcxSideEffects {
     suspend fun recordRemoteRide(): Int
 }
 
-/** 生产用的副作用实现：全部落到 Graph + 提醒调度 + 本机记录。 */
-internal object AppKvcxSideEffects : KvcxSideEffects {
-
-    override suspend fun startRideTimer(): Pair<String, NoticeTone> = startFreeRideNotice()
-
-    override suspend fun ensureReminderEnabled(): Boolean {
-        val prefs = Graph.displayPrefs(Graph.appContext)
-        val on = runCatching { prefs.ebikeFreeReminderEnabled.first() }.getOrDefault(true)
-        if (on) return false
-        runCatching { prefs.setEbikeFreeReminderEnabled(true) }
-        return true
-    }
-
-    override suspend fun scheduleAutoReturn() {
-        // 上一轮的结果通知先撤掉（「已自动还车」不能与新一轮骑行并存），再按设置收口：
-        // 排闹钟 / 到点补跑 / 开关关着时撤销
-        EbikeAutoReturnNotifier.cancel(Graph.appContext)
-        EbikeAutoReturnReminder.reconcile(Graph.appContext)
-    }
-
-    override suspend fun endRideAndBurn() {
-        EbikeFreeRideReminder.endRide(Graph.appContext)
-        // 订单已经结束：自动还车再排着也没有对象可还
-        EbikeAutoReturnReminder.cancel(Graph.appContext)
-        burnPendingCodes(Graph.appContext, Graph.displayPrefs(Graph.appContext), force = true)
-    }
-
-    override suspend fun onOrderGoneExternally(): Boolean {
-        val prefs = Graph.displayPrefs(Graph.appContext)
-        val mode = runCatching { prefs.ebikeUseMode.first() }.getOrElse { EbikeUseMode.Default }
-        val startAt = runCatching { prefs.ebikeRideStartAt.first() }.getOrDefault(0L)
-        val end = EbikeFreeRide.shouldEndTimerWhenOrderGone(
-            inAppRide = mode.isAccount,
-            startAtMillis = startAt,
-            nowMillis = System.currentTimeMillis(),
-        )
-        if (!end) return false
-        // 与手动还车同一条收尾（清计时 / 撤闹钟 / 停常驻服务 / 撤自动还车 / 焚码），不另写一份
-        endRideAndBurn()
-        return true
-    }
-
-    override suspend fun recordRide(summary: KvcxReturnSummary) {
-        val carNum = summary.carNum ?: return
-        runCatching {
-            Graph.rideRecordStore(Graph.appContext).add(
-                carNum = carNum,
-                endAt = System.currentTimeMillis(),
-                durationSeconds = summary.durationSeconds ?: 0L,
-                feeCents = summary.feeCents,
-                // 拿不到结算结果按未结清记：宁可多提醒一次去核对，也不把不确定写成"已结清"
-                settled = summary.settled ?: (summary.needPay == false),
-            )
-        }
-    }
-
-    override suspend fun recordRemoteRide(): Int = runCatching {
-        Graph.displayPrefs(Graph.appContext).incrementEbikeRemoteRideCount()
-    }.getOrDefault(0)
-}
-
 /**
  * 本机用车动作的编排（DESIGN §4.32 B/C 档）：**出码页与地图页共用同一份**。
  *
@@ -372,10 +317,17 @@ internal object AppKvcxSideEffects : KvcxSideEffects {
  * 依赖收窄成 [KvcxRideSession]（业务）与 [KvcxSideEffects]（外部副作用），于是编排本身
  * 可以在 JVM 单测里用假实现跑。
  *
- * 覆盖关系的每一条都在 `KqcxSessionRepository` 里兜底：写操作**零自动重试**由仓库层保证，
+ * 覆盖关系的每一条都在 `KqcxSessionCore` 里兜底：写操作**零自动重试**由仓库层保证，
  * 这里只按用户手势发一次；失败后用户可刷新状态、按提示重试或转官方渠道。
+ *
+ * ## 谁填 [effects]（iOS 移植 E2，2026-11-25）
+ *
+ * 原来是 `effects: KvcxSideEffects = AppKvcxSideEffects`（`:app` 的实现）。搬进共享层后默认值
+ * 只能变成 **`null`**：null = 本平台没有「免费时长倒计时 / 自动还车 / 远程用车提醒」这套
+ * 通知能力（iOS 现状，那四件都要 `AlarmManager` + 通知渠道，见 `design/ios-port.md` §12.1）。
+ * Android 的装配根（`Graph.kvcxRide`）显式传 `AppKvcxSideEffects`，行为一字未变。
  */
-class KvcxRideController internal constructor(
+class KvcxRideController(
     private val session: KvcxRideSession?,
     private val scope: CoroutineScope,
     private val onNotice: (String, NoticeTone) -> Unit,
@@ -402,7 +354,11 @@ class KvcxRideController internal constructor(
         // 写动作不能像地图页那样等 8 秒；5 秒拿不到就走车辆锚点 / 明确提示。
         BikeLocator.currentLocation(timeoutMs = 5_000L)
     },
-    private val effects: KvcxSideEffects = AppKvcxSideEffects,
+    /**
+     * 外部副作用（计时 / 提醒 / 善后 / 记账）；**null = 本平台没有这套能力**（见类注释）。
+     * 每个动作都按「没有就整体跳过」处理，不留点了没反馈的入口。
+     */
+    private val effects: KvcxSideEffects? = null,
     /**
      * 开锁后补全重拉的间隔（毫秒，见 [syncAfterUnlock]）。单测注入 0 让 Unconfined
      * 同步跑完；生产用 [UNLOCK_SYNC_INTERVAL_MS]（官方同款 1.5 秒节奏）。
@@ -453,6 +409,9 @@ class KvcxRideController internal constructor(
     /**
      * 最近一次落盘的「有无骑行」。初值取冷启动提示：落盘值与其相同就不重复写；
      * 提示本身失效时（成功快照说没有订单）才会写 false。
+     *
+     * `kotlin.concurrent.Volatile`（不是 `kotlin.jvm.Volatile`）：iOS 移植 E2 搬进共享层时
+     * 换成多平台那份，JVM 上落成同一个注解，语义不变。
      */
     @Volatile
     private var persistedRideActive: Boolean = launchHadRide
@@ -526,7 +485,7 @@ class KvcxRideController internal constructor(
      * 预热卡券快照（进骑行页 / 抢在开锁确认弹窗之前）。**只在已登录时发**；
      * 缓存新鲜就什么都不做。这是用户打开页面驱动的一次只读查询，不轮询。
      */
-    fun warmRideCard(now: Long = System.currentTimeMillis()) {
+    fun warmRideCard(now: Long = AppClock.nowMillis()) {
         val session = session ?: return
         if (!session.loggedIn.value) return
         if (isCardFresh(now)) return
@@ -539,7 +498,7 @@ class KvcxRideController internal constructor(
      * （可能 null），调用方据此跳过提醒。**查询失败返回 null**：不确定就不打扰，
      * 绝不因为一次读失败把用户挡在车外。
      */
-    suspend fun rideCardCoupons(now: Long = System.currentTimeMillis()): List<KqcxAuth.AssetCoupon>? {
+    suspend fun rideCardCoupons(now: Long = AppClock.nowMillis()): List<KqcxAuth.AssetCoupon>? {
         if (isCardFresh(now)) return cardCoupons
         val job = ensureCardJob(now) ?: return cardCoupons
         return withTimeoutOrNull(RIDE_CARD_WAIT_MS) { job.await() } ?: cardCoupons
@@ -562,7 +521,7 @@ class KvcxRideController internal constructor(
     }
 
     private fun ensureCardJob(
-        fetchedAt: Long = System.currentTimeMillis(),
+        fetchedAt: Long = AppClock.nowMillis(),
     ): Deferred<List<KqcxAuth.AssetCoupon>?>? {
         cardJob?.takeIf { it.isActive }?.let { return it }
         val session = session ?: return null
@@ -672,7 +631,7 @@ class KvcxRideController internal constructor(
             is UnlockOutcome.Unlocked -> {
                 // **界面先行**：确认快照先落 UI——响应回来的第一帧就切骑行卡，不等下面那串善后
                 // （开关读写 / 计时落盘 / 排闹钟 / 起通知服务，几百毫秒起，低端机更久）。
-                val confirmedAt = System.currentTimeMillis()
+                val confirmedAt = AppClock.nowMillis()
                 val confirmedRide = (outcome.ride ?: KqcxAuth.Ride(
                     carNum = outcome.carNum,
                     bluetoothName = null,
@@ -720,21 +679,27 @@ class KvcxRideController internal constructor(
                 // **顺序纪律**：这段善后在界面更新之后跑，但**不许**挪到 [syncAfterUnlock]
                 // 后面——补全在后台跑，挪过去会让通知栏倒计时白等。
                 // 两段式计费同样从建单起，计时照挂（起点只早不晚，提醒更保守）
-                val reminderOpened = effects.ensureReminderEnabled()
-                val (timerText, timerTone) = effects.startRideTimer()
+                val reminderOpened = effects?.ensureReminderEnabled() == true
+                val timer = effects?.startRideTimer()
                 // 自动还车与计时同刻排（触发点 = 计时起点 + 15 分钟 − 提前量；见
                 // EbikeAutoReturnReminder）。开关关着时是一次空操作
-                effects.scheduleAutoReturn()
+                effects?.scheduleAutoReturn()
                 val head = when {
                     outcome.helmetFlow -> "已创建订单，请取下车盔"
                     sendUnlock -> "已开锁"
                     else -> "已创建订单，车辆保持锁定"
                 }
-                notice(
-                    head + "；" + timerText +
-                        if (reminderOpened) "（已打开免费时长提醒）" else "",
-                    timerTone,
-                )
+                if (timer == null) {
+                    // 本平台没有计时 / 提醒（effects = null）：只说动作本身的结果，
+                    // 不补「已开始计时」那种说了却做不到的话
+                    notice(head, NoticeTone.Success)
+                } else {
+                    notice(
+                        head + "；" + timer.first +
+                            if (reminderOpened) "（已打开免费时长提醒）" else "",
+                        timer.second,
+                    )
+                }
                 recordRemoteRideIfRemote(sendUnlock)
                 // 对账 + 补全放到后台：动作的 busy 在这一拍就结束，不让最多 5 次查询
                 // 继续占住按钮。**不走**共享的 refreshInternal（见 [syncAfterUnlock]）：
@@ -757,7 +722,7 @@ class KvcxRideController internal constructor(
                 _state.update {
                     it.copy(
                         ride = pendingRide,
-                        fetchedAt = System.currentTimeMillis(),
+                        fetchedAt = AppClock.nowMillis(),
                         unlockPending = true,
                         returnSummary = null,
                         returnSummaryAt = 0L,
@@ -798,7 +763,7 @@ class KvcxRideController internal constructor(
                         unlockPending = false,
                         lockPending = false,
                         // 刚刚开锁 = 刚"开车"：锁车 / 还车同样进冷却（与 [unlock] 同一口径）
-                        unlockCooldownUntil = System.currentTimeMillis() + UNLOCK_COOLDOWN_MS,
+                        unlockCooldownUntil = AppClock.nowMillis() + UNLOCK_COOLDOWN_MS,
                     )
                 }
                 notice("已确认开锁", NoticeTone.Success)
@@ -840,7 +805,7 @@ class KvcxRideController internal constructor(
                         unlockPending = false,
                         lockPending = false,
                         // 解锁继续骑也是"刚开锁"：锁车 / 还车同样进冷却（与 [unlock] 同一口径）
-                        unlockCooldownUntil = System.currentTimeMillis() + UNLOCK_COOLDOWN_MS,
+                        unlockCooldownUntil = AppClock.nowMillis() + UNLOCK_COOLDOWN_MS,
                     )
                 }
                 notice(
@@ -873,7 +838,7 @@ class KvcxRideController internal constructor(
                 _state.update {
                     it.copy(
                         ride = outcome.ride,
-                        fetchedAt = System.currentTimeMillis(),
+                        fetchedAt = AppClock.nowMillis(),
                         unlockPending = false,
                         lockPending = false,
                     )
@@ -886,7 +851,7 @@ class KvcxRideController internal constructor(
                 _state.update {
                     it.copy(
                         ride = lastKnown ?: it.ride,
-                        fetchedAt = if (lastKnown != null) System.currentTimeMillis() else it.fetchedAt,
+                        fetchedAt = if (lastKnown != null) AppClock.nowMillis() else it.fetchedAt,
                         lockPending = true,
                     )
                 }
@@ -925,7 +890,7 @@ class KvcxRideController internal constructor(
             locationValid = point.source != "none",
             pollSettlement = false,
         ) {
-            effects.endRideAndBurn()
+            effects?.endRideAndBurn()
         }
         // 结束订单成功即落结果卡：订单状态已经在本地结束，不再等 queryUnderwayOrder
         // 的“订单消失”回包，也不让扣款轮询占住主动作。
@@ -938,12 +903,12 @@ class KvcxRideController internal constructor(
                 lockPending = false,
                 returnSummary = summary,
                 // 结算卡 8 秒自动收尾的倒计时基准（2026-10-31）：与结果卡同帧落
-                returnSummaryAt = System.currentTimeMillis(),
+                returnSummaryAt = AppClock.nowMillis(),
             )
         }
-        effects.recordRide(summary)
+        effects?.recordRide(summary)
         // 骑行结束留痕收件箱（手动与自动还车共用同一份口径，见 postKvcxReturnInbox）
-        scope.launch { runCatching { postKvcxReturnInbox(summary, endedAt = System.currentTimeMillis()) } }
+        scope.launch { runCatching { postKvcxReturnInbox(summary, endedAt = AppClock.nowMillis()) } }
         // 手动还车也把「订单结束」告诉其他活着的页面（账号页 / 另一个骑行页实例）
         EbikeRideSignal.notifyEnded()
         if (summary.settling) {
@@ -1072,7 +1037,7 @@ class KvcxRideController internal constructor(
             // 动作开始即推进序号：在飞的旧查询落地时会被丢弃（见 [snapshotSeq] / [readSeq]）
             snapshotSeq += 1
             readSeq += 1
-            _state.update { it.copy(busy = action, busyAt = System.currentTimeMillis()) }
+            _state.update { it.copy(busy = action, busyAt = AppClock.nowMillis()) }
             try {
                 block(session)
             } catch (error: CancellationException) {
@@ -1128,7 +1093,8 @@ class KvcxRideController internal constructor(
      */
     private suspend fun recordRemoteRideIfRemote(sendUnlock: Boolean) {
         if (sendUnlock) return
-        val count = effects.recordRemoteRide()
+        // 没有副作用实现（本平台没有提醒能力）时也不计数：计数唯一用途就是决定要不要提醒
+        val count = effects?.recordRemoteRide() ?: return
         if (EbikeRemoteRide.shouldRemind(count)) {
             remoteRideReminder?.tryEmit(count)
         }
@@ -1152,7 +1118,7 @@ class KvcxRideController internal constructor(
                 carryLock = !unlockPending && !lockPending,
             )
         },
-        fetchedAt = System.currentTimeMillis(),
+        fetchedAt = AppClock.nowMillis(),
         unlockPending = unlockPending && ride?.locked == true,
         lockPending = lockPending && ride != null && ride.locked == false,
     )
@@ -1173,7 +1139,7 @@ class KvcxRideController internal constructor(
         _rideHint.value = false
         persistRidePresence(ride != null)
         _state.update { it.withRideSnapshot(ride) }
-        if (ride == null && effects.onOrderGoneExternally()) {
+        if (ride == null && effects?.onOrderGoneExternally() == true) {
             notice("订单已在别处结束，本机计时已收掉", NoticeTone.Info)
         }
     }
@@ -1267,7 +1233,7 @@ class KvcxRideController internal constructor(
  * 正文是**要点列表**而不是一整段：弹窗里那几件事（计费、核对车号、支付分出路）
  * 各是一条独立责任，糊成一段谁都不看。
  */
-internal data class KvcxConfirm(
+data class KvcxConfirm(
     val title: String,
     /** 正文要点，逐条渲染（一条一句话，别把几件事塞进一条）。 */
     val points: List<String>,
@@ -1294,7 +1260,7 @@ internal data class KvcxConfirm(
  * （骑行页是编号要点 + 可选的「以后开锁不再确认」，今日页同构但没有勾选）。
  * 别在这里、也别在页面里再抄一份 `AlertDialog`。
  */
-internal fun kvcxConfirmDialog(
+fun kvcxConfirmDialog(
     action: KvcxAction,
     carLabel: String,
 ): KvcxConfirm? = when (action) {
@@ -1352,20 +1318,30 @@ internal fun kvcxConfirmDialog(
  * 都直接发指令——**别只认 `UNLOCK`**，那样扫码那条会一直弹窗。临时锁车 / 解锁继续骑 /
  * 响铃 / 查锁本来就没有确认框（[kvcxConfirmDialog] 返回 null）；还车与重试开锁保留每次确认。
  */
-internal fun kvcxNeedsConfirm(action: KvcxAction, unlockConfirm: Boolean): Boolean = when (action) {
+fun kvcxNeedsConfirm(action: KvcxAction, unlockConfirm: Boolean): Boolean = when (action) {
     KvcxAction.UNLOCK, KvcxAction.DIRECT_UNLOCK -> unlockConfirm
     KvcxAction.RETRY_UNLOCK, KvcxAction.RETURN -> true
     KvcxAction.LOCK, KvcxAction.RESUME, KvcxAction.RING, KvcxAction.QUERY_LOCK -> false
 }
 
-/** 快趣动作的失败文案（业务错误已是用户可读文本，见仓库层 `server {}`）。 */
-internal fun kvcxErrorText(error: Throwable): String = when (error) {
+/**
+ * 快趣动作的失败文案（业务错误已是用户可读文本，见仓库层 `server {}`）。
+ *
+ * iOS 移植 E2（2026-11-25）：原来是 `java.net.SocketTimeoutException` /
+ * `java.io.InterruptedIOException` / `java.io.IOException` 三支——JVM 专有类型进不了
+ * `commonMain`。换成 Ktor 的两类超时（`KqcxAuthClient` / `KqcxBikeClient` 走的正是这两条）
+ * 与它们共同的父类 `IOException`（`io.ktor.utils.io.errors.IOException`，JVM 上就是
+ * `java.io.IOException` 的类型别名），文案与判别口径都不变。
+ */
+fun kvcxErrorText(error: Throwable): String = when (error) {
     is KvcBusinessError -> error.message ?: "操作失败"
     is KvcProtocolException -> "响应异常：${error.message ?: "格式不符"}"
+    is KqcxTimeoutException -> "网络超时，请稍后重试"
+    is HttpRequestTimeoutException -> "网络超时，请稍后重试"
     is SocketTimeoutException -> "网络超时，请稍后重试"
-    is InterruptedIOException -> "请求超时，请稍后重试"
+    is ConnectTimeoutException -> "网络超时，请稍后重试"
     is IOException -> "网络不可用，请检查网络后重试"
-    else -> "操作异常：${error.message ?: error.javaClass.simpleName}"
+    else -> "操作异常：${error.message ?: error::class.simpleName}"
 }
 
 /**
@@ -1380,7 +1356,7 @@ internal fun kvcxErrorText(error: Throwable): String = when (error) {
  *
  * 还车成功时控制器会把 `ride` 清空，所以这里不会把上一单的时长带到下一单。
  */
-internal fun carryKnownRideFields(
+fun carryKnownRideFields(
     previous: KqcxAuth.Ride?,
     fresh: KqcxAuth.Ride,
     carryLock: Boolean,
@@ -1395,7 +1371,7 @@ internal fun carryKnownRideFields(
 }
 
 /** 骑行卡的核心指标是否到齐：时长 + 电量。后台补全据此决定是否还要再查。 */
-internal fun KqcxAuth.Ride.hasRideMetrics(): Boolean =
+fun KqcxAuth.Ride.hasRideMetrics(): Boolean =
     totalDateSeconds != null && batteryPercent != null
 
 /**
@@ -1403,14 +1379,14 @@ internal fun KqcxAuth.Ride.hasRideMetrics(): Boolean =
  * 本地就按骑行的自然态显示（与 `retryUnlock` / `resumeRide` 的乐观翻转同一口径）；
  * 报回「已锁」的例外（头盔流程会先后到）照实收，不覆盖。
  */
-internal fun KqcxAuth.Ride.adoptConfirmedUnlock(): KqcxAuth.Ride =
+fun KqcxAuth.Ride.adoptConfirmedUnlock(): KqcxAuth.Ride =
     if (locked == true) this else copy(locked = false)
 
 /**
  * 骑行时长的**本地走时**口径（纯函数，单测锁定）：以最近一次拉取的 `totalDate` 为基准，
  * 加上"拉取至今"的秒数。[fetchedAt] ≤ 0（还没查过）时不再加。无时长数据时返回 null。
  */
-internal fun rideElapsedSeconds(
+fun rideElapsedSeconds(
     ride: KqcxAuth.Ride,
     fetchedAt: Long,
     now: Long,
@@ -1425,7 +1401,7 @@ internal fun rideElapsedSeconds(
  * （骑行卡那一套 `00:13` 口径，与官方小程序一致）；无订单/无时长数据时返回 null。
  */
 @Composable
-internal fun rememberRideElapsed(ride: KqcxAuth.Ride?, fetchedAt: Long): String? {
+fun rememberRideElapsed(ride: KqcxAuth.Ride?, fetchedAt: Long): String? {
     if (ride == null) return null
     val now by rememberResumedNow(1_000L, key = ride.carNum to fetchedAt)
     return rideElapsedSeconds(ride, fetchedAt, now)?.let(KqcxAuth::formatRideDuration)
@@ -1437,20 +1413,24 @@ internal fun rememberRideElapsed(ride: KqcxAuth.Ride?, fetchedAt: Long): String?
  * 骑行结束入收件箱（2026-10-21）：手动还车（[KvcxRideController.returnBike]）与自动还车
  * （`EbikeAutoReturnReminder` 的 `Returned` 分支）共用的留痕点——两者都已在「订单结束 +
  * 结算口径到手」之后，符合收件箱旁路纪律（`InboxRepository.post` 内部吞错，失败不影响
- * 还车主链路）。**别挪进 `performReturnBike`**：那条被 JVM 单测直接跑到，挂上 Graph 会崩。
+ * 还车主链路）。**别挪进 `performReturnBike`**：那条被 JVM 单测直接跑到，挂上装配根会崩。
  *
  * 键 = `InboxKeys.KVCX_DONE_PREFIX` + 车号 + `|` + 当刻：时刻来自还车成功那一拍，
  * 同一次还车的重复投递同键落更新；两轮骑行是两个事实。没有时长/金额时各段缺省，
  * 不编数据。
+ *
+ * iOS 移植 E2（2026-11-25）：原来是 `Graph.inboxRepository(Graph.appContext)`，
+ * 搬进共享层后走 `Services.current.inboxRepository()`——`inbox_messages` 是本地表，
+ * 两端同一份实现。
  */
-internal suspend fun postKvcxReturnInbox(summary: KvcxReturnSummary, endedAt: Long) {
+suspend fun postKvcxReturnInbox(summary: KvcxReturnSummary, endedAt: Long) {
     val carNum = summary.carNum ?: return
     val parts = buildList {
         summary.durationText?.let { add("骑行 $it") }
         summary.feeText?.let { add("费用 $it") }
         add(summary.settleText)
     }
-    Graph.inboxRepository(Graph.appContext).post(
+    Services.current.inboxRepository().post(
         kind = InboxKind.KVCX_RIDE,
         dedupeKey = InboxKeys.KVCX_DONE_PREFIX + carNum + "|" + endedAt,
         title = "快趣骑行已结束",
@@ -1462,67 +1442,3 @@ internal suspend fun postKvcxReturnInbox(summary: KvcxReturnSummary, endedAt: Lo
     )
 }
 
-/**
- * 起免费时长计时并把结果映射成提示文案与语气（点扫一扫 / 本机开锁成功共用）。
- * 起点由调用方给：点「打开微信扫一扫」传 `now + [EbikeFreeRide.SCAN_DELAY_MS]`
- * （切微信、选图、扫码、开车要时间，倒计时从点击 5 秒后才开始走）；本机开锁成功传
- * 当下（服务端确认的开锁时刻，不用缓冲）。
- */
-internal suspend fun startFreeRideNotice(
-    startAtMillis: Long = System.currentTimeMillis(),
-): Pair<String, NoticeTone> {
-    val outcome = EbikeFreeRideReminder.startRide(Graph.appContext, startAtMillis)
-    return when (outcome) {
-        EbikeFreeRideReminder.Outcome.Started ->
-            "已开始计时，通知栏已显示倒计时" to NoticeTone.Success
-        EbikeFreeRideReminder.Outcome.StartedNoNotification ->
-            "通知被关闭，提醒发不出来，请到系统设置打开" to NoticeTone.Warning
-        EbikeFreeRideReminder.Outcome.StartedSilent ->
-            "已开始计时（免费时长提醒未开启）" to NoticeTone.Info
-        is EbikeFreeRideReminder.Outcome.Failed ->
-            "已开始计时；提醒排程失败：${outcome.message}" to NoticeTone.Warning
-        else ->
-            "已开始计时" to NoticeTone.Info
-    }
-}
-
-/**
- * 打开微信（结清欠费的唯一去处）：待支付页在快趣小程序里，而**微信不给第三方直达小程序
- * 具体页面**——URL Scheme / 短链必须由小程序自己的服务端生成（要它的 appsecret），
- * 开放平台拉起小程序又要求 App 与小程序在同一开放平台账号下绑定。所以只能把用户送到微信。
- *
- * 到了微信之后用户为什么"找不到支付入口"：官方的待支付页不挂菜单，
- * 只有两条路能到——**主页的「待支付」横幅**（onShow 查一次、60 秒节流、关过一次冷却 5 分钟）
- * 和**历史订单里的待支付记录**（点进去就是支付页）。提示把这两条写出来，别让用户白进一趟。
- */
-internal fun openWechatForSettle(context: android.content.Context, onHint: (String) -> Unit) {
-    val launch = try {
-        context.packageManager.getLaunchIntentForPackage("com.tencent.mm")
-    } catch (e: CancellationException) {
-        throw e // 取消穿透
-    } catch (_: Exception) {
-        null
-    }
-    if (launch == null) {
-        onHint("没装微信；欠费可在快趣小程序（或找快趣客服）结清")
-        return
-    }
-    try {
-        context.startActivityOutsideApp(launch)
-        onHint(
-            "微信已打开：进快趣小程序后，主页会出现「待支付」横幅（之前关过要等 5 分钟），" +
-                "或在「历史订单」里点那笔待支付订单直接付",
-        )
-    } catch (e: CancellationException) {
-        throw e // 取消穿透
-    } catch (_: Exception) {
-        onHint("无法打开微信；请手动进快趣小程序，主页「待支付」横幅或历史订单可直达付款页")
-    }
-}
-
-/** 时刻文案 `HH:mm`（骑行卡上的「更新于 / 位置」）；两页共用一个格式化器。 */
-internal fun clockText(millis: Long): String =
-    Instant.ofEpochMilli(millis)
-        .atZone(ZoneId.systemDefault())
-        .toLocalTime()
-        .format(DateTimeFormatter.ofPattern("HH:mm", Locale.US))
