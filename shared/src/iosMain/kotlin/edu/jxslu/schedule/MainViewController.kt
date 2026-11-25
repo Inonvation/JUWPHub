@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +57,7 @@ import edu.jxslu.schedule.ui.jwvw.JwWebFit
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.SettingsScreen
+import edu.jxslu.schedule.ui.onboarding.OnboardingScreen
 import edu.jxslu.schedule.ui.theme.JuwTheme
 import edu.jxslu.schedule.ui.today.ActiveServiceCard
 import edu.jxslu.schedule.ui.today.TodayScreen
@@ -88,6 +90,18 @@ private fun IosRoot(services: IosServices) {
         val meViewModel = remember { MeViewModel(services.scheduleRepository()) }
         val top = stack.lastOrNull()
 
+        // 首启引导（2026-11-25 晚接上）：Android 在 `onboarding_seen` 为 false 时用独立
+        // `OnboardingActivity` 拉起，iOS 没有第二个窗口，所以盖在根上。
+        //
+        // 默认 false→null 三态：null = 还没读到（DataStore 是异步的，组合期不能 runBlocking）。
+        // 读到 true 才渲染主界面；读到 false 渲染引导；仍是 null 时主界面照常渲染——
+        // 宁可直接进主界面，也不要先闪一屏空白再跳。
+        val prefs = remember { services.displayPrefs() }
+        var onboardingSeen by remember { mutableStateOf<Boolean?>(null) }
+        LaunchedEffect(prefs) {
+            onboardingSeen = runCatching { prefs.onboardingSeen.first() }.getOrDefault(true)
+        }
+
         // 已下线的页面不进栈（`IosNavigation.IOS_REMOVED_SCREENS`）。这是最后一道闸门：
         // 白名单只挡抽屉，页面内部（账号中心 / 设置 / 收件箱）还有别的入口能推到同一页。
         val pushRoute: (IosRoute) -> Unit = { route ->
@@ -97,8 +111,21 @@ private fun IosRoot(services: IosServices) {
         // iOS 没有系统返回手势：二级页栈非空时把「返回」接到这个缝上（Android 是实体返回键）
         AppBackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
 
+        // 顺序有意义：**登录页压在引导之上**。引导第 2 步点「去导入页登录」会打开 `jwOpen`，
+        // 若把引导判在前面，那个按钮点了就毫无反应（用户会被卡在第 2 步）。
+        // 关掉登录页回来，引导还在（`onboardingSeen` 仍是 false），接着走。
         if (jwOpen) {
             JwLoginScreen(services = services, onClose = { jwOpen = false })
+        } else if (onboardingSeen == false) {
+            // 首启引导：六屏里 iOS 只给得起两样（`onOpenJwLogin` + `onFinish`）。
+            // 其余四个槽位传 null，对应的原生表单 / 品牌位图 / 完成页「其他可选账号」整块不渲染
+            // （`OnboardingScreen` 的槽位表，见其 KDoc 与 design/ios-port.md §10.6）。
+            // 第 2 步换成「去导入页登录」一个按钮 —— 因为 iOS 用的是 WKWebView 手登，
+            // 没有 Android 那套 CAS 自动填表与凭证保险箱。
+            OnboardingScreen(
+                onFinish = { onboardingSeen = true },
+                onOpenJwLogin = { jwOpen = true },
+            )
         } else {
             ModalNavigationDrawer(
                 drawerState = drawerState,
