@@ -8,7 +8,7 @@ import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.BuildConfig
 import edu.jxslu.schedule.data.kqcx.KqcxBikeClient
-import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
+import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.data.kqcx.KvcxZoneSource
 import edu.jxslu.schedule.data.kqcx.ZoneCacheStore
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
@@ -244,9 +244,18 @@ class BikeMapViewModel(
     /**
      * 快趣会话（DESIGN §4.32）：本机开锁 / 锁车 / 还车与「当前用车」标记都靠它；
      * 「按车号查单车」（2026-09-30）也走它——那是个不需要凭证的读接口。
+     *
+     * 类型是会话**本体** [KqcxSessionCore]（iOS 移植 E2，2026-11-25）：原先是 `:app` 的
+     * `KqcxSessionRepository` 兼容壳，而壳只是 core 的 `YearMonth` 视图——本页早就没有
+     * `YearMonth` 交接了，吃壳只会让这一页搬不动。壳仍留在 `:app` 给还没搬的两页用。
      */
-    private val kqcx: KqcxSessionRepository? = null,
-    /** 还车点 / 禁停区图层的数据源（只读；未登录时为 null）。 */
+    private val kqcx: KqcxSessionCore? = null,
+    /**
+     * 还车点 / 禁停区图层的数据源（只读；未登录时为 null）。
+     *
+     * 与 [kqcx] 是同一个实例（[KqcxSessionCore] 同时实现 [KvcxRideSession] 与
+     * [KvcxZoneSource]）：分成两个参数是为了在单测 / 特殊宿主里只喂其中一面。
+     */
     private val zoneSource: KvcxZoneSource? = null,
     /**
      * 图层的落盘缓存（DESIGN §3.9「停车点缓存」）：命中就先摆上、新鲜就不联网；
@@ -1994,8 +2003,8 @@ class BikeMapViewModel(
             BikeMapViewModel(
                 client,
                 prefs,
-                runCatching { Graph.kqcx(Graph.appContext) }.getOrNull(),
-                runCatching { Graph.kqcx(Graph.appContext) }.getOrNull(),
+                runCatching { Graph.kqcxCore(Graph.appContext) }.getOrNull(),
+                runCatching { Graph.kqcxCore(Graph.appContext) }.getOrNull(),
                 runCatching { Graph.zoneCacheStore(Graph.appContext) }.getOrNull(),
                 runCatching { Graph.kvcxRide(Graph.appContext) }.getOrNull(),
             ) as T

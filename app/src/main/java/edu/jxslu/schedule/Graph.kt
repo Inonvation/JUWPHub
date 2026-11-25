@@ -12,7 +12,7 @@ import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
 import edu.jxslu.schedule.data.kqcx.KqxCredentialStore
 import edu.jxslu.schedule.data.kqcx.KqcxBikeClient
-import edu.jxslu.schedule.data.kqcx.KqcxOrderCache
+import edu.jxslu.schedule.data.kqcx.KqcxOrderStore
 import edu.jxslu.schedule.data.kqcx.KvcxRideHintPrefsStore
 import edu.jxslu.schedule.data.kqcx.ZoneCacheStore
 import edu.jxslu.schedule.domain.InboxKeys
@@ -283,7 +283,7 @@ object Graph {
     @Volatile
     private var rideRecordStore: RideRecordStore? = null
     @Volatile
-    private var kqcxOrderCache: KqcxOrderCache? = null
+    private var kqcxOrderStore: KqcxOrderStore? = null
     @Volatile
     private var homeworkRepository: HomeworkRepository? = null
 
@@ -608,11 +608,15 @@ object Graph {
     /**
      * 快趣服务端订单缓存单例（2026-11-05，表 `kqcx_orders`，DB v21）：超时费统计改在
      * 本地算——账号页与历史订单页共用这份缓存，统计不再每次重扫全部月份。
+     *
+     * 类型是共享层的 [KqcxOrderStore]（iOS 移植 E2，2026-11-25）：原来这层壳
+     * `KqcxOrderCache` 只做 `YearMonth` 换算，而两个消费方（[KvcxViewModel] /
+     * [KvcxOrdersViewModel]）已改为直接用共享类型并就地换算——壳随之没有调用方。
      */
-    fun kqcxOrderCache(context: Context): KqcxOrderCache =
-        kqcxOrderCache ?: synchronized(this) {
-            kqcxOrderCache ?: KqcxOrderCache(juwDatabase(context).kqcxOrderDao())
-                .also { kqcxOrderCache = it }
+    fun kqcxOrderStore(context: Context): KqcxOrderStore =
+        kqcxOrderStore ?: synchronized(this) {
+            kqcxOrderStore ?: KqcxOrderStore(juwDatabase(context).kqcxOrderDao())
+                .also { kqcxOrderStore = it }
         }
 
     /** 作业仓库单例（DESIGN §4.20）：与笔记共用一套附件与渲染口径。 */

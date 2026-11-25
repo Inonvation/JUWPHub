@@ -5,8 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.kqcx.KqcxOrderCache
-import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
+import edu.jxslu.schedule.data.kqcx.KqcxOrderStore
+import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KqcxRefreshPolicy
 import edu.jxslu.schedule.domain.KvcBusinessError
@@ -55,9 +55,10 @@ data class KvcxOrdersUiState(
  * 也不做后台批量预取（几十个月就是几十个请求，用户没点就不该发）。
  */
 class KvcxOrdersViewModel(
-    private val session: KqcxSessionRepository,
+    /** 会话**本体**（iOS 移植 E2，2026-11-25）：原先吃 `:app` 的 `KqcxSessionRepository` 兼容壳。 */
+    private val session: KqcxSessionCore,
     /** 订单缓存（2026-11-05）：翻到哪个月就把那个月的订单落库，账号页统计直接受益。 */
-    private val orderCache: KqcxOrderCache,
+    private val orderCache: KqcxOrderStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(KvcxOrdersUiState())
@@ -121,7 +122,7 @@ class KvcxOrdersViewModel(
             _uiState.update { it.copy(months = choices.selectable, yearMonth = month) }
 
             val key = month to requested.deviceType
-            val cached = runCatching { orderCache.ordersFor(month, requested.deviceType) }
+            val cached = runCatching { orderCache.ordersFor(month.toString(), requested.deviceType) }
                 .getOrDefault(emptyList())
             if (cached.isNotEmpty()) {
                 _uiState.update { it.copy(orders = cached) }
@@ -170,7 +171,11 @@ class KvcxOrdersViewModel(
      * 否则页面只有当月一个月份可翻，用户会以为历史订单丢了；账号页同步跑完后自然收敛成真实月份。
      */
     private suspend fun loadMonths(deviceType: Int): MonthChoices {
-        val recorded = runCatching { orderCache.months(deviceType) }.getOrDefault(emptyList())
+        // 共享层按 `yyyy-MM` 键返回月份（[KqcxOrderStore.monthKeys]），本页状态仍用 `YearMonth`。
+        // 解析失败的脏键直接丢掉（与壳里原来 `mapNotNull { YearMonth.parse }` 同口径）
+        val recorded = runCatching {
+            orderCache.monthKeys(deviceType).mapNotNull { key -> monthOf(key) }
+        }.getOrDefault(emptyList())
         val thisMonth = YearMonth.now()
         val selectable = if (recorded.isEmpty()) {
             (0 until FALLBACK_MONTHS).map { thisMonth.minusMonths(it.toLong()) }
@@ -179,6 +184,10 @@ class KvcxOrdersViewModel(
         }
         return MonthChoices(recorded = recorded, selectable = selectable)
     }
+    /** `yyyy-MM` 键 → `YearMonth`；形态不对返回 null（脏行不参与月份选择器）。 */
+    private fun monthOf(key: String): YearMonth? =
+        runCatching { YearMonth.parse(key) }.getOrNull()
+
     /** 查询失败的文案分类（与快趣账号页同口径：业务错误给服务端原文，网络类给可操作建议）。 */
     private fun errorText(error: Throwable): String = when (error) {
         is KvcBusinessError ->
@@ -205,8 +214,8 @@ class KvcxOrdersViewModel(
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
                     KvcxOrdersViewModel(
-                        session = Graph.kqcx(context.applicationContext),
-                        orderCache = Graph.kqcxOrderCache(context.applicationContext),
+                        session = Graph.kqcxCore(context.applicationContext),
+                        orderCache = Graph.kqcxOrderStore(context.applicationContext),
                     ) as T
             }
     }

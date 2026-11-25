@@ -5,8 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.kqcx.KqcxOrderCache
-import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
+import edu.jxslu.schedule.data.kqcx.KqcxOrderStore
+import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.repo.RideRecordStore
 import edu.jxslu.schedule.domain.EbikeCardExpiry
@@ -81,7 +81,12 @@ data class KvcxUiState(
 )
 
 class KvcxViewModel(
-    private val session: KqcxSessionRepository,
+    /**
+     * 会话**本体**（iOS 移植 E2，2026-11-25）：原先吃的是 `:app` 的 `KqcxSessionRepository`
+     * 兼容壳，壳只做 `YearMonth` 换算。本页真正用到的一年月交接只有统计区间
+     * （[scanAllOrders] 的 `fromKey` / `toKey`），就地换成 `YearMonth` 更直接。
+     */
+    private val session: KqcxSessionCore,
     private val records: RideRecordStore,
     /**
      * 使用方式（DESIGN §3.9 / §4.32）：本页只属于**账号登录方式**，小程序方式下页面整片
@@ -90,7 +95,7 @@ class KvcxViewModel(
      */
     private val prefs: DisplayPrefsStore,
     /** 服务端订单缓存（2026-11-05）：统计在本地算，网络只负责增量刷新。 */
-    private val orderCache: KqcxOrderCache,
+    private val orderCache: KqcxOrderStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -231,7 +236,7 @@ class KvcxViewModel(
 
     /**
      * 查一次账户资产（余额 / 卡券）：进页、登录成功、手动刷新各一次。
-     * 会员卡接口已停拉（会员行已删除，2026-11-05 减少请求），见 [KqcxSessionRepository.queryAssets]。
+     * 会员卡接口已停拉（会员行已删除，2026-11-05 减少请求），见 [KqcxSessionCore.queryAssets]。
      * **失败沿用上次结果**：资产是展示性数据，查不到不该把用户已看到的清成空白；
      * 三块全空才算"颗粒无收"，页面给重试出路。失败不打扰（不弹提示，区块内给一行说明）。
      */
@@ -327,8 +332,10 @@ class KvcxViewModel(
                         statsLoading = false,
                         statsScannedMonths = scan.scannedMonths,
                         statsFetchedRows = scan.fetchedRows,
-                        statsFrom = it.statsFrom ?: scan.from,
-                        statsTo = it.statsTo ?: scan.to,
+                        // 共享层回的是 `yyyy-MM` 键（[KqcxOrderScan] 的 fromKey / toKey），
+                        // 本页状态仍用 `YearMonth`：换算失败的只可能是代码 bug，退回旧值
+                        statsFrom = it.statsFrom ?: monthOf(scan.fromKey),
+                        statsTo = it.statsTo ?: monthOf(scan.toKey),
                     )
                 }
             }
@@ -337,6 +344,10 @@ class KvcxViewModel(
                 notice(queryErrorText(it), NoticeTone.Error)
             }
     }
+
+    /** `yyyy-MM` 键 → 本页状态用的 `YearMonth`（见 [scanAllOrders]）。 */
+    private fun monthOf(key: String): YearMonth? =
+        runCatching { YearMonth.parse(key) }.getOrNull()
 
     /** 读缓存本地算一遍（不联网）；缓存空则保持现状（首次进页由 [scanAllOrders] 补）。 */
     private suspend fun recomputeStats() {
@@ -430,10 +441,10 @@ class KvcxViewModel(
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
                     KvcxViewModel(
-                        session = Graph.kqcx(context.applicationContext),
+                        session = Graph.kqcxCore(context.applicationContext),
                         records = Graph.rideRecordStore(context.applicationContext),
                         prefs = Graph.displayPrefs(context.applicationContext),
-                        orderCache = Graph.kqcxOrderCache(context.applicationContext),
+                        orderCache = Graph.kqcxOrderStore(context.applicationContext),
                     ) as T
             }
     }
