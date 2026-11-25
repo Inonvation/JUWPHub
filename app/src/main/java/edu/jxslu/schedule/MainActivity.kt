@@ -13,7 +13,6 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -78,8 +77,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.ui.icon.AppIcons
-import kotlin.math.abs
-import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.combine
@@ -119,6 +116,8 @@ import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.LocalBottomBarVisibleRequest
 import edu.jxslu.schedule.ui.common.StackedDrawerState
+import edu.jxslu.schedule.ui.common.drawerCardTransform
+import edu.jxslu.schedule.ui.common.rememberDrawerCardTransform
 import edu.jxslu.schedule.ui.life.RechargeHost
 import edu.jxslu.schedule.ui.life.RechargeKind
 import edu.jxslu.schedule.domain.EbikeFreeRide
@@ -684,36 +683,9 @@ private val FloatingBarSideMargin = 56.dp
 /** 悬浮胶囊与手势条的间距。 */
 private val FloatingBarBottomMargin = 12.dp
 
-/**
- * 侧栏展开时主页面的缩放比例（2026-10-20 用户参考的层级效果）。
- * 0.06 = 缩小到 94%：上下各露出约 3% 的后层，够读出"卡片浮在侧栏之上"，又不至于让字明显变小。
- */
-private const val CardShrink = 0.06f
-
-/** 主卡在抽屉完全展开时的圆角上限（2026-10-20 第二版定的 24dp，观感不要动）。 */
-private val CardCornerRadius = 24.dp
-
-/** 主卡在抽屉完全展开时的阴影上限（同上）。 */
-private val CardShadowElevation = 12.dp
-
-/**
- * 圆角的量化档数：0…[CardCornerSteps] 共 N+1 个 [RoundedCornerShape]，组合期建一次。
- *
- * 为什么量化而不是逐帧 `RoundedCornerShape(24.dp * eased)`：那个写法在
- * `graphicsLayer` 的绘制 lambda 里**每帧新建一个形状对象**。按 1dp 一档后，形状对象变成
- * 组合期建好的常量数组，绘制 lambda 里只剩一次下标 + 一次乘法，一帧少一次小对象分配；
- * 台阶 ≤1dp（280ms 里每档约 12ms），肉眼不可见。
- *
- * shortcut: 收益就到此为止——**别**指望「outline 取值次数下降」：`graphicsLayer` 的 shape
- * 本来就是逐帧读，一次 spring 落定约 20~25 帧，量化前后差别可以忽略（2026-11-06 交叉复核
- * 纠正了这条注释原来的说法）。真正可感的是**拖动期间**（`draggable` 每帧都在改 eased），
- * 若哪天这条路径不热了，退回逐帧 `RoundedCornerShape(24.dp * eased)` 两行也完全正确。
- *
- * **不要图省事把 shape 改成常量 `RoundedCornerShape(24.dp)`**：主卡是 `fillMaxSize()`，
- * 静止态（eased == 0）会裁掉屏幕四个角、露出后层的 `surfaceContainerLow`，
- * 观感就是屏幕上凭空多四个圆角缺口。
- */
-private const val CardCornerSteps = 24
+// 主卡缩小 / 圆角 / 阴影的数值与算式在共享层 `ui/common/DrawerCardTransform.kt`
+//（2026-11-25 搬走，iOS 的 `ModalNavigationDrawer` 复用同一份）：那个效果是用户最先注意到的
+// 东西，两端各写一遍必然分叉。
 
 /** 侧栏展开时余额静默刷新的节流窗口：用户反复开关侧栏不会连发两轮请求。 */
 private const val SIDE_BALANCE_REFRESH_TTL_MILLIS = 60_000L
@@ -1044,15 +1016,9 @@ internal fun JuwApp(
         )
     }
     DrawerBackHandler(drawer)
-    // 抽屉主卡的圆角与阴影（见 [CardCornerSteps] 的 KDoc）：形状在组合期一次建好，
-    // 阴影只留一个「最大 px」——下面那个每帧都跑的绘制 lambda 里只剩乘法，
-    // 不再逐帧 new RoundedCornerShape、也不再逐帧做 Dp→px 换算。
-    val cardCornerShapes = remember {
-        List(CardCornerSteps + 1) { i ->
-            RoundedCornerShape(CardCornerRadius * (i.toFloat() / CardCornerSteps))
-        }
-    }
-    val cardShadowMaxPx = with(drawerDensity) { CardShadowElevation.toPx() }
+    // 抽屉主卡的缩放 / 圆角 / 阴影（规格与量化档位都在共享层 `DrawerCardTransform`）。
+    // 形状数组与阴影上限在组合期一次备好，绘制 lambda 里只剩乘法。
+    val cardTransform = rememberDrawerCardTransform(maxSlidePx = drawerMaxOffsetPx)
     // 从侧栏钱包发起充值：不再是「跳一个页面」，只落一个待办，壳层 RechargeHost
     // 直接弹对应充值弹层；弹层关掉就结束，不离开当前 Tab。
     var pendingRecharge by remember { mutableStateOf<RechargeKind?>(null) }
@@ -1450,25 +1416,11 @@ internal fun JuwApp(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer {
-                    val p = drawer.progress
-                    val eased = FastOutSlowInEasing.transform(abs(p))
-                    // 用户参考的层级：主页面**微微缩小**并右移，上下露出后层；
-                    // 左缘始终贴在侧栏宽度上（缩放绕中心，补回一半的收缩量）。
-                    val scale = 1f - CardShrink * eased
-                    scaleX = scale
-                    scaleY = scale
-                    translationX = drawerMaxOffsetPx * p - (1f - scale) * size.width / 2f
-                    // 圆角与阴影只在「动起来」时才有值：eased == 0 时形状是 0dp（按整屏
-                    // 矩形绘制）、阴影 0，静止态没有裁角也没有离屏层。形状取组合期预建
-                    // 好的量化档、阴影是「常量 px × eased」——这个 lambda 每帧都跑，
-                    // 里面不再新建任何对象（见 [CardCornerSteps] 的 KDoc）。
-                    shape = cardCornerShapes[
-                        (eased * CardCornerSteps).roundToInt().coerceIn(0, CardCornerSteps)
-                    ]
-                    shadowElevation = cardShadowMaxPx * eased
-                    clip = true
-                }
+                // 用户参考的层级：主页面**微微缩小**并右移，上下露出后层；左缘始终贴在
+                // 侧栏宽度上（缩放绕中心，算式补回一半的收缩量）。`progress` 在绘制期读，
+                // 抽屉每拖一像素不会让整页重组——算式与量化档位见共享层的
+                // `DrawerCardTransform`（iOS 的 `ModalNavigationDrawer` 吃同一份）。
+                .drawerCardTransform(cardTransform) { drawer.progress }
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = cardDragState,
