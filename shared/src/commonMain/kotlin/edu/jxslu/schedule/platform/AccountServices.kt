@@ -20,7 +20,9 @@ import kotlinx.coroutines.flow.StateFlow
  * 不是密码本身。密码永远不出实现类——共享层拿到的 [String] 只是学号。
  *
  * Android 实现转接 `CredentialVault`（`EncryptedSharedPreferences` + `MasterKey`）；
- * iOS 侧要等 Keychain 实现，在那之前账号中心把这两行按「未配置」显示。
+ * iOS 实现转接 Keychain（`IosYktCredentialStore`），但**只填得出一卡通学号**——
+ * iOS 不保存教务密码（登录只在 `WKWebView` 里），所以 `readJwUsername()` 恒为 null，
+ * 页面回退到学籍卡的学号（`profileStudentId`）。
  */
 interface AccountCredentials {
 

@@ -1098,7 +1098,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 |---|---|---|
 | 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份）；底栏三格「今日 / 课表 / 我的」（M3 `NavigationBar` + 图标 + 文字，选中主色 / 未选中 `onSurface` 0.6）；抽屉按 Android 的分组列 39 条，顶部**复用共享层的 `DrawerHeader` 身份区**（头像 + 姓名 + 遮罩学号 + 班级，整块点开进学籍信息）。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的**手势视差**（iOS 用 `ModalNavigationDrawer`，是另一套实现）；`我的` 那一格在 Android 上是从抽屉进的；抽屉顶部还缺 Android 的钱包区与「账号与登录」行 |
 | 教务登录后的自动填表 | iOS 用 `WKWebView` 让用户手点登录，登录成功落地后自动 `archive` | Android 有自动填表；iOS 需要注入 JS，能做 |
-| 凭证存储 | `IosKeychain`（CoreFoundation）+ 六个第三方存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI）已写，**iOS 编译验证卡在 runner 容量** | 一卡通 / 教务（CAS）那两套仍返回 `null`：还要「CAS 学号 + 登录闸门」两样，它们在 `:app` 的 `CredentialVault` 里 |
+| 凭证存储 | `IosKeychain`（CoreFoundation）+ 七个存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI / **一卡通**）已写，**iOS 编译验证卡在 runner 容量** | 教务（CAS）那套仍返回 `null`：iOS 从不保存教务密码，登录只在 `WKWebView` 里；一卡通已接（`IosYktCredentialStore`，service `secure_ykt`，含落盘 token 与失效标记），账号中心 / 消费流水 / 电费读得到学号。**但录入凭证的「校园卡设置」页还在 `:app`**，所以这四处的入口仍然停在「凭证未配置」 |
 | 第三方仓库 | **胖乖 / U净 / 问渠已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 与 `kqcxSession()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账），快趣的 core 还在 `:app` |
 | 支付调起 | 一卡通走「收银台 URL 进 `WKWebView`」；胖乖 / 趣智走 `alipays://` 深链 | `Info.plist` 还没有 `LSApplicationQueriesSchemes`（`alipays` / `weixin`），深链会被系统拦 |
 | App 图标 | **已补**（2026-11-25）：`iosApp/JUWPHub/Assets.xcassets/AppIcon.appiconset`，1024 单尺寸 universal。用 `tools/app-icon/source.png` 的**前景层**重新合成满幅图——原图把圆角与投影烤进了像素，直接用会与 iOS 遮罩叠成双层圆角 | 启动屏仍不给（`UILaunchScreen` 空 dict = 纯色） |
@@ -1155,7 +1155,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | 6 | 抽屉「数据与备份」 | 能导出 JSON、能导入 Android 那边导出的备份 | Room 读写；**这也是 WebView 万一仍不通时的兜底路**：在 Android 上导好课表再导进来 |
 | 7 | 底栏「我的」 | 没有「AI 调课」行、没有「百宝箱」开关 | `showAiSchedule` / `showToolbox` 没传 |
 | 8 | 抽屉「账号中心」 | 没有问渠行、没有「可选 / AI 调课」那一节 | 两个可空回调没传 |
-| 9 | 抽屉「消费流水」/「电费」 | 落在「凭证未配置」态，本地表为空 | 正常（一卡通凭证存储还没接） |
+| 9 | 抽屉「消费流水」/「电费」 | 落在「凭证未配置」态，本地表为空 | 凭证存储已接（Keychain），但**录入凭证的「校园卡设置」页还在 `:app`**，本端无处输入学号 + 查询密码 |
 
 **已知在 iOS 上点了会落在「这一页还在 Android 侧」的**：趣智（缺蓝牙扫描与设备表）、
 骑行 / 快趣、校园卡设置、成绩单、评教、分享、小组件设置、权限与存储、
