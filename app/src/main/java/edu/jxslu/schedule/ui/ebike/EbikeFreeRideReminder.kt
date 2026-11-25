@@ -332,7 +332,7 @@ object EbikeFreeRideReminder {
         if (pending.isEmpty()) return
         val deleted = withContext(Dispatchers.IO) {
             pending.filterTo(mutableSetOf()) { key ->
-                EbikeQrBitmaps.deletePending(context.applicationContext, key)
+                AndroidEbikeCodePlatform.deleteSaved(context.applicationContext, key)
             }
         }
         if (deleted.isEmpty()) return

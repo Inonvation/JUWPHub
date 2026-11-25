@@ -28,19 +28,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.domain.EbikeAutoReturn
 import edu.jxslu.schedule.data.prefs.AMAP_CHOICE_AGREED
 import edu.jxslu.schedule.data.prefs.AMAP_CHOICE_DECLINED
+import edu.jxslu.schedule.domain.EbikeAutoReturn
 import edu.jxslu.schedule.domain.EbikeFreeRide
+import edu.jxslu.schedule.domain.SizeText
 import edu.jxslu.schedule.domain.capabilities
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
-import edu.jxslu.schedule.ui.common.AppPermissions
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SettingChoiceRow
 import edu.jxslu.schedule.ui.common.SettingItem
@@ -62,10 +61,24 @@ import kotlin.math.roundToInt
  *
  * 顶部副行只报「使用方式 + 登录态」；分组沿革、已删入口与各条红线见
  * `.agents/rules/ebike.md`。
+ *
+ * ## iOS 移植 P4（2026-11-25）的四处改写
+ *
+ * | 原来 | 现在 |
+ * |---|---|
+ * | `LocalContext` + `Services.current.displayPrefs()` | `Services.current.displayPrefs()`（宿主在启动时装配） |
+ * | `EbikeMapCache`（`:app`，`Context` + 文件目录） | [mapCache]（null = 本平台没有可管的瓦片缓存 → 整张卡不渲染） |
+ * | `rememberNotificationPermissionGate()`（`POST_NOTIFICATIONS`） | [requestNotificationPermission]（null = 没有权限弹窗这一档，动作直接执行） |
+ * | `AppPermissions.jumpNotificationSettings(context)` | [onOpenNotificationSettings]（null = 本平台没有这个系统页 → 那行入口不渲染） |
+ *
+ * 另外两组**整块**按能力出现：`viewModel.hasReminders` 为 false 时「自动还车」与
+ * 「提醒」不渲染（提醒是 `AlarmManager` + 通知渠道，本平台没有就是没有）；
+ * `viewModel.hasGallery` 为 false 时「乘车码」不渲染（保存 / 焚毁都依赖相册）。
+ * 底图选择（高德 / 栅格）在 iOS 上没有第二选项，所以整块挂在 [showMapSourceChoice] 上。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun EbikeSettingsSheet(
+fun EbikeSettingsSheet(
     viewModel: EbikeViewModel,
     /** 快趣登录态：只影响「账号」区的展示文案（能力判定不依赖它）。 */
     loggedIn: Boolean,
@@ -74,20 +87,39 @@ internal fun EbikeSettingsSheet(
     onOpenKvcxAccount: () -> Unit,
     /** 清缓存等结果提示的出口（走宿主页面的 Snackbar）。 */
     onNotice: (String, NoticeTone) -> Unit,
+    /** 地图瓦片缓存的统计与清理；**null = 本平台没有这份缓存**（「地图缓存」卡不渲染）。 */
+    mapCache: EbikeMapCachePort? = null,
+    /**
+     * 有没有第二档底图可选（Android：高德官方 ↔ 栅格）；**false = 本平台只有一个底图**，
+     * 整块「地图」设置不渲染。
+     *
+     * 为什么不是一个回调：切底图只写 `amapChoice` 偏好，真正换底图是 Android 侧
+     * `BikeMapHost` 观察该偏好后自己做的——共享层不需要通知谁。
+     */
+    showMapSourceChoice: Boolean = false,
+    /**
+     * 申请通知权限并在授予后执行回调；**null = 本平台没有这一步**（直接执行回调）。
+     *
+     * 只有「开启」需要权限——关闭是撤能力，不要权限。
+     */
+    requestNotificationPermission: ((onGranted: () -> Unit) -> Unit)? = null,
+    /** 跳系统通知设置页；**null = 本平台没有这个系统页**（那行提示入口不渲染）。 */
+    onOpenNotificationSettings: (() -> Unit)? = null,
 ) {
     val prefs by viewModel.ebikePrefs.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptics = rememberAppHaptics()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // 没有通知权限这一档的平台：给一个直接执行的空跑，调用点因此不用写空判
+    val withNotificationPermission: (() -> Unit) -> Unit =
+        requestNotificationPermission ?: { action -> action() }
     // 地图缓存占用（进弹层时统计一次；瓦片是浏览地图的时长，弹层开着不会变多少）
-    var cacheUsage by remember { mutableStateOf<EbikeMapCache.Usage?>(null) }
+    var cacheUsage by remember { mutableStateOf<EbikeMapCachePort.Usage?>(null) }
     var clearingCache by remember { mutableStateOf(false) }
     var showClearCache by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        cacheUsage = EbikeMapCache.measure(context)
+        cacheUsage = mapCache?.measure()
     }
-    val withNotificationPermission = rememberNotificationPermissionGate()
     val caps = prefs.useMode.capabilities(loggedIn = loggedIn, hasRide = false)
     // 关弹层走退场动画：点 X 直接置 false 会把弹层从组合里瞬间抽掉（"啪"地消失），
     // 与车号面板 / 使用方式弹层同一条出口
@@ -143,43 +175,54 @@ internal fun EbikeSettingsSheet(
                 // 先让弹层滑走再进账号页，中间不留"弹层突然没了"的那一帧
                 KvcxAccountRow(loggedIn = loggedIn, onClick = { dismiss { onOpenKvcxAccount() } })
                 RideConfirmSettingsSection(prefs = prefs)
-                AutoReturnSettingsSection(
+                // 自动还车是「排闹钟 + 到点发通知」：本平台没有提醒能力就整块不摆
+                if (viewModel.hasReminders) {
+                    AutoReturnSettingsSection(
+                        prefs = prefs,
+                        onAutoReturnChanged = viewModel::onAutoReturnChanged,
+                        withNotificationPermission = withNotificationPermission,
+                    )
+                }
+            }
+
+            // 乘车码：保存与焚毁都依赖相册，没有相册能力的平台整组不摆
+            if (viewModel.hasGallery) CodeSettingsSection(prefs = prefs)
+
+            if (viewModel.hasReminders) {
+                ReminderSettingsSection(
                     prefs = prefs,
-                    onAutoReturnChanged = viewModel::onAutoReturnChanged,
+                    onFreeReminderChanged = viewModel::onFreeReminderChanged,
+                    onReminderPermissionGranted = viewModel::onReminderPermissionGranted,
                     withNotificationPermission = withNotificationPermission,
+                    onOpenNotificationSettings = onOpenNotificationSettings,
                 )
             }
 
-            CodeSettingsSection(prefs = prefs)
+            if (showMapSourceChoice) {
+                MapSettingsSection(
+                    amapChoice = prefs.amapChoice,
+                    onAmapChoiceChange = { enabled ->
+                        scope.launch {
+                            Services.current.displayPrefs().setEbikeAmapChoice(
+                                if (enabled) AMAP_CHOICE_AGREED else AMAP_CHOICE_DECLINED,
+                            )
+                        }
+                    },
+                )
+            }
 
-            ReminderSettingsSection(
-                prefs = prefs,
-                onFreeReminderChanged = viewModel::onFreeReminderChanged,
-                onReminderPermissionGranted = viewModel::onReminderPermissionGranted,
-                withNotificationPermission = withNotificationPermission,
-            )
-
-            MapSettingsSection(
-                amapChoice = prefs.amapChoice,
-                onAmapChoiceChange = { enabled ->
-                    scope.launch {
-                        Graph.displayPrefs(context).setEbikeAmapChoice(
-                            if (enabled) AMAP_CHOICE_AGREED else AMAP_CHOICE_DECLINED,
-                        )
-                    }
-                },
-            )
-
-            MapCacheCard(
-                usage = cacheUsage,
-                onClear = {
-                    if (cacheUsage?.isEmpty == true) {
-                        onNotice("暂无缓存可清除", NoticeTone.Info)
-                    } else {
-                        showClearCache = true
-                    }
-                },
-            )
+            if (mapCache != null) {
+                MapCacheCard(
+                    usage = cacheUsage,
+                    onClear = {
+                        if (cacheUsage?.isEmpty == true) {
+                            onNotice("暂无缓存可清除", NoticeTone.Info)
+                        } else {
+                            showClearCache = true
+                        }
+                    },
+                )
+            }
         }
     }
 
@@ -195,9 +238,9 @@ internal fun EbikeSettingsSheet(
             title = "清除地图缓存？",
             message = buildString {
                 append("将删除离线地图瓦片")
-                usage?.let { append("（${EbikeMapCache.sizeLabel(it.tileBytes)}）") }
+                usage?.let { append("（${SizeText.format(it.tileBytes)}）") }
                 append("与停车点 / 禁停区数据")
-                usage?.let { append("（${EbikeMapCache.sizeLabel(it.zoneBytes)}）") }
+                usage?.let { append("（${SizeText.format(it.zoneBytes)}）") }
                 append("。下次打开「附近单车地图」会重新下载；不影响账号、订单与车辆查询。")
             },
             confirmLabel = if (clearingCache) "清除中…" else "清除",
@@ -208,8 +251,8 @@ internal fun EbikeSettingsSheet(
             onConfirm = {
                 clearingCache = true
                 scope.launch {
-                    val ok = EbikeMapCache.clear(context)
-                    cacheUsage = EbikeMapCache.measure(context)
+                    val ok = mapCache?.clear() ?: false
+                    cacheUsage = mapCache?.measure()
                     clearingCache = false
                     showClearCache = false
                     onNotice(
@@ -284,7 +327,6 @@ private fun KvcxAccountRow(loggedIn: Boolean, onClick: () -> Unit) {
  */
 @Composable
 private fun RideConfirmSettingsSection(prefs: EbikePrefsSnapshot) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var unlockConfirm by remember(prefs.unlockConfirm) { mutableStateOf(prefs.unlockConfirm) }
     SettingsSection(title = "开锁与还车") {
@@ -294,7 +336,7 @@ private fun RideConfirmSettingsSection(prefs: EbikePrefsSnapshot) {
             checked = unlockConfirm,
             onCheckedChange = { checked ->
                 unlockConfirm = checked
-                scope.launch { Graph.displayPrefs(context).setEbikeUnlockConfirm(checked) }
+                scope.launch { Services.current.displayPrefs().setEbikeUnlockConfirm(checked) }
             },
         )
         SettingsNote("还车与重试开锁始终要确认；扫车身码自动开锁遵循此开关。")
@@ -315,7 +357,6 @@ private fun AutoReturnSettingsSection(
     onAutoReturnChanged: () -> Unit,
     withNotificationPermission: (() -> Unit) -> Unit,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var enabled by remember(prefs.autoReturnEnabled) { mutableStateOf(prefs.autoReturnEnabled) }
     var leadSeconds by remember(prefs.autoReturnLeadSeconds) {
@@ -329,7 +370,7 @@ private fun AutoReturnSettingsSection(
             onCheckedChange = { checked ->
                 enabled = checked
                 scope.launch {
-                    Graph.displayPrefs(context).setEbikeAutoReturnEnabled(checked)
+                    Services.current.displayPrefs().setEbikeAutoReturnEnabled(checked)
                     onAutoReturnChanged()
                 }
                 // 结果要发通知：开启时顺手要一次通知权限（关闭是撤能力，不要权限）
@@ -342,7 +383,7 @@ private fun AutoReturnSettingsSection(
                 onValueChange = { leadSeconds = it },
                 onValueChangeFinished = {
                     scope.launch {
-                        Graph.displayPrefs(context).setEbikeAutoReturnLeadSeconds(leadSeconds)
+                        Services.current.displayPrefs().setEbikeAutoReturnLeadSeconds(leadSeconds)
                         onAutoReturnChanged()
                     }
                 },
@@ -354,7 +395,7 @@ private fun AutoReturnSettingsSection(
                 selectedIndex = prefs.autoReturnRetries - EbikeAutoReturn.RETRY_MIN,
                 onSelect = { index ->
                     scope.launch {
-                        Graph.displayPrefs(context)
+                        Services.current.displayPrefs()
                             .setEbikeAutoReturnRetries(index + EbikeAutoReturn.RETRY_MIN)
                         onAutoReturnChanged()
                     }
@@ -422,7 +463,6 @@ private fun AutoReturnLeadSlider(
 /** 「乘车码」区：生成后自动保存、骑完车自动删除。只影响生成、保存与清除。 */
 @Composable
 private fun CodeSettingsSection(prefs: EbikePrefsSnapshot) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var autoSaveChecked by remember(prefs.autoSave) { mutableStateOf(prefs.autoSave) }
     var burnChecked by remember(prefs.burnAfterScan) { mutableStateOf(prefs.burnAfterScan) }
@@ -433,7 +473,7 @@ private fun CodeSettingsSection(prefs: EbikePrefsSnapshot) {
             checked = autoSaveChecked,
             onCheckedChange = { checked ->
                 autoSaveChecked = checked
-                scope.launch { Graph.displayPrefs(context).setEbikeAutoSave(checked) }
+                scope.launch { Services.current.displayPrefs().setEbikeAutoSave(checked) }
             },
         )
         SettingSwitchRow(
@@ -442,7 +482,7 @@ private fun CodeSettingsSection(prefs: EbikePrefsSnapshot) {
             checked = burnChecked,
             onCheckedChange = { checked ->
                 burnChecked = checked
-                scope.launch { Graph.displayPrefs(context).setEbikeBurnAfterScan(checked) }
+                scope.launch { Services.current.displayPrefs().setEbikeBurnAfterScan(checked) }
             },
         )
     }
@@ -455,8 +495,9 @@ private fun ReminderSettingsSection(
     onFreeReminderChanged: () -> Unit,
     onReminderPermissionGranted: () -> Unit,
     withNotificationPermission: (() -> Unit) -> Unit,
+    /** 跳系统通知设置；null = 本平台没有这个系统页（那行出口不渲染）。 */
+    onOpenNotificationSettings: (() -> Unit)?,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var freeEnabled by remember(prefs.freeReminderEnabled) {
         mutableStateOf(prefs.freeReminderEnabled)
@@ -470,7 +511,7 @@ private fun ReminderSettingsSection(
             onCheckedChange = { checked ->
                 freeEnabled = checked
                 scope.launch {
-                    Graph.displayPrefs(context).setEbikeFreeReminderEnabled(checked)
+                    Services.current.displayPrefs().setEbikeFreeReminderEnabled(checked)
                     onFreeReminderChanged()
                 }
                 // 只有开启才要权限：关闭是「撤掉提醒」，不需要任何权限
@@ -487,7 +528,7 @@ private fun ReminderSettingsSection(
                 selectedIndex = prefs.freeLeadMinutes - EbikeFreeRide.LEAD_MIN,
                 onSelect = { index ->
                     scope.launch {
-                        Graph.displayPrefs(context)
+                        Services.current.displayPrefs()
                             .setEbikeFreeLeadMinutes(index + EbikeFreeRide.LEAD_MIN)
                         onFreeReminderChanged()
                     }
@@ -495,12 +536,15 @@ private fun ReminderSettingsSection(
             )
             // 横幅弹不弹由系统 / ROM 决定，App 只能把渠道设成 HIGH。设置不对时用户
             // 在这里有一条出路，否则只有"通知了但看不到"的死局。
-            SettingItem(
-                title = "通知与悬浮",
-                subtitle = "没弹出、没震动时进系统通知：允许通知，「免费时长提醒」设为横幅 + 震动",
-                icon = AppIcons.Notification02,
-                onClick = { AppPermissions.jumpNotificationSettings(context) },
-            )
+            // **iOS 没有「按应用管理通知」的系统页**：宿主给 null 时这一行整块不渲染。
+            onOpenNotificationSettings?.let { openSettings ->
+                SettingItem(
+                    title = "通知与悬浮",
+                    subtitle = "没弹出、没震动时进系统通知：允许通知，「免费时长提醒」设为横幅 + 震动",
+                    icon = AppIcons.Notification02,
+                    onClick = openSettings,
+                )
+            }
         }
         SettingsNote(
             "小程序方式从「打开微信扫一扫」后 5 秒开始计时，账号方式从开锁成功起；" +
@@ -514,7 +558,7 @@ private fun ReminderSettingsSection(
  *
  * 开着 = 高德官方 SDK（矢量底图，楼栋与 POI 名称新、任意缩放清晰）；关着 = osmdroid
  * 高德栅格（体积小、不依赖 key）。**这也是 SDK 失效后的手动补救入口**：上次会话降级成
- * 栅格的人，把开关关掉再打开就会重新初始化一次（[AmapMaps.reset] 在 [BikeMapHost] 里）。
+ * 栅格的人，把开关关掉再打开就会重新初始化一次（Android 侧 AmapMaps.reset 在 BikeMapHost 里）。
  */
 @Composable
 private fun MapSettingsSection(
@@ -552,7 +596,7 @@ private fun MapSettingsSection(
  * （小程序方式的人也看得到地图，也得清得掉那 60 MB 瓦片）。
  */
 @Composable
-private fun MapCacheCard(usage: EbikeMapCache.Usage?, onClear: () -> Unit) {
+private fun MapCacheCard(usage: EbikeMapCachePort.Usage?, onClear: () -> Unit) {
     SettingsSection(
         title = "地图缓存",
         subtitle = "地图瓦片与还车点数据；清除后下次打开重新下载，不影响账号与订单",
@@ -561,11 +605,11 @@ private fun MapCacheCard(usage: EbikeMapCache.Usage?, onClear: () -> Unit) {
             title = when {
                 usage == null -> "正在统计…"
                 usage.isEmpty -> "暂无缓存"
-                else -> "当前占用 ${EbikeMapCache.sizeLabel(usage.totalBytes)}"
+                else -> "当前占用 ${SizeText.format(usage.totalBytes)}"
             },
             subtitle = if (usage != null && !usage.isEmpty) {
-                "离线瓦片 ${EbikeMapCache.sizeLabel(usage.tileBytes)} · " +
-                    "停车点数据 ${EbikeMapCache.sizeLabel(usage.zoneBytes)}；点此清除"
+                "离线瓦片 ${SizeText.format(usage.tileBytes)} · " +
+                    "停车点数据 ${SizeText.format(usage.zoneBytes)}；点此清除"
             } else {
                 "浏览地图时自动缓存，超过 60 MB 自动回收旧瓦片"
             },

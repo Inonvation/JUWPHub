@@ -1,20 +1,17 @@
 package edu.jxslu.schedule.ui.ebike
 
-import android.content.Context
-import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.prefs.AMAP_CHOICE_UNSET
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.BarcodeMatrix
 import edu.jxslu.schedule.domain.EbikeAutoReturn
 import edu.jxslu.schedule.domain.EbikeQr
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeRemoteRide
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.ThemeMode
-import edu.jxslu.schedule.ui.common.CodeBitmaps
 import edu.jxslu.schedule.ui.common.NoticeTone
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -29,7 +26,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 
 data class EbikeUiState(
@@ -38,8 +34,14 @@ data class EbikeUiState(
      * 1~3 位 = 校园车队尾部；6~12 位 = 完整车号（地图选中的车是这一形态）。
      */
     val carInput: String = "",
-    /** 已生成的二维码（null = 未生成）；与 [generatedBikeId] 成对。 */
-    val generatedBitmap: Bitmap? = null,
+    /**
+     * 已生成的二维码**位阵**（null = 未生成）；与 [generatedBikeId] 成对。
+     *
+     * 存位阵而不是位图（iOS 移植 P4，2026-11-25）：`android.graphics.Bitmap` 进不了
+     * `commonMain`，而屏幕上的码由 `ui/common/BarcodeMatrixImage` 用 Compose 画布直接画
+     * （Android 与 iOS 逐像素同一份）。落相册那一份的渲染归平台（[EbikeQrGallery]）。
+     */
+    val generatedMatrix: BarcodeMatrix? = null,
     /** 已生成的完整车号（`100000669` 形态），存相册命名与提示用。 */
     val generatedBikeId: String? = null,
     /**
@@ -102,15 +104,45 @@ sealed interface EbikeEvent {
 /**
  * 共享单车出码（DESIGN §3.9 / §4.18）。
  *
- * 生成 = 拼 URL（[EbikeQr.bikeUrl] 校验，非法输入不出码）→ zxing 矩阵 → 位图；
- * 自动保存开关开着时，生成即落相册（后台线程，结果经 [events] 提示）；
- * 扫完即焚开着时，保存成功记录待焚毁 key，删除时机见 [burnPending]（免费时长结束 /
- * 手动结束骑行 / 无计时回 App 兜底）；最近车号历史随生成更新（DataStore，上限 8）。
- * 二维码内容不含个人信息，历史也不出本机。
+ * 生成 = 拼 URL（[EbikeQr.bikeUrl] 校验，非法输入不出码）→ 码位阵（`EbikeQr.qrMatrix`，
+ * 两端同一份，Android 走 zxing、iOS 走 CoreImage）；自动保存开关开着时，生成即落相册
+ * （后台线程，结果经 [events] 提示）；扫完即焚开着时，保存成功记录待焚毁 key，删除时机见
+ * [burnPending]（免费时长结束 / 手动结束骑行 / 无计时回 App 兜底）；最近车号历史随生成
+ * 更新（DataStore，上限 8）。二维码内容不含个人信息，历史也不出本机。
+ *
+ * ## iOS 移植 P4（2026-11-25）改了什么
+ *
+ * 按 `design/ios-port.md` §11.2 把三件平台件收成构造参数：
+ *
+ * | 原来 | 现在 |
+ * |---|---|
+ * | `Context` + `Graph.appContext` | 全删：偏好由宿主传 [prefs]，宿主从 `Services.current` 取 |
+ * | `EbikeQrBitmaps.saveToGallery` / `deletePending`（MediaStore） | [gallery]（null = 没有相册能力，入口不渲染） |
+ * | `EbikeFreeRideReminder` / `EbikeAutoReturnReminder`（AlarmManager + 通知） | [reminders]（null = 没有提醒能力，设置整组不渲染） |
+ * | `CodeBitmaps.render` → `Bitmap` | **删掉**：状态里存 `BarcodeMatrix`，屏幕绘制交给 `BarcodeMatrixImage` |
+ * | `System.currentTimeMillis()` | `AppClock.nowMillis()` |
+ * | `Dispatchers.IO` | `Dispatchers.Default`（commonMain 没有 IO） |
+ * | `ViewModelProvider.Factory` | 删掉：宿主直接构造（§11.2 ①） |
+ *
+ * 行为口径没变：开关真值一律读 DataStore 原始流、生成即出码、焚毁时机与门禁全照旧。
  */
 class EbikeViewModel(
     private val prefs: DisplayPrefsStore,
+    /** 相册写入与「扫完即焚」的删除；**null = 本平台没有相册能力**（码照出，存相册入口不渲染）。 */
+    private val gallery: EbikeQrGallery? = null,
+    /** 免费时长提醒与自动还车；**null = 本平台没有提醒能力**（两组设置不渲染，计时照走）。 */
+    private val reminders: EbikeReminderPort? = null,
 ) : ViewModel() {
+
+    /**
+     * 本平台有没有「存相册」这项能力（页面据此整组隐藏自动保存 / 存相册 / 扫完即焚入口）。
+     *
+     * 不用 `gallery != null` 直接判：页面拿到的是 ViewModel，不该再看见那条缝。
+     */
+    val hasGallery: Boolean get() = gallery != null
+
+    /** 本平台有没有提醒能力（免费时长提醒 / 自动还车的设置组据此不渲染）。 */
+    val hasReminders: Boolean get() = reminders != null
 
     private val _uiState = MutableStateFlow(EbikeUiState())
     val uiState: StateFlow<EbikeUiState> = _uiState.asStateFlow()
@@ -188,35 +220,53 @@ class EbikeViewModel(
         EbikePrefsSnapshot(useMode = initialUseMode),
     )
 
-    /** 免费提醒设置变更（开关/提前量）→ 重算：补发该发的、重排闹钟、起停服务。 */
-    fun onFreeReminderChanged() {        viewModelScope.launch {
-            emitReminderNotice(EbikeFreeRideReminder.check(Graph.appContext))
+    /**
+     * 免费提醒设置变更（开关/提前量）→ 重算：补发该发的、重排闹钟、起停服务。
+     *
+     * [reminders] 为 null（本平台没有提醒能力）时整段跳过：设置组本来就不渲染，走不到这里。
+     */
+    fun onFreeReminderChanged() {
+        val port = reminders ?: return
+        viewModelScope.launch {
+            emitReminderNotice(port.checkFreeRide())
         }
     }
 
     /**
      * 自动还车设置变更（开关 / 提前量 / 重试次数）→ 重算排程。
      * `catchUp = false`：设置变更**不追补**触发点已过的这一轮（详见
-     * [EbikeAutoReturnReminder.reconcile]）——刚打开开关不该让 App 立刻还车。
+     * [EbikeReminderPort.reconcileAutoReturn]）——刚打开开关不该让 App 立刻还车。
      */
     fun onAutoReturnChanged() {
+        val port = reminders ?: return
         viewModelScope.launch {
-            EbikeAutoReturnReminder.reconcile(Graph.appContext, catchUp = false)
+            port.reconcileAutoReturn(catchUp = false)
         }
     }
 
     /** 通知权限授予后的续跑：把进行中的计时的常驻倒计时与提醒补上（开关开着才做）。 */
     fun onReminderPermissionGranted() {
+        checkFreeRide()
+    }
+
+    /**
+     * 进页 / 回前台核对一次计时与提醒（幂等）：缺服务/闹钟就补上，过期状态就清干净。
+     *
+     * 搬迁前这一行直接调 `:app` 的 `EbikeFreeRideReminder.check(context)`；现在走 [reminders]。
+     * 与 [onReminderPermissionGranted] 是同一件事，只是调用点不同（权限授予后 / 页面可见时）。
+     */
+    fun checkFreeRide() {
+        val port = reminders ?: return
         viewModelScope.launch {
-            emitReminderNotice(EbikeFreeRideReminder.check(Graph.appContext))
+            emitReminderNotice(port.checkFreeRide())
         }
     }
 
     init {
         // 进页兜底：自动还车闹钟被 ROM 丢掉（或被后台限制清掉）时补跑一次；
         // 已执行过的这一轮由 doneKey 挡掉，幂等（同「周期核对」的兜底口径）
-        viewModelScope.launch {
-            EbikeAutoReturnReminder.reconcile(Graph.appContext)
+        reminders?.let { port ->
+            viewModelScope.launch { port.reconcileAutoReturn() }
         }
     }
 
@@ -246,9 +296,9 @@ class EbikeViewModel(
             var saveOk = true
             if (!_uiState.value.generatedSaved) {
                 when (val saved = saveCurrentInternal()) {
-                    is EbikeQrBitmaps.SaveResult.Saved ->
+                    is EbikeQrSaveResult.Saved ->
                         saveText = "已存入相册，在微信里点「相册」选图"
-                    is EbikeQrBitmaps.SaveResult.Failed -> {
+                    is EbikeQrSaveResult.Failed -> {
                         saveText = saved.message
                         saveOk = false
                     }
@@ -256,7 +306,8 @@ class EbikeViewModel(
                 }
             }
             val (timerText, timerTone) = startFreeRideNotice(
-                System.currentTimeMillis() + EbikeFreeRide.SCAN_DELAY_MS,
+                reminders,
+                AppClock.nowMillis() + EbikeFreeRide.SCAN_DELAY_MS,
             )
             _events.send(
                 EbikeEvent.Notice(
@@ -270,13 +321,13 @@ class EbikeViewModel(
     /** 结束骑行：清起点、撤闹钟、停常驻倒计时、清通知栏上的提醒，并焚毁已保存的二维码。 */
     fun onEndRide() {
         viewModelScope.launch {
-            val outcome = EbikeFreeRideReminder.endRide(Graph.appContext)
+            val outcome = reminders?.endFreeRide() ?: EbikeReminderOutcome.Nothing
             // 本机计时都结束了，自动还车没有计时起点可依——撤掉（幂等）
-            EbikeAutoReturnReminder.cancel(Graph.appContext)
+            reminders?.cancelAutoReturn()
             burnPending(force = true)
             _events.send(
                 when (outcome) {
-                    is EbikeFreeRideReminder.Outcome.Failed ->
+                    is EbikeReminderOutcome.Failed ->
                         EbikeEvent.Notice("已结束骑行；提醒清理失败：${outcome.message}", NoticeTone.Warning)
                     else -> EbikeEvent.Notice("已结束骑行", NoticeTone.Info)
                 },
@@ -284,20 +335,20 @@ class EbikeViewModel(
         }
     }
 
-    /** 提醒类动作的结果 → 一次性提示；[EbikeFreeRideReminder.Outcome.Nothing] 不出声。 */
-    private suspend fun emitReminderNotice(outcome: EbikeFreeRideReminder.Outcome) {
+    /** 提醒类动作的结果 → 一次性提示；[EbikeReminderOutcome.Nothing] 不出声。 */
+    private suspend fun emitReminderNotice(outcome: EbikeReminderOutcome) {
         val notice = when (outcome) {
-            EbikeFreeRideReminder.Outcome.Started ->
+            EbikeReminderOutcome.Started ->
                 EbikeEvent.Notice("免费时长提醒已生效", NoticeTone.Success)
-            EbikeFreeRideReminder.Outcome.StartedNoNotification ->
+            EbikeReminderOutcome.StartedNoNotification ->
                 EbikeEvent.Notice("通知被关闭，免费时长提醒发不出来", NoticeTone.Warning)
-            EbikeFreeRideReminder.Outcome.StartedSilent ->
+            EbikeReminderOutcome.StartedSilent ->
                 EbikeEvent.Notice("免费时长提醒已关闭", NoticeTone.Info)
-            EbikeFreeRideReminder.Outcome.Ended ->
+            EbikeReminderOutcome.Ended ->
                 EbikeEvent.Notice("已清空免费时长提醒", NoticeTone.Info)
-            is EbikeFreeRideReminder.Outcome.Failed ->
+            is EbikeReminderOutcome.Failed ->
                 EbikeEvent.Notice("提醒排程失败：${outcome.message}", NoticeTone.Warning)
-            EbikeFreeRideReminder.Outcome.Nothing -> null
+            EbikeReminderOutcome.Nothing -> null
         }
         notice?.let { _events.send(it) }
     }
@@ -352,15 +403,13 @@ class EbikeViewModel(
             val snapshot = ebikePrefs.value
             val autoSave = runCatching { prefs.ebikeAutoSave.first() }
                 .getOrDefault(snapshot.autoSave)
-            val dark = runCatching { prefs.themeMode.first() == ThemeMode.Dark }
-                .getOrDefault(snapshot.dark)
-            val bitmap = withContext(Dispatchers.Default) {
-                CodeBitmaps.render(EbikeQr.qrMatrix(url), dark)
-            }
+            // 位阵生成（原先是 zxing → Bitmap；现在只到位阵，渲染成位图是落相册那一步的事）
+            val matrix = withContext(Dispatchers.Default) { EbikeQr.qrMatrix(url) }
             _uiState.update {
-                it.copy(generatedBitmap = bitmap, generatedBikeId = carNum, generatedSaved = false)
+                it.copy(generatedMatrix = matrix, generatedBikeId = carNum, generatedSaved = false)
             }
-            if (autoSave) saveCurrent()
+            // 没有相册能力的平台（gallery = null）：自动保存这个开关根本没有入口，别静默等
+            if (autoSave && gallery != null) saveCurrent()
             viewModelScope.launch {
                 prefs.updateEbikeRecentIds { EbikeQr.mergeRecent(it, carNum) }
             }
@@ -374,9 +423,9 @@ class EbikeViewModel(
     fun saveCurrent() {
         viewModelScope.launch {
             when (val result = saveCurrentInternal()) {
-                is EbikeQrBitmaps.SaveResult.Saved ->
+                is EbikeQrSaveResult.Saved ->
                     _events.send(EbikeEvent.Notice("已保存到相册", NoticeTone.Success))
-                is EbikeQrBitmaps.SaveResult.Failed ->
+                is EbikeQrSaveResult.Failed ->
                     _events.send(EbikeEvent.Notice(result.message, NoticeTone.Error))
                 null -> Unit
             }
@@ -384,18 +433,18 @@ class EbikeViewModel(
     }
 
     /**
-     * 保存当前码；返回 null = 当前没有可保存的码。不发声，由调用方决定提示文案
-     * （[saveCurrent] 用「已保存到相册」，[onWechatScanClicked] 用「已存入相册…选图」）。
+     * 保存当前码；返回 null = 当前没有可保存的码（或本平台没有相册能力）。不发声，由调用方
+     * 决定提示文案（[saveCurrent] 用「已保存到相册」，[onWechatScanClicked] 用「已存入相册…选图」）。
      */
-    private suspend fun saveCurrentInternal(): EbikeQrBitmaps.SaveResult? {
+    private suspend fun saveCurrentInternal(): EbikeQrSaveResult? {
+        val current = gallery ?: return null
         val state = _uiState.value
-        val bitmap = state.generatedBitmap ?: return null
+        val matrix = state.generatedMatrix ?: return null
         val bikeId = state.generatedBikeId ?: return null
-        val appContext = Graph.appContext
-        val result = withContext(Dispatchers.IO) {
-            EbikeQrBitmaps.saveToGallery(appContext, bitmap, bikeId)
-        }
-        if (result is EbikeQrBitmaps.SaveResult.Saved) {
+        // 深色主题出「深底白码」：与屏幕上那张一致（读取失败按浅色兜底，宁可多一张白底码）
+        val dark = runCatching { prefs.themeMode.first() == ThemeMode.Dark }.getOrDefault(false)
+        val result = current.save(matrix, dark, "ebike-$bikeId.jpg")
+        if (result is EbikeQrSaveResult.Saved) {
             // 同 [generate]：开关真值读原始流。快照在冷启动首帧还是默认值（true），
             // 用户明明关掉了焚毁也会被记上待焚毁 key；读失败按「不记焚毁」兜底
             // （宁可在相册留一张码，也不做没把握的删除）
@@ -417,8 +466,9 @@ class EbikeViewModel(
      * 无计时在案时回 App（页面 ON_RESUME 兜底）。
      */
     fun burnPending(force: Boolean = false) {
+        if (gallery == null) return // 没有相册能力 = 从来没有 key 被记上，不必绕一圈
         viewModelScope.launch {
-            val deleted = burnPendingCodes(Graph.appContext, prefs, force)
+            val deleted = burnPendingCodes(prefs, gallery, force)
             if (deleted > 0) {
                 _events.send(
                     EbikeEvent.Notice("已清除存入相册的二维码（扫完即焚）", NoticeTone.Success),
@@ -427,67 +477,15 @@ class EbikeViewModel(
         }
     }
 
-    /** 离开页面时清掉大位图引用，别等 GC 兜底。 */
+    /**
+     * 离开页面时清掉位阵引用，别等 GC 兜底。
+     *
+     * 搬迁前这里还要 `Bitmap.recycle()`（那是一块原生内存）；现在状态里存的是普通
+     * `BooleanArray` 位阵，丢掉引用即可。
+     */
     override fun onCleared() {
-        _uiState.value.generatedBitmap?.recycle()
+        _uiState.update { it.copy(generatedMatrix = null) }
         super.onCleared()
     }
-
-    class Factory(private val prefs: DisplayPrefsStore) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            // 本机用车（查骑行状态 / 开锁 / 锁车 / 还车）归**地图页那一个** `KvcxRideController`
-            // （`BikeMapViewModel.kvcx`）：快趣出行页是它唯一的消费者，这里不再养第二个实例
-            EbikeViewModel(prefs) as T
-    }
 }
 
-/** 焚毁的进程级互斥：出码页与地图页可能同时触发（还车 + 回页兜底），进行中的不叠跑。 */
-private val burnGate = Mutex()
-
-/**
- * 扫完即焚（DESIGN §3.9）：删除所有记录在案的待焚毁二维码，成功才移出记录，
- * 返回实际删掉的条数（0 = 什么都没删，调用方据此决定要不要出声）。
- * 开关关闭时不删不清——关掉 = 完全回到旧语义。
- *
- * [force] = false 时先看计时：**免费时长还在跑就不删**（图要留着反复扫），删除交给
- * `EbikeFreeRideReminder.check`（免费结束闹钟/周期核对）或手动结束骑行；无计时在案
- * （没点「打开微信扫一扫」）才维持「回 App 即删」——码是开锁耗材，没有计时段落兜着
- * 就不能留在相册。[force] = true 用于手动结束骑行 / 还车，无条件删。
- *
- * 顶层函数而非 [EbikeViewModel] 的成员：地图页还车也要走同一条口径
- * （「骑完车自动删除」不该因为从哪个页面还车而不同）。
- */
-internal suspend fun burnPendingCodes(
-    appContext: Context,
-    prefs: DisplayPrefsStore,
-    force: Boolean,
-): Int {
-    if (!burnGate.tryLock()) return 0
-    try {
-        // 开关真值必须读原始流：ebikePrefs 的 stateIn 快照在 DataStore
-        // 首次发射前是默认值（true），冷启动恢复的首帧竞态下会误删
-        // 「用户已关闭焚毁」时留下的记录。
-        if (!prefs.ebikeBurnAfterScan.first()) return 0
-        if (!force) {
-            val startAt = prefs.ebikeRideStartAt.first()
-            if (EbikeFreeRide.isActive(startAt, System.currentTimeMillis())) return 0
-        }
-        var total = 0
-        while (true) {
-            val pending = prefs.ebikePendingDelete.first()
-            if (pending.isEmpty()) break
-            val deleted = pending.filter { key ->
-                withContext(Dispatchers.IO) { EbikeQrBitmaps.deletePending(appContext, key) }
-            }
-            prefs.updateEbikePendingDelete { it - deleted.toSet() }
-            if (deleted.isEmpty()) break // 全部失败（如文件已不在），保留记录别空转
-            total += deleted.size
-            if (deleted.size == pending.size) break
-            // 有失败项：下轮重试剩余的；连续失败会在下一轮走 break
-        }
-        return total
-    } finally {
-        burnGate.unlock()
-    }
-}

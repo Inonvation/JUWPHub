@@ -91,8 +91,8 @@ import edu.jxslu.schedule.ui.ebike.EbikeAutoReturnReminder
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersViewModel
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
+import edu.jxslu.schedule.ui.ebike.AppRideScreen
 import edu.jxslu.schedule.ui.ebike.KvcxViewModel
-import edu.jxslu.schedule.ui.ebike.RideScreen
 import edu.jxslu.schedule.ui.ebike.BikeLocator
 import edu.jxslu.schedule.ui.ebike.LocateResult
 import edu.jxslu.schedule.ui.ebike.openWechatScan
@@ -699,7 +699,7 @@ class SubpageActivity : ComponentActivity() {
             SubpageScreen.TRANSCRIPTS -> TranscriptHistoryScreen(onBack = onBack)
             // focusItemId 对 RIDE 复用为「进页即定位的车号」（2026-09-29）：识别 / 深链
             // 带车号进来，第一笔查询找到就高亮定位（不轮询）
-            SubpageScreen.RIDE -> RideScreen(onBack = onBack, initialFocusCarNum = focusItemId)
+            SubpageScreen.RIDE -> AppRideScreen(onBack = onBack, initialFocusCarNum = focusItemId)
             // 校园卡设置（iOS 移植 Y1 搬进共享层）：VM 与寝室选择器由宿主建，
             // 三处平台动作（拉起外部支付 / 通知权限 / 付款码窗口）从这里注入，
             // 共享层那边只声明「要什么」（`ui/campus/CampusCardPlatform.kt`）。

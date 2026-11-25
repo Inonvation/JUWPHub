@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.ebike
 
-import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -69,7 +68,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -83,10 +81,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
-import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.BarcodeMatrix
 import edu.jxslu.schedule.domain.BikeCluster
 import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.EbikeAutoReturn
@@ -98,7 +96,9 @@ import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KvcxParkSpot
 import edu.jxslu.schedule.domain.NearbyBike
+import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.BarcodeMatrixImage
 import edu.jxslu.schedule.ui.common.AppCardDefaults
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.AppCardRow
@@ -116,9 +116,6 @@ import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
 /**
@@ -139,7 +136,7 @@ import kotlin.math.roundToInt
  */
 
 /** 出码位的边长（240dp 居中，DESIGN §3.9）：旧版整宽方形会把用码按钮顶出首屏。 */
-internal val QR_PANEL_SIZE = 240.dp
+val QR_PANEL_SIZE = 240.dp
 
 /** 「更新于」超过这个时长就把时间标出来，提示数据可能已经不准。 */
 private const val STALE_AFTER_MS = 90_000L
@@ -168,7 +165,7 @@ private val SPOT_COLOR = Color(0xFFD7535D)
  * （否则动画每帧都 resize 一次地图、osmdroid 每帧整幅重绘——2026-10-01 用户报的
  * 「开锁后掉帧、然后骑行面板弹出来」就是这一段）。
  */
-internal fun rideBarKey(
+fun rideBarKey(
     phase: RidePhase,
     caps: EbikeCapabilities,
     loggedIn: Boolean,
@@ -201,7 +198,7 @@ internal fun rideBarKey(
  * 「更新于 15:09」还被切掉半个字，看着像两个不同的组件（用户报「解锁状态和锁车状态信息
  * 卡片都不一致，有些地方还被挡住」）。现在**容器与内边距恒定**，只有颜色与胶囊文案变。
  */
-internal enum class RidingCardTone { Unlocked, Locked, Pending, Unknown }
+enum class RidingCardTone { Unlocked, Locked, Pending, Unknown }
 
 /**
  * [RidingCardTone] 的构造规则（与胶囊文案同一判据链，逐级短路）：
@@ -210,7 +207,7 @@ internal enum class RidingCardTone { Unlocked, Locked, Pending, Unknown }
  *
  * **全函数**（无 null 分支）：调用方不该再按"有没有态"分两套排版——那正是卡片变形的来路。
  */
-internal fun ridingCardTone(
+fun ridingCardTone(
     locked: Boolean?,
     unlockPending: Boolean,
     lockPending: Boolean,
@@ -228,7 +225,7 @@ internal fun ridingCardTone(
  * 现查中（[querying]）优先于一切：胶囊**原位**翻成「查询中…」，不跳位置、不换颜色
  * （它就是最近一次快照的说明，查完再落回真实态）。
  */
-internal fun ridingStateChipText(
+fun ridingStateChipText(
     querying: Boolean,
     locked: Boolean?,
     unlockPending: Boolean,
@@ -254,7 +251,7 @@ internal fun ridingStateChipText(
  * 删掉了三个只透传不消费的死参数。
  */
 @Composable
-internal fun RideActionArea(
+fun RideActionArea(
     caps: EbikeCapabilities,
     state: BikeMapUiState,
     ride: KqcxAuth.Ride?,
@@ -285,8 +282,10 @@ internal fun RideActionArea(
     /** 小程序方式下"码已经生成好了"：只有这时才给「打开微信扫一扫」。 */
     hasCode: Boolean,
     onDismissPicked: () -> Unit,
-    onWechatScan: () -> Unit,
-    onScanBodyCode: () -> Unit,
+    /** 打开微信扫一扫；**null = 本平台跳不了微信**（那一档改走「按车号」）。 */
+    onWechatScan: (() -> Unit)?,
+    /** 拉起扫码相机；**null = 本平台没有扫码能力**（那一档改走「按车号」）。 */
+    onScanBodyCode: (() -> Unit)?,
     onOpenCarNumber: () -> Unit,
     onLogin: () -> Unit,
     onUnlock: (String) -> Unit,
@@ -443,13 +442,13 @@ internal fun RideActionArea(
  * 过了 8 秒进页也不再弹一张过期的结算卡。用户主动点「重新使用该车 / 去微信结清」后
  * 由页面取消自动收尾（正在决策 / 正在付款，不该把卡片抽走）。
  */
-internal const val SettleAutoContinueMillis = 8_000L
+const val SettleAutoContinueMillis = 8_000L
 
 /**
  * 「继续找车」按钮上的剩余秒数（向上取整；0 = 已到点 / 没有截止时刻）。
  * 纯函数：单测在 `SettleAutoContinueTest`。
  */
-internal fun settleContinueSecondsLeft(deadlineAt: Long, now: Long): Int {
+fun settleContinueSecondsLeft(deadlineAt: Long, now: Long): Int {
     if (deadlineAt <= 0L) return 0
     val remain = deadlineAt - now
     return if (remain <= 0L) 0 else ((remain + 999L) / 1_000L).toInt()
@@ -589,8 +588,8 @@ private fun RideActionButtons(
     summary: KvcxReturnSummary?,
     /** 结算卡自动「继续找车」的截止时刻（0 = 不自动收尾）；见 [RideActionArea] 同名参数。 */
     settleDeadlineAt: Long,
-    onWechatScan: () -> Unit,
-    onScanBodyCode: () -> Unit,
+    onWechatScan: (() -> Unit)?,
+    onScanBodyCode: (() -> Unit)?,
     onOpenCarNumber: () -> Unit,
     onLogin: () -> Unit,
     onUnlock: (String) -> Unit,
@@ -632,14 +631,23 @@ private fun RideActionButtons(
         key == BAR_FINDING_PLAIN ->
             RideActionButton("按车号生成乘车码", onOpenCarNumber, icon = AppIcons.QrCode01)
 
-        key == BAR_FINDING_CODE ->
+        // 小程序方式的主动作；**没有微信这一档的平台退到「按车号生成乘车码」**
+        // （那枚按钮本来就在车号面板里，这里只是把它提到主动作位，不留死按钮）
+        key == BAR_FINDING_CODE -> if (onWechatScan != null) {
             RideActionButton("打开微信扫一扫", onWechatScan, icon = AppIcons.QrCodeScan)
+        } else {
+            RideActionButton("按车号生成乘车码", onOpenCarNumber, icon = AppIcons.QrCode01)
+        }
 
         key == BAR_FINDING_LOGIN ->
             RideActionButton("登录快趣账号", onLogin, icon = AppIcons.UserAccount)
 
-        key == BAR_FINDING_SCAN ->
+        // 账号方式的主动作；没有扫码能力时同样退到「按车号」
+        key == BAR_FINDING_SCAN -> if (onScanBodyCode != null) {
             RideActionButton("扫车身码", onScanBodyCode, icon = AppIcons.QrCodeScan)
+        } else {
+            RideActionButton("按车号用车", onOpenCarNumber, icon = AppIcons.QrCode01)
+        }
 
         carNum != null -> when {
             caps.directUnlock -> RideActionButton(
@@ -813,11 +821,11 @@ private fun RideActionButtons(
 @Composable
 private fun rememberUnlockCooldownSeconds(until: Long): Int {
     var seconds by remember(until) {
-        mutableStateOf(unlockCooldownSecondsLeft(until, System.currentTimeMillis()))
+        mutableStateOf(unlockCooldownSecondsLeft(until, AppClock.nowMillis()))
     }
     LaunchedEffect(until) {
         while (true) {
-            val now = System.currentTimeMillis()
+            val now = AppClock.nowMillis()
             val remain = until - now
             seconds = unlockCooldownSecondsLeft(until, now)
             if (remain <= 0L) break
@@ -836,11 +844,11 @@ private fun rememberUnlockCooldownSeconds(until: Long): Int {
 @Composable
 private fun rememberSettleSecondsLeft(deadlineAt: Long): Int {
     var seconds by remember(deadlineAt) {
-        mutableStateOf(settleContinueSecondsLeft(deadlineAt, System.currentTimeMillis()))
+        mutableStateOf(settleContinueSecondsLeft(deadlineAt, AppClock.nowMillis()))
     }
     LaunchedEffect(deadlineAt) {
         while (true) {
-            val now = System.currentTimeMillis()
+            val now = AppClock.nowMillis()
             seconds = settleContinueSecondsLeft(deadlineAt, now)
             if (deadlineAt <= 0L || now >= deadlineAt) break
             delay(minOf(deadlineAt - now, 1_000L))
@@ -1143,7 +1151,7 @@ private fun RideRidingUpper(
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        text = "更新于 ${clockText(rideFetchedAt)}",
+                        text = "更新于 ${rideClockText(rideFetchedAt)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                         maxLines = 1,
@@ -1151,7 +1159,7 @@ private fun RideRidingUpper(
                 }
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                    LabeledValue(label = "计时起点", value = clockText(timerStartAt))
+                    LabeledValue(label = "计时起点", value = rideClockText(timerStartAt))
                     LabeledValue(label = "免费时长", value = "15 分钟")
                 }
             }
@@ -1329,7 +1337,7 @@ private fun RideSettledUpper(summary: KvcxReturnSummary) {
  * 有数据。失败时不清空列表：拿用户刚看到的那批车配一条提示，比清成空白有用。
  */
 @Composable
-internal fun RideBikePanel(
+fun RideBikePanel(
     state: BikeMapUiState,
     caps: EbikeCapabilities,
     showSpots: Boolean,
@@ -1809,7 +1817,7 @@ private fun RideFilterButton(filtered: Boolean, onClick: () -> Unit) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun RideFilterSheet(
+fun RideFilterSheet(
     onlyOurCampus: Boolean,
     onlyAvailable: Boolean,
     onToggleOnlyOurCampus: () -> Unit,
@@ -2090,17 +2098,19 @@ private fun RideBikeCard(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun RideCarNumberSheet(
+fun RideCarNumberSheet(
     caps: EbikeCapabilities,
     carInput: String,
     inputError: String?,
     /** 最近生成过的那**一个**车号（完整车号）；null = 还没有过。 */
     lastRecent: String?,
     resolvedCarNum: String?,
-    /** 想要哪辆车出码；与 [qrCarNum] 对齐且位图非空时才算"码已就绪"。 */
+    /** 想要哪辆车出码；与 [qrCarNum] 对齐且位阵非空时才算"码已就绪"。 */
     wantedCarNum: String?,
     qrCarNum: String?,
-    qrBitmap: Bitmap?,
+    qrMatrix: BarcodeMatrix?,
+    /** 码配色跟主题走（深色主题出「深底白码」，与屏幕上那张一致）。 */
+    qrDark: Boolean,
     qrSaved: Boolean,
     onCarInput: (String) -> Unit,
     onPickRecent: () -> Unit,
@@ -2108,13 +2118,14 @@ internal fun RideCarNumberSheet(
     onLocateCar: () -> Unit,
     onGenerate: () -> Unit,
     onSave: () -> Unit,
-    onWechatScan: () -> Unit,
+    /** 打开微信扫一扫；**null = 本平台跳不了微信**（这一行只剩「存相册」）。 */
+    onWechatScan: (() -> Unit)?,
     onUnlock: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val mini = caps.wechatScan
-    // 生成是异步的（zxing 渲染在位图线程）：按车号对齐，码真出来了才铺进框里
-    val ready = wantedCarNum != null && qrCarNum == wantedCarNum && qrBitmap != null
+    // 生成是异步的（位阵在后台线程算）：按车号对齐，码真出来了才铺进框里
+    val ready = wantedCarNum != null && qrCarNum == wantedCarNum && qrMatrix != null
     /** 手里这张码**就是当前输入这辆车的**——这时再摆一枚「生成乘车码」就是重复。 */
     val upToDate = ready && resolvedCarNum != null && resolvedCarNum == qrCarNum
     /**
@@ -2250,10 +2261,13 @@ internal fun RideCarNumberSheet(
                     .fillMaxWidth()
                     .padding(top = 4.dp),
             ) { isReady ->
-                val bitmap = if (isReady) qrBitmap else null
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
+                val matrix = if (isReady) qrMatrix else null
+                if (matrix != null) {
+                    // 位阵直接画方块（不再经过 android.graphics.Bitmap）：
+                    // 实现是共享层的 BarcodeMatrixImage，iOS 侧用的是同一份
+                    BarcodeMatrixImage(
+                        matrix = matrix,
+                        dark = qrDark,
                         contentDescription = "乘车码 · $qrCarNum",
                         modifier = Modifier.size(QR_PANEL_SIZE),
                     )
@@ -2311,12 +2325,14 @@ internal fun RideCarNumberSheet(
                     modifier = Modifier.weight(1f),
                     filled = false,
                 )
-                RideActionButton(
-                    text = "打开微信扫一扫",
-                    onClick = { requestClose { onWechatScan() } },
-                    enabled = ready,
-                    modifier = Modifier.weight(1f),
-                )
+                if (onWechatScan != null) {
+                    RideActionButton(
+                        text = "打开微信扫一扫",
+                        onClick = { requestClose { onWechatScan.invoke() } },
+                        enabled = ready,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
             Text(
                 text = if (qrSaved) {
@@ -2573,7 +2589,7 @@ private fun RideSpotsContent(
  * 不做吸附动画——拖动过程中任何动画都会让地图跟着抖。松手才落盘。
  */
 @Composable
-internal fun PanelDragHandle(onResize: (Float) -> Unit, onResizeFinished: () -> Unit) {
+fun PanelDragHandle(onResize: (Float) -> Unit, onResizeFinished: () -> Unit) {
     // 回调走 rememberUpdatedState 再进 pointerInput：`pointerInput(Unit)` 的块只跑一次，
     // 闭包里捕获的会是首次组合那版的 lambda（它的 maxPanelDp 是首帧窗口高度算出来的）。
     val resize by rememberUpdatedState(onResize)
@@ -2786,11 +2802,11 @@ private fun RideCountdown(
     showEstimateNote: Boolean = false,
 ) {
     val now by produceState(
-        initialValue = System.currentTimeMillis(),
+        initialValue = AppClock.nowMillis(),
         key1 = startAt,
     ) {
         while (true) {
-            val tick = System.currentTimeMillis()
+            val tick = AppClock.nowMillis()
             value = tick
             if (!EbikeFreeRide.isActive(startAt, tick)) {
                 onExpired()
@@ -2858,9 +2874,8 @@ private fun RideCountdown(
 @Composable
 private fun rememberAutoReturnHint(startAt: Long, wechatMode: Boolean): String? {
     if (wechatMode || startAt <= 0L) return null
-    val context = LocalContext.current
-    val prefs = remember { Graph.displayPrefs(context) }
-    val clock = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    // 偏好从装配根取（原先 LocalContext + Graph.displayPrefs；共享层没有 Context）
+    val prefs = remember { Services.current.displayPrefs() }
     val hint by produceState(initialValue = null as String?, key1 = startAt) {
         val enabled = runCatching { prefs.ebikeAutoReturnEnabled.first() }.getOrDefault(false)
         if (!enabled) {
@@ -2870,8 +2885,8 @@ private fun rememberAutoReturnHint(startAt: Long, wechatMode: Boolean): String? 
         val lead = runCatching { prefs.ebikeAutoReturnLeadSeconds.first() }
             .getOrDefault(EbikeAutoReturn.DEFAULT_LEAD_SECONDS)
         val triggerAt = EbikeAutoReturn.triggerAtMillis(startAt, lead)
-        val at = Instant.ofEpochMilli(triggerAt).atZone(ZoneId.systemDefault()).format(clock)
-        value = "$at 自动还车（提前 $lead 秒）"
+        // 时刻文案走共享层的 rideClockText（原先 java.time + DateTimeFormatter）
+        value = "${rideClockText(triggerAt)} 自动还车（提前 $lead 秒）"
     }
     return hint
 }
@@ -2885,7 +2900,7 @@ private fun rememberAutoReturnHint(startAt: Long, wechatMode: Boolean): String? 
  * `animateColorAsState` 渐变到主色系，一眼可辨镜头正跟着人走，而不是硬切一个亮色。
  */
 @Composable
-internal fun MapCircleButton(
+fun MapCircleButton(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
@@ -2960,7 +2975,7 @@ internal fun MapCircleButton(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun RideModeSheet(
+fun RideModeSheet(
     mode: EbikeUseMode,
     onSelect: (EbikeUseMode) -> Unit,
     onDismiss: () -> Unit,
@@ -3081,7 +3096,7 @@ private fun subtitleText(
     val now by rememberResumedNow(CLOCK_TICK_MS)
     val base = when {
         loading && queried -> "刷新中…"
-        updatedAtMillis > 0 -> "更新于 ${clockText(updatedAtMillis)}"
+        updatedAtMillis > 0 -> "更新于 ${rideClockText(updatedAtMillis)}"
         queried -> "尚未获取到数据"
         else -> "正在获取…"
     }

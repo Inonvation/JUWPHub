@@ -5,26 +5,28 @@ import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.EbikeUseMode
 import edu.jxslu.schedule.startActivityOutsideApp
 import edu.jxslu.schedule.ui.common.NoticeTone
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 
 /**
- * [KvcxSideEffects] 的**生产实现**，以及它用到的三件平台动作（2026-11-25 从
- * `KvcxRideController.kt` 拆出来）。
+ * [KvcxSideEffects] 的**生产实现**，以及它用到的平台动作（2026-11-25 从
+ * `KvcxRideController.kt` 拆出来；iOS 移植 P4 又收窄了一半）。
  *
- * 为什么这三块留在 `:app` 而不是跟控制器一起搬进共享层：它们全要 Android 专有件——
+ * 为什么它留在 `:app` 而不是跟控制器一起搬进共享层：它全要 Android 专有件——
  * `EbikeFreeRideReminder` / `EbikeAutoReturnReminder` 是 `AlarmManager` + 通知渠道，
- * `burnPendingCodes` 要 `Context` 与相册，`openWechatForSettle` 要
- * `PackageManager` + `startActivityOutsideApp`。按 `design/ios-port.md` §11.2 ④，
- * 共享层的控制器收的是**可空**的 `KvcxSideEffects`：iOS 传 `null`，逐个动作整体跳过。
+ * `EbikeAutoReturnNotifier` 是通知栏，`RideRecordStore` 与 `openWechatForSettle` 要
+ * `Context`（后者还要 `PackageManager` + `startActivityOutsideApp`）。按
+ * `design/ios-port.md` §11.2 ④，共享层的控制器收的是**可空**的 `KvcxSideEffects`：
+ * iOS 传 `null`，逐个动作整体跳过。
+ *
+ * 出码页那一批平台件搬走之后，这条转接线只剩三处共享层入口：
+ * [startFreeRideNotice]（文案唯一实现）、`burnPendingCodes`（焚码唯一实现）、
+ * `KvcxSideEffects` 接口本身。
  */
 internal object AppKvcxSideEffects : KvcxSideEffects {
 
-    override suspend fun startRideTimer(): Pair<String, NoticeTone> = startFreeRideNotice()
+    override suspend fun startRideTimer(): Pair<String, NoticeTone> =
+        startFreeRideNotice(AndroidEbikeCodePlatform)
 
     override suspend fun ensureReminderEnabled(): Boolean {
         val prefs = Graph.displayPrefs(Graph.appContext)
@@ -45,7 +47,11 @@ internal object AppKvcxSideEffects : KvcxSideEffects {
         EbikeFreeRideReminder.endRide(Graph.appContext)
         // 订单已经结束：自动还车再排着也没有对象可还
         EbikeAutoReturnReminder.cancel(Graph.appContext)
-        burnPendingCodes(Graph.appContext, Graph.displayPrefs(Graph.appContext), force = true)
+        burnPendingCodes(
+            Graph.displayPrefs(Graph.appContext),
+            AndroidEbikeCodePlatform,
+            force = true,
+        )
     }
 
     override suspend fun onOrderGoneExternally(): Boolean {
@@ -83,30 +89,10 @@ internal object AppKvcxSideEffects : KvcxSideEffects {
 }
 
 /**
- * 起免费时长计时并把结果映射成提示文案与语气（点扫一扫 / 本机开锁成功共用）。
- * 起点由调用方给：点「打开微信扫一扫」传 `now + [EbikeFreeRide.SCAN_DELAY_MS]`
- * （切微信、选图、扫码、开车要时间，倒计时从点击 5 秒后才开始走）；本机开锁成功传
- * 当下（服务端确认的开锁时刻，不用缓冲）。
- */
-internal suspend fun startFreeRideNotice(
-    startAtMillis: Long = System.currentTimeMillis(),
-): Pair<String, NoticeTone> {
-    val outcome = EbikeFreeRideReminder.startRide(Graph.appContext, startAtMillis)
-    return when (outcome) {
-        EbikeFreeRideReminder.Outcome.Started ->
-            "已开始计时，通知栏已显示倒计时" to NoticeTone.Success
-        EbikeFreeRideReminder.Outcome.StartedNoNotification ->
-            "通知被关闭，提醒发不出来，请到系统设置打开" to NoticeTone.Warning
-        EbikeFreeRideReminder.Outcome.StartedSilent ->
-            "已开始计时（免费时长提醒未开启）" to NoticeTone.Info
-        is EbikeFreeRideReminder.Outcome.Failed ->
-            "已开始计时；提醒排程失败：${outcome.message}" to NoticeTone.Warning
-        else ->
-            "已开始计时" to NoticeTone.Info
-    }
-}
-
-/**
+ * 起免费时长计时并把结果映射成提示文案与语气——**唯一实现已搬进共享层**
+ * （`ui/ebike/EbikeCodePlatform.kt` 的 `startFreeRideNotice`，出码页与本类共用同一份文案）。
+ * 这里只剩「Android 的提醒实现是谁」这一句转接。
+ *
  * 打开微信（结清欠费的唯一去处）：待支付页在快趣小程序里，而**微信不给第三方直达小程序
  * 具体页面**——URL Scheme / 短链必须由小程序自己的服务端生成（要它的 appsecret），
  * 开放平台拉起小程序又要求 App 与小程序在同一开放平台账号下绑定。所以只能把用户送到微信。
@@ -141,10 +127,9 @@ internal fun openWechatForSettle(context: android.content.Context, onHint: (Stri
 }
 
 /**
- * 时刻文案 `HH:mm`（骑行卡上的「更新于 / 位置」）；两页共用一个格式化器。
+ * 时刻文案 `HH:mm`（快趣账号页 / 订单页的「更新于 / 位置」）。
+ *
+ * **唯一实现在共享层** `ui/ebike/RideClockText.kt`（`rideClockText`）：骑行页搬走后，
+ * 两端都要同一份格式化，JVM 那份只是转接，别再在这里写第二个 `DateTimeFormatter`。
  */
-internal fun clockText(millis: Long): String =
-    Instant.ofEpochMilli(millis)
-        .atZone(ZoneId.systemDefault())
-        .toLocalTime()
-        .format(DateTimeFormatter.ofPattern("HH:mm", Locale.US))
+internal fun clockText(millis: Long): String = rideClockText(millis)
