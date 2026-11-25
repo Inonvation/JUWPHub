@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
@@ -447,7 +448,12 @@ private fun IosRoot(services: IosServices) {
                     val selectedTint = MaterialTheme.colorScheme.primary
                     val unselectedTint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.surface,
+                        // 底色与高度跟 Android 的 `AppBottomBar` 走同一套 token
+                        // （`NavigationBarDefaults.containerColor` / `.Elevation`）：
+                        // 上一版写死 `colorScheme.surface`，浅色下底栏和页面连成一片，
+                        // 看起来像「没有底栏」——这正是「外形粗糙」里最明显的一条。
+                        containerColor = NavigationBarDefaults.containerColor,
+                        tonalElevation = NavigationBarDefaults.Elevation,
                     ) {
                         IosTab.entries.filter { it.inBottomBar }.forEach { entry ->
                             NavigationBarItem(
