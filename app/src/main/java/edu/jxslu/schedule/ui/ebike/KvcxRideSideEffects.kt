@@ -24,7 +24,8 @@ import kotlinx.coroutines.flow.first
  */
 internal object AppKvcxSideEffects : KvcxSideEffects {
 
-    override suspend fun startRideTimer(): Pair<String, NoticeTone> = startFreeRideNotice()
+    override suspend fun startRideTimer(): Pair<String, NoticeTone> =
+        startFreeRideNotice(AndroidEbikeCodePlatform)
 
     override suspend fun ensureReminderEnabled(): Boolean {
         val prefs = Graph.displayPrefs(Graph.appContext)
@@ -45,7 +46,11 @@ internal object AppKvcxSideEffects : KvcxSideEffects {
         EbikeFreeRideReminder.endRide(Graph.appContext)
         // 订单已经结束：自动还车再排着也没有对象可还
         EbikeAutoReturnReminder.cancel(Graph.appContext)
-        burnPendingCodes(Graph.appContext, Graph.displayPrefs(Graph.appContext), force = true)
+        burnPendingCodes(
+            Graph.displayPrefs(Graph.appContext),
+            AndroidEbikeCodePlatform,
+            force = true,
+        )
     }
 
     override suspend fun onOrderGoneExternally(): Boolean {
@@ -83,30 +88,10 @@ internal object AppKvcxSideEffects : KvcxSideEffects {
 }
 
 /**
- * 起免费时长计时并把结果映射成提示文案与语气（点扫一扫 / 本机开锁成功共用）。
- * 起点由调用方给：点「打开微信扫一扫」传 `now + [EbikeFreeRide.SCAN_DELAY_MS]`
- * （切微信、选图、扫码、开车要时间，倒计时从点击 5 秒后才开始走）；本机开锁成功传
- * 当下（服务端确认的开锁时刻，不用缓冲）。
- */
-internal suspend fun startFreeRideNotice(
-    startAtMillis: Long = System.currentTimeMillis(),
-): Pair<String, NoticeTone> {
-    val outcome = EbikeFreeRideReminder.startRide(Graph.appContext, startAtMillis)
-    return when (outcome) {
-        EbikeFreeRideReminder.Outcome.Started ->
-            "已开始计时，通知栏已显示倒计时" to NoticeTone.Success
-        EbikeFreeRideReminder.Outcome.StartedNoNotification ->
-            "通知被关闭，提醒发不出来，请到系统设置打开" to NoticeTone.Warning
-        EbikeFreeRideReminder.Outcome.StartedSilent ->
-            "已开始计时（免费时长提醒未开启）" to NoticeTone.Info
-        is EbikeFreeRideReminder.Outcome.Failed ->
-            "已开始计时；提醒排程失败：${outcome.message}" to NoticeTone.Warning
-        else ->
-            "已开始计时" to NoticeTone.Info
-    }
-}
-
-/**
+ * 起免费时长计时并把结果映射成提示文案与语气——**唯一实现已搬进共享层**
+ * （`ui/ebike/EbikeCodePlatform.kt` 的 `startFreeRideNotice`，出码页与本类共用同一份文案）。
+ * 这里只剩「Android 的提醒实现是谁」这一句转接。
+ *
  * 打开微信（结清欠费的唯一去处）：待支付页在快趣小程序里，而**微信不给第三方直达小程序
  * 具体页面**——URL Scheme / 短链必须由小程序自己的服务端生成（要它的 appsecret），
  * 开放平台拉起小程序又要求 App 与小程序在同一开放平台账号下绑定。所以只能把用户送到微信。

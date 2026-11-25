@@ -146,9 +146,13 @@ fun RideScreen(
         ),
     ),
     /** 出码与计时归它管（生成 / 保存 / 焚码 / 免费时长计时的口径都在那边）。 */
-    ebikeViewModel: EbikeViewModel = viewModel(
-        factory = EbikeViewModel.Factory(Graph.displayPrefs(LocalContext.current)),
-    ),
+    // 平台件（相册 / 提醒）由宿主装配：`AndroidEbikeCodePlatform` 是 :app 的实现，
+    // 共享层的 EbikeViewModel 只认两个接口（iOS 宿主将来传自己的实现或 null）。
+    // 用 `Graph.appContext` 而不是 `LocalContext.current`：`viewModel { }` 的 initializer
+    // 不是组合函数，里面读不了 CompositionLocal。
+    ebikeViewModel: EbikeViewModel = viewModel {
+        EbikeViewModel(Graph.displayPrefs(Graph.appContext), AndroidEbikeCodePlatform)
+    },
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val prefs by ebikeViewModel.ebikePrefs.collectAsStateWithLifecycle()
@@ -211,7 +215,7 @@ fun RideScreen(
         0L
     }
     // 手里有没有一张能用的码：小程序方式的主动作在"有码"之后翻面
-    val hasCode = ebikeState.generatedBikeId != null && ebikeState.generatedBitmap != null
+    val hasCode = ebikeState.generatedBikeId != null && ebikeState.generatedMatrix != null
     /**
      * 头行要不要摆「按车号」。
      *
@@ -1295,7 +1299,8 @@ fun RideScreen(
             resolvedCarNum = EbikeQr.resolveCarNum(ebikeState.carInput),
             wantedCarNum = qrRequest,
             qrCarNum = ebikeState.generatedBikeId,
-            qrBitmap = ebikeState.generatedBitmap,
+            qrMatrix = ebikeState.generatedMatrix,
+            qrDark = prefs.dark,
             qrSaved = ebikeState.generatedSaved,
             onCarInput = ebikeViewModel::onCarInput,
             onPickRecent = {

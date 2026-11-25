@@ -1,6 +1,5 @@
-package edu.jxslu.schedule.ui.ebike
+﻿package edu.jxslu.schedule.ui.ebike
 
-import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -69,7 +68,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -87,6 +85,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.domain.BarcodeMatrix
 import edu.jxslu.schedule.domain.BikeCluster
 import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.EbikeAutoReturn
@@ -99,6 +98,7 @@ import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KvcxParkSpot
 import edu.jxslu.schedule.domain.NearbyBike
 import edu.jxslu.schedule.ui.common.AppCard
+import edu.jxslu.schedule.ui.common.BarcodeMatrixImage
 import edu.jxslu.schedule.ui.common.AppCardDefaults
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.AppCardRow
@@ -2097,10 +2097,12 @@ internal fun RideCarNumberSheet(
     /** 最近生成过的那**一个**车号（完整车号）；null = 还没有过。 */
     lastRecent: String?,
     resolvedCarNum: String?,
-    /** 想要哪辆车出码；与 [qrCarNum] 对齐且位图非空时才算"码已就绪"。 */
+    /** 想要哪辆车出码；与 [qrCarNum] 对齐且位阵非空时才算"码已就绪"。 */
     wantedCarNum: String?,
     qrCarNum: String?,
-    qrBitmap: Bitmap?,
+    qrMatrix: BarcodeMatrix?,
+    /** 码配色跟主题走（深色主题出「深底白码」，与屏幕上那张一致）。 */
+    qrDark: Boolean,
     qrSaved: Boolean,
     onCarInput: (String) -> Unit,
     onPickRecent: () -> Unit,
@@ -2113,8 +2115,8 @@ internal fun RideCarNumberSheet(
     onDismiss: () -> Unit,
 ) {
     val mini = caps.wechatScan
-    // 生成是异步的（zxing 渲染在位图线程）：按车号对齐，码真出来了才铺进框里
-    val ready = wantedCarNum != null && qrCarNum == wantedCarNum && qrBitmap != null
+    // 生成是异步的（位阵在后台线程算）：按车号对齐，码真出来了才铺进框里
+    val ready = wantedCarNum != null && qrCarNum == wantedCarNum && qrMatrix != null
     /** 手里这张码**就是当前输入这辆车的**——这时再摆一枚「生成乘车码」就是重复。 */
     val upToDate = ready && resolvedCarNum != null && resolvedCarNum == qrCarNum
     /**
@@ -2250,10 +2252,13 @@ internal fun RideCarNumberSheet(
                     .fillMaxWidth()
                     .padding(top = 4.dp),
             ) { isReady ->
-                val bitmap = if (isReady) qrBitmap else null
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
+                val matrix = if (isReady) qrMatrix else null
+                if (matrix != null) {
+                    // 位阵直接画方块（不再经过 android.graphics.Bitmap）：
+                    // 实现是共享层的 BarcodeMatrixImage，iOS 侧用的是同一份
+                    BarcodeMatrixImage(
+                        matrix = matrix,
+                        dark = qrDark,
                         contentDescription = "乘车码 · $qrCarNum",
                         modifier = Modifier.size(QR_PANEL_SIZE),
                     )
