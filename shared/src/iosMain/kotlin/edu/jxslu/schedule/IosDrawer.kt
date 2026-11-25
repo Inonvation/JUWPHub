@@ -1,6 +1,10 @@
 package edu.jxslu.schedule
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,13 +29,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.campus.CampusCardViewModel
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.life.AccountRow
-import edu.jxslu.schedule.ui.life.DrawerDivider
 import edu.jxslu.schedule.ui.life.DrawerHeader
 import edu.jxslu.schedule.ui.life.DrawerRow
 import edu.jxslu.schedule.ui.life.DrawerSectionHeader
@@ -94,16 +98,25 @@ private val IOS_DRAWER_QUICK_SCREENS: Set<SubpageScreen> = setOf(
  * | 顶部 | 身份卡（头像 + 姓名 + 遮罩学号 + 班级，整块进学籍信息） | `DrawerHeader` |
  * | 其下 | 账号与登录 → 账号中心 | `AccountRow` |
  * | 其下 | 「我的 · 设置」（iOS 的 Tab 入口，Android 由底栏 / 左下齿轮承担） | `DrawerRow` |
- * | 分隔线 | — | `DrawerDivider` |
  * | 钱包卡 | 校园卡余额 / 电子账户 / 寝室电费 | `WalletHero` + `walletCardTexts` |
- * | 生活服务区 | 一卡通账号 / 胖乖生活（开水）/ U净 —— 缺服务的行整行不渲染 | `lifeServiceRows` |
- * | 二级页 | 白名单按段分组（学习 / 教务 / 生活 / 设置 / 江水生活） | `LazyColumn` |
+ * | 江水生活 | 一卡通账号 / 胖乖生活（开水）/ U净 + 白名单里同段的其余行 —— 缺服务的行整行不渲染 | `lifeServiceRows` + [CompactDrawerRow] |
+ * | 二级页 | 白名单按段分组（学习 / 教务 / 生活 / 设置） | `LazyColumn` |
  * | 底部 | 付款码 | `PaymentCodeEntry` |
  *
  * 段头与行的字级、间距、描边全部来自共享层，和 Android 走同一份代码——这就是本轮要消灭的
  * 「iOS 专用仿制品」。**为什么单独一个文件**：`IosNavigation.kt` 里是路由白名单与
  * `IosRouteContent` 的渲染分支（那是另一条并行流的地盘），抽屉是纯排版组装，混在一起
  * 既超长又容易撞车。
+ *
+ * ## 2026-11-26 与 Android 侧栏逐项对齐（三处，都是「iOS 自己多出来的东西」）
+ *
+ * 1. **「江水生活」只起一次段头**。白名单里这一段的二级页（洗衣账单）原先在下面又开一段，
+ *    Android 侧栏这一段只有一个段头（`lifeDrawerGroups` 的 `DrawerGroup("江水生活")`）；
+ *    现在同段的行接在服务行后面，段头不重复。
+ * 2. **列表首尾留白按 Android 的数**：上 0（`DrawerHeader` 自带 `top = 12dp`）、下 16
+ *    （Android 收尾是 `Spacer(Modifier.height(16.dp))`）。原先上下各 8dp，头上多 8、尾上少 8。
+ * 3. **删掉 `DrawerDivider`**：Android 侧栏没有分隔线（靠段头与留白分段），那是 iOS 侧自己
+ *    加的一条线；`ModalDrawerSheet` 底色与 Android 一样是 `surfaceContainerLow`，不缺层级。
  *
  * ## 手势与遮罩
  *
@@ -156,6 +169,12 @@ internal fun IosDrawer(
             .filterNot { it.route.screen in IOS_DRAWER_QUICK_SCREENS }
             .groupBy { it.section }
     }
+    // 「江水生活」段在上面已经有一条段头（服务行那三行），白名单里同段剩下的二级页
+    // （洗衣账单）接在同一段里。**不能交给下面的 `sections.forEach`**：那会再起一个
+    // 同名段头，抽屉里就出现两段「江水生活」——Android 侧栏这一段只有一个段头
+    // （`lifeDrawerGroups` 的 `DrawerGroup("江水生活")`）。
+    val serviceSectionTitle = "江水生活"
+    val serviceSectionExtras = sections[serviceSectionTitle].orEmpty()
     // 身份区数据源与 Android 侧栏同一份 `DisplayPrefsStore`（iOS 落在沙箱私有目录的 DataStore）
     val prefs = remember { services.displayPrefs() }
     val profileName by prefs.profileName.collectAsStateWithLifecycle(initialValue = "")
@@ -222,12 +241,16 @@ internal fun IosDrawer(
 
     ModalDrawerSheet(modifier = Modifier.width(IosDrawerWidth)) {
         Column(Modifier.fillMaxSize()) {
-            // 上半区（身份卡 / 账号与登录 / 我的·设置 / 分隔线 / 钱包卡）也放进 `LazyColumn`：
+            // 上半区（身份卡 / 账号与登录 / 我的·设置 / 钱包卡）也放进 `LazyColumn`：
             // Android 的侧栏是「整列滚动、底部付款码钉住」，段头与钱包区跟着内容一起滚。
             // 把它们钉在列表外面会让小屏上的列表只剩半屏——那是排版差异，不是平台差异。
+            //
+            // 首尾留白按 Android 的数：上 0（`DrawerHeader` 自带 `top = 12dp`，再垫一层就是
+            // 凭空多出 8dp）；下 16（Android 收尾是 `Spacer(Modifier.height(16.dp))`，
+            // 不是 8dp）。
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(vertical = 8.dp),
+                contentPadding = PaddingValues(bottom = 16.dp),
             ) {
                 item(key = "header") {
                     // 身份区：头像 + 姓名 + 遮罩学号 + 班级，整块点开进学籍信息
@@ -252,7 +275,6 @@ internal fun IosDrawer(
                         onClick = onOpenMe,
                     )
                 }
-                item(key = "divider") { DrawerDivider() }
                 item(key = "wallet") {
                     // 钱包卡：三格文案走共享层的 `walletCardTexts`，视觉与 Android 逐像素同源。
                     // `onRecharge = null`：充值宿主还在 `:app`，本平台没有这条路径 →
@@ -268,8 +290,8 @@ internal fun IosDrawer(
                     )
                 }
                 // 生活服务区：段头与行都是共享部件，与 Android 同一个段名、同一种行
-                item(key = "h-江水生活") { DrawerSectionHeader("江水生活") }
-                // 键用 label 前缀：这两段的行来自 `lifeServiceRows`（`DrawerEntry`，没有路由），
+                item(key = "h-$serviceSectionTitle") { DrawerSectionHeader(serviceSectionTitle) }
+                // 键用 label 前缀：这几行来自 `lifeServiceRows`（`DrawerEntry`，没有路由），
                 // 与下面按 `route.screen.name` 做键的二级页列表不共用命名空间
                 items(serviceRows, key = { "service:${it.label}" }) { entry ->
                     DrawerRow(
@@ -283,37 +305,18 @@ internal fun IosDrawer(
                         onTrailingClick = entry.onTrailingClick,
                     )
                 }
+                // 同段剩下的二级页（洗衣账单）接在上面这一段里，段头不重复（见文件头第 1 条）
+                items(serviceSectionExtras, key = { it.route.screen.name }) { entry ->
+                    CompactDrawerRow(entry = entry, onClick = { onPick(entry.route) })
+                }
                 // 其余二级页：紧凑分组列表（键仍是 `route.screen.name`，与上一版一致）
                 sections.forEach { (section, rows) ->
-                    item(key = "h-$section") { DrawerSectionHeader(section) }
+                    // 「江水生活」的段头已经在上面出过，这里只画其余段的段头
+                    if (section != serviceSectionTitle) {
+                        item(key = "h-$section") { DrawerSectionHeader(section) }
+                    }
                     items(rows, key = { it.route.screen.name }) { entry ->
-                        // 二级页这一档不走 `DrawerRow`：它要一颗图标，而 40 多页各挑一颗是
-                        // 一批新的视觉决定，不在本轮。字级与内边距对齐 `DrawerRow`
-                        // （外 12dp + 内 12dp = 文字起点 24dp，与段头同一条竖线）。
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable(onClickLabel = entry.label) { onPick(entry.route) }
-                                .heightIn(min = 50.dp)
-                                .padding(horizontal = 12.dp, vertical = 1.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = entry.label,
-                                style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Icon(
-                                AppIcons.ChevronRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
+                        CompactDrawerRow(entry = entry, onClick = { onPick(entry.route) })
                     }
                 }
             }
@@ -329,5 +332,78 @@ internal fun IosDrawer(
                 PaymentCodeEntry(onClick = { onPick(IosRoute(SubpageScreen.PAY_CODE)) })
             }
         }
+    }
+}
+
+/** 抽屉行按下的回缩比例：与 `ui/life/SideDrawerParts.kt` 的 `DrawerRow` 同值（2026-10-21 定的 0.985）。 */
+private const val CompactRowPressScale = 0.985f
+
+/**
+ * 抽屉里「二级页」那一档的行：文字 + 箭头，没有图标。
+ *
+ * ## 为什么不用 `DrawerRow`
+ *
+ * `DrawerRow` 的 `icon` 在 `brandIcon` 缺席时是 `icon!!`（非空断言），而二级页这一档
+ * 40 多页各挑一颗图标是一批新的视觉决定，不在本轮范围。所以这里只复刻**几何与手感**，
+ * 不复用那个组件：
+ *
+ * | 项 | 值 | 与 `DrawerRow` |
+ * |---|---|---|
+ * | 行高 | `heightIn(min = 50.dp)` | 同 |
+ * | 外缩进 / 内缩进 | 12dp / 12dp（文字起点 24dp） | 同（与段头同一条竖线） |
+ * | 文字 | `bodyLarge` | 同 |
+ * | 箭头 | `AppIcons.ChevronRight` 16dp，`onSurface` 30% | 同（`onTrailingClick == null` 那一档） |
+ * | 圆角 | 12dp | 同 |
+ * | 按下 | 整行缩到 98.5%，松手回弹 | 同 |
+ *
+ * ## 2026-11-26 补按下回缩
+ *
+ * 上一版这里是裸 `Modifier.clickable`：Android 侧栏的每一行按下都会缩一下
+ * （`DrawerRow` 的 `pressScale`），iOS 抽屉的二级页行点了没反应——两边的「按下去有反馈」
+ * 对不上。触感这一层两边都不发（`DrawerRow` 也不发）：侧栏行只给视觉回缩，振动归各页面里
+ * 自己的可点元素，避免同一次点击震两下。
+ */
+@Composable
+private fun CompactDrawerRow(entry: IosDrawerEntry, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) CompactRowPressScale else 1f,
+        label = "iosDrawerRowPress",
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                onClickLabel = entry.label,
+                onClick = onClick,
+            )
+            .heightIn(min = 50.dp)
+            // 纵向 1dp：与 `DrawerRow` 同（它那 1dp 是给右侧 48dp 命中区留位，这里只为
+            // 让两种行的高度算式逐项一致，行高仍是 50dp）
+            .padding(horizontal = 12.dp, vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = entry.label,
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            AppIcons.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+            modifier = Modifier.size(16.dp),
+        )
     }
 }
