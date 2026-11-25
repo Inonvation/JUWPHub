@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.domain.ScoreCalculator
 import edu.jxslu.schedule.domain.ScoreGroups
 import edu.jxslu.schedule.domain.ScoreRecord
@@ -58,7 +59,9 @@ import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.LoadingHint
+import edu.jxslu.schedule.ui.common.PageRefreshAction
 import edu.jxslu.schedule.ui.common.SectionHeader
+import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jwvw.JwImportOutcomeEffect
 import kotlinx.coroutines.launch
@@ -93,6 +96,16 @@ private const val SCOPE_ALL = "\u0000all"
  * | [onOpenTranscript] | 平台没有签章单导出 → 隐藏「导出带章成绩单」卡 |
  *
  * 数据本身两端同源：成绩读的是 [Services.current] 给的 Room 仓库，不依赖会话。
+ *
+ * ## 没有导入窗口的平台怎么导入（iOS 移植 W3，2026-11-25）
+ *
+ * `onImportScores` 为 null 时，本页改用共享层的教务直取链 [Services.current.scoreSync]
+ * （`ScoreSync.sync(force = true)`，与「成绩变动提醒」是同一条链、同一个 Mutex）：
+ * 顶栏动作换成「从教务导入」，空态出口也指向它。**两个入口不同时出现**——Android 的
+ * WebView 那条路能处理验证码与会话重登，有它就用它；iOS 没有 WebView 容器，才落到直取。
+ *
+ * 失败原因原样透出（`没取到成绩数据，教务返回 HTTP 500` / `还没有登录教务：…`），
+ * 不换成一句「导入失败」：用户要知道是登录、网络还是教务那边的问题。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,11 +119,54 @@ fun ScoreScreen(
     onOpenTranscript: (() -> Unit)? = null,
 ) {
     val scoreRepo = remember { Services.current.scoreRepository() }
+    // 教务直取链：`onImportScores` 为空时它就是这个页面的导入入口；也为空 = 两样都没有
+    val scoreSync = remember { Services.current.scoreSync() }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
+    var importing by remember { mutableStateOf(false) }
+    /** 手动导入失败的原因；空态里显示出来，免得用户只看到一句「还没有成绩」。 */
+    var lastError by remember { mutableStateOf<String?>(null) }
+
     // 成绩导入成功的气泡（DESIGN §3.3）：导入窗口 finish 后落回的是这一页
     JwImportOutcomeEffect(snackbar)
+
+    /**
+     * 走共享层直取链导入（iOS 等没有 WebView 导入窗口的平台）。
+     *
+     * `force = true`：用户手动点的那一次必须真抓，闸门（7 天 / 小时级）只该管自动那次。
+     */
+    fun runSync() {
+        if (importing) return
+        val service = scoreSync ?: return
+        importing = true
+        scope.launch {
+            val result = try {
+                service.sync(force = true)
+            } finally {
+                importing = false
+            }
+            when (result) {
+                is ScoreSync.Result.Updated -> {
+                    lastError = null
+                    snackbar.showNotice(
+                        if (result.records == 0) {
+                            "教务还没有成绩记录"
+                        } else {
+                            "已更新：${result.terms} 个学期 / ${result.records} 门成绩"
+                        },
+                    )
+                }
+                // 自动那次才可能被闸门挡下；手动 force=true 撞上的是并发，让位即可
+                ScoreSync.Result.Skipped -> Unit
+                ScoreSync.Result.InProgress -> snackbar.showNotice("正在导入中，请稍后再试")
+                is ScoreSync.Result.Failed -> {
+                    lastError = result.reason
+                    snackbar.showNotice(result.reason)
+                }
+            }
+        }
+    }
 
     // null = Room 流首帧未到（未就绪），非 null 空列表 = 确实没有成绩。
     // 不区分的话，首帧会先渲染「还没有成绩」空态再跳真实数据（与今日页 ready
@@ -175,10 +231,17 @@ fun ScoreScreen(
                     }
                 },
                 actions = {
-                    if (onImportScores != null) {
-                        IconButton(onClick = onImportScores) {
+                    // 两个导入入口不同时出现：有 WebView 导入窗口就用它（Android），
+                    // 否则落到共享层直取链（iOS）。都没有 = 这一格不渲染。
+                    when {
+                        onImportScores != null -> IconButton(onClick = onImportScores) {
                             Icon(AppIcons.Refresh, contentDescription = "从教务导入")
                         }
+                        scoreSync != null -> PageRefreshAction(
+                            busy = importing,
+                            onClick = { runSync() },
+                            label = "从教务导入",
+                        )
                     }
                     if (onOpenSettings != null) {
                         IconButton(onClick = onOpenSettings) {
@@ -202,6 +265,17 @@ fun ScoreScreen(
                     LoadingHint("正在读取成绩")
                 }
             }
+            // 空态下手动导入：抓取期间留在加载态，不继续挂着「还没有成绩」（否则像按了没反应）
+            importing && terms.isEmpty() -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    LoadingHint("正在从教务导入…")
+                }
+            }
             terms.isEmpty() -> {
                 Column(
                     modifier = Modifier
@@ -212,13 +286,24 @@ fun ScoreScreen(
                 ) {
                     EmptyHint(
                         title = "还没有成绩",
-                        body = if (onImportScores != null) {
-                            "从教务导入全部学期的成绩后，这里会按学期展示。\n导入只读教务数据，不会写入课表。"
-                        } else {
-                            "本平台还没有成绩导入窗口，要等导入过成绩之后这里才会有内容。"
+                        body = when {
+                            onImportScores != null ->
+                                "从教务导入全部学期的成绩后，这里会按学期展示。\n导入只读教务数据，不会写入课表。"
+                            scoreSync != null -> lastError
+                                ?: "点右上角「从教务导入」从教务读一次全部学期的成绩。\n导入只读教务数据，不会写入课表。"
+                            else ->
+                                "本平台还没有成绩导入窗口，要等导入过成绩之后这里才会有内容。"
                         },
-                        actionLabel = if (onImportScores != null) "去导入" else null,
-                        onAction = onImportScores,
+                        actionLabel = when {
+                            onImportScores != null -> "去导入"
+                            scoreSync != null -> "从教务导入"
+                            else -> null
+                        },
+                        onAction = when {
+                            onImportScores != null -> onImportScores
+                            scoreSync != null -> ({ runSync() })
+                            else -> null
+                        },
                     )
                     if (onOpenTranscript != null) {
                         Spacer(Modifier.height(8.dp))

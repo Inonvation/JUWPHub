@@ -69,9 +69,14 @@
 - 教材来自「教材管理 → 学生教材确认」：壳页 `/jsxsd/nxsjc/jccx` + 数据接口
   `/jsxsd/nxsjc/xsjcqr`（layui 形态，参数 `xnxqid` + `pageNum/pageSize`，**不带 .do**）。
   解析在 `data/jw/TextbookParser.kt`（照 ScoreParser 的三道检查），同步器 `data/repo/TextbookSync.kt`。
-- **触发点只有两个**：教务导入写库成功后 `Graph.appScope.launch { textbookSync().syncForTerm(term) }`
-  （`ui/jwvw/JwImportScreen.kt`），以及冷启动补抓 `TextbookSync.backfillIfMissing`（`JuwApplication`，
-  搭在 CAS 那组，顺序 成绩→考试→学业→教材）。**「导入 JSON 文件」不抓**——它走 `importJson`，
+- **触发点有三个**：教务导入写库成功后 `Graph.appScope.launch { textbookSync().syncForTerm(term) }`
+  （`ui/jwvw/JwImportScreen.kt`）、冷启动补抓 `TextbookSync.backfillIfMissing`（`JuwApplication`，
+  搭在 CAS 那组，顺序 成绩→考试→学业→教材），以及**教材页自己**（`ui/jw/TextbookScreen`，
+  2026-11-25 加）：进页该学期为空时走 `backfillIfMissing`（吃 6 小时闸门，零网络），
+  顶栏「重新导入」走 `syncForTerm`（无闸门，用户手动点的必须真抓）。它读的是
+  `AppServices.textbookSync()`——**两端都非空**（Android 转接 `Graph.textbookSync`，iOS 用
+  `IosJwReadSession` 建同一份），所以 iOS 上这一页也是真能抓到数据的。
+  **「导入 JSON 文件」不抓**——它走 `importJson`，
   教材从备份自己的 `textbooks` 段恢复（带数据才整体替换）。
 - **失败不再无声**（2026-10-06）：`syncForTerm` 的结果落一条 `Log.i`，导入路径失败另补一条气泡
   「教材未同步：<原因>」。教材真的丢过，原因是会话被别处登录顶掉（强智单会话，
@@ -540,7 +545,8 @@
 - 两条最容易写错的：**工作日列是裸日号、周末列才是 `MM月DD日`、全表无年份**（年份从学期号
   推导 + 周六格必须真是周六 + 周一/周二裸日号交叉校验）；**响应学期 ≠ 请求学期一律放弃**
   （不猜学期——教务没有该学期日历时的回落必须挡住）。
-- 触发点与教材同两个（WebView 导入写库成功 / 首启 `importIfEmpty` 成功），**失败静默只记
+- 触发点与教材前两个相同（WebView 导入写库成功 / 首启 `importIfEmpty` 成功；教材多出的
+  第三个「教材页自己」不适用于日历——日历页没有手动抓取入口），**失败静默只记
   `Log.i`**、值没变不写库不弹泡（区别于教材的失败气泡：开学日失败 = 维持现状，不是数据
   丢失，没有「去哪儿看」的问题）。
 - 口径「教务为准」：每次导入重设；用户手改只保证到下一次导入（课表设置照常可改）。

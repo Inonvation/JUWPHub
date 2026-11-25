@@ -1181,7 +1181,7 @@ Cookie + Ktor 降为兜底（WebView 已销毁时，例如从成绩页触发的�
 | `IosJwReadSession.ensureValid` | 强判 `JSESSIONID`，误报「没登录」 | WebView 在就 Ready；否则读 Cookie，缺失时把 `describeStore()` 的条数打出来 |
 | `hasJwWebSession()` | 恒 `null` → 登录成功后账号中心仍显示「未登录」 | 进程内标记 `IosJwSessionFlag`：冷启动探一次、抓取成功/失败顺手更新、落到学生端立刻置真 |
 | 预选清单页 | `client == null` 时仍打印「本轮已开 0 条预选」 | 改说「本平台不支持本轮匹配」，刷新钮整只不渲染 |
-| 教材页 | 空态说「导入课表后会自动抓取」（iOS 没有 `TextbookSync`） | `syncAvailable = false` → 「本平台还没有教材抓取」，两个出口都不给 |
+| 教材页 | 空态说「导入课表后会自动抓取」（iOS 没有 `TextbookSync`），随后改成「本平台还没有教材抓取」——两种说法都不解决问题：iOS 侧没有任何一方写 `textbooks` 表 | **第三批补上真抓取**（§12.6）：`AppServices.textbookSync()` 两端非空，进页空态自动补抓一次（吃 6 小时闸门）、顶栏「重新导入」强抓；失败原因原样显示 |
 | U净 弹窗 | 扫码钮点了没反应（槽位 null 但按钮还在） | `onScan` 改可空，null 时扫码钮与那句提示都不渲染 |
 | 变动检测页 | 顶栏「调课记录」点了没反应 | `onOpenHistory` 改可空，null 时不渲染 |
 | 课表页 | 「管理课表…」与「检测 → 查看」落在空 lambda | 宿主补接线，两页都能进 |
@@ -1192,3 +1192,24 @@ Cookie + Ktor 降为兜底（WebView 已销毁时，例如从成绩页触发的�
 
 还有一件与功能无关但用户天天看得见的：底栏下方那行「数据自检：通过 · DB v21 …」**已撤掉**
 （P2 验收用的探针，真实导入课表已经覆盖了它的目的）。
+
+### 12.6 第三批：成绩 / 教材在 iOS 上真能导入（2026-11-25）
+
+教务的抓取链（`JwReadSession`）两端早已是同一套，缺的从来不是「能不能抓」，而是**页面上没有
+可点的入口**：教材页的 `textbooks` 表没有任何写入方，成绩页的导入按钮挂在宿主的
+`JwImportActivity`（iOS 传 null）。这一批把入口补成「共享层直取」，没有再搬 WebView。
+
+| 页 | 入口怎么来 | 失败时用户看到什么 |
+|---|---|---|
+| 教材 | `AppServices.textbookSync()` 两端非空。进页该学期为空 → `backfillIfMissing`（6 小时闸门，零网络）；顶栏「重新导入」→ `syncForTerm`（无闸门） | 原样透出 `TextbookSync.Result.Failed.reason`（`没取到教材数据，教务返回 HTTP 500` / `还没有登录教务：…`）；0 条写成「教务这学期没有教材记录」，**不是失败** |
+| 成绩 | `onImportScores == null` 时页面改用 `AppServices.scoreSync()`（`sync(force = true)`，与成绩提醒同一条链、同一个 Mutex）。两个入口不同时出现 | 原样透出 `ScoreSync.Result.Failed.reason`，并留在空态里 |
+| 考试 | 早已如此：`ExamSync` 非空 → 顶栏「从教务更新」+ 空态出口；写课表走「自动合并」开关 | 原样透出 `ExamSync.Result.Failed.reason` |
+| 选课 | 早已如此：`SelectionSync` 非空 → 顶栏「更新」+ 进页自动刷新一次（30 分钟缓存） | 轮次卡里显示 `failedReason`；**只读**，退课/免责声明接口一律不碰 |
+
+两条共同纪律：
+
+1. **不要在 `iosMain` 里写业务逻辑**。抓取、解析、写库、闸门全在共享层的 `*Sync` 里，
+   iOS 侧只给「会话 + 仓库 + 偏好」三样（`IosServices` 的各 lazy）。
+2. **没有 WebView 时走 Cookie + Ktor 兜底**（`IosJwReadSession.fetchHtml` 的第二条路）。
+   这条路在真机上是否拿得到会话**尚未验证**——`IosWebFetch.available` 为假时（导入页已关）
+   就可能落到「还没有登录教务：…」，那句话本身是准确的，不吞。

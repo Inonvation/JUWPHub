@@ -40,6 +40,7 @@ import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.repo.ScholarProgressRepository
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
+import edu.jxslu.schedule.data.repo.TextbookSync
 import edu.jxslu.schedule.data.session.LoginGateRules
 import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionExpirySink
@@ -436,4 +437,15 @@ class GraphServices(private val context: Context) : AppServices {
 
     override fun internshipBasesLoader(): InternshipBasesLoader =
         Graph.internshipBasesLoader(appContext)
+
+    // ---- 教材（iOS 移植 W3，2026-11-25） ----
+
+    /**
+     * 教材抓取：转接 `Graph.textbookSync` 的同一份单例。
+     *
+     * 必须是同一份：`JwImportScreen`（导入写库成功后顺带抓）、`JuwApplication`（冷启动补抓）
+     * 与教材页的「重新导入」三处共用它，`TextbookSync` 内部的 Mutex 是「一次只抓一轮」的
+     * 全部依据。各 new 一个等于导入那一次与页面这次同时各打一遍教务。
+     */
+    override fun textbookSync(): TextbookSync = Graph.textbookSync(appContext)
 }
