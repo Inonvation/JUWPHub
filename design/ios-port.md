@@ -1171,12 +1171,12 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 
 | 差什么 | 现状（2026-11-25 03:30） | 影响 |
 |---|---|---|
-| 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份）；底栏三格「今日 / 课表 / 教务」（M3 `NavigationBar` + 图标 + 文字，选中主色 / 未选中 `onSurface` 0.6）。**2026-11-25 晚（S1）抽屉排版整块对齐 Android**：身份卡 → 账号与登录 → 我的·设置 → 分隔线 → 钱包卡 → 生活服务区 → 二级页紧凑分组 → 付款码，段头 / 行 / 钱包卡 / 付款码**全部是 `shared/commonMain/ui/life/SideDrawerParts.kt` 的同一份 Composable**（钱包卡文案走 `walletCardTexts`，服务行走 `lifeServiceRows`，缺服务的平台传 null 即整行不渲染）。白名单 41 条仍在且全部可达，其中 8 条由卡片 / 行直接承担。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的**手势视差**（iOS 用 `ModalNavigationDrawer`，是另一套实现）；服务行右侧的实时状态（开水余额 / U净 空闲数）未接——聚合逻辑还在 `:app` 的 `SideDrawerContent`；钱包卡的「充值」按钮不渲染（充值宿主 `RechargeHost` / `PowerBankPayScreen` 仍在 `:app`）；余额取数是「首次组合拉一次」而不是「抽屉展开时」（`IosDrawer` 签名固定三参数，拿不到 `DrawerState`） |
+| 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份）；底栏三格「今日 / 课表 / 教务」（M3 `NavigationBar` + 图标 + 文字，选中主色 / 未选中 `onSurface` 0.6）。**2026-11-25 晚（S1）抽屉排版整块对齐 Android**：身份卡 → 账号与登录 → 我的·设置 → 分隔线 → 钱包卡 → 生活服务区 → 二级页紧凑分组 → 付款码，段头 / 行 / 钱包卡 / 付款码**全部是 `shared/commonMain/ui/life/SideDrawerParts.kt` 的同一份 Composable**（钱包卡文案走 `walletCardTexts`，服务行走 `lifeServiceRows`，缺服务的平台传 null 即整行不渲染）。白名单 41 条仍在且全部可达，其中 8 条由卡片 / 行直接承担。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的**手势视差**（iOS 用 `ModalNavigationDrawer`，是另一套实现）；**主卡的缩放 / 圆角 / 阴影 2026-11-25 晚已对齐**，侧栏宽也统一成 300dp，Tab 与二级页的进出场补了过渡（§14）；服务行右侧的实时状态（开水余额 / U净 空闲数）未接——聚合逻辑还在 `:app` 的 `SideDrawerContent`；钱包卡的「充值」按钮不渲染（充值宿主 `RechargeHost` / `PowerBankPayScreen` 仍在 `:app`）；余额取数是「首次组合拉一次」而不是「抽屉展开时」（`IosDrawer` 签名固定三参数，拿不到 `DrawerState`） |
 | 教务登录后的自动填表 | iOS 用 `WKWebView` 让用户手点登录，登录成功落地后自动 `archive` | Android 有自动填表；iOS 需要注入 JS，能做 |
 | 凭证存储 | `IosKeychain`（CoreFoundation）+ 八个存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI / **一卡通** / **教务**）已写，**iOS 编译验证卡在 runner 容量** | 教务（CAS）2026-11-25 晚起也是真的（`IosCredentialVault`，service `secure_jw`，见 §12.10）——此前恒为 `null`，因为 iOS 从不保存教务密码、登录只在 `WKWebView` 里；一卡通已接（`IosYktCredentialStore`，service `secure_ykt`，含落盘 token 与失效标记），账号中心 / 消费流水 / 电费读得到学号。**2026-11-25 晚起录入界面也搬完了**（校园卡设置页 + 付款码页进 `commonMain`，见 §12.8），四处入口不再停在「凭证未配置」 |
 | 第三方仓库 | **胖乖 / U净 / 问渠 / 快趣会话已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账）。快趣：**数据层两端已是同一份**（`KqcxSessionCore` + `IosKqcxCredentialStore`，S23 起 `IosServices.kqcxSession()` 给真实现），账号中心的快趣行能读登录态 / 退出；**差的是页面**——`ui/ebike` 被高德 Android SDK 挡住（§12.1），所以快趣账号页 / 订单页 / 骑行页在 iOS 上仍不路由（地图层已用 MapKit 打通，见 §12.11） |
 | 支付调起 | 一卡通走「收银台 URL 进 `WKWebView`」；胖乖 / 趣智走 `alipays://` 深链 | `Info.plist` 还没有 `LSApplicationQueriesSchemes`（`alipays` / `weixin`），深链会被系统拦 |
-| App 图标 | **已补**（2026-11-25）：`iosApp/JUWPHub/Assets.xcassets/AppIcon.appiconset`，1024 单尺寸 universal。用 `tools/app-icon/source.png` 的**前景层**重新合成满幅图——原图把圆角与投影烤进了像素，直接用会与 iOS 遮罩叠成双层圆角 | 启动屏仍不给（`UILaunchScreen` 空 dict = 纯色） |
+| App 图标 | **已补**（2026-11-25）：`iosApp/JUWPHub/Assets.xcassets/AppIcon.appiconset`，1024 单尺寸 universal。用 `tools/app-icon/source.png` 的**前景层**重新合成满幅图——原图把圆角与投影烤进了像素，直接用会与 iOS 遮罩叠成双层圆角 | 启动屏 2026-11-25 晚补上（§14.4）：`UILaunchScreen` 指向命名色 `LaunchBackground`，两档色值 = 主题 `background` |
 
 **iOS 上现在能进的页面**（精简版：抽屉 39 条 + 4 个底栏 Tab）：今日、课表、教务汇总、我的、
 理论课表、实验课表、教材、教学日历、学籍信息、学业完成情况、培养方案、实习基地、成绩 / 成绩设置、
@@ -1425,3 +1425,94 @@ App）在这个 App 的实际使用里成立（查课表、看今日页都会进
 | 导入页登录 → 关页 → 当天取数 | ①（WebView 在）或 ②（jar 里已有会话）能覆盖 |
 | 隔天冷启动 → 成绩 / 教材 / 学业 | ② jar 为空 → ③ 用 Keychain 凭证自动登录；**这一步只能在真机验**（Keychain 读写 + CAS 链路 + 真账号） |
 | iOS 的 Ktor 登录链本身 | **未验**：Windows 上编不了 iOS，CI 只验编译；真机若出现「重复 Cookie 头」，修法见 `IosCasTransport` 的「未验」段 |
+
+## 14. 外观与交互打磨（2026-11-25 晚，U1）
+
+用户的判断是对的：「外形还是非常粗糙」。这一轮只动**看得见的层级与过渡**，不碰页面内容。
+
+### 14.1 抽屉的主卡缩放层级效果（唯一实现）
+
+Android 侧栏展开时主内容卡缩小、拉圆角、上阴影、跟手视差——这是「层级」读得出来还是
+「一块遮罩糊上去」的分界。2026-10-20 那一版写在 `:app` 的 `MainActivity` 里，
+**2026-11-25 收口到 `shared/commonMain/.../ui/common/DrawerCardTransform.kt`**，
+两端吃同一份数值与同一套算式：
+
+| 项 | 值 | 在哪 |
+|---|---|---|
+| 缩小 | `1 − 0.06·eased`（到 94%） | `DrawerCardShrink` |
+| 圆角上限 | 24dp，按 **1dp 量化成 25 档**（组合期建一次形状数组） | `DrawerCardCornerRadius` / `DrawerCardCornerSteps` |
+| 阴影上限 | 12dp × eased | `DrawerCardShadowElevation` |
+| 横向位移 | `侧栏宽·p − (1−scale)·宽/2`（补回缩放绕中心少走的一半） | `drawerCardTransform` |
+| 曲线 | `FastOutSlowInEasing` | 同上 |
+
+**为什么量化而不是逐帧 `RoundedCornerShape(24.dp * eased)`**：后者在 `graphicsLayer` 的绘制
+lambda 里每帧新建一个对象。台阶 ≤1dp、肉眼不可见，代价是 25 个常量。**别**改成常量形状——
+静止态会裁掉屏幕四角、露出后层。（性能口径的完整理由在文件的 KDoc 里，这里不重复。）
+
+`progress` 是 **lambda**：两端都在 `graphicsLayer` 的绘制期求值，拖动时只失效绘制、
+不触发重组。Android 传 `drawer.progress`（0…1），iOS 传 `−drawerState.currentOffset / 侧栏宽`。
+
+### 14.2 iOS 侧的三个决定
+
+1. **继续用 `ModalNavigationDrawer` + `ModalDrawerSheet`，不自己画侧栏**。
+   它的 sheet 是 300dp 宽（见下条），不覆盖整屏，主卡变换的可见性没问题；
+   手势、点击关闭、无障碍语义都是现成的。整页自绘只会多一处本机验不了的手势代码。
+2. **侧栏宽度从 M3 默认的 360dp 改成 300dp**（`IosDrawerWidth`，与 Android 同宽）。
+   M3 在 `DrawerSheet` 里加的是 `sizeIn(min = 240, max = 360)`，把固定宽度套在外层即可收敛；
+   抽屉的拖动锚点由 M3 按**实测宽度**更新，所以开到底时 `currentOffset` 正好是 −300dp。
+   两个理由：抽屉里的身份卡 / 钱包卡 / 服务行是 `ui/life/SideDrawerParts.kt`（按 300dp 排的）；
+   360dp 的侧栏在 iPhone 上只剩约 30pt 的卡片边缘，层级效果等于看不见。
+3. **遮罩透明**（`scrimColor = Color.Transparent`）。M3 默认那层 32% 黑会让主卡一边缩小
+   一边变暗，读成「弹了个模态框」；Android 那边不压暗。遮罩本身保留（点它关抽屉的行为、
+   命中区都不变），只是不画颜色。后层底色挂在 `ModalNavigationDrawer` 的 `modifier` 上，
+   用 `surfaceContainerLow`（= sheet 的默认容器色），缩小时露出的留白与侧栏同色。
+
+### 14.3 Tab 切换与二级页 push / pop 的过渡
+
+两端都是「同一槽位换内容」，所以都用 `AnimatedContent`，时长与曲线**只从 `Motion` 取**：
+
+| 动作 | 转场 | 档位 |
+|---|---|---|
+| Tab 切换 | 淡入 + 上浮（屏高的 1/32）+ 旧页淡出 | `Motion.state()` 进场 / `Motion.exit()` 退场 |
+| 二级页 push | 新页右侧滑入（整宽）+ 淡入，旧页淡出 | `Motion.page()` / `Motion.exit()` |
+| 二级页 pop | 当前页右侧滑出 + 淡出，下一页淡入 | `Motion.pageExit()` / `Motion.exit()` |
+
+- **二级页的键是「栈深 + 栈顶」而不是 `stack` 本身**：`mutableStateListOf` 没有结构相等，
+  拿它当 `AnimatedContent` 的键永远判成「没变」，动画一次都不播。深度还决定方向
+  （深了 push、浅了 pop），根层就是 `null`。
+- 底栏显隐跟着栈空非空淡入淡出（`Motion.state()`）——硬切的话，退栈时底栏会在页面
+  滑走之前先蹦出来。
+- **`AppBackHandler` 不受影响**：它读的还是 `stack.isNotEmpty()`，退栈走同一条
+  `stack.removeAt`。
+
+### 14.4 启动屏
+
+`UILaunchScreen` 从空 dict（= 系统兜底色，与 App 无关的白）改成指**命名颜色**：
+
+- 色值资产 `iosApp/JUWPHub/Assets.xcassets/LaunchBackground.colorset`，两档 = 主题
+  `background`（晴空蓝浅色 `#F9F9FF` / 深色 `#0F1419`，见 `ui/theme/Palettes.kt`），跟随系统深浅色；
+- `Info.plist` 的 `UILaunchScreen` = `{ UIColorName = LaunchBackground }`。
+
+**限制**：`UILaunchScreen` 是嵌套字典，XcodeGen 的 `INFOPLIST_KEY_*` 构建设置表达不了，
+所以这一项只能写在 `Info.plist`（`project.yml` 里没有可写的位置）；颜色资源本身由
+`Assets.xcassets` 承担——工程把整个 `JUWPHub` 目录当 sources，新 colorset 由 actool 自动收。
+
+### 14.5 状态栏与底部净空：这一轮**不改**，理由是它们本来就是对的
+
+- **顶部**：Compose 树没有顶到刘海下面，靠的不是 Compose 的 insets，而是 **SwiftUI 宿主**。
+  `iOSApp.swift` 是 `WindowGroup { ComposeContainer().ignoresSafeArea(.keyboard) }`——只放开了
+  键盘，安全区（顶部 / 底部 / 容器）由 SwiftUI 布局让出，Compose 的 `UIViewController` 整个
+  落在安全区内。所以 `pinnedStatusBars()` / M3 `TopAppBar` 的默认 insets 在这个排布下取到 0
+  是**正确**的（再垫一层就是双重让位，顶栏会多空一截）。
+- **底部**：iOS 的底栏是 `Column` 流里的 M3 `NavigationBar`（不是 Android 那种悬浮胶囊），
+  内容本来就在它上方，所以 `LocalBottomBarClearance` 保持默认 `0.dp` 是对的——Android 那条
+  「普通底栏形态下净空是 0」的注释在这里同样成立。
+- **风险提示（写在这里，不是想象的问题）**：谁哪天给 Swift 视图加 `.ignoresSafeArea()`，
+  整棵 Compose 树会立刻顶到刘海与手势条下面，而共享层没有任何补偿。那时要么在
+  `IosRoot` 外层加 `windowInsetsPadding(WindowInsets.safeDrawing)`，要么把
+  `.ignoresSafeArea()` 去掉。
+- **未验**：CMP 1.7.3 在 iOS 上 `WindowInsets.statusBars` 到底返回 0 还是真实安全区高度，
+  本机（Windows）拿不到证据——gradle 缓存里没有 uikit 变体的 klib，本机也编不了 iOS。
+  上面的结论不依赖它（安全区由 SwiftUI 让出），但**如果真机上顶栏出现「多空一截」**，
+  那就是 CMP 也返回了真实值，处置是让 `IosRoot` 里那几个页面的顶栏不再吃 insets。
+
