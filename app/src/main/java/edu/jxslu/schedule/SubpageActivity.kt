@@ -87,8 +87,10 @@ import edu.jxslu.schedule.ui.common.SessionExpiredNotice
 import edu.jxslu.schedule.ui.common.ShortcutLauncher
 import edu.jxslu.schedule.ui.common.washerScanIntent
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
+import edu.jxslu.schedule.ui.ebike.EbikeAutoReturnReminder
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
+import edu.jxslu.schedule.ui.ebike.KvcxViewModel
 import edu.jxslu.schedule.ui.ebike.RideScreen
 import edu.jxslu.schedule.ui.ebike.BikeLocator
 import edu.jxslu.schedule.ui.ebike.LocateResult
@@ -311,7 +313,27 @@ class SubpageActivity : ComponentActivity() {
                 // 拉起支付宝小程序是平台动作：共享层只有深链字符串，`Intent` 留在这里
                 onOpenRecharge = { openQiekjRecharge(this) },
             )
-            SubpageScreen.KVCX -> KvcxScreen(onBack = onBack)
+            // 快趣账号页（iOS 移植 P4，2026-11-25 搬进 shared/commonMain）：ViewModel 由宿主创建
+            // （design/ios-port.md §11.2 ①）。三处注入：自动还车的排程（AlarmManager +
+            // WorkManager，iOS 传 null）、历史订单二级页入口、品牌位图（`R` 只有 Android 有）。
+            // `viewModel { }` 的 lambda 接收者是 CreationExtras，所以这里显式写
+            // `this@SubpageActivity` 取装配根，别用裸 `this`。
+            SubpageScreen.KVCX -> KvcxScreen(
+                viewModel = viewModel {
+                    KvcxViewModel(
+                        session = Graph.kqcxCore(this@SubpageActivity),
+                        records = Graph.rideRecordStore(this@SubpageActivity),
+                        prefs = Graph.displayPrefs(this@SubpageActivity),
+                        orderCache = Graph.kqcxOrderStore(this@SubpageActivity),
+                        onReconcileAutoReturn = {
+                            EbikeAutoReturnReminder.reconcile(this@SubpageActivity)
+                        },
+                    )
+                },
+                onBack = onBack,
+                onOpenOrders = { SubpageActivity.start(this, SubpageScreen.KVCX_ORDERS) },
+                brandIcon = R.drawable.ic_brand_kqcx,
+            )
             SubpageScreen.KVCX_ORDERS -> KvcxOrdersScreen(onBack = onBack)
             // 校历（DESIGN §4.34）：页在共享层（iOS 移植 W2），画图与全屏查看器由这里注入
             // （BitmapFactory 降采样 + `ImageViewerDialog` 都是 Android 专有）。

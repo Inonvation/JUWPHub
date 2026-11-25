@@ -31,26 +31,23 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.R
-import edu.jxslu.schedule.SubpageActivity
-import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.session.SessionService
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.EbikeCardExpiry
 import edu.jxslu.schedule.domain.EbikeCardSavings
 import edu.jxslu.schedule.domain.EbikeRideStats
 import edu.jxslu.schedule.domain.KqcxAuth
+import edu.jxslu.schedule.domain.TextFmt
 import edu.jxslu.schedule.domain.YearMonthKey
 import edu.jxslu.schedule.domain.capabilities
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AccountHeroCard
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
@@ -65,12 +62,6 @@ import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 /**
  * 快趣账号页（DESIGN §4.32；**2026-11-05 改版**，效果稿 `docs/kvcx-account-redesign.html`）。
@@ -88,42 +79,49 @@ import java.util.Locale
  * 进页不发请求。
  *
  * **免责边界**：开锁 / 临时锁车 / 还车在工作台逐次确认后执行；支付与免押授权不做。
+ *
+ * **iOS 移植 P4（2026-11-25）搬进共享层**，接线口径见 `design/ios-port.md` §11：
+ * ViewModel 是必填参数（宿主建），二级页入口与品牌位图是可空参数（`null` = 本平台没有 → 整块不渲染）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KvcxScreen(
-    onBack: () -> Unit,
+    viewModel: KvcxViewModel,
+    onBack: () -> Unit = {},
+    /**
+     * 「历史订单」二级页。
+     *
+     * **null = 本平台还没有二级页栈**（iOS 侧如此，见 §11.3），整块「骑行记录」不渲染——
+     * 留一个点了没反应的入口比没有更糟（§11.2 ④）。
+     */
+    onOpenOrders: (() -> Unit)? = null,
+    /**
+     * 品牌位图 id（宿主的 `R.drawable.ic_brand_kqcx`）；**null = 本平台没有这套素材**。
+     *
+     * `R` 只有 Android 有：iOS 侧 `AccountHeroCard` 的头像位整块不占位（见 `BrandMark`）。
+     */
+    brandIcon: Int? = null,
 ) {
-    val context = LocalContext.current
-    // ViewModel 已搬进共享层（iOS 移植 P4）：构造改由宿主负责（design/ios-port.md §11.2 ①）。
-    // 「自动还车」的排程是平台件（AlarmManager + WorkManager），以可空回调注入。
-    val viewModel: KvcxViewModel = viewModel {
-        KvcxViewModel(
-            session = Graph.kqcxCore(context.applicationContext),
-            records = Graph.rideRecordStore(context.applicationContext),
-            prefs = Graph.displayPrefs(context.applicationContext),
-            orderCache = Graph.kqcxOrderStore(context.applicationContext),
-            onReconcileAutoReturn = { EbikeAutoReturnReminder.reconcile(context.applicationContext) },
-        )
-    }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    // 使用方式（DESIGN §3.9 / §4.32）：初值阻塞读一次，页面不该先按另一档画一帧
-    val ebikePrefs = remember(context) { Graph.displayPrefs(context) }
-    val useMode by ebikePrefs.ebikeUseMode.collectAsStateWithLifecycle(
-        initialValue = remember { runBlocking { ebikePrefs.ebikeUseMode.first() } },
-    )
+    // 使用方式（DESIGN §3.9 / §4.32）：**可空初值 = 还没读到**。
+    // 不能阻塞读 DataStore（`runBlocking` 在 commonMain 不存在，且组合期读盘本身就该避免），
+    // 也不拿 `EbikeUseMode.Default` 当首帧值——那会让「账号登录」用户先看到「小程序方式」那句
+    // 提示再跳一次，正是当初加阻塞读要躲的那一下。没读到就两侧都不画（见下面 when 的 null 支）。
+    // shortcut: 首帧这一帧页面内容区是空的；要连它也门闸得把整页首帧化，代价大于收益。
+    val ebikePrefs = remember { Services.current.displayPrefs() }
+    val useMode by ebikePrefs.ebikeUseMode.collectAsStateWithLifecycle(initialValue = null)
     // 能力矩阵（DESIGN §3.9）：本页的账号 / 记录属于 App 内用车那一档
-    val appRideEnabled = useMode.capabilities().inAppRide
+    val appRideEnabled: Boolean? = useMode?.capabilities()?.inAppRide
     // 骑行卡节省与已用额度（2026-10-24 / 2026-11-05）：额度 − 服务端剩余次数；
     // 没有可参与推算的卡（无可用卡 / 只有无限次数卡 / 次数缺失）返回 null，指标位显示「—」。
     val cardSavings = state.assets?.let { assets ->
-        EbikeCardSavings.computeFromCoupons(assets.coupons, System.currentTimeMillis())
+        EbikeCardSavings.computeFromCoupons(assets.coupons, AppClock.nowMillis())
     }
 
     // 账号方式下上次判定登录过期：进页说一句为什么退回登录表单（小程序方式没有账号，不提示）
-    if (appRideEnabled) {
+    if (appRideEnabled == true) {
         SessionExpiredNotice(SessionService.Kqcx, state.loggedIn, snackbar)
     }
 
@@ -138,30 +136,30 @@ fun KvcxScreen(
     }
 
     PageScaffoldColumn(title = "快趣账号", onBack = onBack, snackbar = snackbar) {
-        when {
+        when (appRideEnabled) {
+            // 还没读到「使用方式」：两侧都不画，不按另一档先画一帧（见上面 useMode 的注记）
+            null -> Unit
+
             // 兜底：本页入口在「小程序方式」下是隐藏的（校园服务里那一行按模式显隐），
             // 正常进不来。真进来了也不该给一个死胡同，所以说清去哪儿切
-            !appRideEnabled -> InlineNoticeRow(
+            false -> InlineNoticeRow(
                 message = "当前是「微信小程序」使用方式：本页的账号与本机记录都已收起，" +
                     "开车与还车在微信小程序里完成。要切换使用方式，请到快趣出行页标题栏的" +
                     "「使用方式」入口。",
                 tone = NoticeTone.Info,
             )
 
-            state.loggedIn -> {
-                KvcxIdentityCard(mobile = state.accountMobile)
+            true -> if (state.loggedIn) {
+                KvcxIdentityCard(mobile = state.accountMobile, brandIcon = brandIcon)
                 AssetsSection(
                     state = state,
                     savings = cardSavings,
                     onRefreshAssets = viewModel::refreshAll,
                 )
-                OrdersSection(
-                    onOpenOrders = { SubpageActivity.start(context, SubpageScreen.KVCX_ORDERS) },
-                )
+                // 二级页入口：本平台没有二级页栈时整块不渲染（见参数 KDoc）
+                if (onOpenOrders != null) OrdersSection(onOpenOrders = onOpenOrders)
                 LogoutRow(onLogout = viewModel::logout)
-            }
-
-            else -> {
+            } else {
                 LoginSection(state, viewModel)
             }
         }
@@ -184,11 +182,12 @@ fun KvcxScreen(
  * 身份卡（2026-11-05 改版）：头像 + 手机号掩码 + 「已登录」+ 凭证去向。
  *
  * 版式已抽到 [AccountHeroCard]（趣智 / 胖乖 / U净 同款）；这里只给快趣自己的三行字。
+ * [brandIcon] 由宿主传（`R.drawable.ic_brand_kqcx`）；null 时头像位整块不占位。
  */
 @Composable
-private fun KvcxIdentityCard(mobile: String) {
+private fun KvcxIdentityCard(mobile: String, brandIcon: Int?) {
     AccountHeroCard(
-        brandIcon = R.drawable.ic_brand_kqcx,
+        brandIcon = brandIcon,
         title = maskMobile(mobile),
         subtitle = "凭证仅存本机 · 不进云备份",
         pill = "已登录",
@@ -231,7 +230,7 @@ private fun AssetsSection(
     var showStatsDetail by remember { mutableStateOf(false) }
     var showSavingsDetail by remember { mutableStateOf(false) }
     val assets = state.assets
-    val now = System.currentTimeMillis()
+    val now = AppClock.nowMillis()
     AppCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -359,19 +358,24 @@ private fun remainingValue(assets: KqcxAuth.Assets): String {
  *
  * 数值只放 `MM-dd`——三列并排时 `titleLarge` 塞不下「2026-12-31」；时分放到下面那行小字里
  * （[expiryCaption]），跨年再补年份。取**最近一张可用卡**的到期时刻，多张卡时以最早的为准。
+ *
+ * 格式手写而不用 `DateTimeFormatter`：iOS 移植 P4 起本页在 `commonMain`，
+ * `kotlinx-datetime` 没有格式化器（`design/ios-port.md` §3 第 3 条），
+ * 定宽补零走 [TextFmt]（与仓库里其余页面同一写法，输出与原来的 `MM-dd` 逐字相同）。
  */
 private fun expiryValue(assets: KqcxAuth.Assets): String {
     val endAt = nearestCardEndAt(assets) ?: return "—"
-    return MONTH_DAY_FORMAT.format(Instant.ofEpochMilli(endAt).atZone(ZoneId.systemDefault()))
+    val at = AppClock.dateTimeOf(endAt)
+    return "${TextFmt.pad(at.monthNumber)}-${TextFmt.pad(at.dayOfMonth)}"
 }
 
 /** 到期列的说明：`23:59 到期`（跨年补 `2027 年`）；没有可用卡写「无可用卡」。 */
 private fun expiryCaption(assets: KqcxAuth.Assets, now: Long): String {
     val endAt = nearestCardEndAt(assets) ?: return "无可用卡"
-    val zoned = Instant.ofEpochMilli(endAt).atZone(ZoneId.systemDefault())
-    val time = TIME_OF_DAY_FORMAT.format(zoned)
-    val currentYear = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).year
-    return if (zoned.year != currentYear) "${zoned.year} 年 $time 到期" else "$time 到期"
+    val at = AppClock.dateTimeOf(endAt)
+    val time = TextFmt.clock(at.hour * 60 + at.minute)
+    val currentYear = AppClock.dateTimeOf(now).year
+    return if (at.year != currentYear) "${at.year} 年 $time 到期" else "$time 到期"
 }
 
 /** 最近一张**可用**卡（有次数）的到期时刻；无限次数卡没有到期日时返回 null。 */
@@ -625,11 +629,6 @@ private fun OrdersSection(onOpenOrders: () -> Unit) {
 /** 「临近到期」的提示窗口：3 天（与卡券提醒的 1 天窗口不同：这里只是列表里的一句话）。 */
 private const val CARD_EXPIRY_SOON_MS = 3L * 24 * 60 * 60 * 1000
 
-private val MONTH_DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd", Locale.US)
-
-/** 到期时刻只显示到分：服务端给到秒，秒对用户没有意义，还会把三列挤爆。 */
-private val TIME_OF_DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
-
 // ── 页尾：退出登录 ──
 
 /** 页尾退出登录（2026-11-05 从账号卡里挪下来）：低频破坏性动作，单独一行 + 二次确认。 */
@@ -671,7 +670,7 @@ private fun LogoutRow(onLogout: () -> Unit) {
 @Composable
 private fun CardExpiryDialog(coupons: List<KqcxAuth.AssetCoupon>, onDismiss: () -> Unit) {
     val lines = remember(coupons) {
-        EbikeCardExpiry.reminderLines(coupons, System.currentTimeMillis())
+        EbikeCardExpiry.reminderLines(coupons, AppClock.nowMillis())
     }
     AppInfoDialog(title = "骑行卡即将到期", onDismiss = onDismiss) {
         lines.forEach { line ->
