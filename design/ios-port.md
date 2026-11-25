@@ -930,7 +930,7 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 | `ui/inbox` / `ui/weather` | 收件箱、天气页 |
 | `ui/me` | 设置首页、数据与备份、显示设置面板、账号卡、`UpdateAvailableDialog` |
 | `ui/life` | 电费账单、电费充值弹层、侧边栏内容（`SideDrawerParts` + `SideDrawerGroups`） |
-| `ui/campus` | 消费流水（`StatementScreen`） |
+| `ui/campus` | 消费流水（`StatementScreen`）、校园卡设置（`CampusCardSettingsScreen` + `CampusCardViewModel`）、付款码（`PayCodeScreen` + `PayCodeViewModel`）、充值弹层与到账弹窗（`CampusRechargeUi`）、余额变化补拉（`YktBalanceChangeSync`）、结果总线（`PayCodeResultBus` / `CampusBalanceSync`） |
 | `ui/water` | 开水房整包（页 + VM + 流程块 + 入口弹层） |
 | `ui/wenqu` | 问渠整包（主页 / 蹲点 / 记录 / 设置 / 活动弹层 / 卡片） |
 | `ui/ujing` | U净三页（主页 / 下单 / 历史）+ VM |
@@ -1078,7 +1078,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 |---|---|---|---|
 | `ui/ebike` | 30 | 17,879 | 见 12.1：高德 Android SDK |
 | `ui/reminder` | 15 | 4,107 | 见 12.1：通知 + WorkManager |
-| `ui/campus` | 8 | 3,735 | 学工表单 / 教务导入的 WebView 外壳（要文件上传、SSL、定位、WebSettings 那一层），`CampusCardViewModel` 被 `ui/life` 的禁改文件调着，`PayCodeScreen` 用 `FLAG_SECURE` + 屏幕亮度 |
+| `ui/campus` | 2 | 646 | 只剩学工表单（`XgFormScreen`：文件上传、SSL、定位、WebSettings 那一层）与校历图解码（`CampusCalendarImageUiAndroid`）。校园卡设置 / 付款码 / 充值弹层 2026-11-25 晚已搬（§12.8） |
 | `ui/widget` | 12 | 3,112 | 见 12.1：Glance |
 | `ui/onboarding` | 1 | 2,592 | 首启引导；多步向导 + 权限申请 + 图片素材，iOS 侧这一版不做 |
 | `ui/jwvw` | 2 | 2,445 | `JwImportScreen`：教务导入总入口，WebView 全套 API + 文件选择 |
@@ -1098,7 +1098,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 |---|---|---|
 | 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份）；底栏三格「今日 / 课表 / 我的」（M3 `NavigationBar` + 图标 + 文字，选中主色 / 未选中 `onSurface` 0.6）；抽屉按 Android 的分组列 39 条，顶部**复用共享层的 `DrawerHeader` 身份区**（头像 + 姓名 + 遮罩学号 + 班级，整块点开进学籍信息）。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的**手势视差**（iOS 用 `ModalNavigationDrawer`，是另一套实现）；`我的` 那一格在 Android 上是从抽屉进的；抽屉顶部还缺 Android 的钱包区与「账号与登录」行 |
 | 教务登录后的自动填表 | iOS 用 `WKWebView` 让用户手点登录，登录成功落地后自动 `archive` | Android 有自动填表；iOS 需要注入 JS，能做 |
-| 凭证存储 | `IosKeychain`（CoreFoundation）+ 七个存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI / **一卡通**）已写，**iOS 编译验证卡在 runner 容量** | 教务（CAS）那套仍返回 `null`：iOS 从不保存教务密码，登录只在 `WKWebView` 里；一卡通已接（`IosYktCredentialStore`，service `secure_ykt`，含落盘 token 与失效标记），账号中心 / 消费流水 / 电费读得到学号。**但录入凭证的「校园卡设置」页还在 `:app`**，所以这四处的入口仍然停在「凭证未配置」 |
+| 凭证存储 | `IosKeychain`（CoreFoundation）+ 七个存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI / **一卡通**）已写，**iOS 编译验证卡在 runner 容量** | 教务（CAS）那套仍返回 `null`：iOS 从不保存教务密码，登录只在 `WKWebView` 里；一卡通已接（`IosYktCredentialStore`，service `secure_ykt`，含落盘 token 与失效标记），账号中心 / 消费流水 / 电费读得到学号。**2026-11-25 晚起录入界面也搬完了**（校园卡设置页 + 付款码页进 `commonMain`，见 §12.8），四处入口不再停在「凭证未配置」 |
 | 第三方仓库 | **胖乖 / U净 / 问渠已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 与 `kqcxSession()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账），快趣的 core 还在 `:app` |
 | 支付调起 | 一卡通走「收银台 URL 进 `WKWebView`」；胖乖 / 趣智走 `alipays://` 深链 | `Info.plist` 还没有 `LSApplicationQueriesSchemes`（`alipays` / `weixin`），深链会被系统拦 |
 | App 图标 | **已补**（2026-11-25）：`iosApp/JUWPHub/Assets.xcassets/AppIcon.appiconset`，1024 单尺寸 universal。用 `tools/app-icon/source.png` 的**前景层**重新合成满幅图——原图把圆角与投影烤进了像素，直接用会与 iOS 遮罩叠成双层圆角 | 启动屏仍不给（`UILaunchScreen` 空 dict = 纯色） |
@@ -1155,11 +1155,12 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | 6 | 抽屉「数据与备份」 | 能导出 JSON、能导入 Android 那边导出的备份 | Room 读写；**这也是 WebView 万一仍不通时的兜底路**：在 Android 上导好课表再导进来 |
 | 7 | 底栏「我的」 | 没有「AI 调课」行、没有「百宝箱」开关 | `showAiSchedule` / `showToolbox` 没传 |
 | 8 | 抽屉「账号中心」 | 没有问渠行、没有「可选 / AI 调课」那一节 | 两个可空回调没传 |
-| 9 | 抽屉「消费流水」/「电费」 | 落在「凭证未配置」态，本地表为空 | 凭证存储已接（Keychain），但**录入凭证的「校园卡设置」页还在 `:app`**，本端无处输入学号 + 查询密码 |
+| 9 | 抽屉「钱包」→「校园卡」 | 填学号 + 查询密码 → 「保存并开启」→ 回「消费流水」/「电费」看是否真拉到数据 | **这一页就是 Keychain 的真实录入点**（Y1 2026-11-25 晚搬进共享层）。页面上「充值」按钮与「余额提醒」整节**本来就不该出现**（两个平台槽位传 null，§12.8）；「寝室电费」的房间行能点、能改绑 |
+| 9b | 抽屉「钱包」→「付款码」 | 能出二维码与一维码、卡号行有数字、「下一个码」批内递增 | 码图由共享层 Compose 画布绘制（不再走 `android.graphics`）。**防截屏与亮度拉满都不会生效**（iOS 没有实现，§12.8）；扫码可读性要在真机上用另一部手机试 |
 
 **已知在 iOS 上点了会落在「这一页还在 Android 侧」的**：趣智（缺蓝牙扫描与设备表）、
-骑行 / 快趣、校园卡设置、成绩单、评教、分享、小组件设置、权限与存储、
-付款码、水印 / 拼接（纯位图管线）。
+骑行 / 快趣、成绩单、评教、分享、小组件设置、权限与存储、
+水印 / 拼接（纯位图管线）。
 
 ### 12.5 第二批：导入改走 WebView 同源取页 + 审计修复（2026-11-25 晚）
 
@@ -1228,14 +1229,37 @@ Cookie + Ktor 降为兜底（WebView 已销毁时，例如从成绩页触发的�
    这条路在真机上是否拿得到会话**尚未验证**——`IosWebFetch.available` 为假时（导入页已关）
    就可能落到「还没有登录教务：…」，那句话本身是准确的，不吞。
 
-### 12.8 一卡通凭证：存储已通，录入界面还没有（2026-11-25）
+### 12.8 一卡通凭证：录入界面已搬完（2026-11-25 晚，Y1）
 
 `IosYktCredentialStore`（Keychain，service `secure_ykt`，account 沿用 Android 键名
 `username`/`password`/`token`/`token_at`，`kSecAttrAccessibleAfterFirstUnlock`、
-**不写 `kSecAttrSynchronizable`** 即不进 iCloud）已接入，`yktCredentialStore()` /
-`accountCredentials()` 都不是 null 了。
+**不写 `kSecAttrSynchronizable`** 即不进 iCloud）早已接入，`yktCredentialStore()` /
+`accountCredentials()` 都不是 null。此前缺的是**录入界面**：`CAMPUS_CARD_SETTINGS` 与
+`PAY_CODE` 在 `:app`，所以消费流水与电费仍停在「凭证未配置」。
 
-但这只是「介质」通了。**消费流水与电费仍然停在「凭证未配置」**，因为没有任何界面能录入学号
-与密码——`CAMPUS_CARD_SETTINGS`（校园卡设置 713+727 行）与 `PAY_CODE`（付款码 350+350 行）
-还在 `:app`，要搬得补齐四件平台件：防截屏（无现成缝）、屏幕亮度（无现成缝）、码图栅格化
-（`CodeBitmaps` 走 `android.graphics`）、`LifeWidgetSync`。**下一单独立做**，不要试图顺手塞进别的流。
+Y1（2026-11-25 晚）把四个文件搬进 `shared/commonMain/.../ui/campus/`：`CampusCardSettingsScreen`、
+`CampusCardViewModel`、`PayCodeScreen`、`PayCodeViewModel`，连同它们用到的
+`CampusRechargeUi`、`YktBalanceChangeSync` 一起。`:app` 只剩宿主装配
+（`CampusCardPlatformAndroid.kt`）。iOS 侧 `IosNavigation.kt` 补了这两条路由，
+抽屉「钱包」组加「校园卡」「付款码」两条。
+
+**平台槽位（一律 §11.2 ④：null = 本平台没有 → 那块不渲染）**
+
+| 槽位 | Android | iOS | null 时 iOS 上少什么 |
+|---|---|---|---|
+| `onOpenPaymentUrl` | `startActivityOutsideApp(ACTION_VIEW)`（不加 NEW_TASK，与搬迁前一致） | 传 `null` | 「充值」按钮、充值免责声明、充值弹层 → 这一版不做充值（§10.4 那条「收银台进 WKWebView」另算） |
+| `notificationPermission` | `POST_NOTIFICATIONS` launcher | 传 `null` | 「余额提醒」整节（两个开关 + 阈值 + 间隔） |
+| `CampusCardViewModel(alerts = …)` | `BalanceAlertReminder.onSettingsChanged` / `ensurePeriodicWork` | 不传 | 排程不生效（与上一行成对：一个管显示、一个管排程） |
+| `vpnActive` | `JwVpnDetector` | 不传 | 失败文案退回「换一条网络」，不再点名「关代理」 |
+| `powerRoomPicker` | 宿主建 `PowerRoomPickerViewModel` | **真实现** | 拿不到仓库时才为 null → 「寝室电费」整节不渲染。iOS 现在能选/改绑房间 |
+| `PayCodeScreen(windowGuard = …)` | `FLAG_SECURE` + 亮度拉满 | 传 `null` | 两项都不做：码照常显示，只是没防截屏、不调亮度 |
+| `PayCodeViewModel(vibrate = …)` | `ReminderVibration` | 不传 | 扫码扣款那一刻不震 |
+| 码图栅格化 | 曾有 `CodeBitmaps` → `android.graphics.Bitmap` | 无 | **不再需要平台件**：位阵改由 `ui/common/BarcodeMatrixImage` 用 Compose 画布画（列合并 + 整像素对齐），两端同一份输出，`recycle()` 三处一并删除 |
+
+**AppServices 没有新增成员**：仓库 / 凭证 / 偏好 / 数据库 / 收件箱 / 推小组件全部用既有成员。
+
+**这条链断在哪**：填学号密码 → `verifyAndEnable`（真登录一次，失败不落库）→
+`credentialStore.save` → Keychain → `setCampusCardEnabled(true)` → 消费流水 / 电费页
+`credentialStore.read()` 拿到同一份凭证 → `YktRepository` 真发请求。代码上是连通的；
+**没验的是真机**：Keychain 写入后跨进程读回、学校接口在 iOS 上的实际返回、码图扫码可读性。
+

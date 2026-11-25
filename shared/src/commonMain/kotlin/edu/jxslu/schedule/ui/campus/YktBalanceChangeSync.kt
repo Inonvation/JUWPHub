@@ -1,17 +1,15 @@
 package edu.jxslu.schedule.ui.campus
 
-import android.content.Context
-import android.util.Log
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.data.local.JuwDatabase
-import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.prefs.setYktLastBalanceFen
 import edu.jxslu.schedule.data.prefs.yktLastBalanceFen
 import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer
 import edu.jxslu.schedule.domain.YktBalanceChange
+import edu.jxslu.schedule.platform.Logger
+import edu.jxslu.schedule.platform.Services
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.concurrent.Volatile
 
 /**
  * 余额变化 → 补拉一页最新流水（2026-11-06）。
@@ -30,7 +28,7 @@ import kotlinx.coroutines.sync.withLock
  * 基线落盘（`DisplayPrefsStore.yktLastBalanceFen`）：进程被杀后第一次取余额也要能判出
  * 「这段时间扣过钱」。首次（从未记录）只建基线不补拉，判定见 [YktBalanceChange]。
  *
- * 旁路纪律（同收件箱那套）：整段挂在 [Graph.appScope]、全部吞错——余额链路本身已经
+ * 旁路纪律（同收件箱那套）：整段挂在 [Services.appScope]、全部吞错——余额链路本身已经
  * 成功，补拉流水失败不影响任何展示，下一次余额观察还会再来。
  *
  * 挂点（都是「余额已到手」的结果点，别在别处再发一份）：
@@ -39,6 +37,13 @@ import kotlinx.coroutines.sync.withLock
  *   未必跑完第一轮，这里兜一份；同键幂等）；
  * - `BalanceAlertReminder.checkYkt`：余额提醒的周期核对（后台也能让收件箱跟上）；
  * - `LifeWidgetSync.maybeFetchCampusBalance`：桌面生活小组件的后台取数。
+ *
+ * ## 为什么搬进 commonMain（iOS 移植 Y1，2026-11-25）
+ *
+ * 它原来吃一个 `Context`，只为拿 `Graph` 里的四件东西；四件在 [Services] 里都有，
+ * 于是参数整条去掉，改由装配根给同一份实例（Android 仍是 `Graph` 缓存的那一份，
+ * iOS 是 `IosServices` 里的同一份）。落盘基线仍在 `DisplayPrefsStore`，
+ * 两端路径口径不变。
  */
 object YktBalanceChangeSync {
 
@@ -57,25 +62,27 @@ object YktBalanceChangeSync {
     /**
      * 报告一次「刚取到的正式卡余额」（分）。
      *
-     * 非 suspend、立即返回：调用方都是展示链路，补拉流水在 [Graph.appScope] 上跑，
+     * 非 suspend、立即返回：调用方都是展示链路，补拉流水在 [Services.appScope] 上跑，
      * 绝不因为这条旁路拖慢/挡住余额展示或付款码流程。
      */
-    fun onBalanceObserved(context: Context, cardFen: Long) {
+    fun onBalanceObserved(cardFen: Long) {
         if (lastReportedFen == cardFen) return
         lastReportedFen = cardFen
-        val appContext = context.applicationContext
-        Graph.appScope.launch {
+        Services.current.appScope().launch {
             runCatching {
                 mutex.withLock {
-                    val prefs = Graph.displayPrefs(appContext)
+                    val prefs = Services.current.displayPrefs()
                     val previous = prefs.yktLastBalanceFen()
                     val pull = YktBalanceChange.shouldPullStatement(previous, cardFen)
                     // 先记基线再补拉：并发观察同一笔变化时只有第一条真正发请求。
                     // 没变化就不写盘（每轮余额核对都写一次 DataStore 没必要）。
                     if (previous != cardFen) prefs.setYktLastBalanceFen(cardFen)
                     if (!pull) return@withLock
-                    val credentials = Graph.yktCredentialStore(appContext).read() ?: return@withLock
-                    YktTurnoverSyncer(Graph.yktRepository(appContext), juwDatabase(appContext)) {
+                    val credentials = Services.current.yktCredentialStore()?.read() ?: return@withLock
+                    YktTurnoverSyncer(
+                        Services.current.yktRepository(),
+                        Services.current.database(),
+                    ) {
                         postYktPaymentInbox(it)
                     }.sync(
                         username = credentials.username,
@@ -87,7 +94,7 @@ object YktBalanceChangeSync {
             }.onFailure {
                 // 只留日志：补拉失败不影响余额展示；基线已前进，要等下一次余额变化再补
                 //（进账单页那条老路照常兜底）。
-                Log.w(TAG, "余额变化后补拉流水失败（旁路，进账单页仍可补上）", it)
+                Logger.w(TAG, "余额变化后补拉流水失败（旁路，进账单页仍可补上）", it)
             }
         }
     }

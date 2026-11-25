@@ -1,10 +1,5 @@
 package edu.jxslu.schedule.ui.campus
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -37,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,25 +40,23 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.domain.BalanceAlert
-import edu.jxslu.schedule.domain.MoneyFormat
-import edu.jxslu.schedule.domain.RechargeDisclaimer
-import edu.jxslu.schedule.domain.YktArrival
-import edu.jxslu.schedule.data.ykt.rechargeTargetCard
 import edu.jxslu.schedule.data.session.LoginState
 import edu.jxslu.schedule.data.session.LoginStateRules
 import edu.jxslu.schedule.data.session.LoginTarget
 import edu.jxslu.schedule.data.session.SessionStatus
-import edu.jxslu.schedule.startActivityOutsideApp
+import edu.jxslu.schedule.data.ykt.rechargeTargetCard
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.BalanceAlert
+import edu.jxslu.schedule.domain.MoneyFormat
+import edu.jxslu.schedule.domain.RechargeDisclaimer
+import edu.jxslu.schedule.domain.YktArrival
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AccountCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
@@ -78,13 +72,12 @@ import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
+import edu.jxslu.schedule.ui.common.rememberResumeTick
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.life.PowerRoomPickerSheet
 import edu.jxslu.schedule.ui.life.PowerRoomPickerViewModel
-import edu.jxslu.schedule.ui.life.powerRoomPickerFactory
 import kotlinx.coroutines.launch
-import androidx.compose.ui.text.font.FontWeight
 
 /**
  * 我的 → 校园卡（DESIGN §3.10）：管开启状态、凭证与两个余额提醒，不看付款码。
@@ -95,27 +88,61 @@ import androidx.compose.ui.text.font.FontWeight
  * 凭证交互：默认未开启；填学号 + 查询密码点「保存并开启」，真实登录验证成功才落库并开启。
  * 已开启时本卡只显示学号与「查询密码 · 更换」，改密码或换学号才展开输入框；
  * 「关闭并清除」在卡尾（危险操作，确认后清凭证并回落两个提醒）。
+ *
+ * ## 三处平台槽位（iOS 移植 Y1，2026-11-25）
+ *
+ * 搬进 `shared/commonMain` 后，页面里那些「只有 Android 有」的动作按
+ * `design/ios-port.md` §11.2 ④ 收成可空参数，**null = 本平台确实没有，对应那块不渲染**：
+ *
+ * | 槽位 | 谁给 | null 时 iOS 上少什么 |
+ * |---|---|---|
+ * | [onOpenPaymentUrl] | Android：`openExternal`（`Intent.ACTION_VIEW` + 过渡静止） | 余额卡上的「充值」按钮、充值免责声明、充值弹层 → **这一版不做充值** |
+ * | [notificationPermission] | Android：`POST_NOTIFICATIONS` launcher | 「余额提醒」整节（阈值 / 间隔 / 两个开关） |
+ * | [powerRoomPicker] | 两端都给（电费仓库 + 凭证存储两端都有） | 拿不到仓库时才为 null → 「寝室电费」整节的房间行不渲染 |
+ *
+ * 余额提醒的**排程**钩子不在页面上，在 `CampusCardViewModel(alerts = …)`：页面只管两件事
+ * 「要不要显示这一节」与「点开关时请一次通知权限」，排程归 VM。
+ *
+ * iOS 的「回到前台补检到账」走 `rememberResumeTick()`（`ui/common/ResumedTicker` 的既有
+ * expect/actual，iOS 侧恒 0 = 只在进页时做一次），与搬迁前 `LifecycleEventObserver` 的
+ * 观感一致：进页一次 + 每次回到前台一次。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CampusCardSettingsScreen(
+    viewModel: CampusCardViewModel,
     onBack: () -> Unit,
     /** 跳消费流水页（DESIGN §4.19 B4/B5） */
     onOpenStatement: () -> Unit = {},
-    viewModel: CampusCardViewModel = viewModel(
-        factory = CampusCardViewModel.Factory(LocalContext.current.applicationContext),
-    ),
+    /**
+     * 打开外部支付链接（微信 / 官方收银台），返回 false = 打不开（页面已给文案）。
+     *
+     * **null = 本平台不做充值**：余额卡上的「充值」按钮整块不渲染，充值免责声明与充值弹层
+     * 也随之不出现（iOS 这版没有 `LSApplicationQueriesSchemes`，拉起微信必被系统拦下）。
+     * 消费流水入口照常在——它不依赖任何平台能力。
+     */
+    onOpenPaymentUrl: ((String) -> Boolean)? = null,
+    /**
+     * 通知权限申请；**null = 本平台没有余额提醒的通知渠道** → 「余额提醒」整节不渲染。
+     *
+     * 与 `CampusCardViewModel(alerts = null)` 成对：一个管显示，一个管排程。
+     * 只给其中一个会出现「开关点了、排程不生效」的死开关。
+     */
+    notificationPermission: CampusNotificationPermission? = null,
+    /**
+     * 「选择寝室」弹层的状态机，由宿主建（Android `viewModel { … }`、iOS `remember { … }`）。
+     * **null = 宿主拿不到电费仓库 / 凭证存储** → 「寝室电费」整节不渲染。
+     */
+    powerRoomPicker: PowerRoomPickerViewModel? = null,
 ) {
     val enabled by viewModel.enabled.collectAsStateWithLifecycle()
     val balance by viewModel.balance.collectAsStateWithLifecycle()
     val arrivalState by viewModel.arrivalState.collectAsStateWithLifecycle()
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    // Activity 窗口 context：通知权限申请、外部跳转（微信/浏览器）都用它
-    val context = LocalContext.current
 
     // 超时安抚提示（只弹一次：Timeout 状态被确认后转 Idle）
-    androidx.compose.runtime.LaunchedEffect(arrivalState) {
+    LaunchedEffect(arrivalState) {
         val st = arrivalState
         if (st is CampusCardViewModel.ArrivalState.Timeout) {
             snackbar.showNotice(
@@ -130,16 +157,11 @@ fun CampusCardSettingsScreen(
         }
     }
 
-    // 从微信/浏览器返回的瞬间立即补检一轮（不等 5 秒周期）；同时兜进程被杀重启恢复
-    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                viewModel.onHostResume()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    // 进页一次 + 每次回到前台一次（不改搬迁前的口径：`LifecycleEventObserver` 注册时
+    // 会补发一次 ON_RESUME，等价于这里的「进页也跑一次」）。从微信/浏览器返回的瞬间
+    // 立即补检一轮，不等 5 秒周期；进程被杀重启的恢复路径在 VM 的 init 里。
+    LaunchedEffect(rememberResumeTick()) {
+        viewModel.onHostResume()
     }
 
     // 已保存学号**明文回填**（2026-09-24 用户拍板）：进页时读一次加密存储填进输入框，
@@ -162,18 +184,15 @@ fun CampusCardSettingsScreen(
     // 房号显示取本机最新读数（零网络；权威状态以生活页电费卡为准），改绑成功后就地更新
     var showRoomPicker by remember { mutableStateOf(false) }
     var roomLabel by remember { mutableStateOf<String?>(null) }
-    val roomPickerViewModel: PowerRoomPickerViewModel = viewModel(
-        factory = powerRoomPickerFactory(context.applicationContext),
-    )
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        roomLabel = runCatching { Graph.powerReadingStore(context.applicationContext).latest() }
+    LaunchedEffect(Unit) {
+        roomLabel = runCatching { Services.current.powerReadingStore().latest() }
             .getOrNull()?.roomName?.takeIf { it.isNotBlank() }
     }
 
     // 充值免责声明（与生活页同一条口径，domain/RechargeDisclaimer）：充值入口打开
     // 弹层前先过提醒，勾「一周内不再提醒」静默 7 天；首次（从未确认过）锁 5 秒
     // 才能关，之后任何一次弹出立即可关。继续或取消都算「已确认」。
-    val displayPrefs = remember { Graph.displayPrefs(context) }
+    val displayPrefs = remember { Services.current.displayPrefs() }
     val disclaimerSuppressUntil by displayPrefs.rechargeDisclaimerSuppressUntil
         .collectAsStateWithLifecycle(initialValue = 0L)
     val disclaimerSeenAt by displayPrefs.rechargeDisclaimerSeenAt
@@ -204,20 +223,12 @@ fun CampusCardSettingsScreen(
         scope.launch { snackbar.showNotice(AppNoticeVisuals(text, tone = tone)) }
     }
 
-    // 两个提醒开关共用：开启那一刻请求 POST_NOTIFICATIONS（API 33+），拒绝不阻塞开关本身
-    // （口径同「我的 → 上课提醒」页：功能在系统设置里授权后自动生效）
-    val notifPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (!granted) showNotice("未授予通知权限，提醒不会显示；可在系统设置里重新开启", NoticeTone.Warning)
-    }
+    // 两个提醒开关共用：开启那一刻请求通知权限，拒绝不阻塞开关本身
+    // （口径同「我的 → 上课提醒」页：功能在系统设置里授权后自动生效）。
+    // 本平台没有通知渠道（notificationPermission = null）时这一节整块不渲染，走不到这里。
     val requestNotifPermission = {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(
-                context, Manifest.permission.POST_NOTIFICATIONS,
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        notificationPermission?.request {
+            showNotice("未授予通知权限，提醒不会显示；可在系统设置里重新开启", NoticeTone.Warning)
         }
     }
 
@@ -232,7 +243,7 @@ fun CampusCardSettingsScreen(
     }
 
     Scaffold(
-        // 与其余二级页同口径：M3 默认 inset（本页跑在 SubpageActivity 独立窗口里，无外层垫 inset）
+        // 与其余二级页同口径：M3 默认 inset（本页跑在二级页窗口里，无外层垫 inset）
         snackbarHost = { AppSnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
@@ -254,9 +265,9 @@ fun CampusCardSettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val profileName by remember { Graph.displayPrefs(context).profileName }
+            val profileName by remember { Services.current.displayPrefs().profileName }
                 .collectAsStateWithLifecycle(initialValue = "")
-            val profileStudentId by remember { Graph.displayPrefs(context).profileStudentId }
+            val profileStudentId by remember { Services.current.displayPrefs().profileStudentId }
                 .collectAsStateWithLifecycle(initialValue = "")
             val suspendedTargets by SessionStatus.suspended.collectAsStateWithLifecycle()
             val yktState = LoginStateRules.derive(
@@ -334,31 +345,37 @@ fun CampusCardSettingsScreen(
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 "正在等待充值到账（${MoneyFormat.fromFen(watching.orderFen)}）· 约 " +
-                                    "${YktArrival.arrivalPollIntervalMs(System.currentTimeMillis() - watching.startedAt) / 1000} 秒检测一次",
+                                    "${YktArrival.arrivalPollIntervalMs(AppClock.nowMillis() - watching.startedAt) / 1000} 秒检测一次",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
                             )
                         }
                     }
+                    // 充值入口（2026-10-08 起「充值」与「消费流水」并排）：本平台没有
+                    // 拉起外部支付的能力（onOpenPaymentUrl = null）时只留「消费流水」一条，
+                    // 别给一个点了没反应的按钮（design/ios-port.md §11.2 ④）
+                    val openPayment = onOpenPaymentUrl
                     Row(
                         modifier = Modifier.padding(top = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Button(
-                            onClick = {
-                                if (RechargeDisclaimer.isSuppressed(
-                                        disclaimerSuppressUntil,
-                                        System.currentTimeMillis(),
-                                    )
-                                ) {
-                                    showRechargeSheet = true
-                                } else {
-                                    showRechargeDisclaimer = true
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            enabled = watching == null,
-                        ) { Text("充值") }
+                        if (openPayment != null) {
+                            Button(
+                                onClick = {
+                                    if (RechargeDisclaimer.isSuppressed(
+                                            disclaimerSuppressUntil,
+                                            AppClock.nowMillis(),
+                                        )
+                                    ) {
+                                        showRechargeSheet = true
+                                    } else {
+                                        showRechargeDisclaimer = true
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                enabled = watching == null,
+                            ) { Text("充值") }
+                        }
                         OutlinedButton(
                             onClick = onOpenStatement,
                             modifier = Modifier.weight(1f),
@@ -391,7 +408,7 @@ fun CampusCardSettingsScreen(
                         },
                     )
                     Text(
-                        "付款码等同现金，请勿截图或分享。凭证 Keystore 加密只存本机。",
+                        "付款码等同现金，请勿截图或分享。凭证加密后只存本机。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                         modifier = Modifier.padding(top = 4.dp),
@@ -466,63 +483,70 @@ fun CampusCardSettingsScreen(
                 }
             }
 
-            // 寝室房间（DESIGN §4.24）：官方要求先在缴费平台确认寝室，电费查询与充值才可用
-            SettingsSection(
-                title = "寝室电费",
-                subtitle = "电费查询与充值都以缴费平台确认的房间为准",
-            ) {
-                SettingValueRow(
-                    title = "房间",
-                    value = roomLabel ?: "未设置",
-                    enabled = enabled,
-                    onClick = {
-                        roomPickerViewModel.start()
-                        showRoomPicker = true
-                    },
-                )
+            // 寝室房间（DESIGN §4.24）：官方要求先在缴费平台确认寝室，电费查询与充值才可用。
+            // 宿主没给选择器（拿不到电费仓库或凭证）时整节不渲染——它是唯一改绑入口。
+            if (powerRoomPicker != null) {
+                SettingsSection(
+                    title = "寝室电费",
+                    subtitle = "电费查询与充值都以缴费平台确认的房间为准",
+                ) {
+                    SettingValueRow(
+                        title = "房间",
+                        value = roomLabel ?: "未设置",
+                        enabled = enabled,
+                        onClick = {
+                            powerRoomPicker.start()
+                            showRoomPicker = true
+                        },
+                    )
+                }
             }
 
-            // 余额提醒（DESIGN §3.13）：两个来源共用上面那份凭证；参数行只在开关打开时出现
-            SettingsSection(
-                title = "余额提醒",
-                subtitle = "低于阈值发通知，共用这份凭证",
-            ) {
-                SettingSwitchRow(
-                    title = "寝室电费",
-                    icon = AppIcons.Home01,
-                    checked = powerAlertEnabled,
-                    onCheckedChange = { want -> toggleAlert(want) { viewModel.setPowerAlertEnabled(it) } },
-                )
-                AlertParams(
-                    visible = powerAlertEnabled,
-                    threshold = BalanceAlert.powerLabel(powerAlertYuan),
-                    interval = BalanceAlert.intervalLabel(powerAlertIntervalHours),
-                    onThreshold = { showPowerPicker = true },
-                    onInterval = { showPowerIntervalPicker = true },
-                )
-                SettingSwitchRow(
-                    title = "一卡通余额",
-                    icon = AppIcons.CreditCard,
-                    checked = yktAlertEnabled,
-                    onCheckedChange = { want -> toggleAlert(want) { viewModel.setYktAlertEnabled(it) } },
-                )
-                AlertParams(
-                    visible = yktAlertEnabled,
-                    threshold = BalanceAlert.yktLabel(yktAlertYuan),
-                    interval = BalanceAlert.intervalLabel(yktAlertIntervalHours),
-                    onThreshold = { showYktPicker = true },
-                    onInterval = { showYktIntervalPicker = true },
-                )
-                SettingsNote(
-                    "开关打开后可设置阈值与检查间隔；后台按间隔检查（默认 6 小时），" +
-                        "可能被省电推迟，余额持续偏低只提醒一次。",
-                )
+            // 余额提醒（DESIGN §3.13）：两个来源共用上面那份凭证；参数行只在开关打开时出现。
+            // 本平台没有通知渠道（notificationPermission = null）时整节不渲染：
+            // 开关写了偏好也没人执行，只会是一堆亮着但永远不生效的死开关。
+            if (notificationPermission != null) {
+                SettingsSection(
+                    title = "余额提醒",
+                    subtitle = "低于阈值发通知，共用这份凭证",
+                ) {
+                    SettingSwitchRow(
+                        title = "寝室电费",
+                        icon = AppIcons.Home01,
+                        checked = powerAlertEnabled,
+                        onCheckedChange = { want -> toggleAlert(want) { viewModel.setPowerAlertEnabled(it) } },
+                    )
+                    AlertParams(
+                        visible = powerAlertEnabled,
+                        threshold = BalanceAlert.powerLabel(powerAlertYuan),
+                        interval = BalanceAlert.intervalLabel(powerAlertIntervalHours),
+                        onThreshold = { showPowerPicker = true },
+                        onInterval = { showPowerIntervalPicker = true },
+                    )
+                    SettingSwitchRow(
+                        title = "一卡通余额",
+                        icon = AppIcons.CreditCard,
+                        checked = yktAlertEnabled,
+                        onCheckedChange = { want -> toggleAlert(want) { viewModel.setYktAlertEnabled(it) } },
+                    )
+                    AlertParams(
+                        visible = yktAlertEnabled,
+                        threshold = BalanceAlert.yktLabel(yktAlertYuan),
+                        interval = BalanceAlert.intervalLabel(yktAlertIntervalHours),
+                        onThreshold = { showYktPicker = true },
+                        onInterval = { showYktIntervalPicker = true },
+                    )
+                    SettingsNote(
+                        "开关打开后可设置阈值与检查间隔；后台按间隔检查（默认 6 小时），" +
+                            "可能被省电推迟，余额持续偏低只提醒一次。",
+                    )
+                }
             }
 
             // 安全说明与免责集中在页尾（DESIGN §3.10）：付款码、凭证存储、风险自负三件事逐字保留
             FooterDisclaimer(
                 body = "**付款码等同现金**，会随时变更，**请勿截图或分享**。" +
-                    "学号与密码**只存本机**（Keystore 加密，排除云备份），登录时只发给学校对应接口；" +
+                    "学号与密码**只存本机**（加密存储，排除云备份），登录时只发给学校对应接口；" +
                     "**启用风险自负**。完整条款见「设置 → 条款与声明」。",
             )
         }
@@ -581,9 +605,9 @@ fun CampusCardSettingsScreen(
     }
 
     // 选择寝室（设置 / 改绑）：与生活页同一个弹层与状态机；成功后更新行上的房号
-    if (showRoomPicker) {
+    if (showRoomPicker && powerRoomPicker != null) {
         PowerRoomPickerSheet(
-            viewModel = roomPickerViewModel,
+            viewModel = powerRoomPicker,
             onDismiss = { showRoomPicker = false },
             onBound = { room ->
                 showRoomPicker = false
@@ -623,13 +647,13 @@ fun CampusCardSettingsScreen(
     // 充值流程（DESIGN §4.19「充值」）：金额弹层 → 二次确认 → 下单 → 直拉微信 → 等待到账
     if (showRechargeDisclaimer) {
         RechargeDisclaimerDialog(
-            closableAfterMs = RechargeDisclaimer.closeLockMs(disclaimerSeenAt, System.currentTimeMillis()),
+            closableAfterMs = RechargeDisclaimer.closeLockMs(disclaimerSeenAt, AppClock.nowMillis()),
             onContinue = { suppressWeek ->
                 showRechargeDisclaimer = false
                 if (suppressWeek) {
                     scope.launch {
                         displayPrefs.setRechargeDisclaimerSuppressUntil(
-                            RechargeDisclaimer.suppressUntil(System.currentTimeMillis()),
+                            RechargeDisclaimer.suppressUntil(AppClock.nowMillis()),
                         )
                     }
                 }
@@ -643,7 +667,9 @@ fun CampusCardSettingsScreen(
         )
     }
 
-    if (showRechargeSheet) {
+    // 充值弹层只在能拉起外部支付时出现（onOpenPaymentUrl 非空才会把 showRechargeSheet 点亮）
+    val openPayment = onOpenPaymentUrl
+    if (showRechargeSheet && openPayment != null) {
         RechargeSheet(
             balanceFen = balance?.totalFen,
             // 电子账户余额来自同一份 queryCard（ACCOUNT 行）；null = 不显示账户切换
@@ -671,12 +697,9 @@ fun CampusCardSettingsScreen(
                     viewModel.recharge(
                         yuan,
                         targetAccount = target,
-                        // 统一走 startActivityOutsideApp：拉起前把本窗口的推入/滑出过渡换成
-                        // 静止，防止从外部应用返回时重放右推动画（微信是 singleTask，开不进
-                        // 本 task，「不设 NEW_TASK」只救得了浏览器——2026-09-26 修页面跳动）
-                        launchExternal = { intent ->
-                            runCatching { context.startActivityOutsideApp(intent) }.isSuccess
-                        },
+                        // 平台动作由宿主注入：Android 那边顺手把本窗口的推入/滑出过渡换成静止，
+                        // 防止从外部应用返回时重放右推动画（2026-09-26 修页面跳动）
+                        launchExternal = openPayment,
                     ) { notice ->
                         busy = false
                         progressJob.cancel()
@@ -701,7 +724,7 @@ fun CampusCardSettingsScreen(
     }
 
     // 到账弹窗**只由常驻的 RechargeHost 弹**（`ui/life/RechargeHost.kt`），本页不再重复弹。
-    // 为什么不能在这里也弹：本页是 SubpageActivity 里的另一个 CampusCardViewModel 实例，
+    // 为什么不能在这里也弹：本页是另一个窗口里的另一个 CampusCardViewModel 实例，
     // 两个实例各自跑一份到账轮询、各自持有自己的 ArrivalState——在这里弹一次、用户点掉，
     // 回到主窗口 RechargeHost 那份仍是「未确认」，于是同一个到账会**再弹一次**。
     // 而两个实例之间没有共享状态，谁先到账谁后到账不可控，只能让「弹」这件事只归常驻宿主。
@@ -709,10 +732,9 @@ fun CampusCardSettingsScreen(
     // 属于本页自己的轮询，不与宿主重复。
 
     // 「支付成功」：付款码页检测到扣款会自己退出，由共享宿主弹在退回来的这一页
-    // （`CampusPayResultDialogHost`，2026-10-07 起本页与 MainActivity 根层共用一份实现）
+    // （`CampusPayResultDialogHost`，2026-10-07 起本页与主窗口根层共用一份实现）
     CampusPayResultDialogHost()
 }
-
 
 /**
  * 提醒参数两行（阈值 / 检查间隔）：开关关着就整段不出现，卡片末尾那行注记说明怎么打开。
