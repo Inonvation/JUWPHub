@@ -126,6 +126,13 @@
 
 ## 首启引导只服务新安装
 
+- **页面本体在共享层**（2026-11-25，iOS 移植 S22）：`shared/src/commonMain/.../ui/onboarding/
+  OnboardingScreen.kt` 是两端唯一实现，`:app` 只留装配根 `OnboardingActivity`（把六个平台槽位
+  填成非空）+ `ui/onboarding/AndroidOnboarding.kt`（CAS 会话 + 凭证保险箱、品牌位图 id）。
+  改引导只改共享层那一份，别再往 `:app` 加第二份；步骤按平台能力现算（`qzxyRepository()` 为
+  null 时趣智那一步整步不出现），加步骤要同时想清楚「哪个平台没有它」。
+- **引导里没有权限申请**：通知 / 日历 / 定位 / 存储四类都不在这一页，六屏全是账号配置。
+  别按「权限步」的旧印象去找 `requestPermission`——要找去 `ui/me` 的权限与存储页。
 - **首启引导只服务新安装**（2026-09-24，DESIGN §3.16）：`onboarding_seen` 为 false 时
   `MainActivity` 拉起 `OnboardingActivity`（六屏：欢迎 → 学校统一认证 → 一卡通·电费 → 胖乖生活 →
   趣智校园 → 完成，**每步可跳过**，跳过只丢那一步的凭据）。老用户没有这个键 ⇒ 不弹引导，只在「我的」页

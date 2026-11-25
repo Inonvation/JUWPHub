@@ -13,21 +13,20 @@ import kotlin.time.TimeSource
  * 关闭锁的剩余毫秒（0 = 可关）：强制阅读弹窗的倒计时。
  *
  * **用单调时钟而不是墙钟**：用户把系统时间往前调就能把锁瞬间走完，`TimeSource.Monotonic`
- * 不受改时间、时区与 NTP 校正影响（`:app` 那份用的是 `SystemClock.elapsedRealtime()`，
- * 语义相同）。
+ * 不受改时间、时区与 NTP 校正影响。
  *
  * 计时起点是**本组合第一次进入时**，不是宿主算锁的那一刻——弹窗还没上屏就把秒数走掉，
  * 锁就白设了。
  *
- * ## 为什么与 `:app` 的 `rememberCloseLock` 并存
+ * ## 现在是全仓唯一一份（2026-11-25）
  *
- * `:app` 的 `ui/common/LegalDialogs.kt` 里有一份同名同语义的实现，仍被长文声明弹窗与
- * U净页用着；那个文件在本次改造的禁改清单里，删不掉。这里声明成 `internal`，
- * 所以 `:app` 看不见它（不会出现同名重载歧义），等 `LegalDialogs.kt` 解冻后删掉那边那份、
- * 把这里改成 `public` 即可——**届时全仓只剩一份**。
+ * 原先 `:app` 的 `ui/common/LegalDialogs.kt` 里有一份同名同语义的实现（用 Android 的
+ * `SystemClock.elapsedRealtime()`），本文件这份声明成 `internal` 与它并存。
+ * 那个文件随首启引导一起搬进共享层（iOS 也要弹同一份声明），两份合并成这一份，
+ * 因此改成 `public`——`:app` 的长文弹窗、U净页与引导页都指向这里。
  */
 @Composable
-internal fun rememberCloseLock(totalMs: Long): Long {
+fun rememberCloseLock(totalMs: Long): Long {
     var remainingMs by remember(totalMs) { mutableLongStateOf(totalMs) }
     LaunchedEffect(totalMs) {
         if (totalMs <= 0L) {

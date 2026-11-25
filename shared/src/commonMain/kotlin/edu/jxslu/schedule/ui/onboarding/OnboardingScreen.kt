@@ -1,9 +1,5 @@
 package edu.jxslu.schedule.ui.onboarding
 
-import android.app.Activity
-import android.os.Build
-import android.view.HapticFeedbackConstants
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -32,7 +28,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -94,11 +89,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -111,30 +102,32 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.R
-import edu.jxslu.schedule.SubpageActivity
 import edu.jxslu.schedule.SubpageScreen
 import edu.jxslu.schedule.data.prefs.OnboardingSyncOutcome
-import edu.jxslu.schedule.data.repo.ScheduleSync
+import edu.jxslu.schedule.data.qiekj.QiekjRepository
+import edu.jxslu.schedule.data.qzxy.QzxyRepository
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.repo.TeachingCalendarSync
 import edu.jxslu.schedule.data.session.CasEnsureResult
-import edu.jxslu.schedule.data.session.CasSession
-import edu.jxslu.schedule.data.session.CredentialVault
+import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktException
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.FirstRunNotice
 import edu.jxslu.schedule.domain.FirstRunNotices
 import edu.jxslu.schedule.domain.NoticeConsent
 import edu.jxslu.schedule.domain.QzxySessionLink
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.ui.common.AppBackHandler
+import edu.jxslu.schedule.ui.common.BrandMark
 import edu.jxslu.schedule.ui.common.DialogWindowFadeEffect
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.NoticeDialog
 import edu.jxslu.schedule.ui.common.NoticeFeedback
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.emphasizedText
+import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jwvw.JwImportResultBus
 import edu.jxslu.schedule.ui.theme.rememberAnimationsEnabled
@@ -144,14 +137,20 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-/** 引导步骤（DESIGN §3.16）。顺序即流程，[Done] 是终点。 */
-private enum class Step(val index: Int, val title: String, val desc: String) {
-    Welcome(0, "欢迎", ""),
-    Jw(1, "学校统一认证", "仅支持江西水利电力大学账号。教务 · 学工（报修 / 请假）· 盖章成绩单，共用这一套账号"),
-    Ykt(2, "一卡通 · 寝室电费", "仅支持江西水利电力大学一卡通。余额、付款码、消费流水、电费共用这份凭证（学号 + 查询密码，不是统一认证密码）"),
-    Qiekj(3, "胖乖生活", "开水房的账号，与学校账号无关，需要单独登录"),
-    Qzxy(4, "趣智校园", "洗澡开热水的账号，与学校账号无关；充值在登录后的官方小程序完成"),
-    Done(5, "配置完成", "没配置的项随时能在「我的」页补上，那里也能看到每个平台的登录状态"),
+/**
+ * 引导步骤（DESIGN §3.16）。顺序即流程，[Done] 是终点。
+ *
+ * **不再带固定的 `index`**（iOS 移植 S22）：某一步的平台能力缺失时那一步整个不出现
+ * （iOS 没有趣智的会话存储，见 `OnboardingSlots`），进度条段数与「上一步 / 下一步」
+ * 都得按**实际在场的步骤**算，而不是按枚举序号。序号是描述，`steps.indexOf` 才是真相。
+ */
+private enum class Step(val title: String, val desc: String) {
+    Welcome("欢迎", ""),
+    Jw("学校统一认证", "仅支持江西水利电力大学账号。教务 · 学工（报修 / 请假）· 盖章成绩单，共用这一套账号"),
+    Ykt("一卡通 · 寝室电费", "仅支持江西水利电力大学一卡通。余额、付款码、消费流水、电费共用这份凭证（学号 + 查询密码，不是统一认证密码）"),
+    Qiekj("胖乖生活", "开水房的账号，与学校账号无关，需要单独登录"),
+    Qzxy("趣智校园", "洗澡开热水的账号，与学校账号无关；充值在登录后的官方小程序完成"),
+    Done("配置完成", "没配置的项随时能在「我的」页补上，那里也能看到每个平台的登录状态"),
 }
 
 /**
@@ -162,8 +161,6 @@ private enum class Step(val index: Int, val title: String, val desc: String) {
  * 只有三项全 Failed 才显示失败行）；[DoneFailed] = 三项都 Failed。
  */
 private enum class BgSyncPhase { Idle, Running, DoneOk, DoneFailed }
-
-private const val TOTAL_STEPS = 5
 
 /** 验证成功后「对勾停留」再自动进下一步的时长。 */
 private const val SUCCESS_HOLD_MS = 900L
@@ -198,18 +195,63 @@ private val RiseEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
  * 第 2 步用原生表单收密码，是整个 App 里唯一明确告诉用户「我们会保存这个密码」的地方
  * —— 因为「会话失效后自动续登」必须要有密码才做得到（WebView 登录拿不到密码）。
  *
+ * ## 本页在共享层，平台差异全部走可空槽位（iOS 移植 S22）
+ *
+ * 依赖分两类，别混：
+ * - **两端都建得起来的**：从 `Services.current` 直接取（偏好、各业务仓库与同步器），
+ *   不给参数——包一层槽位只会多一条会走偏的路。
+ * - **只有某个平台有的**：[jwLogin] [onOpenJwLogin] [brands] [onOpenService]
+ *   [onBackAtWelcome] [onDeclineNotices]。一律可空，null 的语义是「本平台确实没有这项能力」，
+ *   对应入口**整块不渲染**（`design/ios-port.md` §11.2 ④）。没平台能力的步骤整步不出现，
+ *   进度条段数与返回链按实际在场的步骤算（见 [Step] 的 KDoc）。
+ *
+ * Android 侧这六个槽位全给非空（`OnboardingActivity` 里装配），六屏一屏不少；
+ * iOS 侧没有原生教务会话（给 `onOpenJwLogin`）、没有趣智的会话存储（那一步自动消失）、
+ * 没有 `SubpageActivity`（完成页「其他可选账号」整块不渲染）、也不能主动退出进程
+ * （「不同意并退出」按钮不渲染，`NoticeDialog` 的 `declineLabel` 给 null 即可）。
+ *
  * @param startAtJw 直接落在「学校统一认证」那一步。给**重复进入**用：状态卡显示
  *   「登录状态已失效」时点进去就是要改密码，没必要让用户再走一遍欢迎页。
  *   首启由 `MainActivity` 拉起时用默认值（从欢迎页开始）。
+ * @param jwLogin 第 2 步的原生教务登录（验证 + 落库）；null = 本平台没有原生传输层。
+ * @param onOpenJwLogin 没有原生登录时的出口：去导入页在网页里登录（Android 不用）。
+ * @param brands 各步品牌位图 id；null = 本平台没有这套素材（图标位留白，布局不动）。
+ * @param onOpenService 完成页「其他可选账号」的跳转；null = 本平台没有二级页，整块不渲染。
+ * @param onBackAtWelcome 欢迎页按系统返回：退到后台；null = 本平台没有这条输入（iOS）。
+ * @param onDeclineNotices 「不同意并退出」：整应用退场；null = 本平台不能主动退出进程。
  */
 @Composable
-fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
-    val context = LocalContext.current
+fun OnboardingScreen(
+    onFinish: () -> Unit,
+    startAtJw: Boolean = false,
+    jwLogin: OnboardingJwLogin? = null,
+    onOpenJwLogin: (() -> Unit)? = null,
+    brands: OnboardingBrandIcons? = null,
+    onOpenService: ((SubpageScreen) -> Unit)? = null,
+    onBackAtWelcome: (() -> Unit)? = null,
+    onDeclineNotices: (() -> Unit)? = null,
+) {
     val scope = rememberCoroutineScope()
-    val prefs = remember { Graph.displayPrefs(context) }
-    val vault = remember { Graph.credentialVault(context) }
-    val cas = remember { Graph.casSession(context) }
-    val view = LocalView.current
+    val services = Services.current
+    val prefs = services.displayPrefs()
+    val haptics = rememberAppHaptics()
+
+    // 实际在场的步骤：能力为 null 的那一步整步不出现（§11.2 ④）。
+    // 判据只认「本平台有没有这个东西」，不猜、不按版本号分支。
+    val qiekj = remember { services.qiekjRepository() }
+    val qzxy = remember { services.qzxyRepository() }
+    val yktCredentialStore = remember { services.yktCredentialStore() }
+    val steps = remember(jwLogin, onOpenJwLogin, qiekj, qzxy, yktCredentialStore) {
+        buildList {
+            add(Step.Welcome)
+            if (jwLogin != null || onOpenJwLogin != null) add(Step.Jw)
+            if (yktCredentialStore != null) add(Step.Ykt)
+            if (qiekj != null) add(Step.Qiekj)
+            if (qzxy != null) add(Step.Qzxy)
+            add(Step.Done)
+        }
+    }
+    val totalSteps = (steps.size - 1).coerceAtLeast(1)
 
     // 验证码冷却起点提到引导级（胖乖与趣智各一份，互不牵连）：跨步返回冷却不丢。
     // 服务端限流本来就还在，这里只求按钮口径与之一致。
@@ -220,12 +262,15 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
     // 已验证横幅（各步自己的 done 参数），而不是一张空白表单。
     var jwUsername by remember { mutableStateOf("") }
     var jwPassword by remember { mutableStateOf("") }
-    var yktUsername by remember { mutableStateOf(vault.readCas()?.username.orEmpty()) }
+    // 一卡通的学号初值取教务凭证里的那个（同一串学号）；读不到就是空。
+    // 走 `AccountCredentials` 而不是凭证保险箱本体：保险箱在 `:app`（EncryptedSharedPreferences），
+    // 共享层看不见，而这一条读取正是 `accountCredentials().readJwUsername()` 已经对好的口径。
+    var yktUsername by remember { mutableStateOf(services.accountCredentials()?.readJwUsername().orEmpty()) }
     var yktPassword by remember { mutableStateOf("") }
     // 成绩 / 学业后台补抓状态，完成页状态行读它（见 startBgSync）
     var bgSyncPhase by remember { mutableStateOf(BgSyncPhase.Idle) }
 
-    var step by remember { mutableStateOf(if (startAtJw) Step.Jw else Step.Welcome) }
+    var step by remember { mutableStateOf(if (startAtJw && Step.Jw in steps) Step.Jw else Step.Welcome) }
     var jwOk by remember { mutableStateOf(false) }
     var yktOk by remember { mutableStateOf(false) }
     var qiekjOk by remember { mutableStateOf(false) }
@@ -262,20 +307,21 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
         }
     }
 
-    fun next(target: Step) {
-        step = target
+    /**
+     * 下一步 = **实际在场的下一屏**，不是枚举里的下一个。
+     *
+     * 写死 `Step.Ykt` 之类的目标会在「平台缺某一步」时跳进一个不存在的屏（iOS 没有趣智那一步，
+     * 胖乖往后一跳就落在枚举里有、流程里没有的 Qzxy 上）。[Done] 恒在，所以末尾不会越界。
+     */
+    fun advance() {
+        val i = steps.indexOf(step)
+        if (i >= 0 && i < steps.lastIndex) step = steps[i + 1]
     }
 
-    /** 上一步（DESIGN §3.16）。[Step.Done] 退回趣智校园那一步。 */
+    /** 上一步（DESIGN §3.16）。同样是「在场的上一屏」，[Step.Welcome] 停在原地。 */
     fun back() {
-        step = when (step) {
-            Step.Jw -> Step.Welcome
-            Step.Ykt -> Step.Jw
-            Step.Qiekj -> Step.Ykt
-            Step.Qzxy -> Step.Qiekj
-            Step.Done -> Step.Qzxy
-            Step.Welcome -> Step.Welcome
-        }
+        val i = steps.indexOf(step)
+        if (i > 0) step = steps[i - 1]
     }
 
     /**
@@ -300,20 +346,20 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
         // 上一次还在跑就让位：sync 内部有 mutex，重复 force 只会白打一轮
         if (bgSyncPhase == BgSyncPhase.Running) return
         bgSyncPhase = BgSyncPhase.Running
-        val appContext = context.applicationContext
         val isRepeatEntry = startAtJw
-        Graph.appScope.launch {
-            val score = runCatching { Graph.scoreSync(appContext).sync(force = true) }
-            val scholar = runCatching { Graph.scholarProgressSync(appContext).sync(force = true) }
+        val appScope = services.appScope()
+        appScope.launch {
+            val score = runCatching { services.scoreSync()?.sync(force = true) }
+            val scholar = runCatching { services.scholarProgressSync().sync(force = true) }
             // 全学期归档（2026-11-19，DESIGN §4.17）：教务学期下拉里每个学期各建一张课表，
             // 命名「大一上 / 大一下 …」。已有同学期课表一律跳过，绝不覆盖。
-            val schedule = runCatching { Graph.scheduleTermImport(appContext).archive() }
+            val schedule = runCatching { services.scheduleTermImport()?.archive() }
             val archived = schedule.getOrNull() as? ScheduleTermImport.Result.Archived
             // 教材钩子同手动导入（import-jw.md「触发点只有一个」）：写库成功后抓导入学期教材，静默失败。
             // 归档会建多张表，教材只为教务当前学期抓（历史学期看教材没有使用价值，且每学期多 6 次请求）
             archived?.currentTerm?.let { term ->
-                Graph.appScope.launch {
-                    runCatching { Graph.textbookSync(appContext).syncForTerm(term) }
+                appScope.launch {
+                    runCatching { services.textbookSync()?.syncForTerm(term) }
                 }
             }
             // 开学日校准（DESIGN §4.42）：同一个触发点，只校准教务当前学期那张表——
@@ -325,13 +371,12 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
             // String 不可用（iOS 移植 S4 搬类之后才暴露的编译错误），这里显式取一次。
             val currentTerm = currentArchived?.currentTerm
             if (currentTerm != null) {
-                Graph.appScope.launch {
+                appScope.launch {
                     val timetableId = runCatching {
-                        Graph.repository(appContext).timetableByTerm(currentTerm)?.id
+                        services.scheduleRepository().timetableByTerm(currentTerm)?.id
                     }.getOrNull() ?: return@launch
                     val result = runCatching {
-                        Graph.teachingCalendarSync(appContext)
-                            .applyAfterImport(currentTerm, timetableId)
+                        services.teachingCalendarSync()?.applyAfterImport(currentTerm, timetableId)
                     }.getOrNull()
                     if (result is TeachingCalendarSync.Result.Applied && result.changed) {
                         JwImportResultBus.publish("开学日已按教务教学日历设为 ${result.startDate}")
@@ -347,9 +392,9 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
                 val scoreResult = score.getOrNull()
                 val scholarResult = scholar.getOrNull()
                 runCatching {
-                    Graph.displayPrefs(appContext).setOnboardingSyncOutcome(
+                    prefs.setOnboardingSyncOutcome(
                         OnboardingSyncOutcome(
-                            finishedAt = System.currentTimeMillis(),
+                            finishedAt = AppClock.nowMillis(),
                             scheduleTried = scheduleResult is ScheduleTermImport.Result.Archived ||
                                 scheduleResult is ScheduleTermImport.Result.Failed,
                             scheduleOk = okSchedule,
@@ -371,7 +416,7 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
             // 培养方案（DESIGN §4.41）：静默抓一次；**不进「同步完成」结果弹窗**——
             // 它是低频清单（几年才变一次），失败只影响「培养方案」页自己的空态/重试，
             // 不值得在首启结果里多一行。放在结果落盘之后，不拖慢引导完成页。
-            runCatching { Graph.curriculumSync(appContext).sync(force = true) }
+            runCatching { services.curriculumSync().sync(force = true) }
         }
     }
 
@@ -379,15 +424,17 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
     // 想回头改一下密码只能一路跳过再重新进引导。跳过本步仍有出口：顶栏「跳过」收整个引导，
     // 每屏底部的「先跳过」进下一步，两条都在。
     // 直接进来改密码的（startAtJw）：返回 = 退出，用户本来就不在配置流程里。
-    BackHandler(enabled = !startAtJw && step != Step.Welcome) { back() }
+    AppBackHandler(enabled = !startAtJw && step != Step.Welcome) { back() }
 
     // 欢迎页的系统返回 = 整个应用退到后台（2026-10-24 用户反馈）：首启什么都没配置，
     // 露出底下的空壳主界面只会让人困惑；退到后台再回来引导还在（seen 未写）。
-    // moveTaskToBack 不可用（返回 false）就整任务退场。重复进入（startAtJw）不适用
-    // ——那时候返回退出引导回主界面本来就是对的。
-    val activity = context as? Activity
-    BackHandler(enabled = !startAtJw && step == Step.Welcome) {
-        if (activity == null || !activity.moveTaskToBack(true)) activity?.finishAffinity()
+    // 重复进入（startAtJw）不适用——那时候返回退出引导回主界面本来就是对的。
+    //
+    // 「退到后台 / 整任务退场」是宿主的动作（Android 是 `moveTaskToBack`，失败退回
+    // `finishAffinity`），共享层只留一个可空回调：iOS 根本没有系统返回键，这个回调
+    // 在那边是 null，而 `AppBackHandler` 在 iOS 也是空实现——两层都空，不构成死入口。
+    AppBackHandler(enabled = !startAtJw && step == Step.Welcome) {
+        onBackAtWelcome?.invoke()
     }
 
     // 切步轻触感：欢迎页首帧不算，之后每前进一步 tick 一下
@@ -396,7 +443,7 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
         if (!stepPrimed) {
             stepPrimed = true
         } else {
-            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            haptics.tick()
         }
     }
 
@@ -419,7 +466,8 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
                 showBack = !startAtJw && step != Step.Welcome,
                 onBack = { back() },
                 showSegments = !startAtJw,
-                filledSegments = step.index,
+                filledSegments = steps.indexOf(step).coerceAtLeast(0),
+                totalSegments = totalSteps,
                 showSkip = step != Step.Done,
                 onSkipAll = { showSkipAllConfirm = true },
             )
@@ -444,12 +492,13 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
             ) { current ->
                 when (current) {
                     Step.Welcome -> WelcomeStep(
-                        onNext = { next(Step.Jw) },
+                        onNext = { advance() },
                         onOpenDisclaimer = { browseNotice = FirstRunNotice.Disclaimer },
                     )
                     Step.Jw -> JwStep(
-                        cas = cas,
-                        vault = vault,
+                        login = jwLogin,
+                        onOpenJwLogin = onOpenJwLogin,
+                        brands = brands,
                         scope = scope,
                         username = jwUsername,
                         onUsernameChange = { jwUsername = it },
@@ -464,41 +513,49 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
                             // 学号带过去。表单状态提升后，yktUsername 的初值在欢迎页首帧就算好
                             // （那时教务还没保存，读到空），必须在这里补带；用户已手输的不覆盖。
                             if (yktUsername.isEmpty()) yktUsername = jwUsername
-                            if (startAtJw) finish() else next(Step.Ykt)
+                            if (startAtJw) finish() else advance()
                         },
-                        onSkip = { if (startAtJw) finish() else next(Step.Ykt) },
+                        onSkip = { if (startAtJw) finish() else advance() },
                     )
-                    Step.Ykt -> YktStep(
+                    Step.Ykt -> if (yktCredentialStore != null) YktStep(
+                        credentialStore = yktCredentialStore,
+                        brands = brands,
                         scope = scope,
                         username = yktUsername,
                         onUsernameChange = { yktUsername = it },
                         password = yktPassword,
                         onPasswordChange = { yktPassword = it },
                         done = yktOk,
-                        onDone = { yktOk = true; next(Step.Qiekj) },
-                        onSkip = { next(Step.Qiekj) },
+                        onDone = { yktOk = true; advance() },
+                        onSkip = { advance() },
                     )
-                    Step.Qiekj -> QiekjStep(
+                    Step.Qiekj -> if (qiekj != null) QiekjStep(
+                        repo = qiekj,
+                        brands = brands,
                         scope = scope,
                         codeSentAt = qiekjCodeSentAt,
                         onCodeSent = { qiekjCodeSentAt = it },
-                        onDone = { qiekjOk = true; next(Step.Qzxy) },
-                        onSkip = { next(Step.Qzxy) },
+                        onDone = { qiekjOk = true; advance() },
+                        onSkip = { advance() },
                     )
-                    Step.Qzxy -> QzxyStep(
+                    Step.Qzxy -> if (qzxy != null) QzxyStep(
+                        repo = qzxy,
+                        brands = brands,
                         scope = scope,
                         codeSentAt = qzxyCodeSentAt,
                         onCodeSent = { qzxyCodeSentAt = it },
-                        onDone = { qzxyOk = true; next(Step.Done) },
-                        onSkip = { next(Step.Done) },
+                        onDone = { qzxyOk = true; advance() },
+                        onSkip = { advance() },
                     )
                     Step.Done -> DoneStep(
+                        present = steps,
+                        brands = brands,
                         jwOk = jwOk,
                         yktOk = yktOk,
                         qiekjOk = qiekjOk,
                         qzxyOk = qzxyOk,
                         bgSyncPhase = bgSyncPhase,
-                        onOpenService = { SubpageActivity.start(context, it) },
+                        onOpenService = onOpenService,
                         onFinish = { finish() },
                     )
                 }
@@ -512,6 +569,8 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
     // 确认即落盘（版本号 + 时刻）：下次进来队列为空，不重复打扰。
     // 「不同意并退出」（2026-09-30 用户要求）：不写同意记录、不写 onboarding_seen，
     // 整个应用关掉——下次启动引导与声明都会再来，进主界面的唯一路径是同意。
+    // 平台不能主动退出进程时（iOS）**不给这枚按钮**：`declineLabel` 为 null 时弹窗只留确认键，
+    // 这是 `NoticeDialog` 既有的口径。留一个点了不动的「退出」比没有更糟。
     noticeQueue.firstOrNull()?.let { notice ->
         NoticeDialog(
             title = FirstRunNotices.title(notice),
@@ -522,8 +581,8 @@ fun OnboardingScreen(onFinish: () -> Unit, startAtJw: Boolean = false) {
                 noticeQueue = noticeQueue.drop(1)
                 scope.launch { prefs.markNoticeConsented(notice, FirstRunNotices.VERSION) }
             },
-            declineLabel = "不同意并退出",
-            onDecline = { activity?.finishAffinity() },
+            declineLabel = if (onDeclineNotices != null) "不同意并退出" else null,
+            onDecline = onDeclineNotices,
         )
     }
 
@@ -579,6 +638,7 @@ private fun OnboardingTopBar(
     onBack: () -> Unit,
     showSegments: Boolean,
     filledSegments: Int,
+    totalSegments: Int,
     showSkip: Boolean,
     onSkipAll: () -> Unit,
 ) {
@@ -602,6 +662,7 @@ private fun OnboardingTopBar(
         if (showSegments) {
             StepSegments(
                 filledCount = filledSegments,
+                total = totalSegments,
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 8.dp),
@@ -619,18 +680,23 @@ private fun OnboardingTopBar(
     }
 }
 
-/** 分段进度条：[TOTAL_STEPS] 段，填充数随步骤推进入场；语义上给 TalkBack 报当前位置。 */
+/**
+ * 分段进度条：[total] 段，填充数随步骤推进入场；语义上给 TalkBack 报当前位置。
+ *
+ * [total] 由调用方按**实际在场的步骤**算（= 步骤数 − 1），不是常量：Android 六屏恒为 5，
+ * iOS 少一步（没有趣智的会话存储）就是 4——写死 5 会让进度条永远差一格走不满。
+ */
 @Composable
-private fun StepSegments(filledCount: Int, modifier: Modifier = Modifier) {
+private fun StepSegments(filledCount: Int, total: Int, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier.semantics(mergeDescendants = true) {
             contentDescription =
-                if (filledCount > 0) "第 $filledCount 步，共 $TOTAL_STEPS 步" else "准备开始，共 $TOTAL_STEPS 步"
+                if (filledCount > 0) "第 $filledCount 步，共 $total 步" else "准备开始，共 $total 步"
         },
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        repeat(TOTAL_STEPS) { i ->
+        repeat(total) { i ->
             val fraction by animateFloatAsState(
                 targetValue = if (filledCount > i) 1f else 0f,
                 animationSpec = tween(280, easing = FastOutSlowInEasing),
@@ -702,15 +768,21 @@ private fun ShakeBox(tick: Int, modifier: Modifier = Modifier, content: @Composa
     Box(modifier.offset(x = x.value)) { content() }
 }
 
-/** 品牌图 tile（校徽 / 各服务官方图标）：自带底色，原尺寸渲染，不再叠容器底。 */
+/**
+ * 品牌图 tile（校徽 / 各服务官方图标）：自带底色，原尺寸渲染，不再叠容器底。
+ *
+ * [icon] 为 null = 本平台没有这套素材（iOS）：**留等大的空位**，不画假图标
+ * （理由见 [OnboardingBrandIcons]）。位图本身走 `ui/common/BrandMark` 那条既有缝
+ * ——本文件原来直接写 `painterResource(R.drawable.…)`，而 `R` 在 `:app`，
+ * 共享层看不见，只能由宿主把 id 传进来。
+ */
 @Composable
-private fun BrandTile(resId: Int, size: Dp) {
-    Image(
-        painter = painterResource(resId),
-        contentDescription = null,
-        modifier = Modifier.size(size),
-        contentScale = ContentScale.Fit,
-    )
+private fun BrandTile(icon: Int?, size: Dp) {
+    if (icon == null) {
+        Spacer(Modifier.size(size))
+    } else {
+        BrandMark(icon, size)
+    }
 }
 
 /** 步骤头：图标块（[tile]）+ 标题 + 一句话说明；[done] 时右下角弹出「已验证」角标。 */
@@ -1072,26 +1144,6 @@ private fun imeKeyboardActions(onImeAction: (() -> Unit)?): KeyboardActions =
         KeyboardActions.Default
     }
 
-/**
- * 成功触感工厂：CONFIRM 在 API 30 才有，低版本退回 KEYBOARD_TAP。
- * 四个登录步共用一个口径。
- */
-@Composable
-private fun rememberSuccessHaptic(): () -> Unit {
-    val view = LocalView.current
-    return remember(view) {
-        {
-            view.performHapticFeedback(
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    HapticFeedbackConstants.CONFIRM
-                } else {
-                    HapticFeedbackConstants.KEYBOARD_TAP
-                },
-            )
-        }
-    }
-}
-
 // ---------------------------------------------------------------- 欢迎屏
 
 @Composable
@@ -1298,11 +1350,23 @@ private fun FeatureCell(icon: ImageVector, label: String) {
 
 // ---------------------------------------------------------------- 学校统一认证
 
+/**
+ * 第 2 步「学校统一认证」。
+ *
+ * 两个形态，按本平台有没有原生教务传输层分：
+ * - [login] != null：**原生表单**（Android），验证 → 落库 → 后台补抓，与搬迁前一字不差。
+ * - [login] == null：改成「去导入页登录」一个按钮（iOS）。这一步在 iOS 上不可能拿到密码，
+ *   所以上面两张「我们会保存密码 / Android Keystore」的说明卡**也不能照搬**——那是另一套事实。
+ *   文案只承诺本平台真有的事：登录发生在导入页的网页里，密码不落本机，会话过期要再登一次。
+ *
+ * 两者都为 null 时这一步根本不在流程里（见 [OnboardingScreen] 的 steps），走不到这里。
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun JwStep(
-    cas: CasSession,
-    vault: CredentialVault,
+    login: OnboardingJwLogin?,
+    onOpenJwLogin: (() -> Unit)?,
+    brands: OnboardingBrandIcons?,
     scope: CoroutineScope,
     username: String,
     onUsernameChange: (String) -> Unit,
@@ -1313,7 +1377,6 @@ private fun JwStep(
     onDone: () -> Unit,
     onSkip: () -> Unit,
 ) {
-    val context = LocalContext.current
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<NoticeFeedback?>(null) }
     var successMessage by remember { mutableStateOf<String?>(null) }
@@ -1322,7 +1385,7 @@ private fun JwStep(
     val passwordFocus = remember { FocusRequester() }
     // 已验证过（从下一步返回）就不自动弹键盘：用户多半只是路过看看，不是要重填
     if (!done) FocusOnEnter(usernameFocus)
-    val successHaptic = rememberSuccessHaptic()
+    val haptics = rememberAppHaptics()
     val noticeInView = remember { BringIntoViewRequester() }
     LaunchedEffect(notice) {
         // 错误横幅出现在密码框下方，键盘还开着时多半在折叠线以下——把它滚进来，
@@ -1331,6 +1394,7 @@ private fun JwStep(
     }
 
     fun submit() {
+        val flow = login ?: return
         val user = username.trim()
         if (user.isEmpty() || password.isEmpty()) {
             notice = NoticeFeedback("请填入学号和统一认证密码", NoticeTone.Warning)
@@ -1339,10 +1403,11 @@ private fun JwStep(
         }
         busy = true
         scope.launch {
-            // 用户重新输入 = 重新开始计数：先清零闸门，避免上一次的失败次数把这次顶掉
-            cas.onCredentialsUpdated()
+            // 用户重新输入 = 重新开始计数：清闸门这一步在 [OnboardingJwLogin.verify] 的实现里
+            // 做（Android = `cas.onCredentialsUpdated()` 后 `tryLogin`）——那是 :app 的闸门，
+            // 共享层碰不到，也不能在这里另起一套计数。
             val result = try {
-                cas.tryLogin(user, password)
+                flow.verify(user, password)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // 窗口销毁（用户退出引导）时取消必须原样抛，别把登录链拖完
                 throw e
@@ -1352,15 +1417,15 @@ private fun JwStep(
             busy = false
             when (result) {
                 is CasEnsureResult.Ready -> {
-                    vault.saveCas(user, password)
+                    flow.save(user, password)
                     // 顺手补学籍卡的姓名 / 班级（DESIGN §3.3）：走到「完成」页时「我的」页
                     // 已经有名字和班级，不用先导一次成绩。失败静默——它是锦上添花，
                     // 不该挡住引导的下一步。
-                    runCatching { Graph.profileSync(context).syncOnce(force = true) }
+                    runCatching { Services.current.profileSync().syncOnce(force = true) }
                     // 成绩 / 学业完成情况后台补抓：壳层 startBgSync（进度收敛到完成页状态行）
                     onLaunchBgSync()
                     // 成功反馈：对勾描边停留一拍再进下一步，别让「成了」一闪而过
-                    successHaptic()
+                    haptics.success()
                     notice = null
                     successMessage = "统一认证已保存，课表、成绩与学籍正在后台同步"
                     delay(SUCCESS_HOLD_MS)
@@ -1402,72 +1467,100 @@ private fun JwStep(
             Spacer(Modifier.height(6.dp))
             StaggerIn(0) {
                 StepHeader(
-                    tile = { BrandTile(R.drawable.ic_school_badge, 60.dp) },
+                    tile = { BrandTile(brands?.school, 60.dp) },
                     title = Step.Jw.title,
                     desc = Step.Jw.desc,
                     done = successMessage != null,
                 )
             }
             Spacer(Modifier.height(14.dp))
-            StaggerIn(1) {
-                WhyCard(
-                    question = "为什么要保存密码？",
-                    body = "保存后，登录状态过期时 App 会自己重新登录，不用你再输一遍。" +
-                        "密码加密存放在手机本机（Android Keystore），**不进云备份，也不经过开发者服务器**；" +
-                        "随时可以在「我的」页退出登录并清除。不保存的话，每次进教务都要手动登录。",
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            StaggerIn(2) {
-                TrustBar("密码加密存在本机（Android Keystore），仅用于学校系统登录；" +
-                    "**这是全应用唯一保存教务密码的地方**。")
-            }
-            Spacer(Modifier.height(16.dp))
-            if (done && successMessage == null) {
-                // 从下一步返回时的「已验证」状态（2026-10-24 用户反馈）：不再显示空白表单，
-                // 表单保留输入值且可改，主按钮变「重新验证并保存」
-                StaggerIn(3) {
-                    SuccessRow("统一认证已验证并保存，可修改后重新验证")
+            if (login != null) {
+                StaggerIn(1) {
+                    WhyCard(
+                        question = "为什么要保存密码？",
+                        body = "保存后，登录状态过期时 App 会自己重新登录，不用你再输一遍。" +
+                            "密码加密存放在手机本机（Android Keystore），**不进云备份，也不经过开发者服务器**；" +
+                            "随时可以在「我的」页退出登录并清除。不保存的话，每次进教务都要手动登录。",
+                    )
                 }
                 Spacer(Modifier.height(12.dp))
-            }
-            StaggerIn(if (done && successMessage == null) 4 else 3) {
-                ShakeBox(tick = errorTick) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OnboardingTextField(
-                            label = "学号",
-                            value = username,
-                            onValueChange = { onUsernameChange(it.trim()) },
-                            focusRequester = usernameFocus,
-                            imeAction = ImeAction.Next,
-                            onImeAction = { passwordFocus.requestFocus() },
-                        )
-                        PasswordField(
-                            label = "统一认证密码",
-                            value = password,
-                            onValueChange = { onPasswordChange(it) },
-                            focusRequester = passwordFocus,
-                            placeholder = "统一认证密码即为教务系统密码",
-                            imeAction = ImeAction.Done,
-                            onImeAction = { submit() },
-                        )
-                        Box(Modifier.bringIntoViewRequester(noticeInView)) {
-                            NoticeSlot(notice, successMessage)
+                StaggerIn(2) {
+                    TrustBar("密码加密存在本机（Android Keystore），仅用于学校系统登录；" +
+                        "**这是全应用唯一保存教务密码的地方**。")
+                }
+                Spacer(Modifier.height(16.dp))
+                if (done && successMessage == null) {
+                    // 从下一步返回时的「已验证」状态（2026-10-24 用户反馈）：不再显示空白表单，
+                    // 表单保留输入值且可改，主按钮变「重新验证并保存」
+                    StaggerIn(3) {
+                        SuccessRow("统一认证已验证并保存，可修改后重新验证")
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+                StaggerIn(if (done && successMessage == null) 4 else 3) {
+                    ShakeBox(tick = errorTick) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OnboardingTextField(
+                                label = "学号",
+                                value = username,
+                                onValueChange = { onUsernameChange(it.trim()) },
+                                focusRequester = usernameFocus,
+                                imeAction = ImeAction.Next,
+                                onImeAction = { passwordFocus.requestFocus() },
+                            )
+                            PasswordField(
+                                label = "统一认证密码",
+                                value = password,
+                                onValueChange = { onPasswordChange(it) },
+                                focusRequester = passwordFocus,
+                                placeholder = "统一认证密码即为教务系统密码",
+                                imeAction = ImeAction.Done,
+                                onImeAction = { submit() },
+                            )
+                            Box(Modifier.bringIntoViewRequester(noticeInView)) {
+                                NoticeSlot(notice, successMessage)
+                            }
                         }
                     }
                 }
+            } else if (onOpenJwLogin != null) {
+                // 没有原生教务传输层（iOS）：这一步不撒谎——「保存密码」那两张卡说的是
+                // Android Keystore 里那件事，这里根本没有这回事，照搬就是虚构承诺。
+                StaggerIn(1) {
+                    WhyCard(
+                        question = "为什么这一步要去网页里登录？",
+                        body = "本平台不在本机保存教务密码，所以也没有「会话过期自动续登」。" +
+                            "登录只在导入页的网页里完成，之后的课表、成绩、教材都用这份网页会话；" +
+                            "会话过期时回导入页再登一次即可。",
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
             }
         }
-        StaggerIn(if (done && successMessage == null) 5 else 4) {
-            StepActions(
-                primaryText = if (done && successMessage == null) "重新验证并保存" else "验证并保存",
-                busy = busy,
-                busyText = "正在验证…",
-                enabled = !busy && successMessage == null,
-                onPrimary = { submit() },
-                skipText = "先跳过，导入课表时再手动登录",
-                onSkip = onSkip,
-            )
+        if (login != null) {
+            StaggerIn(if (done && successMessage == null) 5 else 4) {
+                StepActions(
+                    primaryText = if (done && successMessage == null) "重新验证并保存" else "验证并保存",
+                    busy = busy,
+                    busyText = "正在验证…",
+                    enabled = !busy && successMessage == null,
+                    onPrimary = { submit() },
+                    skipText = "先跳过，导入课表时再手动登录",
+                    onSkip = onSkip,
+                )
+            }
+        } else if (onOpenJwLogin != null) {
+            StaggerIn(3) {
+                StepActions(
+                    primaryText = "去导入页登录",
+                    busy = false,
+                    busyText = "",
+                    enabled = true,
+                    onPrimary = onOpenJwLogin,
+                    skipText = "先跳过，导入课表时再手动登录",
+                    onSkip = onSkip,
+                )
+            }
         }
     }
 }
@@ -1477,6 +1570,8 @@ private fun JwStep(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun YktStep(
+    credentialStore: YktCredentialStore,
+    brands: OnboardingBrandIcons?,
     scope: CoroutineScope,
     username: String,
     onUsernameChange: (String) -> Unit,
@@ -1486,7 +1581,6 @@ private fun YktStep(
     onDone: () -> Unit,
     onSkip: () -> Unit,
 ) {
-    val context = LocalContext.current
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<NoticeFeedback?>(null) }
     var successMessage by remember { mutableStateOf<String?>(null) }
@@ -1494,7 +1588,7 @@ private fun YktStep(
     val usernameFocus = remember { FocusRequester() }
     val passwordFocus = remember { FocusRequester() }
     if (!done) FocusOnEnter(usernameFocus)
-    val successHaptic = rememberSuccessHaptic()
+    val haptics = rememberAppHaptics()
     val noticeInView = remember { BringIntoViewRequester() }
     LaunchedEffect(notice) {
         if (notice != null) runCatching { noticeInView.bringIntoView() }
@@ -1511,11 +1605,11 @@ private fun YktStep(
         scope.launch {
             try {
                 // 与「我的 → 校园卡」开启流程同一序列：先真登一次，再查一次账户
-                Graph.yktRepository(context).loginForToken(user, password)
-                Graph.yktCredentialStore(context).save(user, password)
-                Graph.displayPrefs(context).setCampusCardEnabled(true)
+                Services.current.yktRepository().loginForToken(user, password)
+                credentialStore.save(user, password)
+                Services.current.displayPrefs().setCampusCardEnabled(true)
                 busy = false
-                successHaptic()
+                haptics.success()
                 notice = null
                 successMessage = "一卡通已开启，余额与寝室电费可用"
                 delay(SUCCESS_HOLD_MS)
@@ -1559,7 +1653,8 @@ private fun YktStep(
             Spacer(Modifier.height(6.dp))
             StaggerIn(0) {
                 StepHeader(
-                    tile = { BrandTile(R.drawable.ic_brand_wenqu, 60.dp) },
+                    // 这一步的图标**原本就用的是 `ic_brand_wenqu`**（不是一卡通的图），照搬不动
+                    tile = { BrandTile(brands?.wenqu, 60.dp) },
                     title = Step.Ykt.title,
                     desc = Step.Ykt.desc,
                     done = successMessage != null,
@@ -1632,14 +1727,14 @@ private fun YktStep(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QiekjStep(
+    repo: QiekjRepository,
+    brands: OnboardingBrandIcons?,
     scope: CoroutineScope,
     codeSentAt: Long,
     onCodeSent: (Long) -> Unit,
     onDone: () -> Unit,
     onSkip: () -> Unit,
 ) {
-    val context = LocalContext.current
-    val repo = remember { Graph.qiekj(context) }
     var phone by remember { mutableStateOf(repo.readPhone().orEmpty()) }
     var code by remember { mutableStateOf("") }
     var tokenInput by remember { mutableStateOf("") }
@@ -1652,10 +1747,12 @@ private fun QiekjStep(
     var errorTick by remember { mutableIntStateOf(0) }
     // 发送验证码的冷却起点提到引导级（参数传入）：跨步返回冷却不丢。
     // 倒计时按 codeSentAt 派生，发送成功后 onCodeSent 更新起点即自动重启。
+    // 这里的毫秒只做差值（`now - codeSentAt`），不进任何日期格式化，所以走 `AppClock.nowMillis()`
+    // 就够——墙钟被改动时冷却会算错，与搬迁前的 `System.currentTimeMillis()` 完全同一档行为。
     var cooldownLeft by remember { mutableIntStateOf(0) }
     LaunchedEffect(codeSentAt) {
         while (true) {
-            val elapsed = System.currentTimeMillis() - codeSentAt
+            val elapsed = AppClock.nowMillis() - codeSentAt
             cooldownLeft = ((60_000 - elapsed + 999) / 1000).toInt().coerceAtLeast(0)
             if (cooldownLeft == 0) break
             delay(1_000)
@@ -1669,7 +1766,7 @@ private fun QiekjStep(
         delay(430)
         runCatching { (if (tokenMode) tokenFocus else phoneFocus).requestFocus() }
     }
-    val successHaptic = rememberSuccessHaptic()
+    val haptics = rememberAppHaptics()
     val noticeInView = remember { BringIntoViewRequester() }
     LaunchedEffect(notice) {
         // 验证码冷却/发送/登录的提示都在表单下方，键盘开着时滚进来再说
@@ -1678,7 +1775,7 @@ private fun QiekjStep(
 
     fun sendCode() {
         val p = phone.trim()
-        val elapsed = System.currentTimeMillis() - codeSentAt
+        val elapsed = AppClock.nowMillis() - codeSentAt
         if (elapsed < 60_000) {
             notice = NoticeFeedback(
                 "验证码已发送，请 ${(60 - elapsed / 1000).toInt()} 秒后再试",
@@ -1696,7 +1793,7 @@ private fun QiekjStep(
         scope.launch {
             try {
                 repo.sendCode(p)
-                onCodeSent(System.currentTimeMillis())
+                onCodeSent(AppClock.nowMillis())
                 notice = NoticeFeedback("验证码已发送", NoticeTone.Success)
             } catch (e: Exception) {
                 notice = NoticeFeedback(e.message ?: "验证码发送失败", NoticeTone.Error)
@@ -1721,7 +1818,7 @@ private fun QiekjStep(
                 repo.savePhone(p)
                 repo.queryBalance()
                 busy = false
-                successHaptic()
+                haptics.success()
                 notice = null
                 successMessage = "胖乖生活已登录，今日页开水卡可用"
                 delay(SUCCESS_HOLD_MS)
@@ -1749,7 +1846,7 @@ private fun QiekjStep(
                 repo.validateToken(token)
                 repo.saveToken(token)
                 busy = false
-                successHaptic()
+                haptics.success()
                 notice = null
                 successMessage = "Token 已验证并保存"
                 delay(SUCCESS_HOLD_MS)
@@ -1773,7 +1870,7 @@ private fun QiekjStep(
             Spacer(Modifier.height(6.dp))
             StaggerIn(0) {
                 StepHeader(
-                    tile = { BrandTile(R.drawable.ic_brand_pangguai, 60.dp) },
+                    tile = { BrandTile(brands?.pangguai, 60.dp) },
                     title = Step.Qiekj.title,
                     desc = Step.Qiekj.desc,
                     done = successMessage != null,
@@ -1895,14 +1992,14 @@ private enum class QzxyMode { Password, Sms, Session }
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QzxyStep(
+    repo: QzxyRepository,
+    brands: OnboardingBrandIcons?,
     scope: CoroutineScope,
     codeSentAt: Long,
     onCodeSent: (Long) -> Unit,
     onDone: () -> Unit,
     onSkip: () -> Unit,
 ) {
-    val context = LocalContext.current
-    val repo = remember { Graph.qzxy(context) }
     // 已经登录过（比如重复进入引导）就把手机号带出来，省得再敲一遍
     var phone by remember { mutableStateOf(repo.localSession()?.telephone.orEmpty()) }
     var password by remember { mutableStateOf("") }
@@ -1920,7 +2017,7 @@ private fun QzxyStep(
     var cooldownLeft by remember { mutableIntStateOf(0) }
     LaunchedEffect(codeSentAt) {
         while (true) {
-            val elapsed = System.currentTimeMillis() - codeSentAt
+            val elapsed = AppClock.nowMillis() - codeSentAt
             cooldownLeft = ((60_000 - elapsed + 999) / 1000).toInt().coerceAtLeast(0)
             if (cooldownLeft == 0) break
             delay(1_000)
@@ -1940,7 +2037,7 @@ private fun QzxyStep(
             }
         }
     }
-    val successHaptic = rememberSuccessHaptic()
+    val haptics = rememberAppHaptics()
     val noticeInView = remember { BringIntoViewRequester() }
     LaunchedEffect(notice) {
         if (notice != null) runCatching { noticeInView.bringIntoView() }
@@ -1948,7 +2045,7 @@ private fun QzxyStep(
 
     fun sendCode() {
         val p = phone.trim()
-        val elapsed = System.currentTimeMillis() - codeSentAt
+        val elapsed = AppClock.nowMillis() - codeSentAt
         if (elapsed < 60_000) {
             notice = NoticeFeedback(
                 "验证码已发送，请 ${(60 - elapsed / 1000).toInt()} 秒后再试",
@@ -1966,7 +2063,7 @@ private fun QzxyStep(
         scope.launch {
             try {
                 repo.sendCode(p)
-                onCodeSent(System.currentTimeMillis())
+                onCodeSent(AppClock.nowMillis())
                 notice = NoticeFeedback("验证码已发送", NoticeTone.Success)
             } catch (e: Exception) {
                 notice = NoticeFeedback(e.message ?: "验证码发送失败", NoticeTone.Error)
@@ -1998,7 +2095,7 @@ private fun QzxyStep(
             try {
                 if (mode == QzxyMode.Sms) repo.loginBySms(p, code) else repo.loginByPassword(p, password)
                 busy = false
-                successHaptic()
+                haptics.success()
                 notice = null
                 successMessage = "趣智校园已登录，今日页可开热水"
                 delay(SUCCESS_HOLD_MS)
@@ -2041,7 +2138,7 @@ private fun QzxyStep(
                 repo.validateSession(candidate)
                 repo.adoptSession(candidate)
                 busy = false
-                successHaptic()
+                haptics.success()
                 notice = null
                 successMessage = "会话串已验证并接管"
                 delay(SUCCESS_HOLD_MS)
@@ -2064,7 +2161,7 @@ private fun QzxyStep(
             Spacer(Modifier.height(6.dp))
             StaggerIn(0) {
                 StepHeader(
-                    tile = { BrandTile(R.drawable.ic_brand_qzxy, 60.dp) },
+                    tile = { BrandTile(brands?.qzxy, 60.dp) },
                     title = Step.Qzxy.title,
                     desc = Step.Qzxy.desc,
                     done = successMessage != null,
@@ -2212,16 +2309,43 @@ private fun QzxyStep(
 
 // ---------------------------------------------------------------- 完成
 
+/** 完成页一行状态数据的形状（只为少写四遍同样的 `StatusRow` 参数）。 */
+private data class DoneStatus(
+    val step: Step,
+    val icon: Int?,
+    val name: String,
+    val desc: String,
+    val ok: Boolean,
+    val missText: String,
+)
+
+/**
+ * 完成页。
+ *
+ * 状态行只列**本次流程里真有的那几步**（[present]）：平台没有的步骤（iOS 无趣智）不该在这里
+ * 显示一个永远「未配置」的行——那是在报告一件本平台做不到的事。Android 六步齐全，
+ * 四行与搬迁前完全一致。
+ */
 @Composable
 private fun DoneStep(
+    present: List<Step>,
+    brands: OnboardingBrandIcons?,
     jwOk: Boolean,
     yktOk: Boolean,
     qiekjOk: Boolean,
     qzxyOk: Boolean,
     bgSyncPhase: BgSyncPhase,
-    onOpenService: (SubpageScreen) -> Unit,
+    onOpenService: ((SubpageScreen) -> Unit)?,
     onFinish: () -> Unit,
 ) {
+    val rows = buildList {
+        // 一卡通那一行的图标原本也是 `ic_brand_wenqu`（同第 3 步），照搬
+        add(DoneStatus(Step.Jw, brands?.school, "学校统一认证", "教务 · 学工 · 成绩单", jwOk, "未配置（导入课表时手动登录）"))
+        add(DoneStatus(Step.Ykt, brands?.wenqu, "一卡通 · 电费", "余额 · 付款码 · 流水", yktOk, "未配置"))
+        add(DoneStatus(Step.Qiekj, brands?.pangguai, "胖乖生活", "开水房账号", qiekjOk, "未配置"))
+        add(DoneStatus(Step.Qzxy, brands?.qzxy, "趣智校园", "洗澡开热水", qzxyOk, "未配置（洗澡开热水时再登录）"))
+    }.filter { it.step in present }
+
     Column(Modifier.fillMaxSize()) {
         Column(
             Modifier
@@ -2232,50 +2356,31 @@ private fun DoneStep(
             Spacer(Modifier.height(24.dp))
             StaggerIn(0) { DoneHero() }
             Spacer(Modifier.height(24.dp))
-            StaggerIn(1) {
-                StatusRow(
-                    tile = { BrandTile(R.drawable.ic_school_badge, 34.dp) },
-                    name = "学校统一认证",
-                    desc = "教务 · 学工 · 成绩单",
-                    ok = jwOk,
-                    missText = "未配置（导入课表时手动登录）",
-                )
-            }
-            StaggerIn(2) {
-                StatusRow(
-                    tile = { BrandTile(R.drawable.ic_brand_wenqu, 34.dp) },
-                    name = "一卡通 · 电费",
-                    desc = "余额 · 付款码 · 流水",
-                    ok = yktOk,
-                    missText = "未配置",
-                    modifier = Modifier.padding(top = 9.dp),
-                )
-            }
-            StaggerIn(3) {
-                StatusRow(
-                    tile = { BrandTile(R.drawable.ic_brand_pangguai, 34.dp) },
-                    name = "胖乖生活",
-                    desc = "开水房账号",
-                    ok = qiekjOk,
-                    missText = "未配置",
-                    modifier = Modifier.padding(top = 9.dp),
-                )
-            }
-            StaggerIn(4) {
-                StatusRow(
-                    tile = { BrandTile(R.drawable.ic_brand_qzxy, 34.dp) },
-                    name = "趣智校园",
-                    desc = "洗澡开热水",
-                    ok = qzxyOk,
-                    missText = "未配置（洗澡开热水时再登录）",
-                    modifier = Modifier.padding(top = 9.dp),
-                )
+            rows.forEachIndexed { i, row ->
+                StaggerIn(i + 1) {
+                    StatusRow(
+                        tile = { BrandTile(row.icon, 34.dp) },
+                        name = row.name,
+                        desc = row.desc,
+                        ok = row.ok,
+                        missText = row.missText,
+                        // 首行紧接上方的 24dp 间隔，后面各行之间再加 9dp——与搬迁前的四段
+                        // 手写 StaggerIn 一致，别图省事给首行也加
+                        modifier = if (i == 0) Modifier else Modifier.padding(top = 9.dp),
+                    )
+                }
             }
             if (jwOk) {
-                StaggerIn(5) { BgSyncLine(bgSyncPhase) }
+                StaggerIn(rows.size + 1) { BgSyncLine(bgSyncPhase) }
             }
-            StaggerIn(6) {
-                OptionalAccountsSection(onOpen = onOpenService, modifier = Modifier.padding(top = 18.dp))
+            if (onOpenService != null) {
+                StaggerIn(rows.size + 2) {
+                    OptionalAccountsSection(
+                        brands = brands,
+                        onOpen = onOpenService,
+                        modifier = Modifier.padding(top = 18.dp),
+                    )
+                }
             }
         }
         StepActions(
@@ -2295,13 +2400,22 @@ private fun DoneStep(
  * 不是平台账号）。快趣落**骑行页**而不是快趣账号页：新装用户默认「微信小程序」
  * 使用方式，账号页此时把账号区收起并指向骑行页切方式（KvcxScreen 的进页提示），
  * 落那里等于让「去设置」绕一圈。
+ *
+ * 图标存成**取 id 的函数**而不是 id：`OnboardingBrandIcons` 可空（iOS 没有这套素材），
+ * 这个列表是顶层 `val`，只能在用到时才知道当前平台有没有。
  */
-private data class OptionalAccount(val iconRes: Int, val name: String, val desc: String, val action: String, val screen: SubpageScreen)
+private data class OptionalAccount(
+    val icon: (OnboardingBrandIcons?) -> Int?,
+    val name: String,
+    val desc: String,
+    val action: String,
+    val screen: SubpageScreen,
+)
 
 private val OptionalAccounts = listOf(
-    OptionalAccount(R.drawable.ic_brand_ujing, "U净 · 校园洗衣", "洗衣房空闲看板 · 扫码下单", "去登录", SubpageScreen.UJING),
-    OptionalAccount(R.drawable.ic_brand_kqcx, "快趣出行", "共享单车 · 免登录即可骑车", "去设置", SubpageScreen.RIDE),
-    OptionalAccount(R.drawable.ic_brand_wenqu, "问渠 · 志愿服务", "志愿工时 · 劳动教育时长", "去登录", SubpageScreen.WENQU),
+    OptionalAccount({ it?.ujing }, "U净 · 校园洗衣", "洗衣房空闲看板 · 扫码下单", "去登录", SubpageScreen.UJING),
+    OptionalAccount({ it?.kqcx }, "快趣出行", "共享单车 · 免登录即可骑车", "去设置", SubpageScreen.RIDE),
+    OptionalAccount({ it?.wenqu }, "问渠 · 志愿服务", "志愿工时 · 劳动教育时长", "去登录", SubpageScreen.WENQU),
 )
 
 /**
@@ -2310,9 +2424,16 @@ private val OptionalAccounts = listOf(
  * 各服务页（与账号中心「本页不做表单」同一原则）。点行在**引导窗上叠开**对应服务页
  * （不写 seen、不收引导），返回键回完成页还能继续点其他行；引导的收窗仍只有
  * 主按钮「进入 JUWPHub」与顶栏「全部跳过」两条路。
+ *
+ * 整块只在宿主给得出跳转（`onOpenService`）时渲染：没有二级页栈的平台（iOS）点行无处可去，
+ * 那就不要这一块，而不是给三个点了没反应的入口。
  */
 @Composable
-private fun OptionalAccountsSection(onOpen: (SubpageScreen) -> Unit, modifier: Modifier = Modifier) {
+private fun OptionalAccountsSection(
+    brands: OnboardingBrandIcons?,
+    onOpen: (SubpageScreen) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -2330,6 +2451,7 @@ private fun OptionalAccountsSection(onOpen: (SubpageScreen) -> Unit, modifier: M
         OptionalAccounts.forEach { account ->
             OptionalAccountRow(
                 account = account,
+                brands = brands,
                 onOpen = { onOpen(account.screen) },
                 modifier = Modifier.padding(top = 9.dp),
             )
@@ -2347,6 +2469,7 @@ private fun OptionalAccountsSection(onOpen: (SubpageScreen) -> Unit, modifier: M
 @Composable
 private fun OptionalAccountRow(
     account: OptionalAccount,
+    brands: OnboardingBrandIcons?,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -2359,7 +2482,7 @@ private fun OptionalAccountRow(
             .padding(horizontal = 15.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BrandTile(account.iconRes, 34.dp)
+        BrandTile(account.icon(brands), 34.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(account.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)

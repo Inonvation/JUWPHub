@@ -1,6 +1,5 @@
 package edu.jxslu.schedule.ui.common
 
-import android.os.SystemClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -16,11 +15,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -28,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.Disclaimer
 import edu.jxslu.schedule.domain.LicenseEntry
 import edu.jxslu.schedule.domain.OpenSourceLicenses
-import kotlinx.coroutines.delay
 import kotlin.math.ceil
 
 /**
@@ -39,35 +32,6 @@ import kotlin.math.ceil
  * 不把最后一条压在视口外面。
  */
 private val LegalTextMaxHeight = 420.dp
-
-/**
- * 关闭锁的剩余毫秒（0 = 可关）。
- *
- * **用 `SystemClock.elapsedRealtime()` 而不是 `System.currentTimeMillis()`**：后者跟着
- * 系统时间走，用户把时间往前调就能把锁瞬间走完。单调时钟不受改时间、时区与 NTP 校正影响。
- *
- * 计时起点是**本组合第一次进入时**，不是宿主算锁的那一刻——弹窗还没上屏就把秒数走掉，
- * 锁就白设了。
- */
-@Composable
-fun rememberCloseLock(totalMs: Long): Long {
-    var remainingMs by remember(totalMs) { mutableLongStateOf(totalMs) }
-    LaunchedEffect(totalMs) {
-        if (totalMs <= 0L) {
-            remainingMs = 0L
-            return@LaunchedEffect
-        }
-        val startAt = SystemClock.elapsedRealtime()
-        while (true) {
-            val left = totalMs - (SystemClock.elapsedRealtime() - startAt)
-            if (left <= 0L) break
-            remainingMs = left
-            delay(minOf(200L, left))
-        }
-        remainingMs = 0L
-    }
-    return remainingMs
-}
 
 /**
  * 长文声明弹窗（免责声明 / 用户须知 / 充值风险查看共用，DESIGN §3.3 / §3.16）。

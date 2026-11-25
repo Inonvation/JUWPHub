@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import edu.jxslu.schedule.ui.onboarding.OnboardingScreen
+import edu.jxslu.schedule.ui.onboarding.rememberOnboardingBrandIcons
+import edu.jxslu.schedule.ui.onboarding.rememberOnboardingJwLogin
 
 /**
  * 首次配置引导窗口（DESIGN §3.16）。
@@ -20,6 +22,10 @@ import edu.jxslu.schedule.ui.onboarding.OnboardingScreen
  *
  * 也能被**重复进入**（「我的」页账户卡在登录失效时点进去）：那时直接落在「学校统一认证」
  * 那一步，只改密码，不走欢迎页。
+ *
+ * 引导页本体自 2026-11-25 起在 `shared/commonMain`（iOS 首次打开也要有引导）。
+ * **本窗口是那份共享 UI 在 Android 上的装配根**：可空槽位在这里填成非空，
+ * 平台动作（品牌位图、二级页跳转、退后台 / 整窗退场）都在这一层落地。
  */
 class OnboardingActivity : ComponentActivity() {
 
@@ -32,7 +38,18 @@ class OnboardingActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             JuwRoot {
-                OnboardingScreen(onFinish = { finish() }, startAtJw = startAtJw)
+                OnboardingScreen(
+                    onFinish = { finish() },
+                    startAtJw = startAtJw,
+                    // 六槽位全非空 ⇒ Android 侧六屏一屏不少，与搬迁前逐字一致
+                    jwLogin = rememberOnboardingJwLogin(),
+                    brands = rememberOnboardingBrandIcons(),
+                    onOpenService = { SubpageActivity.start(this, it) },
+                    // 欢迎页按返回：退到后台；退不了（极少数 OEM）就整任务退场
+                    onBackAtWelcome = { if (!moveTaskToBack(true)) finishAffinity() },
+                    // 声明弹窗的「不同意并退出」：不写同意记录、不写 seen，整个应用关掉
+                    onDeclineNotices = { finishAffinity() },
+                )
             }
         }
     }
