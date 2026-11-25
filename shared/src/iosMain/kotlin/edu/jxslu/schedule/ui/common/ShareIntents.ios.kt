@@ -65,7 +65,10 @@ private fun resolveShareTarget(): ShareTarget? = ShareSettings.target ?: IosShar
 
 /**
  * 现成的 [ShareTarget] 实现：把 UIKit 那一半写死在 Kotlin/Native 里，只把「从哪个 VC 弹」
- * 留给 Swift 壳注入（构造参数是一个返回当前 VC 的闭包，每次分享时现取，不要缓存）。
+ * 留给构造方（构造参数是一个返回当前 VC 的闭包，每次分享时现取，不要缓存）。
+ *
+ * 两个构造方：Swift 壳（`ShareSettings.target`）与根组合里的 `IosSharePresenter()`
+ * （`IosSharePresenter.kt`）。两者都只是回答「哪个 VC」，不重复实现本类。
  *
  * 线程：`UIActivityViewController` 必须在主线程 present。Compose 在 iOS 上跑在主线程，
  * 这里不切线程——切过去反而会因为跨线程碰 UIKit 崩。
