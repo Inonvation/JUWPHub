@@ -23,7 +23,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,9 +30,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
@@ -63,7 +60,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -263,12 +259,6 @@ fun JwImportScreen(
      */
     var autoNavDone by remember { mutableStateOf(false) }
     /**
-     * 评教注入的「尝试代次」（DESIGN §4.44）：每次注入自增，15s 看门狗只对同代次生效——
-     * 刷新重试会开启新代次，旧代次的看门狗到点即废（否则重试后它会给一条与事实相反的
-     * 失败提示，2026-10-07 复查修）。
-     */
-    var evalAttempt by remember { mutableStateOf(0) }
-    /**
      * 登录落地（教务主页）后自动打开的目标页与提示文案，按模式固定。
      * 触发在 [startAutoNavOnLanding]，`onPageCommitVisible` 与 `onPageFinished` 两个入口
      * 共用这一份口径。
@@ -280,8 +270,9 @@ fun JwImportScreen(
         JwImportMode.Selection -> selectionRoundId
             ?.let { JwUrls.selectionRoundUrl(it) }
             ?: JwUrls.SELECTION_CENTER
-        // 评教没有静态目标页：落主页后由 [startAutoNav] 注入「取 token 再跳」脚本
-        // （DESIGN §4.44）。空串只是占位，走不到 loadUrl
+        // 评教（§4.44）2026-11-26 起由共享层的 TeachingEvalScreen 承载，本页收不到这个模式
+        // （JwImportActivity 在进门时就分流了）。这一档只为 `when` 穷尽保留：枚举值仍被
+        // MainActivity 的入口引用，不能删。
         JwImportMode.TeachingEval -> ""
         // 从考试页进来的窗口（DESIGN §4.33）：落理论课表页会触发 autoImportOnTheoryReady，
         // 一键导入理论+实验跑起来，跟入口写的「导入考试安排」不是一回事
@@ -302,7 +293,9 @@ fun JwImportScreen(
     val autoNavNote: String = when (mode) {
         JwImportMode.Scores -> "已登录教务主页，正在打开成绩查询页…"
         JwImportMode.Selection -> "已登录教务主页，正在打开选课中心…"
-        JwImportMode.TeachingEval -> "已登录教务主页，正在打开学生评教…"
+        // 同上：评教窗口已改由共享层承载，这一档只为 `when` 穷尽保留；文案取共享层那份
+        // （`TeachingEvalFlow`），别在这里另写一句
+        JwImportMode.TeachingEval -> TeachingEvalFlow.LANDING_NOTE
         JwImportMode.Schedule -> if (startAtExam) {
             "已登录教务主页，正在打开考试安排查询…"
         } else {
@@ -515,7 +508,7 @@ fun JwImportScreen(
             onDone()
             return
         }
-        view?.evaluateJavascript(SESSION_PROBE_JS) { raw ->
+        view?.evaluateJavascript(JwSessionProbe.SCRIPT) { raw ->
             val probe = unwrapJsString(raw)
             // 无条件记录探针原始值：上一轮排查时无法回答「探测到底跑没跑、看到了什么」，
             // 这个日志让下次复现能直接读出判定依据，而不是靠猜。
@@ -580,38 +573,9 @@ fun JwImportScreen(
                 autoNavDone = true
                 // 起跳 = 离开认证落点，之后用户停留在别的教务页刷新不再被拽回来
                 if (mode == JwImportMode.Browse) browseAuthChainActive = false
-                if (mode == JwImportMode.TeachingEval) {
-                    // 评教没有静态目标页（DESIGN §4.44）：注入取 token 脚本、同窗口跳转。
-                    // 回调只判「有没有真的发起」；发起后未必有导航（ajax 静默失败），
-                    // 由下面的原地看门狗兜底——任何路径不允许状态悬在 Loading。
-                    evalAttempt++
-                    val attempt = evalAttempt
-                    wv.evaluateJavascript(JwTeachingEval.launchJs()) { outcome ->
-                        if (outcome?.contains("sent") != true && outcome?.contains("dup") != true) {
-                            statusNote = if (outcome?.contains("no-jquery") == true) {
-                                "教务页脚本未就绪：可点右上角「刷新」重试"
-                            } else {
-                                "没能打开评教页：可点右上角「刷新」重试"
-                            }
-                            if (pageState is PageState.Loading) pageState = PageState.Ready
-                        }
-                    }
-                    wv.postDelayed({
-                        // 只对同代次生效：刷新重试后旧看门狗作废，不再补一条假告警；
-                        // 另要求 autoNavDone（本轮注入仍生效）——刷新会把它复位，
-                        // 「刷新后到重新注入前」的间隙里旧看门狗据此也不再命中（2026-10-07 复查补）
-                        if (attempt == evalAttempt &&
-                            autoNavDone &&
-                            currentUrl.contains("xsMainV") &&
-                            pageState is PageState.Loading
-                        ) {
-                            statusNote = "还没打开评教页：可点右上角「刷新」重试"
-                            pageState = PageState.Ready
-                        }
-                    }, AUTO_EVAL_TIMEOUT_MS)
-                } else {
-                    wv.loadUrl(autoNavTarget)
-                }
+                // 评教那条「注入取 token 再跳」已随窗口搬进共享层（TeachingEvalScreen /
+                // TeachingEvalFlow）：本页所有模式的落地目标都是静态 URL，直接 loadUrl。
+                wv.loadUrl(autoNavTarget)
             } else {
                 autoNavPending = false
                 autoNavDone = true
@@ -1114,7 +1078,7 @@ fun JwImportScreen(
                             when (mode) {
                                 JwImportMode.Scores -> "成绩导入 · 统一认证"
                                 JwImportMode.Selection -> "选课 · 统一认证"
-                                JwImportMode.TeachingEval -> "学生评教 · 统一认证"
+                                JwImportMode.TeachingEval -> TeachingEvalFlow.TITLE
                                 JwImportMode.Schedule -> "教务导入 · 统一认证"
                                 JwImportMode.Browse -> browseTitle.ifBlank { "网页核对" }
                             },
@@ -1341,9 +1305,6 @@ fun JwImportScreen(
                                                     "已打开${browseTitle.ifBlank { "教务网页" }}。"
                                                 JwUrls.isSelectionCenterUrl(u) ->
                                                     "选课中心已打开。点「进入选课」在教务页面上完成选课，选好后返回即可。"
-                                                // 评教平台（DESIGN §4.44）：SPA 页面，进页即静候用户操作
-                                                JwTeachingEval.isPlatformUrl(u) ->
-                                                    "学生评教页已打开，评教完成后返回即可。"
                                                 page == JwSchedulePage.Exam ->
                                                     // 首次落页由 autoImportOnExamReady 自动跑，
                                                     // 跑过之后再回来就只剩手动入口
@@ -1361,9 +1322,6 @@ fun JwImportScreen(
                                                     // 跑过之后再回来就只剩手动入口
                                                     if (autoImportTried) "成绩查询页已打开。点下方「导入成绩」。"
                                                     else "成绩查询页已打开，正在自动导入…"
-                                                // 评教模式的普通页兜底：这窗口没有导入按钮，别指向它
-                                                mode == JwImportMode.TeachingEval ->
-                                                    "已登录教务。评教页打不开时可点右上角「刷新」重试"
                                                 else -> "已登录教务，点下方「一键导入课表」可同步理论与实验课表"
                                             }
 
@@ -1405,19 +1363,14 @@ fun JwImportScreen(
                                             applyPageFit(view, u, desktopMode)
                                             pageState = PageState.Ready
                                             releaseLoadGate(u)
-                                            // 平台落地 = 评教这一跳完成：autoNavPending 归零（否则它一直
-                                            // 挂着 true——今天无功能影响，但别把「在途」状态留给将来）
-                                            if (JwTeachingEval.isPlatformUrl(u)) autoNavPending = false
                                             // 加载完成 ≠ 渲染出东西：探测一下，白屏时给可操作提示，
                                             // 而不是让用户对着空页猜发生了什么。
-                                            // 评教平台是 SPA 空壳（内容全由 JS 渲染），探针必然误判
-                                            // ——平台域跳过，状态条由上面的平台分支负责（DESIGN §4.44）
-                                            if (!JwTeachingEval.isPlatformUrl(u)) {
-                                                view?.evaluateJavascript(PAGE_CONTENT_PROBE_JS) { scoreRaw ->
-                                                    val score = scoreRaw?.trim()?.removeSurrounding("\"")?.toFloatOrNull()
-                                                    if (score != null && score < 20f) {
-                                                        statusNote = "页面已加载但内容为空，可点「重试」重新认证"
-                                                    }
+                                            // （评教平台那个 SPA 空壳以前要在这里跳过，2026-11-26 起
+                                            // 评教走共享层 TeachingEvalScreen，本页不再有平台域页面。）
+                                            view?.evaluateJavascript(PAGE_CONTENT_PROBE_JS) { scoreRaw ->
+                                                val score = scoreRaw?.trim()?.removeSurrounding("\"")?.toFloatOrNull()
+                                                if (score != null && score < 20f) {
+                                                    statusNote = "页面已加载但内容为空，可点「重试」重新认证"
                                                 }
                                             }
                                         }
@@ -2143,13 +2096,6 @@ private const val AUTO_NAV_DELAY_MS = 400L
 private const val AUTO_NAV_TIMEOUT_MS = 10_000L
 
 /**
- * 评教注入的原地看门狗（DESIGN §4.44）：注入脚本是「发起即返回」，ajax 静默失败时
- * 不会有任何页面事件。取 15 秒（比 [AUTO_NAV_TIMEOUT_MS] 宽）——token 往返 + 302 +
- * SPA 首屏都在这一段里；到点仍停在教务主页就往状态条给出路（刷新可重试）。
- */
-private const val AUTO_EVAL_TIMEOUT_MS = 15_000L
-
-/**
  * 顶部提示条：只留一行状态文字。
  *
  * 根因（也是白屏修复的一半）：旧版还有 URL 行 + 「统一认证/强智直登」两个入口按钮，
@@ -2251,46 +2197,9 @@ private fun TermSwitchErrorDialog(
 }
 
 /**
- * 电脑版 / 手机版开关（DESIGN §4.4）。
- *
- * 形态照骑行页「使用方式」chip：纯文字胶囊、**不用图标**（这是两态开关不是动作，
- * 当前态直接写在胶囊上；也免了猜 HugeIcons 名）。开 = 主色底「电脑版」，
- * 关 = 中性底「手机版」，点一下切到另一态。
- *
- * 命中区 48dp（胶囊本体约 32dp 高，外面套一层 [heightIn] + 点击），
- * 与右侧刷新 IconButton 的触摸高度对齐。
+ * 电脑版 / 手机版开关（DESIGN §4.4）已上移到共享层 `ui/jwvw/JwDesktopModeChip.kt`
+ * （2026-11-26 评教窗口与导入窗口共用同一个胶囊）；本文件的调用点不用改导入——包名不变。
  */
-@Composable
-private fun JwDesktopModeChip(desktop: Boolean, onToggle: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
-    Box(
-        modifier = Modifier
-            .heightIn(min = 48.dp)
-            .clickable(onClick = onToggle)
-            .padding(horizontal = 6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(
-                    if (desktop) scheme.primaryContainer else scheme.onSurface.copy(alpha = 0.07f),
-                )
-                .padding(horizontal = 12.dp, vertical = 7.dp),
-        ) {
-            Text(
-                text = if (desktop) "电脑版" else "手机版",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = if (desktop) {
-                    scheme.onPrimaryContainer
-                } else {
-                    scheme.onSurface.copy(alpha = 0.7f)
-                },
-            )
-        }
-    }
-}
 
 @SuppressLint("SetJavaScriptEnabled")
 private fun configureForJw(webView: WebView) {
@@ -2393,31 +2302,7 @@ private val PAGE_CONTENT_PROBE_JS: String = """
 """.trimIndent()
 
 /**
- * 判定当前页是不是教务登录页（= 未登录）。
- *
- * 特征取自实测（2026-09-18，手机 5G 无代理）：
- * - 未登录的 `xsMainV` / `xskb_list` / `Logon.do` 都是 HTTP 200 就地渲染登录页，
- *   含 `id="loginDiv"` 与 `type="password"` 输入框，`<title>登录</title>`；
- * - 已登录的课表/主页快照里这两者均为 0 处（`scripts/out/xskb_vt0.html`、`syxkb.html`）。
- *
- * ⚠️ 不要改回按文案判定。曾用过「用户没有登录」，而实测该页面上此文案出现 **0 次**，
- * 那种判据永远不会命中（旧实现的「会话失效」提示因此从未生效过）。
- *
- * 2026-10-06 补 `conflict`：账号在别处登录时强智回一段**裸 JSON**
- * （`{"flag1":3,"msgContent":"您的账号在其它地方登录"}`，页面很小），
- * 登录页那两个特征都不出现，不单独认就会把它当正常页一路放行。
- * token 与 `JwImportDiagnosis.SESSION_CONFLICT_TOKEN` 逐字对齐。
+ * 判定当前页是不是教务登录页（= 未登录）的探针脚本已上移到共享层
+ * `ui/jwvw/JwSessionProbe.kt`（2026-11-26 评教窗口也要跑同一段探针，特征与
+ * `JwImportDiagnosis` 的判据必须逐字对齐）。调用点用 `JwSessionProbe.SCRIPT`。
  */
-private val SESSION_PROBE_JS: String = """
-(function(){
-  try{
-    var hasLoginDiv = !!document.getElementById('loginDiv');
-    var hasPwd = !!document.querySelector('input[type=password]');
-    var title = (document.title||'').trim();
-    var text = (document.body && document.body.textContent) || '';
-    var conflict = text.length < 4000 &&
-        text.indexOf('其它地方登录') >= 0 && text.indexOf('flag1') >= 0;
-    return (conflict?'conflict ':'') + (hasLoginDiv?'loginDiv ':'') + (hasPwd?'password ':'') + 'title=' + title;
-  }catch(e){ return ''; }
-})()
-""".trimIndent()

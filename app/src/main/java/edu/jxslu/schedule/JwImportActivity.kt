@@ -9,6 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import edu.jxslu.schedule.ui.common.LaunchGate
 import edu.jxslu.schedule.ui.jwvw.JwImportMode
 import edu.jxslu.schedule.ui.jwvw.JwImportScreen
+import edu.jxslu.schedule.ui.jwvw.TeachingEvalHost
 
 /**
  * 教务导入独立窗口。
@@ -47,14 +48,21 @@ class JwImportActivity : ComponentActivity() {
         val browseTitle = intent.getStringExtra(EXTRA_BROWSE_TITLE).orEmpty()
         setContent {
             JuwRoot {
-                JwImportScreen(
-                    onBack = { finish() },
-                    mode = mode,
-                    startAtExam = startAtExam,
-                    selectionRoundId = selectionRoundId,
-                    browseUrl = browseUrl,
-                    browseTitle = browseTitle,
-                )
+                // 评教（§4.44）2026-11-26 起走共享层的 TeachingEvalScreen：它只做「登录 →
+                // 落地注入取 token → 交给用户在平台里操作」，与下面这张导入页（抽取 / 写库 /
+                // 学期切换）没有交集。窗口、转场、清理仍旧是这一个 Activity。
+                if (mode == JwImportMode.TeachingEval) {
+                    TeachingEvalHost(onBack = { finish() })
+                } else {
+                    JwImportScreen(
+                        onBack = { finish() },
+                        mode = mode,
+                        startAtExam = startAtExam,
+                        selectionRoundId = selectionRoundId,
+                        browseUrl = browseUrl,
+                        browseTitle = browseTitle,
+                    )
+                }
             }
         }
     }
