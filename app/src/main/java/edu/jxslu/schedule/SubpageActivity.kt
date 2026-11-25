@@ -89,6 +89,7 @@ import edu.jxslu.schedule.ui.common.washerScanIntent
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
 import edu.jxslu.schedule.ui.ebike.EbikeAutoReturnReminder
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
+import edu.jxslu.schedule.ui.ebike.KvcxOrdersViewModel
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
 import edu.jxslu.schedule.ui.ebike.KvcxViewModel
 import edu.jxslu.schedule.ui.ebike.RideScreen
@@ -334,7 +335,17 @@ class SubpageActivity : ComponentActivity() {
                 onOpenOrders = { SubpageActivity.start(this, SubpageScreen.KVCX_ORDERS) },
                 brandIcon = R.drawable.ic_brand_kqcx,
             )
-            SubpageScreen.KVCX_ORDERS -> KvcxOrdersScreen(onBack = onBack)
+            // 快趣历史订单页（iOS 移植 P4，2026-11-25 搬进 shared/commonMain）：同一口径，
+            // ViewModel 由宿主建；本页没有平台动作，所以只有 `onBack` 一个参数。
+            SubpageScreen.KVCX_ORDERS -> KvcxOrdersScreen(
+                viewModel = viewModel {
+                    KvcxOrdersViewModel(
+                        session = Graph.kqcxCore(this@SubpageActivity),
+                        orderCache = Graph.kqcxOrderStore(this@SubpageActivity),
+                    )
+                },
+                onBack = onBack,
+            )
             // 校历（DESIGN §4.34）：页在共享层（iOS 移植 W2），画图与全屏查看器由这里注入
             // （BitmapFactory 降采样 + `ImageViewerDialog` 都是 Android 专有）。
             SubpageScreen.CAMPUS_CALENDAR -> CampusCalendarScreen(

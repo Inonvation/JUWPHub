@@ -31,19 +31,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.RideRecord
 import edu.jxslu.schedule.domain.YearMonthKey
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.LabelValueRow
@@ -69,18 +66,17 @@ import edu.jxslu.schedule.ui.theme.semanticColors
  * 与快趣账号页的「最近骑行」分工：那个是本机记录（只记 App 里开的车，最多 100 条），
  * 这里是账号下的全部订单（微信里骑的、换手机之前的都在）。金额显示**不是账单**，
  * 以快趣为准——页尾一行常驻说明。
+ *
+ * **iOS 移植 P4（2026-11-25）搬进共享层**：ViewModel 是必填参数、由宿主创建
+ * （`design/ios-port.md` §11.2 ①）。本页**没有任何平台动作**——月份、车型、下拉刷新
+ * 全是共享层状态，所以签名里没有可空回调。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun KvcxOrdersScreen(onBack: () -> Unit = {}) {
-    val context = LocalContext.current
-    // ViewModel 已搬进共享层（iOS 移植 P4）：构造改由宿主负责（design/ios-port.md §11.2 ①）
-    val viewModel: KvcxOrdersViewModel = viewModel {
-        KvcxOrdersViewModel(
-            session = Graph.kqcxCore(context.applicationContext),
-            orderCache = Graph.kqcxOrderStore(context.applicationContext),
-        )
-    }
+fun KvcxOrdersScreen(
+    viewModel: KvcxOrdersViewModel,
+    onBack: () -> Unit = {},
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val haptics = rememberAppHaptics()
     val thisMonth = remember { YearMonthKey.fromDate(AppClock.today()) }
