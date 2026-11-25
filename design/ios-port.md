@@ -1099,7 +1099,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | 快捷设置磁贴 | `ui/widget` 内 | Android 的 `TileService`；iOS 控制中心不支持第三方磁贴 | 无替代。iOS 侧只保留 App 内入口 |
 | 免费骑行倒计时「灵动岛」 | `ui/reminder` 内 | 用的是 Android 16 的标准 Live Updates（`setRequestPromotedOngoing` + chronometer） | iOS 对应物是 Live Activity（ActivityKit），要写 SwiftUI 布局 + 推送更新；**能做，是另一份实现** |
 | 后台定时任务（`WorkManager`） | `ui/reminder` 6 处 | iOS 的 `BGTaskScheduler` 由系统决定何时跑，不保证周期；Android 的 WorkManager 有最小时延语义 | 改成「进前台时补跑 + BGAppRefreshTask 尽力而为」，**行为必然弱于 Android** |
-| 通知（洗好提醒 / 问渠提醒 / 成绩提醒） | `ui/reminder` 15 文件 | `NotificationManager` + 渠道 + 前台服务 | 用 `UNUserNotificationCenter` 重写，权限模型不同（iOS 要显式请求）；**能做，是另一份实现** |
+| 通知（洗好提醒 / 问渠提醒 / 成绩提醒） | `ui/reminder` 15 文件 | `NotificationManager` + 渠道 + 前台服务 | 用 `UNUserNotificationCenter` 重写，权限模型不同（iOS 要显式请求）。**U净 洗衣完成已接**（`platform/IosUjingReminder`，2026-11-25 晚，见 §12.9）；其余几类缺的是**触发时机**（后台周期抓取 / 到点执行代码），不是通知本身 |
 
 ### 12.2 今晚没做完（能搬，时间不够）
 
@@ -1293,4 +1293,55 @@ Y1（2026-11-25 晚）把四个文件搬进 `shared/commonMain/.../ui/campus/`�
 `credentialStore.save` → Keychain → `setCampusCardEnabled(true)` → 消费流水 / 电费页
 `credentialStore.read()` 拿到同一份凭证 → `YktRepository` 真发请求。代码上是连通的；
 **没验的是真机**：Keychain 写入后跨进程读回、学校接口在 iOS 上的实际返回、码图扫码可读性。
+
+### 12.9 iOS 通知能力清单（2026-11-25 晚，N1）
+
+iOS 侧此前**没有任何通知能力**——`AppServices.ujingReminder()` 在 iOS 上返回 null，所有「到点
+告诉你」的功能都不存在。N1 立了第一份实现 `platform/IosUjingReminder`（`shared/src/iosMain`，
+`UNUserNotificationCenter` + `UNTimeIntervalNotificationTrigger`），并把
+`IosServices.ujingReminder()` 接成非 null。**这是一份实现、一个用例**，不是一类能力的开关。
+
+#### 12.9.1 平台口径：iOS 与 Android 的四处硬差异
+
+| 面 | Android（`ui/reminder/*`） | iOS（本轮） |
+|---|---|---|
+| 排程机制 | `AlarmManager.setAlarmClock`，到点拉起 Receiver → 查一次网络 → 决定发不发 | `UNTimeIntervalNotificationTrigger`（**相对秒数**），到点由系统直接投递，**没有任何代码被执行** |
+| 到点核对 | 有：本次看到转入 50 才发，还在跑按新剩余重排，取消静默收摊 | **没有**。iOS 到点不能执行代码（后台唤起靠 `BGTaskScheduler`，系统不保证时刻），所以到点即发，正文写「预计已结束」 |
+| 权限 | `POST_NOTIFICATIONS` 运行时权限 + 通知渠道，渠道可单独关 | 首次请求 `alert \| sound \| badge`；被拒后**不抛异常**，`schedule` 降级成 no-op，结论记进进程内 `IosNotificationPermission`（`hint` 是给页面的一行说明）。**权限结论不落盘**，真身由系统持有 |
+| 前台可见 | 默认就弹 | **默认不弹**。必须实现 `UNUserNotificationCenterDelegateProtocol` 的 `willPresentNotification` 并回 `banner \| sound`。那个 delegate 挂在**进程级**对象上——`UNUserNotificationCenter.delegate` 是 weak，写成局部对象会被回收，回调一次都不来（与 `WebViewController.ios.kt` 的 `navigationDelegate` 同一个坑）。为此 `IosServices` 里这个提醒是**非 lazy** 成员，启动第一行就把代理装上 |
+
+两条实现细节：**`timeInterval` 必须 > 0**，已过期或不足 1 秒一律钳到 1 秒（传 0/负数 iOS 直接
+拒绝注册）；**标识符 `ujing.<orderId>`** 稳定且可枚举，`cancel` / `revoke` 按前缀扫
+「待发 + 已投递」两个队列，不依赖进程内存记得排过哪几个（进程被杀后那点记忆就没了）。
+
+`Info.plist` **不需要加任何键**（本地通知不要求 `UIBackgroundModes`、没有用途描述串）；
+`iosApp/project.yml` 的 `OTHER_LDFLAGS` 补了 `-framework UserNotifications`——静态 framework
+不自带 load command，漏了是链接期 Undefined symbols。
+
+#### 12.9.2 六类提醒：现在能做什么、还缺什么
+
+| 提醒 | 状态 | 缺的是什么 |
+|---|---|---|
+| 洗衣完成（U净） | **能做**（本轮）。排 / 撤 / 撤已发 + 前台横幅 + 权限降级全接上；`UjingViewModel` 里五处调用点（`refreshOrder` 排与终结撤、`cancelOrder`、`logout`、`dismissOrder` revoke）自然生效 | **整条「下单 → 通知」在 iOS 上还差一段**：`UjingViewModel.createAndPay` 在 `pay == null` 时直接拦住（iOS 没有支付宝 SDK，`UjingPay` 由宿主传 null），本机建不出订单，因此提醒只在「已有在案订单」时被排到。缺的是支付缝（§10.4：收银台 URL 进 `WKWebView` + `alipays` 白名单） |
+| 上课提醒 | 不能做 | ①「课表 → 通知」的换算（`Course.startSection/endSection` + 作息表 → 绝对时刻，含单双周 / `date_overrides` 停调课）；②**64 条待发上限的分配策略**（见 12.9.3）；③重排时机（落库后 / 前台恢复 / 每天首次启动）。Android 那份 `ScheduleAlertReminder` 是 `AlarmManager` + 前台服务 + 免扰队列，**不能搬**，只有换算规则可以复用 |
+| 作业截止 | 不能做 | ①`homework` 表 → 到期时刻（表在 iOS 上读得到，`HomeworkRepository` 已非空）；②同样吃 64 条分配；③**免扰队列的等价物不存在**——Android 是「拦下入队、时段结束补发」，iOS 只能靠 `UNNotificationInterruptionLevel` 分级或干脆不排，没有补发；④作业模块在 iOS 上已按 §12.4 下线，得先把入口放回来 |
+| 免费骑行超时 | 不能做 | ①骑行链路本身（`ui/ebike` 是高德 **Android** SDK，§12.1）；②「倒计时常驻/灵动岛」的等价物是 Live Activity（ActivityKit + SwiftUI 扩展 target），本地通知只能给一条到点横幅，不是同一个体验；③到点要触发的自动还车是后台动作，iOS 没有等价物 |
+| 自动还车 | 不能做 | 后台定时（`WorkManager` → `BGAppRefreshTask`，系统不保证时刻）+ 骑行订单来源（同上）。通知只是副产品，前置条件一个都没有 |
+| 成绩 / 调课提醒 | 一半能做 | 抓取与对比**已经能跑**（`ScoreSync` / `ScheduleSync` 在 iOS 非空，§12.7），缺的是**触发时机**：Android 是 `WorkManager` 周期任务，iOS 只能「进前台补跑 + 有差异时在前台弹一条本地通知」，或接 `BGAppRefreshTask`（尽力而为）。「后台悄悄抓完再推送」这条路 iOS 不保证 |
+
+#### 12.9.3 64 条上限：上课提醒的两种候选策略（本轮不实现）
+
+iOS 每个 App 最多挂 **64 条待发本地通知**（`UNUserNotificationCenter` 装不下就丢，且丢哪条不可依赖）。
+11 小节 × 7 天 = **77 条**，Android 那种「一次排满一周」到 iOS 上必然超限。
+
+| 策略 | 怎么排 | 取舍 |
+|---|---|---|
+| **A. 只排未来 N 天 + 开 App 补齐**（倾向这个） | 64 / 11 ≈ 5.8 天，留余量给洗衣 / 作业 / 成绩 → 排 **4 天 = 44 条**，剩 20 条给别的提醒。进 App、前台恢复、课表落库、`date_overrides` 变更时重排 | 优点：与 Android 行为最接近（用户感知「每节课前都提醒」），换算逻辑与排程互相独立，共享层只写一份。缺点：**连续 4 天以上不开 App 就断**（第 5 天起没有提醒），且每次重排都是一次批量 `add`（同标识符覆盖，幂等没问题） |
+| **B. 每天只排最近一节 + 按周重复** | 用 `UNCalendarNotificationTrigger`（`repeats = true`）按「周一 08:00 … 周五 08:00」排 7 条（周末有课再补），只覆盖**每天第一节** | 优点：7 条稳定，永不超限，不需要补排。缺点：**一天只提醒一次**，第 2 节起全没有；调课 / 停课 / 单双周都要靠 `date_overrides` 重新换算，而重复触发器不会跟着改——一改就得重排一批 |
+
+选 A 的理由：上课提醒的价值在「每节都提醒」，B 直接砍掉三分之二；而 A 的断档条件（一周内必开
+App）在这个 App 的实际使用里成立（查课表、看今日页都会进前台），断档的损失也只是「第 5 天起
+安静」，不是错误提醒。**两种都要在排之前先算总量**：`44 + 洗衣 1 + 作业 N + 成绩 1 ≤ 64`，
+余量不足时按「上课 > 作业 > 洗衣 > 成绩」的顺序砍最远的那些。
+
 
