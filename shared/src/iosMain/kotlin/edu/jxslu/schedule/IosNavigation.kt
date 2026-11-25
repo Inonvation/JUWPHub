@@ -113,6 +113,8 @@ import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.score.ScoreSettingsScreen
 import edu.jxslu.schedule.ui.score.TranscriptHistoryContent
 import edu.jxslu.schedule.ui.score.TranscriptScreen
+import edu.jxslu.schedule.ui.score.iosSaveTranscriptPdf
+import edu.jxslu.schedule.ui.score.iosShareTranscriptPdf
 import edu.jxslu.schedule.ui.scholar.ScholarScreen
 import edu.jxslu.schedule.ui.selection.SelectionCenterScreen
 import edu.jxslu.schedule.ui.selection.SelectionRecordsScreen
@@ -454,11 +456,28 @@ internal fun IosRouteContent(
             if (showHistory) {
                 TranscriptHistoryContent(
                     onBack = { showHistory = false },
+                    // 历史里每一份也能直接分享（与列表页同一份 `iosShareTranscriptPdf`）；
+                    // 「打开」与「在网页里核对」仍旧留空，理由见下面 TranscriptScreen 那段。
+                    onSharePdf = ::iosShareTranscriptPdf,
                 )
             } else {
                 TranscriptScreen(
                     onBack = pop,
                     onOpenHistory = { showHistory = true },
+                    // 分享：落到 `Documents/exports/` 再交给系统面板（`ShareIntents` 的 iOS actual，
+                    // 需要根组合里调过 `IosSharePresenter()`——`MainViewController` 已经调了）。
+                    onSharePdf = ::iosShareTranscriptPdf,
+                    // 另存：拷一份到 `Documents/exports/`，用户在「文件 App → JUWPHub」里能看到。
+                    // iOS 没有「下载目录」这个概念，所以「存到下载」在这里的语义就是这一份。
+                    onSavePdf = ::iosSaveTranscriptPdf,
+                    // 打开：沙箱里的 PDF 没有公有「打开」入口（`UIApplication.openURL(file://)`
+                    // 不生效），要 `QLPreviewController`（得往 project.yml 加 QuickLook.framework）
+                    // 或自建 WKWebView 预览页。两件都超出「一个回调」的体量，所以保持 null：
+                    // 页面上那颗「打开」按钮不渲染（§11.2 ④）。
+                    onOpenPdf = null,
+                    // 自动填表脚本：iOS 的教务登录页没有注入脚本的通道（登录由 WKWebView 里
+                    // 用户自己完成），传 null 即不注入。
+                    casAutoFillScript = null,
                 )
             }
         }

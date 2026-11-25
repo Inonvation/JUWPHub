@@ -85,6 +85,9 @@ import edu.jxslu.schedule.ui.today.TodayServiceSlot
 import edu.jxslu.schedule.ui.today.TodayViewModel
 import edu.jxslu.schedule.ui.web.WebContentView
 import edu.jxslu.schedule.ui.web.WebViewController
+import edu.jxslu.schedule.ui.common.IosSharePresenter
+import edu.jxslu.schedule.ui.week.iosSaveScheduleImageToGallery
+import edu.jxslu.schedule.ui.week.iosShareScheduleImage
 import edu.jxslu.schedule.ui.week.ScheduleShareScreen
 import edu.jxslu.schedule.ui.week.WeekScreen
 import edu.jxslu.schedule.ui.week.WeekViewModel
@@ -431,9 +434,14 @@ private fun IosRoot(services: IosServices) {
                                                     viewModel = viewModel,
                                                     onBack = { shareWeek = null },
                                                     initialWeek = week,
-                                                    // 保存相册 / 分享两个槽位暂为 null：iOS 的
-                                                    // 「ImageBitmap → 相册 / 文件分享」还没接（§12.14）。
-                                                    // 这一页现在能看本周课表的完整预览，两个出口不渲染。
+                                                    // 存相册：`ImageBitmap` → PNG → `UIImage` →
+                                                    // `UIImageWriteToSavedPhotosAlbum`（`Info.plist` 的
+                                                    // `NSPhotoLibraryAddUsageDescription` 已在）。
+                                                    onSaveToGallery = ::iosSaveScheduleImageToGallery,
+                                                    // 分享：落 `Documents/exports/` 再交给系统面板。
+                                                    onShareImage = ::iosShareScheduleImage,
+                                                    // 背景图解码还没做（`scheduleBackgroundFiles()` 返回 null），
+                                                    // 所以预览板用纯色底——与课表页一致。
                                                 )
                                             }
                                         }
@@ -610,6 +618,11 @@ fun MainViewController(): UIViewController {
     services.warmUp()
     Logger.i(TAG_BOOT, "④ warmUp 已派发（后台协程）")
     val controller = ComposeUIViewController {
+        // 分享面板要一个「当前在屏」的 UIViewController，共享层拿不到它。
+        // 这一步在根组合里把 `LocalUIViewController` 装进 `IosShareHost`，之后
+        // `ShareIntents` 的两个 actual（`sharePlainText` / `shareFile`）就能自己弹面板了
+        // —— 不装的话它们恒回 false，页面上表现为「点了没反应」。
+        IosSharePresenter()
         // 提醒三件（前台横幅代理 / 作业截止重排 / 成绩核对）挪到**首帧之后、主线程**上。
         // 2026-11-26 之前它们藏在 `IosServices.init` 与 `warmUp` 里，等于在 Swift
         // `makeUIViewController` 执行期间就去碰 `UNUserNotificationCenter`，而那时 App
