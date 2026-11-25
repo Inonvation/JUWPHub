@@ -135,6 +135,7 @@ import edu.jxslu.schedule.ui.water.WaterEntrySheet
 import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.ui.theme.JuwTheme
 import edu.jxslu.schedule.ui.theme.Motion
+import edu.jxslu.schedule.ui.theme.ProvideFixedFontScale
 import edu.jxslu.schedule.ui.theme.semanticColors
 import edu.jxslu.schedule.ui.today.TodayScreen
 import edu.jxslu.schedule.ui.today.TodayViewModel
@@ -506,26 +507,14 @@ internal fun JuwRoot(content: @Composable () -> Unit) {
  * 字体缩放锁定（「固定字体大小」）：把 Compose 树的 `fontScale` 钉在
  * [FontScalePolicy.effectiveFontScale] 的结果上（固定 0.9×）。
  *
+ * **2026-11-26 起实现搬到共享层** `ui/theme/FontScale.kt`（同名同签名）：iOS 根也要用同一份，
+ * 否则两端字号差 11%（iOS 上一版是无参 `JuwTheme { }`，`sp` 恒 1.0×）。这里只留调用点。
+ * 「落点只有一处」的口径不变——唯一实现在共享层，两个根各调一次。
+ *
  * 只覆盖 `fontScale`——密度（dp/px）原样透传，图标、间距、命中区、自适应行高
  * 等一切按 dp 的几何都不受影响；`sp` 的换算从此与系统「字体大小」设置脱钩。
  * 弹层 / 底部弹层 / 下拉菜单是同一合成树的子组合，继承这层 `LocalDensity`，无需各自处理。
- *
- * 未锁定时与系统值恒等，不额外包一层 Provider（避免无谓的 Density 实例）。
  */
-@Composable
-private fun ProvideFixedFontScale(locked: Boolean, content: @Composable () -> Unit) {
-    val density = LocalDensity.current
-    val scale = FontScalePolicy.effectiveFontScale(locked, density.fontScale)
-    if (scale == density.fontScale) {
-        content()
-    } else {
-        CompositionLocalProvider(
-            LocalDensity provides Density(density.density, scale),
-        ) {
-            content()
-        }
-    }
-}
 
 /**
  * 启动期冻结的底栏形态（悬浮导航栏开关，DESIGN §4.22）。
