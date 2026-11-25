@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.CourseKind
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.ai.AiChatScreen
 import edu.jxslu.schedule.ui.ai.AiChatViewModel
 import edu.jxslu.schedule.ui.ai.AiHistoryScreen
@@ -94,6 +96,7 @@ import edu.jxslu.schedule.ui.jw.JwScheduleListScreen
 import edu.jxslu.schedule.ui.jw.StudentInfoScreen
 import edu.jxslu.schedule.ui.jw.TeachingCalendarScreen
 import edu.jxslu.schedule.ui.jw.TextbookScreen
+import edu.jxslu.schedule.ui.life.DrawerHeader
 import edu.jxslu.schedule.ui.life.PowerBillScreen
 import edu.jxslu.schedule.ui.life.PowerBillViewModel
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
@@ -812,26 +815,41 @@ private fun IosNotPortedScreen(screen: SubpageScreen, onBack: () -> Unit) {
  *
  * 分组顺序照 Android：教务 / 学习 / 钱包 / 生活 / 设置 / 账号 / 江水生活。
  * 点条目由宿主关抽屉并 push 二级页。
+ *
+ * ## 顶部身份区（2026-11-25 对齐 Android）
+ *
+ * 上一版这里写的是「JUWPHub / 江西水利电力大学 · 非官方」两行字——Android 的侧栏顶部
+ * 从来不是应用名，而是**身份区**（头像 + 姓名 + 遮罩学号 + 班级，整块点开进学籍信息）。
+ * 现在直接复用共享层的 [DrawerHeader]：同一个 Composable、同一套文案规则，两端一字不差。
+ *
+ * 学号只取**学籍卡落库**那一份（`profileStudentId`）：iOS 没有 CAS 凭证保险箱
+ * （`design/ios-port.md` §12.3），`casUsername` / `yktUsername` 那两档在 iOS 上恒为 null，
+ * 所以这里与 Android 的 `casUsername ?: yktUsername ?: profileStudentId` 是**同一条链**，
+ * 只是前两档在本平台不存在。
+ *
+ * `onScan` 传 null：iOS 还没有相机扫码实现，那一枚整颗不渲染（§11.2 ④）——比留一个
+ * 点了没反应的圆钮好。
  */
 @Composable
-internal fun IosDrawer(onPick: (IosRoute) -> Unit) {
+internal fun IosDrawer(services: IosServices, onPick: (IosRoute) -> Unit) {
     val entries = remember { iosDrawerEntries() }
     val sections = remember(entries) { entries.groupBy { it.section } }
+    // 身份区数据源与 Android 侧栏同一份 `DisplayPrefsStore`（iOS 落在沙箱私有目录的 DataStore）
+    val prefs = remember { services.displayPrefs() }
+    val profileName by prefs.profileName.collectAsStateWithLifecycle(initialValue = "")
+    val profileClass by prefs.profileClass.collectAsStateWithLifecycle(initialValue = "")
+    val profileStudentId by prefs.profileStudentId.collectAsStateWithLifecycle(initialValue = "")
 
     ModalDrawerSheet {
-        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 12.dp)) {
-            Text(
-                text = "JUWPHub",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "江西水利电力大学 · 非官方",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
+        // 身份区：头像 + 姓名 + 遮罩学号 + 班级，整块点开进学籍信息（与 Android 同一个回调语义）。
+        // 学籍信息页在 iOS 白名单里（`iosDrawerEntries` 的「教务」组），所以这条不是死入口。
+        DrawerHeader(
+            name = profileName,
+            studentId = profileStudentId,
+            className = profileClass,
+            onOpenStudentInfo = { onPick(IosRoute(SubpageScreen.STUDENT_INFO)) },
+            onScan = null,
+        )
         // 分隔线用 1dp 的 Box 而不是 HorizontalDivider：后者在不同 material3 小版本里名字与
         // 可用性都变过（`Divider` → `HorizontalDivider`），不值得为一条线赌一次 CI。
         Box(

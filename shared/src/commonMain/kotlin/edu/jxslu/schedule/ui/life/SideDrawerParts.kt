@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import edu.jxslu.schedule.domain.AccountMask
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.TextFmt
@@ -97,16 +98,47 @@ data class ServiceActiveFlags(
 )
 
 /**
- * 侧栏头部：头像 + 姓名 + 遮罩学号 + 班级（整块进学籍信息页），右侧独立「扫一扫」。
+ * 侧栏头部身份区：头像 + 姓名 + 遮罩学号 + 班级（整块进学籍信息页），右侧独立「扫一扫」。
+ *
+ * ## 为什么三行文案由这里拼（2026-11-25 iOS 抽屉对齐）
+ *
+ * 搬进来之前这三个参数是已经拼好的字符串（`title` / `subtitle` / `avatarText`），拼接逻辑
+ * 留在 `:app` 的 `SideDrawerContent` 里。iOS 抽屉要同一块身份区，就得把「姓名 + 遮罩学号
+ * 拼成一行、班级做次标题、空值退到哪句兜底文案」再抄一遍——那是同一个事实的第二份拷贝。
+ * 现在只传原始值（[name] / [studentId] / [className]），文案规则只在这里一处。
+ *
+ * 参数全是「字符串 + 回调」，没有平台 API：两端同一个 Composable。
+ *
+ * ## 头像为什么是文字而不是位图槽位
+ *
+ * Android 侧的头像一直是**姓名首字的圆形文字头像**（`profileName.firstOrNull()`，
+ * 取不到时「水」），全仓没有任何位图解码实现（`app` 与 `shared` 里 `avatar` 只有这一处）。
+ * 所以这里不给可空的 `Painter` 槽位：两端渲染的是同一份文字头像，观感本来就一致。
+ * 真要接真实头像位图时再引入槽位——现在加就是给不存在的调用方留参数。
+ *
+ * @param name 姓名（教务学籍卡导入）。空串 → 整行退到「尚未配置」。
+ * @param studentId 学号（原样传，内部走 [AccountMask]；遮不住的不显示，见那个函数的 KDoc）。
+ * @param className 班级（教务学籍卡导入）。空串 → 「登录教务后自动填班级」。
+ * @param onOpenStudentInfo 头像 / 姓名 / 班级整块点击：进学籍信息页。
+ * @param onScan 扫一扫。**null = 本平台没有扫码能力，那一枚整颗不渲染**
+ *   （`design/ios-port.md` §11.2 ④：留一个点了没反应的入口比没有更糟）。
  */
 @Composable
 fun DrawerHeader(
-    avatarText: String,
-    title: String,
-    subtitle: String,
+    name: String,
+    studentId: String,
+    className: String,
     onOpenStudentInfo: () -> Unit,
-    onScan: () -> Unit,
+    onScan: (() -> Unit)? = null,
 ) {
+    // 2026-10-20 用户口径：学号跟在姓名后面，班级单独做次标题。
+    val masked = AccountMask.maskStudentId(studentId).orEmpty()
+    val title = buildList {
+        if (name.isNotBlank()) add(name)
+        if (masked.isNotBlank()) add(masked)
+    }.joinToString(" ").ifBlank { "尚未配置" }
+    val subtitle = className.ifBlank { "登录教务后自动填班级" }
+    val avatarText = name.firstOrNull()?.toString() ?: "水"
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -156,7 +188,8 @@ fun DrawerHeader(
                 )
             }
         }
-        ScanCircle(onClick = onScan)
+        // 右侧留白由外层 `weight(1f)` 吃掉，扫一扫缺席时身份块自然铺到右缘
+        if (onScan != null) ScanCircle(onClick = onScan)
     }
 }
 

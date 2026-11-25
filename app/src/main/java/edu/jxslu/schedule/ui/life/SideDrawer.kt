@@ -38,7 +38,6 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.ujing.UjingHouseStore
 import edu.jxslu.schedule.data.ujing.UjingRepository
-import edu.jxslu.schedule.domain.AccountMask
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.ShortcutSettings
 import edu.jxslu.schedule.ui.campus.CampusCardViewModel
@@ -194,14 +193,6 @@ fun SideDrawerContent(
     val casUsername = remember(resumeTick) { vault.readCas()?.username }
     val yktUsername = remember(resumeTick) { vault.readYkt()?.username }
     val username = casUsername ?: yktUsername ?: profileStudentId
-    val masked = AccountMask.maskStudentId(username).orEmpty()
-    // 2026-10-20 用户口径：学号跟在姓名后面，班级单独做次标题。
-    val titleLine = buildList {
-        if (profileName.isNotBlank()) add(profileName)
-        if (masked.isNotBlank()) add(masked)
-    }.joinToString(" ").ifBlank { "尚未配置" }
-    val subtitle = profileClass.ifBlank { "登录教务后自动填班级" }
-    val avatarText = profileName.firstOrNull()?.toString() ?: "水"
 
     val campusVm: CampusCardViewModel = viewModel(
         // 侧栏是常驻组合：不在冷启动取数，展开时由下面的 effect 显式刷新
@@ -357,9 +348,9 @@ fun SideDrawerContent(
                     .verticalScroll(scrollState),
             ) {
                 DrawerHeader(
-                    avatarText = avatarText,
-                    title = titleLine,
-                    subtitle = subtitle,
+                    name = profileName,
+                    studentId = username,
+                    className = profileClass,
                     onOpenStudentInfo = onOpenStudentInfo,
                     onScan = onScan,
                 )

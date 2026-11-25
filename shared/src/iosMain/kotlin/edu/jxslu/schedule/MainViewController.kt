@@ -3,7 +3,6 @@ package edu.jxslu.schedule
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,8 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,6 +51,7 @@ import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppBackHandler
+import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jwvw.JwWebFit
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
@@ -102,6 +107,9 @@ private fun IosRoot(services: IosServices) {
                 gesturesEnabled = true,
                 drawerContent = {
                     IosDrawer(
+                        // 身份区（顶部）读的是 `services.displayPrefs()` 里学籍卡落库的三行，
+                        // 与 Android 侧栏同一个 `DisplayPrefsStore`
+                        services = services,
                         onPick = { route ->
                             shellScope.launch { drawerState.close() }
                             pushRoute(route)
@@ -258,15 +266,39 @@ private fun IosRoot(services: IosServices) {
                 }
                 // 底栏只在根层出现：二级页有自己的返回键，再压一条底栏会把返回路径搞混。
                 // 三格与 Android 一致（今日 / 课表 / 我的），抽屉靠左缘右滑或今日页的汉堡打开。
+                //
+                // 2026-11-25 晚：从「纯文字 TextButton」换成与 Android **同一个组件**
+                // （`NavigationBar` + `NavigationBarItem`）的「图标 + 文字」两行式。
+                // Android 那三格是 `Calendar01` / `Book01` / `School01`（`MainActivity.kt`
+                // 的 `AppBottomBar` 调用点）；iOS 第三格是「我的」而不是「教务」，所以用
+                // `UserAccount`——教务汇总页在 iOS 上已经并进抽屉的「教务」分组。
+                // 选中态主色、未选中 `onSurface` 0.6 透明度（用户口径）。
                 if (top == null) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    // 选中主色 / 未选中 `onSurface` 0.6（用户口径）；指示块仍是 M3 默认的
+                    // `secondaryContainer` 胶囊，与 Android 的选中块同一族。
+                    val selectedTint = MaterialTheme.colorScheme.primary
+                    val unselectedTint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.surface,
                     ) {
                         IosTab.entries.forEach { entry ->
-                            TextButton(onClick = { tab = entry }) { Text(entry.label) }
+                            NavigationBarItem(
+                                selected = tab == entry,
+                                onClick = { tab = entry },
+                                icon = {
+                                    Icon(
+                                        imageVector = entry.icon,
+                                        contentDescription = entry.label,
+                                    )
+                                },
+                                label = { Text(entry.label) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = selectedTint,
+                                    selectedTextColor = selectedTint,
+                                    unselectedIconColor = unselectedTint,
+                                    unselectedTextColor = unselectedTint,
+                                ),
+                            )
                         }
                     }
                 }
@@ -282,13 +314,17 @@ private fun IosRoot(services: IosServices) {
  * 与 Android 对齐：**今日 / 课表 / 我的**。教务汇总页不再是 Tab——它下面的每一个入口
  * 都在左侧抽屉的「教务」分组里，少一层跳转反而更快。抽屉靠左缘右滑或今日页的汉堡打开。
  *
+ * 图标名**不是猜的**：`Calendar01` / `Book01` 与 Android `MainActivity.AppBottomBar`
+ * 的三格前两格同名同源；第三格 Android 是「教务」（`School01`），iOS 这一格是「我的」，
+ * 用 `UserAccount`。全部在 `shared/.../ui/icon/AppIcons.kt` 里查得到。
+ *
  * 今日页的**进行中服务卡**已接上（只接开水与 U净）；快趣骑行 / 趣智开水 / 趣智面板 /
  * 扫码在 iOS 上没有实现，槽位传 `null`，对应内容整块不渲染（§11.2 ④）。
  */
-private enum class IosTab(val label: String) {
-    Today("今日"),
-    Week("课表"),
-    Me("我的"),
+private enum class IosTab(val label: String, val icon: ImageVector) {
+    Today("今日", AppIcons.Calendar01),
+    Week("课表", AppIcons.Book01),
+    Me("我的", AppIcons.UserAccount),
 }
 
 /**
@@ -303,7 +339,7 @@ private enum class IosTab(val label: String) {
  * | 区域 | 内容 | 说明 |
  * |---|---|---|
  * | 主体 | 二级页栈顶（[IosRouteContent]）或三个 Tab 之一 | 栈空时显示 Tab，栈非空时显示栈顶 |
- * | 底栏 | 今日 / 课表 / 我的 | 只在栈空时出现，三格与 Android 一致 |
+ * | 底栏 | 今日 / 课表 / 我的（图标 + 文字，M3 `NavigationBar`） | 只在栈空时出现，三格与 Android 一致 |
  * | 抽屉 | [IosDrawer]（`ModalNavigationDrawer`） | 左缘右滑或今日页汉堡打开；分组列出**已经搬过来**的二级页（白名单在 `IosNavigation.kt`） |
  * | 覆盖层 | [JwLoginScreen] | 点「去导入」进来的教务登录 WebView（WKWebView） |
  *

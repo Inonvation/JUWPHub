@@ -1096,7 +1096,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 
 | 差什么 | 现状（2026-11-25 03:30） | 影响 |
 |---|---|---|
-| 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份），底栏「今日 / 课表 / 教务 / 我的」+ 「更多」打开抽屉，抽屉按 Android 的分组列 31 条。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的手势与视差；`我的` 那一格在 Android 上是从抽屉进的 |
+| 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份）；底栏三格「今日 / 课表 / 我的」（M3 `NavigationBar` + 图标 + 文字，选中主色 / 未选中 `onSurface` 0.6）；抽屉按 Android 的分组列 39 条，顶部**复用共享层的 `DrawerHeader` 身份区**（头像 + 姓名 + 遮罩学号 + 班级，整块点开进学籍信息）。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的**手势视差**（iOS 用 `ModalNavigationDrawer`，是另一套实现）；`我的` 那一格在 Android 上是从抽屉进的；抽屉顶部还缺 Android 的钱包区与「账号与登录」行 |
 | 教务登录后的自动填表 | iOS 用 `WKWebView` 让用户手点登录，登录成功落地后自动 `archive` | Android 有自动填表；iOS 需要注入 JS，能做 |
 | 凭证存储 | `IosKeychain`（CoreFoundation）+ 六个第三方存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI）已写，**iOS 编译验证卡在 runner 容量** | 一卡通 / 教务（CAS）那两套仍返回 `null`：还要「CAS 学号 + 登录闸门」两样，它们在 `:app` 的 `CredentialVault` 里 |
 | 第三方仓库 | **胖乖 / U净 / 问渠已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 与 `kqcxSession()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账），快趣的 core 还在 `:app` |
