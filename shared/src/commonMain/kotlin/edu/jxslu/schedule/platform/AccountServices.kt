@@ -1,7 +1,5 @@
 package edu.jxslu.schedule.platform
 
-import kotlinx.coroutines.flow.StateFlow
-
 /**
  * 账号中心页（`ui/me/hub/AccountsHubScreen`）要的那几条**账号侧平台能力**（iOS 移植 S20）。
  *
@@ -78,22 +76,4 @@ interface AiApiKeyStore {
     fun readApiKey(): String?
 
     fun clear()
-}
-
-/**
- * 账号中心要的「第三方会话」最小形状：登录态 + 退出。
- *
- * 只给快趣用。其余四个第三方仓库（胖乖 / 趣智 / U净 / 问渠）的类型早在 `commonMain`，
- * 装配根直接返回原类型即可；快趣的逻辑在共享层 `KqcxSessionCore`，但 `:app` 的
- * `KqcxSessionRepository` 把 core 包成**私有字段**（那个文件本轮不在可改范围），
- * 装配根拿不到 core 本体。于是这里只要它对外暴露的那两个能力，不把 `:app` 的类型
- * 引进接口——那样 iOS 侧连签名都写不出来。
- */
-interface ThirdPartySession {
-
-    /** 登录态；会话不可用时实现方给一个恒 false 的流。 */
-    val loggedIn: StateFlow<Boolean>
-
-    /** 退出登录并清本机凭证。 */
-    fun logout()
 }

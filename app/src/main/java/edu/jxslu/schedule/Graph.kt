@@ -8,6 +8,7 @@ import edu.jxslu.schedule.data.ai.AiCredentialStore
 import edu.jxslu.schedule.data.ai.AiScheduleClient
 import edu.jxslu.schedule.data.ai.createAiScheduleClient
 import edu.jxslu.schedule.data.kqcx.KqcxAuthClient
+import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.data.kqcx.KqcxSessionRepository
 import edu.jxslu.schedule.data.kqcx.KqxCredentialStore
 import edu.jxslu.schedule.data.kqcx.KqcxBikeClient
@@ -173,6 +174,10 @@ object Graph {
 
     @Volatile
     private var kqcxSession: KqcxSessionRepository? = null
+
+    /** 会话本体（见 [kqcxCore]）：与 [kqcxSession] 是两个视图、一份状态。 */
+    @Volatile
+    private var kqcxCoreInstance: KqcxSessionCore? = null
 
     @Volatile
     private var aiCredentialStore: AiCredentialStore? = null
@@ -724,16 +729,38 @@ object Graph {
         }
 
     /**
+     * 快趣会话本体（DESIGN §4.32，iOS 移植 S23）。
+     *
+     * 单独立成装配点而不是藏在 [kqcx] 里：`KqcxSessionRepository` 是给 `ui/ebike` 那批
+     * 用 `java.time.YearMonth` 的页面准备的**兼容壳**，iOS 侧取不到它，但两端需要的是
+     * 同一个会话本体。会话状态（token / 当前账号 / 重登单飞）全在这里，所以**必须是一份**
+     * ——[kqcx] 只是它的 `YearMonth` 视图。
+     *
+     * 仪表盘上的两条留痕回调（登录失效 / 登录成功或退出）也在这里接：壳只做月份换算，
+     * 不要再让第二处去连 `SessionExpiryStore`。
+     */
+    fun kqcxCore(context: Context): KqcxSessionCore =
+        kqcxCoreInstance ?: synchronized(this) {
+            kqcxCoreInstance ?: run {
+                val app = context.applicationContext
+                KqcxSessionCore(
+                    client = KqcxAuthClient.create(),
+                    credentials = KqxCredentialStore(app),
+                    onSessionExpired = { sessionExpiry(app).mark(SessionService.Kqcx) },
+                    onSessionCleared = { sessionExpiry(app).clear(SessionService.Kqcx) },
+                ).also { kqcxCoreInstance = it }
+            }
+        }
+
+    /**
      * 快趣出行会话单例（DESIGN §4.32）。与胖乖/趣智同为第三方的独立会话：
      * token 仅内存、凭证落加密 prefs（secure_kqcx.xml，已排除备份）。
+     *
+     * 这是 [kqcxCore] 的 `YearMonth` 视图，只做月份换算，**不持有会话状态**。
      */
     fun kqcx(context: Context): KqcxSessionRepository =
         kqcxSession ?: synchronized(this) {
-            kqcxSession ?: KqcxSessionRepository(
-                KqcxAuthClient.create(),
-                KqxCredentialStore(context.applicationContext),
-                expiry = sessionExpiry(context.applicationContext),
-            ).also { kqcxSession = it }
+            kqcxSession ?: KqcxSessionRepository(kqcxCore(context)).also { kqcxSession = it }
         }
 
     /**

@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.platform
 
 import edu.jxslu.schedule.data.ai.AiScheduleClient
+import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.power.PowerReadingStore
@@ -381,8 +382,18 @@ interface AppServices {
     /** U净 仓库（DESIGN §4.37）；null 的语义同 [qiekjRepository]。 */
     fun ujingRepository(): UjingRepository?
 
-    /** 快趣出行会话（DESIGN §4.32）；null 的语义同 [qiekjRepository]。 */
-    fun kqcxSession(): ThirdPartySession?
+    /**
+     * 快趣出行会话（DESIGN §4.32）；**null = 本平台没有会话介质**（凭证保险箱）。
+     *
+     * 返回的是会话**本体** `KqcxSessionCore`，不是一层面孔：iOS 移植 S23 之前这里只能给
+     * 「登录态 + 退出」两件，因为 `:app` 的 `KqcxSessionRepository` 把 core 包成私有字段，
+     * 装配根拿不到本体。现在 core 由装配根装配（Android `Graph.kqcxCore`、iOS `IosServices`），
+     * 那层转接连同 `ThirdPartySession` 接口一起消失了——页面要哪一面就用哪一面。
+     *
+     * 账号中心页只读 `loggedIn` 与调 `logout()`；下一轮搬快趣页面（骑行状态、开锁还车、
+     * 订单历史、卡券）时不需要回来改这个签名。
+     */
+    fun kqcxSession(): KqcxSessionCore?
 
     /** 问渠仓库（DESIGN §3.30）；null 的语义同 [qiekjRepository]。 */
     fun wenquRepository(): WenquRepository?
