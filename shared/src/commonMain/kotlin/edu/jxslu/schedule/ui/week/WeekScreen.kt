@@ -108,8 +108,15 @@ import kotlinx.datetime.LocalDate
 private fun slashDate(date: LocalDate): String =
     "${date.year}/${date.monthNumber}/${date.dayOfMonth}"
 
-/** 导出文件名里的日期戳（`yyyyMMdd`，本地日历日）。 */
-private fun compactDate(date: LocalDate): String = buildString {
+/**
+ * 导出文件名里的日期戳（`yyyyMMdd`，本地日历日）。
+ *
+ * **`internal` 而不是 `private`**（2026-11-26 分享页搬进共享层）：`ui/week/ScheduleShareScreen.kt`
+ * 的文件名要同一份口径（`ScheduleShare.exportFileName` 的第一个参数）。两处各写一遍会在
+ * 「零填充」这种细节上漂移，于是把这一份放开给同模块——`:app` 看不见 `internal`，
+ * 也本来就只有这一条链在用。
+ */
+internal fun compactDate(date: LocalDate): String = buildString {
     append(date.year)
     if (date.monthNumber < 10) append('0')
     append(date.monthNumber)
