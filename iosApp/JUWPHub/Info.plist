@@ -68,5 +68,13 @@
 	     但改起来是同一处）。 -->
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>用于在地图上显示你附近的共享单车与实时距离，以及计算骑行时的位置。</string>
+	<!-- 相册两个用途说明（2026-11-26 补）。缺 `NSPhotoLibraryAddUsageDescription` 时
+	     UIImageWriteToSavedPhotosAlbum（shared/.../ui/common/BitmapSave.ios.kt）不是返回错误，
+	     而是**进程被系统直接终止**——存课表图 / 成绩单图一点就闪退，栈顶看不到我们的代码。
+	     读的那条（选图）目前没有调用方，但先写明：以后接选图时同样缺不了。 -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>用于把课表、成绩单等图片保存到你的相册。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>用于从相册选择图片，例如给图片加水印或拼接。</string>
 </dict>
 </plist>
