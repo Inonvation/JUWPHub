@@ -57,7 +57,7 @@ import edu.jxslu.schedule.ui.web.WebViewController
  * iOS 侧本页给得出的能力按 `design/ios-port.md` §11.4 的现状表：**能开、能填、能提交**；
  * 网页里的上传按钮点了没反应（`onPickFiles` 在 iOS 的 Kotlin/Native 绑定里没有
  * `WKOpenPanelParameters`，见 `WebViewController.ios.kt` 的说明），销假的位置签到同样没有
- * （`onGeolocationPrompt` 未接）。这两处都不在本页另造兜底：造一个点了没反应的按钮更糟。
+ * （**2026-11-26 已接**：WebViewController.ios.kt 的 WKUIDelegate 覆盖了定位授权，Info.plist 也有 NSLocationWhenInUseUsageDescription）。附件上传仍给不出。这两处都不在本页另造兜底：造一个点了没反应的按钮更糟。
  *
  * // shortcut: 没有缓存自愈与网页历史回退（接缝缺 goBack / cacheMode）；
  * // 接缝补上这两件、且 Android 的选文件走进 onPickFiles 之后，:app 的 XgFormScreen 删掉、两端共用本页。

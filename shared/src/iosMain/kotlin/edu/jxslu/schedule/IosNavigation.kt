@@ -860,8 +860,9 @@ internal fun IosRouteContent(
         // （`ui/web/WebViewController`），所以 `onOpenForm` 给真回调后三行入口会渲染。
         // 表单窗口不是独立二级页：它在 hub 这一层用本地状态顶掉列表，返回即回列表——
         // 这样不用给 `SubpageScreen` 加一个带参数的枚举（那要 `:app` 同步改）。
-        // iOS 上仍缺两件：附件上传（`onPickFiles` 在 K/N 绑定里没有 `WKOpenPanelParameters`）
-        // 与销假的定位（`onGeolocationPrompt` 未接）。不带附件的单子能填能提交。
+        // iOS 上仍缺**一件**：附件上传（`onPickFiles` 在 K/N 绑定里没有 `WKOpenPanelParameters`，
+        // 且 JS 侧改不了 `input.files`，没有可用替代）。销假的定位签到 2026-11-26 已接
+        //（`WebViewController.ios.kt` 的 `WKUIDelegate`）。不带附件的单子能填能提交。
         SubpageScreen.LEAVE_HUB -> {
             val openForm = remember { mutableStateOf<XgForm?>(null) }
             val form = openForm.value
