@@ -89,6 +89,9 @@ import edu.jxslu.schedule.ui.web.WebViewController
 import edu.jxslu.schedule.ui.common.IosSharePresenter
 import edu.jxslu.schedule.ui.week.iosSaveScheduleImageToGallery
 import edu.jxslu.schedule.ui.week.iosShareScheduleImage
+import edu.jxslu.schedule.ui.week.IosScheduleBackgroundLayer
+import edu.jxslu.schedule.ui.week.IosScheduleBackgroundThumb
+import edu.jxslu.schedule.ui.week.iosImportScheduleBackground
 import edu.jxslu.schedule.ui.week.ScheduleShareScreen
 import edu.jxslu.schedule.ui.week.WeekScreen
 import edu.jxslu.schedule.ui.week.WeekViewModel
@@ -424,6 +427,27 @@ private fun IosRoot(services: IosServices) {
                                                 // 课表分享弹层里的「导出为图片」：挂上之后那一行才渲染
                                                 //（`WeekScreen` 第 4 行入口的可见性由它判，见 shared 侧）。
                                                 onOpenScheduleShare = { shareWeek = it },
+                                                // 课表背景图（2026-11-26 夜间，M4）：`WeekScreen` 的背景层槽位。
+                                                // iOS 上画不出一张 Compose 位图（`ImageBitmap` 在 CMP 1.7.3 只读不写，
+                                                // 见 design/ios-port.md §12.14），所以这一层用 `UIKitView` 垫
+                                                // `UIImageView`，绕开 `ImageBitmap`。
+                                                //
+                                                // 三格参数取自 `WeekUiState`：文件名 / 缩放方式 / 模糊强度。
+                                                // **不透明度与压暗遮罩这两根滑块在 iOS 上不生效**——前者要给 UIImageView 设
+                                                // `alpha`，后者要一层 UIKit 的黑色蒙版，都超出本轮；它们在设置面板里仍在，
+                                                // 拖了没反应，已知不一致。
+                                                backgroundLayer = { layerModifier ->
+                                                    val weekState by viewModel.uiState.collectAsStateWithLifecycle()
+                                                    val name = weekState.bgImageName
+                                                    if (name != null) {
+                                                        IosScheduleBackgroundLayer(
+                                                            fileName = name,
+                                                            scale = weekState.bgImageScale,
+                                                            blur = weekState.bgImageBlur,
+                                                            modifier = layerModifier,
+                                                        )
+                                                    }
+                                                },
                                                 // 其余平台动作（时间表管理 / 调课 / 日历同步 / 文件选择）
                                                 // 在 iOS 侧还没有实现，留默认值——对应入口本来就不渲染。
                                             )
@@ -690,6 +714,10 @@ private fun IosDisplaySettingsOverlay(
     onDismiss: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
+        // 选图是一条挂起链（弹选择器 → 读字节 → 缩图 → 落盘 → 写偏好），
+        // 由面板自己的作用域发起：面板关掉就取消，与 Android 那边 `MeViewModel.beginBackgroundImport`
+        // 之后由宿主 launcher 回填的生命周期等价。
+        val scope = rememberCoroutineScope()
         // 遮罩：点它就关（与 Android 同一手感：无波纹点击）
         Box(
             Modifier
@@ -731,6 +759,18 @@ private fun IosDisplaySettingsOverlay(
                     viewModel = viewModel,
                     headerMinDp = headerMinDp,
                     modifier = Modifier.weight(1f),
+                    // 背景图（2026-11-26 夜间）：三个槽位都给了真实现之后「背景」整组才会渲染
+                    //（`DisplaySettingsContent` 的渲染条件就是 `onPickBackground != null`）。
+                    // 选图器在 `iosImportScheduleBackground` 里（`UIDocumentPickerViewController`
+                    // + `UTTypeImage`），落盘到 `appDataDir()/schedule_bg/`，与 Android 同一目录名。
+                    onPickBackground = {
+                        scope.launch { iosImportScheduleBackground(viewModel) }
+                    },
+                    // 缩略图走 `UIKitView` + `UIImageView`：这条路不需要 `ImageBitmap`
+                    //（那个在 CMP 1.7.3 上只读不写，见 §12.14）。
+                    backgroundThumb = { name, thumbModifier ->
+                        IosScheduleBackgroundThumb(fileName = name, modifier = thumbModifier)
+                    },
                 )
             }
         }
