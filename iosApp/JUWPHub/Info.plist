@@ -51,5 +51,12 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<!-- 快趣出行「附近的单车」要用户位置（iOS 的 CLLocationManager）。
+	     缺这一项时 requestWhenInUseAuthorization() **静默无效**：不弹框、状态一直
+	     NotDetermined，地图上没有蓝点也没有「距你多远」，而代码不会报错——排查起来
+	     像是「定位功能没写」。文案要说明用途，否则 App Store 审核会拒（侧载不影响，
+	     但改起来是同一处）。 -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>用于在地图上显示你附近的共享单车与实时距离，以及计算骑行时的位置。</string>
 </dict>
 </plist>
