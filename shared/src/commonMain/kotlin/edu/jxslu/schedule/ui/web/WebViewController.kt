@@ -145,10 +145,12 @@ class WebViewController {
      *
      * - Android：`WebChromeClient.onGeolocationPermissionsShowPrompt`。`respond` 对应
      *   `callback.invoke(origin, granted, retain = false)`——**不**把授权持久化到 WebView。
-     * - iOS：`WKUIDelegate` 的定位授权回调（`requestMediaCapturePermissionFor` 那条路**不**管定位；
-     *   WKWebView 的 `navigator.geolocation` 要宿主持有 `CLLocationManager`）。**2026-11-26 已接**：
-     *   `WebViewController.ios.kt` 的 `UiDelegate` 覆盖 `requestGeolocationPermissionForOrigin`，
-     *   未装回调时按 `CLLocationManager.authorizationStatus()` 作答（已授权即放行，与 Android 同口径）。
+     * - iOS：**给不出。** `WKUIDelegate` 在 Kotlin 2.1.21 的 `platform.WebKit` 绑定里
+     *   **没有**任何定位授权 selector（2026-11-26 CI 实测的候选列表里只有
+     *   `requestMediaCapturePermissionForOrigin` 与 `requestDeviceOrientationAndMotionPermissionForOrigin`，
+     *   试写 `requestGeolocationPermissionForOrigin` 直接报 `'webView' overrides nothing`）。
+     *   所以 `navigator.geolocation` 在 iOS 上一律拿不到坐标，这一栏恒为 `null`。
+     *   需要定位的页面（销假签到那类）在 iOS 上得另想办法，别指望这条缝。
      *
      * 宿主拿到 [respond] 后**必须**在拿到结果时调一次（`true` / `false` 都行）；
      * 网页撤销请求（Android `onGeolocationPermissionsHidePrompt`）时平台侧会替宿主补一次
@@ -156,8 +158,7 @@ class WebViewController {
      *
      * `null` = 本调用方不参与定位授权，平台侧的默认动作：Android 已授予系统定位权限就
      * 直接放行、没有就**立刻拒绝**（比「网页永远等不到坐标」好，页面能自己给出提示）；
-     * iOS：未装回调时同样按 `CLLocationManager.authorizationStatus()` 作答——
-     * 已授权放行、其余拒绝（与 Android 一致，不再是「一律拒绝」）。
+     * iOS 恒不回（见上）。
      */
     var onGeolocationPrompt: ((origin: String?, respond: (Boolean) -> Unit) -> Unit)? = null
 
