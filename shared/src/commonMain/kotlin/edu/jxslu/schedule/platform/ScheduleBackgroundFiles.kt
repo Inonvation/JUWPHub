@@ -17,9 +17,10 @@ package edu.jxslu.schedule.platform
  * ## null 的语义
  *
  * [AppServices.scheduleBackgroundFiles] 返回 null = 本平台没接背景图落盘：
- * iOS 侧还没有 `UIImage` 的解码压缩实现（要 `UIGraphicsImageRenderer` 那一套），
- * 于是选图入口整组不渲染、VM 里也不删文件（没有文件可删）。
- * 这不是「以后补」的占位——Android 侧的实现是完整的，iOS 侧要接的是另一套图像 API。
+ * 选图入口整组不渲染、VM 里也不删文件（没有文件可删）。
+ * 两端现在都给真实现（Android 是 `FilesDir/schedule_bg/`，iOS 是 `appDataDir()/schedule_bg/`），
+ * 但**这个可空性不能收掉**：JVM 单测不装装配根（`MeViewModel` 里用 `runCatching` 兜的就是这一档），
+ * 而将来若再多一个目标平台，它的第一版实现同样可能什么都没有。
  */
 interface ScheduleBackgroundFiles {
 

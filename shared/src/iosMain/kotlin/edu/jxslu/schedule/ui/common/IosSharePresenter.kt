@@ -78,4 +78,14 @@ internal object IosShareHost {
 
     /** 宿主没调 [IosSharePresenter] 时给 null，调用方按「分享不可用」处理（返回 false）。 */
     fun target(): ShareTarget? = controller?.let { host -> IosShareTarget { host } }
+
+    /**
+     * 直接要那个 `UIViewController`。给**自己 present 系统面板**的调用方用（背景图选图器：
+     * `ui/week/IosScheduleBackgroundImport.kt` 的 `UIDocumentPickerViewController`）。
+     *
+     * `ShareTarget` 只能「分享一段东西」，套不上选图器；而「VC 从哪儿来」这条答案全仓只能有一份
+     * （见文件头），所以这里把持有者本身交出去，**不是**让调用方再猜一次
+     * `UIApplication.keyWindow.rootViewController`。返回值可能为 null = 根组合没装过 presenter。
+     */
+    fun host(): UIViewController? = controller
 }

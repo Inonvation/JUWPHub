@@ -1607,11 +1607,11 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 | 成绩单 PDF 另存 | **打通**：拷一份到 `Documents/exports/`，「文件 App → JUWPHub」可见（iOS 没有「下载目录」，这就是等价物） |
 | 网页定位授权（`navigator.geolocation`） | **给不出**：Kotlin 2.1.21 的 `platform.WebKit` 绑定里 `WKUIDelegateProtocol` 没有任何定位 selector（CI 实测），试写即 `'webView' overrides nothing` |
 | 网页文件上传（`<input type=file>`） | **给不出**：`WKOpenPanelParameters` 缺失，且 JS 侧 `input.files` 只读，没有可用替代 |
-| 课表背景图（`scheduleBackgroundFiles`） | **硬阻塞，做不了**。见下面那一段 |
+| 课表背景图（`scheduleBackgroundFiles`） | **已打通（2026-11-26 晚）**：`WeekScreen` 有了背景层槽位，iOS 侧是 `UIKitView` + `UIImageView`，选图 / 压缩 / 落盘 / 删除都在 `shared/src/iosMain/.../ui/week/`。**真机未验**，符号清单见那两个文件的 KDoc 表 |
 
-#### 课表背景图为什么在 iOS 上做不了（2026-11-26 夜间复核，证据级）
+#### 课表背景图：为什么不能造 `ImageBitmap`，以及 2026-11-26 晚落地的解法
 
-不是「还没做」，是**在锁定的 Compose Multiplatform 1.7.3 上没有合法解法**。核实方式不是纸面推导：
+**造 `ImageBitmap` 这条路仍然是死的**（这一段保留，以后别再试）。核实方式不是纸面推导：
 从 Gradle 缓存解包 `org.jetbrains.compose.ui:ui-graphics:1.7.3` 的 metadata klib，
 把 `androidx.compose.ui.graphics` 的**导出面**逐个看了一遍：
 
@@ -1622,22 +1622,24 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 | `org.jetbrains.skia.Bitmap` + `toComposeImageBitmap()` | 有 | 但接收者是 skia 类型，**全仓零出处**；引它等于把 skia 拉进 iOS 的 UI 层 |
 | 自己实现 `ImageBitmap` 接口 | 能编译 | 但绘制端 skiko 走 `asSkiaBitmap()` 强转，非 `SkiaBackedImageBitmap` 的实现几乎必然在真机上崩——Windows 上验不出来 |
 
-而 `ui/week/WeekScreen.kt` 里**没有背景层槽位**（只有一个 `backgroundExists` 用于「文件丢了清偏好」），
-真正画背景的 `ScheduleBackgroundLayer` 整个在 `:app`。所以「选图器 + 落盘 + 缩略图」即使全做出来，
-用户选完图课表页**仍是纯色底**——那是「选完没反应」的入口，比不给更糟。
+**解法（已落地）：不造位图，把原生视图塞进页面的一个槽位。**
 
-结论：**整组保持不渲染**。两条升级路线，优先级从高到低：
+| 件 | 在哪 |
+|---|---|
+| 页面槽位 `backgroundLayer: (@Composable (Modifier) -> Unit)? = null`（null = 不画，§11.2 ④） | `shared/src/commonMain/.../ui/week/WeekScreen.kt`；调用点在 `Scaffold` 之前、不消费 padding，所以图铺到顶栏 / 状态栏背后 |
+| 画：`IosScheduleBackgroundLayer` / `IosScheduleBackgroundThumb`（`UIKitView` + `UIImageView`） | `shared/src/iosMain/.../ui/week/IosScheduleBackgroundView.kt` |
+| 选图 + 压缩 + 落盘：`iosImportScheduleBackground(vm)` | `shared/src/iosMain/.../ui/week/IosScheduleBackgroundImport.kt` |
+| 删旧文件：`IosScheduleBackgroundFiles` | `shared/src/iosMain/.../ui/week/IosScheduleBackgroundFiles.kt` |
+| 目录 | `appDataDir()/schedule_bg/`，与 `:app` 的 `ScheduleBackgroundStore.DIR_NAME` 逐字相同 |
 
-1. **`UIKitView` 垫底（不必等 CMP 升级，推荐）**：给 `WeekScreen` 加一个可空背景层槽位
-   `backgroundLayer: (@Composable (Modifier) -> Unit)? = null`（§11.2 ④ 那套反转），Android 传现有的
-   `ScheduleBackgroundLayer`，iOS 传一个 `UIKitView` 包的 `UIImageView`（`aspectFill`）——
-   这条路**不需要 `ImageBitmap`**，符号全有出处。还差的活：iOS 的选图器
-   （`UIDocumentPickerViewController` + `UTTypeImage`，新符号）、`UIImageJPEGRepresentation` 重编码、
-   `IosScheduleBackgroundFiles` 的 `delete`。**本轮没做，不是做不了。**
-2. CMP 升到 1.8+（或允许引 skia）：`ByteArray.decodeToImageBitmap()` 一次解决，页面与落盘都不用改。
+**「模糊」不需要 `UIVisualEffectView`**：与 Android 同一套口径——按 `ScheduleBackground.decodeLongSide(blur)`
+把图重绘到更小的尺寸，再让 `UIImageView` 放大，纹理越粗越过。剩下的差异只有两条：
+`BgScale.Tile` 退化成 `Fill`（`UIImageView` 没有平铺语义），不透明度 / 变暗遮罩没有
+（`UIKitView` 是原生视图，Compose 的 scrim 盖不上，槽位签名里也没有这两个参数）。
 
-⚠️ 别只做「选图 + 落盘 + 缩略图」就交付：`WeekScreen` 没有背景层槽位时课表页仍是纯色底，
-用户选完图看不到任何变化——那是「选完没反应」的入口，比不给更糟。
+⚠️ 这台机器（Windows）编不了 Kotlin/Native，上面整组**只有 macOS CI 编译过，没有真机运行过**。
+真机第一眼按这个顺序看：课表页是否还能正常显示（interop 视图的层级）、换图是否立刻生效、
+背景上是否点得动。细节与每一处符号的兜底改法都写在两个文件的 KDoc 里。
 
 ## 14. 外观与交互打磨（2026-11-25 晚，U1）
 
