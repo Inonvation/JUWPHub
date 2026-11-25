@@ -681,6 +681,35 @@ lightlife，菜鸟自绘矢量）；自定义条目从注册表选 HugeIcons；�
   构造再怀疑密码）；`code 8001` = 学号绑多账号（只报错不自动选）；`8002/8003` = 触发图形
   验证码（**绝不重试**，引导浏览器登录一次）；401 = token 失效（重登一次）。
 
+#### 失败分三层，技术细节可复制（2026-11-25）
+
+起因：iOS 上报「一卡通登录提示服务器错误 / 无法连接」。当时 `YktClient.send` 一个
+`catch (e: Exception) → YktException.Network(e)` 把 TLS 被拒、连不上、超时、服务器 5xx 全部
+压成「网络不可达」，用户截图里没有任何可判断的信息。现在按**判据**分三层，各带各的证据
+（全部经 `data/ykt/YktDiagnostics.kt` 脱敏）：
+
+| 层 | 异常 | 判据 | 带出来的东西 |
+|---|---|---|---|
+| 传输层 | `YktException.Network` | 根本没拿到响应（DNS / TCP / TLS 握手 / 超时 / 系统网络策略） | 底层异常类名 + message + 目标 URL |
+| HTTP 层 | `YktException.Http` | 拿到响应但状态码非 2xx | 状态码 + 响应体前 300 字 |
+| 业务层 | `Credential` / `NeedCaptcha` / `MultiAccount` / `Protocol` / `NotInServiceTime` | 2xx 但业务码不对 | 既有分类文案（口径不变） |
+
+- **该单独处理的 400（凭证错）与 401（重登）都在 `YktRepository.parse()` 之前分支**，所以
+  走到 `parse()` 的 4xx/5xx 没有业务含义，一律落 HTTP 层；`parse()` 的改动只有这一条，
+  登录失败的三条出口（`tokenEnv` 解析失败 / 400 / 业务码）逐条未动。
+- **iOS 与 Android 现在跑的是同一份 Ktor 代码**（`YktClient` 在 commonMain），差异只可能在
+  引擎（OkHttp ↔ Darwin）与系统信任链。所以诊断信息的价值在于**一次就能分辨是哪一类**，
+  而不是继续在代码里找分叉——`NSURLErrorDomain -1200`（TLS）、`-1004`（连不上）、
+  `SocketTimeoutException`（超时）、`HTTP 502`（网关）在截图里是四种不同的下一步。
+- 页面侧：Snackbar 文案仍是业务分类（`NetworkHint` 那两句不动，它管的是「关代理 / 换网络」
+  这个**动作**），技术细节进「上次没成功的原因」卡——一行等宽小字 + 「复制诊断信息」
+  （`CampusCardSettingsScreen`）。提示会过期，卡片不会：用户截一次图就把话说清了。
+- **脱敏是硬约束，不是可选项**：URL 只留 `scheme://host/path`，query 里 token / 卡号 /
+  `prepay_id` 一律 `***`；响应体命中 password / token / cardNo / 学号等键的值 `***`，
+  空白压成一行并截到 300 字。`YktDiagnosticsTest` 逐条钉住（含「抹掉后结构仍可读」）。
+- **不做的事**：不为「让登录能过」关掉 TLS 校验、跳过证书验证或降低 ATS 要求——那会把用户
+  的学号与查询密码暴露在中间人面前。查不清就只加诊断。
+
 #### 字形映射（`domain/YktKeyboard.kt`，纯 JVM）
 
 - `HASH2DIGIT`：**全量 32 位 MD5 → 数字**（2026-09-20 两次会话实测一致；8 位前缀在两张表
