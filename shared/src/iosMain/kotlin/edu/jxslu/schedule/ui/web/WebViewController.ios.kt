@@ -14,6 +14,9 @@ import kotlinx.cinterop.ObjCSignatureOverride
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
 import platform.CoreGraphics.CGRectMake
+import platform.CoreLocation.CLLocationManager
+import platform.CoreLocation.kCLAuthorizationStatusAuthorizedAlways
+import platform.CoreLocation.kCLAuthorizationStatusAuthorizedWhenInUse
 import platform.Foundation.NSData
 import platform.Foundation.NSError
 import platform.Foundation.NSTemporaryDirectory
@@ -26,6 +29,9 @@ import platform.WebKit.WKNavigationActionPolicy
 import platform.WebKit.WKNavigationDelegateProtocol
 import platform.WebKit.WKNavigationResponse
 import platform.WebKit.WKNavigationResponsePolicy
+import platform.WebKit.WKPermissionDecision
+import platform.WebKit.WKSecurityOrigin
+import platform.WebKit.WKUIDelegateProtocol
 import platform.WebKit.WKUserContentController
 import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
@@ -115,8 +121,8 @@ import platform.darwin.dispatch_get_main_queue
  *
  * ## 五、销毁
  *
- * `WKWebView.navigationDelegate` 是 **weak**，代理必须由本文件的 holder 强引用，
- * 否则代理会被立刻回收、回调一次都不来。离开组合时：停加载 → 摘代理 →
+ * `WKWebView.navigationDelegate` / `UIDelegate` 都是 **weak**，代理必须由本文件的 holder
+ * 强引用，否则代理会被立刻回收、回调一次都不来。离开组合时：停加载 → 摘两个代理 →
  * 断开 [WebViewController.impl]，再把强引用清掉。
  *
  * ## 六、2026-11-25 扩缝：五个事件接到哪
@@ -124,10 +130,54 @@ import platform.darwin.dispatch_get_main_queue
  * | 事件 | iOS 侧入口 | `null` 时 |
  * |---|---|---|
  * | [WebViewController.onPickFiles] | **未接**（见下条） | 网页的上传按钮点了没反应，与接缝之前一致 |
- * | [WebViewController.onGeolocationPrompt] | **未接**：`navigator.geolocation` 要宿主持有 `CLLocationManager` 并自己弹权限 | 一律不响应 |
+ * | [WebViewController.onGeolocationPrompt] | `WKUIDelegate` 的 `requestGeolocationPermissionForOrigin:`（iOS 15+），见下条 | 已授予系统定位权限就放行，否则弹一次系统框并按当前状态作答（默认拒绝） |
  * | [WebViewController.onExternalScheme] | `decidePolicyForNavigationAction:`（只主 frame） | `Allow`，交给 WebKit（`Info.plist` 没配 `LSApplicationQueriesSchemes` 时打不开） |
  * | [WebViewController.onDownload] | `decidePolicyForNavigationResponse:` 里判 `canShowMIMEType` | `Allow`，WKWebView 显示不了就留一页空白 |
  * | [WebViewController.onPageReady] | `didFinishNavigation:` 之后 `evaluateJavaScript` | 不注入 |
+ *
+ * ### `onGeolocationPrompt` 怎么接的（2026-11-26）
+ *
+ * 入口是 `WKUIDelegate` 的
+ * `webView(_:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:)`（iOS 15+）。
+ * 同协议的 `requestMediaCapturePermissionFor:` 那条路**不管**定位，没碰它。这条 selector 挂在
+ * 单独的 [UiDelegate] 上，`UIDelegate` 与 `navigationDelegate` 一样是 **weak**，所以同样由
+ * [IosWebHost] 强引用。
+ *
+ * 动作：先看 App 自己的定位授权（`CLLocationManager.authorizationStatus()`，写法逐条抄
+ * `ui/ebike/BikeSensors.ios.kt`）。
+ *
+ * - **已授权**（`WhenInUse` / `Always`）→ 放行，页面能拿到坐标；
+ * - **没授权** → 调一次 `requestWhenInUseAuthorization()` 弹系统框，**本轮仍按「没授权」作答**。
+ *
+ * 系统框是异步的，而这条回调不给等待的余地：`decisionHandler` 必须当场回调，晚一步 WebKit
+ * 就当超时丢弃。所以这里**不做授权轮询**——用户点「允许」之后，页面下一次请求定位才走「已授权」
+ * 那一支。`BikeSensors.ios.kt` 能轮询是因为它在 `suspend` 函数里等，不在 ObjC 回调里。
+ *
+ * 装了 [WebViewController.onGeolocationPrompt] 就改成让宿主决定：`origin` 取
+ * `WKSecurityOrigin.host`，`respond` 转成 `Grant` / `Deny`；没装则按上面那套默认动作。
+ *
+ * 只实现**新** selector。部署目标是 15.0，而 iOS 15.0–15.4 上 WebKit 调的是那条已废弃的
+ * `requestGeolocationPermissionForFrame:`（回参 `Boolean`），那几档因此仍是默认拒绝；
+ * 15.5 起（含现在所有在用的系统）走新的一条。要覆盖 15.0–15.4 得再写一个签名不同的 override，
+ * 换来的只是几个已停更的系统版本，不做，这里留个记号。
+ *
+ * `Info.plist` 的 `NSLocationWhenInUseUsageDescription` 已在（2026-11-26 核对）：缺了它
+ * `requestWhenInUseAuthorization()` 静默无效（不弹框、状态一直 `NotDetermined`），现象与
+ * 「用户拒绝」一模一样。
+ *
+ * 这条路上没在本机核实的符号（Windows 编不了 Kotlin/Native，结论来自仓库历史与绑定命名规则）：
+ *
+ * | 符号 | 依据 | 万一不符怎么改 |
+ * |---|---|---|
+ * | `WKUIDelegateProtocol`、`WKWebView.UIDelegate` | 历史提交 `b5158206` 用过这两个写法，`37f0a9be` 的 CI 修复清单里没有它们（清单只点了 `WKOpenPanelParameters` 与 `mimeType`），按已过 CI 处理 | — |
+ * | `requestGeolocationPermissionForOrigin:` 的 Kotlin 名 | 按 K/N 的 selector → 参数名规则，与本文件 `decidePolicyForNavigationAction:` 同款 | 报 `overrides nothing` 时照编译器的候选列表改名。**不要**回退到 iOS 15.0 的旧 selector `requestGeolocationPermissionForFrame:`（回参是 `Boolean`，15.5 起废弃） |
+ * | `WKSecurityOrigin` / `.host` | 只出现在协议签名与一次属性读取上 | `origin.host` 若 Unresolved，改成传 `null`——契约里 `origin` 本来就可空 |
+ * | `WKPermissionDecision` 的两个取值 | 用限定写法 `WKPermissionDecision.WKPermissionDecisionGrant`，与本文件 `WKNavigationActionPolicy.WKNavigationActionPolicyCancel` 同形；那种写法已过 CI，说明这版绑定把 NS_ENUM 生成为「枚举类 + 前缀同名常量」 | 若枚举类不存在，改成裸常量 + `import platform.WebKit.WKPermissionDecisionGrant` / `…Deny` 两行 |
+ *
+ * 与 Android 的差异：Android 由 `onGeolocationPermissionsShowPrompt` 交给宿主决定；这里
+ * 「没装回调」时的默认动作**与 Android 同一口径**（已授权就放行）。契约
+ * `WebViewController.onGeolocationPrompt` 的 KDoc 那句「iOS 同 `null` 的默认（拒绝）」因此已不准，
+ * 改法见本轮报告（commonMain 不归本流改）。
  *
  * ### `onPickFiles` 为什么没接（2026-11-25 CI 实测）
  *
@@ -144,6 +194,11 @@ import platform.darwin.dispatch_get_main_queue
  * 2. 确认 `platform.WebKit` 里那个类叫什么（可能是 `WKOpenPanelParameters` 之外的别名），
  *    对着 macOS 编译器改一行。
  *
+ * 第 1 条只是「换条路」，**不是等价替代**（2026-11-26 复核）：脚本能读 `<input type=file>` 的
+ * `files`，但**不能往里塞文件**——那是浏览器的安全边界，没有绕过办法。所以 JS 桥只对「页面
+ * 自己发请求交字节」的场景有效，让网页 `<form>` 带着附件提交做不到。学工表单是后者，按
+ * `design/ios-port.md` §11.2 ④ 的口径：给不出就让入口不渲染（`ui/xg/XgFormScreen` 已按此处理）。
+ *
  * ## 七、iOS 侧明确**没做**的（本轮范围外，别当成 bug）
  *
  * - **下载落盘 / 另存到「文件」App**：接下去要 `WKNavigationDownload`（iOS 14.5+）+
@@ -151,9 +206,15 @@ import platform.darwin.dispatch_get_main_queue
  *   才能让用户选「存到哪」。本轮只在 [WebViewController.onDownload] 里把 URL / 建议文件名 /
  *   MIME 交出去（`localPath` 恒 `null`），**落盘交给宿主**：拿 `IosWebCookieSource` 读同一个域
  *   的 Cookie、用共享层 Ktor 取，再用 `platform/AppDirs` 写进沙箱。
+ * - **`WKNavigationActionPolicyDownload` / `WKNavigationResponsePolicyDownload`**（2026-11-26
+ *   复核）：仓库里没有这两个常量的先例，本机也编不了。**刻意不用**——选 `Download` 等于让
+ *   WebKit 自己接管这次导航，而它落到哪里要靠 `WKNavigationDownloadDelegateProtocol` 的落盘
+ *   回调，那个回调一个都没接，结果是「文件下到看不见的地方」，比现在的「取消 + 宿主用 Ktor
+ *   取」更差。现在的路已经走得通：[WebViewController.onDownload] 在 iOS 上确实会回调
+ *   （`canShowMIMEType` 为假且是主 frame），由宿主自己取、自己落盘。
  * - **文件上传**：见上一条。
- * - **定位**：需要 `CLLocationManager` + `Info.plist` 的 `NSLocationWhenInUseUsageDescription`，
- *   另算一轮。
+ * - **定位的「等用户点完」**：见上面「`onGeolocationPrompt` 怎么接的」——回调不等待，本轮
+ *   按现有授权状态作答。要「点了允许就当场放行」得在 `CLLocationManagerDelegate` 上另做一轮。
  * - **JS 桥（`WKScriptMessageHandler`）**：`configuration.userContentController` 现在是空的，
  *   没有任何页面需要往原生发消息。
  * - **多窗口**（`createWebViewWithConfiguration:`）：教务 / 学工都是同窗口导航（评教那套
@@ -179,6 +240,9 @@ private class IosWebHost {
 
     private var webView: WKWebView? = null
     private var navigationDelegate: NavigationDelegate? = null
+
+    /** 定位授权的代理（`UIDelegate` 同样是 weak，必须强引用）。 */
+    private var uiDelegate: UiDelegate? = null
     private var loadedUrl: String? = null
     private var installed: WebViewController.Impl? = null
 
@@ -195,6 +259,9 @@ private class IosWebHost {
         val delegate = NavigationDelegate(controller)
         view.navigationDelegate = delegate
         navigationDelegate = delegate
+        val ui = UiDelegate(controller)
+        view.UIDelegate = ui
+        uiDelegate = ui
         val impl = WebViewController.Impl(
             load = { target -> loadInto(view, target) },
             reload = { view.reload() },
@@ -229,12 +296,14 @@ private class IosWebHost {
         val view = webView ?: return
         view.stopLoading()
         view.navigationDelegate = null
+        view.UIDelegate = null
         // 只清自己装的那一份：另一个视图接管过桥时，别把它的拆掉
         val bridge = fetchBridge
         if (bridge != null && IosWebFetch.runScript === bridge) IosWebFetch.runScript = null
         fetchBridge = null
         webView = null
         navigationDelegate = null
+        uiDelegate = null
         loadedUrl = null
         if (controller.impl === installed) controller.impl = null
         installed = null
@@ -359,5 +428,65 @@ private class NavigationDelegate(
         withError: NSError,
     ) {
         controller.onError?.invoke(withError.localizedDescription)
+    }
+}
+
+/**
+ * 定位授权代理：`WKUIDelegate` 的
+ * `webView(_:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:)`。
+ *
+ * **必须被强引用**（`WKWebView.UIDelegate` 是 weak），持有者是 [IosWebHost]。必须是 `class`
+ * 不能是 `object`：本仓库踩过「Obj-C 子类用 object 描述」的坑（`Allocation of Obj-C class …`）。
+ *
+ * 只实现这一个方法。同协议的 `runOpenPanelWithParameters:` 没有对应的绑定类型（见文件头），
+ * `runJavaScriptAlertPanel` 一族刻意不接：学工与教务的弹窗走页面自己的 layui 层，拦成原生
+ * alert 反而会吞掉页面的确认框。三者的第二参类型各不相同，不存在 `@ObjCSignatureOverride` 的问题。
+ *
+ * 授权流程与「为什么不轮询」见文件头「`onGeolocationPrompt` 怎么接的」。
+ */
+private class UiDelegate(
+    private val controller: WebViewController,
+) : NSObject(), WKUIDelegateProtocol {
+
+    /**
+     * 弹系统授权框用的那一个。
+     *
+     * 与 `IosBikeLocation` 各持一份**是有意的**：定位授权是 App 级状态（`authorizationStatus()`
+     * 是类方法），两个 `CLLocationManager` 拿到的结论一样，而共用一份要跨包暴露一个可变单例，
+     * 收益只有「少一个对象」。
+     */
+    private val manager: CLLocationManager by lazy { CLLocationManager() }
+
+    override fun webView(
+        webView: WKWebView,
+        requestGeolocationPermissionForOrigin: WKSecurityOrigin,
+        initiatedByFrame: WKFrameInfo,
+        decisionHandler: (WKPermissionDecision) -> Unit,
+    ) {
+        val granted = hasLocationPermission()
+        // 还没授权就弹一次系统框。它异步、不阻塞，本轮回调按「当前状态」作答（见文件头）。
+        if (!granted) manager.requestWhenInUseAuthorization()
+        val respond: (Boolean) -> Unit = { allowed ->
+            decisionHandler(
+                if (allowed) {
+                    WKPermissionDecision.WKPermissionDecisionGrant
+                } else {
+                    WKPermissionDecision.WKPermissionDecisionDeny
+                }
+            )
+        }
+        val handler = controller.onGeolocationPrompt
+        if (handler != null) {
+            handler(requestGeolocationPermissionForOrigin.host, respond)
+        } else {
+            respond(granted)
+        }
+    }
+
+    /** 与 `IosBikeLocation.hasPermission()` 同一判据：`WhenInUse` 与 `Always` 都算授权。 */
+    private fun hasLocationPermission(): Boolean {
+        val status = CLLocationManager.authorizationStatus()
+        return status == kCLAuthorizationStatusAuthorizedWhenInUse ||
+            status == kCLAuthorizationStatusAuthorizedAlways
     }
 }
