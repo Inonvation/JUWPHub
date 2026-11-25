@@ -1578,8 +1578,9 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 为什么是 4 天不是 7 天：一周满课 77 节必然超 64，而第 5 天以后那批几乎一定在下次进前台时被
 「按前缀清空重排」覆盖掉，排了只占额度不产生收益。代价是连续 4 天不开 App 就断档。
 
-重排时机：冷启动（`IosServices.warmUpReminders`）＋ 提醒设置页改动。**课表变化不会自动重排**
-——改完课表要等下次冷启动，这是这一批唯一的已知功能缺口。
+重排时机：冷启动（`IosServices.warmUpReminders`）＋ 提醒设置页改动 ＋ **课表变化自动重排**
+（订阅 `courses` / `semester` / `timeSlots` / `overrides` 四条流，任一变化就重排一次；
+2026-11-26 夜间补上，此前改完课表要等下次冷启动才纠正）。
 
 #### 页面清单（截至 2026-11-26 夜间，iOS 能进的）
 
@@ -1606,7 +1607,27 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 | 成绩单 PDF 另存 | **打通**：拷一份到 `Documents/exports/`，「文件 App → JUWPHub」可见（iOS 没有「下载目录」，这就是等价物） |
 | 网页定位授权（`navigator.geolocation`） | **给不出**：Kotlin 2.1.21 的 `platform.WebKit` 绑定里 `WKUIDelegateProtocol` 没有任何定位 selector（CI 实测），试写即 `'webView' overrides nothing` |
 | 网页文件上传（`<input type=file>`） | **给不出**：`WKOpenPanelParameters` 缺失，且 JS 侧 `input.files` 只读，没有可用替代 |
-| 课表背景图（`scheduleBackgroundFiles`） | **仍是 null**（这一批没做完）。显示设置里「背景」整组不渲染 |
+| 课表背景图（`scheduleBackgroundFiles`） | **硬阻塞，做不了**。见下面那一段 |
+
+#### 课表背景图为什么在 iOS 上做不了（2026-11-26 夜间复核，证据级）
+
+不是「还没做」，是**在锁定的 Compose Multiplatform 1.7.3 上没有合法解法**。核实方式不是纸面推导：
+从 Gradle 缓存解包 `org.jetbrains.compose.ui:ui-graphics:1.7.3` 的 metadata klib，
+把 `androidx.compose.ui.graphics` 的**导出面**逐个看了一遍：
+
+| 想要的能力 | 1.7.3 里有没有 | 结论 |
+|---|---|---|
+| 从字节造 `ImageBitmap`（`ByteArray.decodeToImageBitmap()`） | **没有** | 那是 CMP 1.8+ 的 API，而本仓锁死 1.7.3（升 1.8.x 会抬 Android 侧整条 compose 版本线，Glance 与全部既有 UI 都得重验） |
+| 往 `ImageBitmap` 写像素（`writePixels` / `installPixels`） | **没有** | 导出面只有 `readPixels` / `toPixelMap` / `prepareToDraw` / `drawImage*`，全是读或画 |
+| `org.jetbrains.skia.Bitmap` + `toComposeImageBitmap()` | 有 | 但接收者是 skia 类型，**全仓零出处**；引它等于把 skia 拉进 iOS 的 UI 层 |
+| 自己实现 `ImageBitmap` 接口 | 能编译 | 但绘制端 skiko 走 `asSkiaBitmap()` 强转，非 `SkiaBackedImageBitmap` 的实现几乎必然在真机上崩——Windows 上验不出来 |
+
+而 `ui/week/WeekScreen.kt` 里**没有背景层槽位**（只有一个 `backgroundExists` 用于「文件丢了清偏好」），
+真正画背景的 `ScheduleBackgroundLayer` 整个在 `:app`。所以「选图器 + 落盘 + 缩略图」即使全做出来，
+用户选完图课表页**仍是纯色底**——那是「选完没反应」的入口，比不给更糟。
+
+结论：**整组保持不渲染**。升级条件只有一条——CMP 升到 1.8+（或允许引 skia），届时用
+`decodeToImageBitmap()` 一次解决，页面与落盘都不用改。
 ## 14. 外观与交互打磨（2026-11-25 晚，U1）
 
 用户的判断是对的：「外形还是非常粗糙」。这一轮只动**看得见的层级与过渡**，不碰页面内容。
