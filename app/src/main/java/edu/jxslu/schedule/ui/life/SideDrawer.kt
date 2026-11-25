@@ -38,7 +38,6 @@ import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
 import edu.jxslu.schedule.data.ujing.UjingHouseStore
 import edu.jxslu.schedule.data.ujing.UjingRepository
-import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.ShortcutSettings
 import edu.jxslu.schedule.ui.campus.CampusCardViewModel
 import edu.jxslu.schedule.ui.campus.campusCardViewModel
@@ -215,25 +214,14 @@ fun SideDrawerContent(
     val power = lifeState.power
     val snapshot = balance
     val remain = power.snapshot?.meter?.remain
-    val balanceText = when {
-        !campusEnabled -> "未开启"
-        snapshot != null -> MoneyFormat.fromFen(snapshot.cardFen)
-        balanceLoaded -> "—"
-        else -> "读取中…"
-    }
-    val accountValue = snapshot?.accountFen
-        ?.let { MoneyFormat.fromFen(it) }
-        ?: "—"
-    val powerText = when {
-        // 有读数就先留着：刷新期间不再退回「读取中…」（侧栏展开即静默刷一轮，
-        // 每次把已显示的电量抹掉再填回来，读起来像在闪）。无凭证 / 未绑定房间
-        // 是终态，优先于旧读数——那份读数已经不属于当前房间。
-        power.noCredentials || power.roomNotBound -> "—"
-        remain != null -> "%.1f 度".format(remain)
-        power.loading -> "读取中…"
-        power.error != null -> "读取失败"
-        else -> "—"
-    }
+    // 三格文案的唯一实现在共享层（iOS 抽屉同一张钱包卡）：这里是取值，不是拼字。
+    val walletTexts = walletCardTexts(
+        campusEnabled = campusEnabled,
+        cardFen = snapshot?.cardFen,
+        accountFen = snapshot?.accountFen,
+        balanceLoaded = balanceLoaded,
+        power = power,
+    )
 
     // U净 行右侧的空闲摘要（2026-10-21）：侧栏**展开时**拉一次收藏店聚合，带 30 秒节流
     // （与空闲看板「云端数据约 30 秒滞后」同频，刷更勤没有意义）。未登录 / 无收藏店
@@ -357,9 +345,9 @@ fun SideDrawerContent(
                 )
                 AccountRow(onClick = onOpenAccounts)
                 WalletHero(
-                    balanceText = balanceText,
-                    accountValue = accountValue,
-                    powerText = powerText,
+                    balanceText = walletTexts.balance,
+                    accountValue = walletTexts.account,
+                    powerText = walletTexts.power,
                     arrivalWatching = arrivalWatching,
                     onCampusDetail = { detail = WalletDetail.Campus },
                     onPowerDetail = { detail = WalletDetail.Power },

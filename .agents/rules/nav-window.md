@@ -75,6 +75,13 @@
   教务 Tab 的服务列表挪过来；扫一扫是组内独立按钮，不包进这块点击区。
 - 充值：选择弹层选完 → `pendingRecharge` → 壳层 `RechargeHost` 直接弹对应充值弹层；
   生活页已删，不再有 `Routes.LIFE` 或页面级充值宿主。
+- **排版部件在共享层，`:app` 的 `SideDrawer.kt` 只剩壳**（2026-11-25，iOS 抽屉共用同一份）：
+  身份卡 / 账号与登录 / 钱包卡 / 服务行 / 段头 / 分隔线 / 设置与付款码两个底部入口在
+  `shared/src/commonMain/.../ui/life/SideDrawerParts.kt`，三段的「哪几行、写什么、点开什么」
+  在 `SideDrawerGroups.kt` 的 `lifeDrawerGroups` / `lifeServiceRows`。改观感去共享层改，
+  **别在 `:app` 里再画一份**——iOS 读的是同一份，两处各写一次就必然分叉。
+  `:app` 那份留下的是 Android 才有的事：`StackedDrawerState` 的手势视差、`Graph` 装配、
+  `viewModel()`、品牌位图资源 id 与刷新闸门。
 
 ## 设置是独立窗口（2026-10-20）
 

@@ -68,6 +68,111 @@ data class DrawerBrandIds(
 )
 
 /**
+ * 「江水生活」段的服务行：一卡通账号 + 五张服务卡（快趣 / 胖乖 / 趣智 / U净 / 问渠）。
+ *
+ * ## 回调为什么可空（2026-11-25 iOS 抽屉对齐）
+ *
+ * **null = 本平台没有这项服务，整行不渲染**（`design/ios-port.md` §11.2 ④）。iOS 侧
+ * 快趣（底图是高德 Android SDK）、趣智（蓝牙传输层）、问渠（精简版下线）三行就是这样消失的；
+ * 留一个点了没反应的入口比没有更糟。Android 侧五个都非空，渲染结果与抽出来之前逐行相同。
+ *
+ * 注意与 [DrawerEntry.trailing] 的 `null` 区分：那是**服务在、状态没有**（U净 未登录 /
+ * 没收藏店 → 只剩箭头，行为见 `.agents/rules/nav-window.md`）。两者别混用。
+ *
+ * @param brands 五个官方品牌位图的资源 id；iOS 传默认值（全 0），行上退回线性图标。
+ */
+fun lifeServiceRows(
+    brands: DrawerBrandIds = DrawerBrandIds(),
+    serviceActive: ServiceActiveFlags = ServiceActiveFlags(),
+    waterBalance: String? = null,
+    qzxyBalance: String? = null,
+    ujingFreeText: String? = null,
+    ujingFreeLoading: Boolean = false,
+    wenquHours: String? = null,
+    onOpenCampusAccount: (() -> Unit)? = null,
+    onOpenRide: (() -> Unit)? = null,
+    onOpenWater: (() -> Unit)? = null,
+    onOpenWaterSheet: (() -> Unit)? = null,
+    onOpenQzxy: (() -> Unit)? = null,
+    onOpenQzxySheet: (() -> Unit)? = null,
+    onOpenUjing: (() -> Unit)? = null,
+    onOpenUjingSheet: (() -> Unit)? = null,
+    onOpenWenqu: (() -> Unit)? = null,
+): List<DrawerEntry> = buildList {
+    // 一卡通账号（2026-11-21 用户口径）：「江水生活」首行、快趣卡片之上。
+    // 图标用线性信用卡、不用水宝宝位图——品牌位图留给五张服务卡，
+    // 账号行与「账号与登录」页的「一卡通 · 电费」共用同一颗。
+    onOpenCampusAccount?.let {
+        add(DrawerEntry(label = "一卡通账号", icon = AppIcons.CreditCard, onClick = it))
+    }
+    // 五行走**官方品牌图标**（2026-10-21 用户口径）：位图自带彩色底，
+    // 视觉体量比线性图标大，槽位取 24dp（线性 22dp）保持行内平衡。
+    // 行本体直接进二级页，右侧状态 / 余额才开入口弹窗。
+    onOpenRide?.let {
+        add(
+            DrawerEntry(
+                label = "快趣出行",
+                icon = AppIcons.ScooterElectric,
+                brandResId = brands.kqcx.ifZeroNull(),
+                active = serviceActive.ride,
+                onClick = it,
+            ),
+        )
+    }
+    onOpenWater?.let {
+        add(
+            DrawerEntry(
+                label = "胖乖生活",
+                icon = AppIcons.Droplet,
+                brandResId = brands.pangguai.ifZeroNull(),
+                trailing = waterBalance,
+                active = serviceActive.water,
+                onClick = it,
+                onTrailingClick = onOpenWaterSheet,
+            ),
+        )
+    }
+    onOpenQzxy?.let {
+        add(
+            DrawerEntry(
+                label = "趣智校园",
+                icon = AppIcons.ShowerHead,
+                brandResId = brands.qzxy.ifZeroNull(),
+                trailing = qzxyBalance,
+                active = serviceActive.qzxy,
+                onClick = it,
+                onTrailingClick = onOpenQzxySheet,
+            ),
+        )
+    }
+    onOpenUjing?.let {
+        add(
+            DrawerEntry(
+                label = "U净",
+                icon = AppIcons.WashingMachine,
+                brandResId = brands.ujing.ifZeroNull(),
+                trailing = ujingFreeText,
+                trailingLoading = ujingFreeLoading,
+                active = serviceActive.ujing,
+                onClick = it,
+                onTrailingClick = onOpenUjingSheet,
+            ),
+        )
+    }
+    onOpenWenqu?.let {
+        add(
+            DrawerEntry(
+                label = "问渠 · 志愿服务",
+                icon = AppIcons.HeartHandshake,
+                brandResId = brands.wenqu.ifZeroNull(),
+                trailing = wenquHours,
+                onClick = it,
+            ),
+        )
+    }
+}
+
+/**
  * 侧栏三段的内容（顺序即渲染顺序）。
  *
  * 参数全是「值 + 回调」，没有 `Context` / `Graph` / `viewModel()`：数据由宿主先读好
@@ -117,60 +222,23 @@ fun lifeDrawerGroups(
     ),
     DrawerGroup(
         title = "江水生活",
-        entries = listOf(
-            // 一卡通账号（2026-11-21 用户口径）：「江水生活」首行、快趣卡片之上。
-            // 图标用线性信用卡、不用水宝宝位图——品牌位图留给五张服务卡，
-            // 账号行与「账号与登录」页的「一卡通 · 电费」共用同一颗。
-            DrawerEntry(
-                label = "一卡通账号",
-                icon = AppIcons.CreditCard,
-                onClick = onOpenCampusAccount,
-            ),
-            // 五行走**官方品牌图标**（2026-10-21 用户口径）：位图自带彩色底，
-            // 视觉体量比线性图标大，槽位取 24dp（线性 22dp）保持行内平衡。
-            // 行本体直接进二级页，右侧状态 / 余额才开入口弹窗。
-            DrawerEntry(
-                label = "快趣出行",
-                icon = AppIcons.ScooterElectric,
-                brandResId = brands.kqcx.ifZeroNull(),
-                active = serviceActive.ride,
-                onClick = onOpenRide,
-            ),
-            DrawerEntry(
-                label = "胖乖生活",
-                icon = AppIcons.Droplet,
-                brandResId = brands.pangguai.ifZeroNull(),
-                trailing = waterBalance,
-                active = serviceActive.water,
-                onClick = onOpenWater,
-                onTrailingClick = onOpenWaterSheet,
-            ),
-            DrawerEntry(
-                label = "趣智校园",
-                icon = AppIcons.ShowerHead,
-                brandResId = brands.qzxy.ifZeroNull(),
-                trailing = qzxyBalance,
-                active = serviceActive.qzxy,
-                onClick = onOpenQzxy,
-                onTrailingClick = onOpenQzxySheet,
-            ),
-            DrawerEntry(
-                label = "U净",
-                icon = AppIcons.WashingMachine,
-                brandResId = brands.ujing.ifZeroNull(),
-                trailing = ujingFreeText,
-                trailingLoading = ujingFreeLoading,
-                active = serviceActive.ujing,
-                onClick = onOpenUjing,
-                onTrailingClick = onOpenUjingSheet,
-            ),
-            DrawerEntry(
-                label = "问渠 · 志愿服务",
-                icon = AppIcons.HeartHandshake,
-                brandResId = brands.wenqu.ifZeroNull(),
-                trailing = wenquHours,
-                onClick = onOpenWenqu,
-            ),
+        entries = lifeServiceRows(
+            brands = brands,
+            serviceActive = serviceActive,
+            waterBalance = waterBalance,
+            qzxyBalance = qzxyBalance,
+            ujingFreeText = ujingFreeText,
+            ujingFreeLoading = ujingFreeLoading,
+            wenquHours = wenquHours,
+            onOpenCampusAccount = onOpenCampusAccount,
+            onOpenRide = onOpenRide,
+            onOpenWater = onOpenWater,
+            onOpenWaterSheet = onOpenWaterSheet,
+            onOpenQzxy = onOpenQzxy,
+            onOpenQzxySheet = onOpenQzxySheet,
+            onOpenUjing = onOpenUjing,
+            onOpenUjingSheet = onOpenUjingSheet,
+            onOpenWenqu = onOpenWenqu,
         ),
     ),
     DrawerGroup(
