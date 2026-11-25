@@ -111,6 +111,8 @@ import edu.jxslu.schedule.ui.notes.NoteDetailScreen
 import edu.jxslu.schedule.ui.notes.NoteLibraryScreen
 import edu.jxslu.schedule.ui.score.ScoreScreen
 import edu.jxslu.schedule.ui.score.ScoreSettingsScreen
+import edu.jxslu.schedule.ui.score.TranscriptHistoryContent
+import edu.jxslu.schedule.ui.score.TranscriptScreen
 import edu.jxslu.schedule.ui.scholar.ScholarScreen
 import edu.jxslu.schedule.ui.selection.SelectionCenterScreen
 import edu.jxslu.schedule.ui.selection.SelectionRecordsScreen
@@ -389,7 +391,11 @@ internal fun IosRouteContent(
         SubpageScreen.SCORES -> ScoreScreen(
             onBack = pop,
             onOpenSettings = { push(IosRoute(SubpageScreen.SCORE_SETTINGS)) },
-            // 盖章成绩单要 WebView + PDF 导出，iOS 还没有；传 null 入口不渲染
+            // 盖章成绩单（2026-11-26 搬进共享层）：页面与 PDF 抓取都在共享层，走 Ktor，
+            // 不依赖 WebView 下载，所以 iOS 上**真能导出**（落到 appDataDir()/transcripts/）。
+            // 打开 / 分享 / 另存三个出口等 iOS 的「文件分享」缝补完再挂（§12.14），
+            // 现在页面能进、能导出、能在「最近导出」里看到，只是三颗按钮不渲染。
+            onOpenTranscript = { push(IosRoute(SubpageScreen.TRANSCRIPTS)) },
         )
 
         SubpageScreen.SCORE_SETTINGS -> ScoreSettingsScreen(onBack = pop)
@@ -428,7 +434,37 @@ internal fun IosRouteContent(
 
         SubpageScreen.STUDENT_INFO -> StudentInfoScreen(onBack = pop)
 
+        // ---------------------------------------------------------------- 盖章成绩单
+        //
+        // 2026-11-26 搬进 `commonMain`（`ui/score/TranscriptScreen` + 历史导出页 + `TranscriptStore`）。
+        // 关键点：**PDF 不是从 WebView 下载的**，是 `TranscriptClient`（Ktor）带着网页会话的
+        // `sid` 直取，落盘走 `TranscriptStore`（okio，`appDataDir()/transcripts/`）。所以 iOS 上
+        // 「导出」这条链是完整可用的，不依赖 `onDownload` 事件。
+        //
+        // 三个出口暂为 null（§12.14 记着升级条件）：
+        // - `onOpenPdf`：要交给系统 PDF 阅读器（`QLPreviewController` / `UIDocumentInteractionController`）
+        // - `onSharePdf`：要文件分享（`UIActivityViewController` + `NSURL`）
+        // - `onSavePdf`：要 `UIDocumentPickerViewController` 或落到「文件」App 可见的目录
+        // 三者都补完之后把这里换成真回调即可，页面本身不用改。
+        //
+        // 「最近导出」不占二级页枚举：它在 `:app` 那边也只是同一个窗口里的列表，所以这里
+        // 用本地状态顶掉表单（与 `LEAVE_HUB` 的请假表单同一做法）。
+        SubpageScreen.TRANSCRIPTS -> {
+            var showHistory by remember { mutableStateOf(false) }
+            if (showHistory) {
+                TranscriptHistoryContent(
+                    onBack = { showHistory = false },
+                )
+            } else {
+                TranscriptScreen(
+                    onBack = pop,
+                    onOpenHistory = { showHistory = true },
+                )
+            }
+        }
+
         // ---------------------------------------------------------------- 钱包
+
         SubpageScreen.POWER_BILL -> {
             val vm = remember {
                 PowerBillViewModel(

@@ -85,6 +85,7 @@ import edu.jxslu.schedule.ui.today.TodayServiceSlot
 import edu.jxslu.schedule.ui.today.TodayViewModel
 import edu.jxslu.schedule.ui.web.WebContentView
 import edu.jxslu.schedule.ui.web.WebViewController
+import edu.jxslu.schedule.ui.week.ScheduleShareScreen
 import edu.jxslu.schedule.ui.week.WeekScreen
 import edu.jxslu.schedule.ui.week.WeekViewModel
 import kotlinx.coroutines.delay
@@ -386,6 +387,10 @@ private fun IosRoot(services: IosServices) {
 
                                         IosTab.Week -> {
                                             val viewModel = remember { WeekViewModel(services.scheduleRepository()) }
+                                            // 课表分享（2026-11-26 搬进共享层）：非空 = 分享板盖在课表页上。
+                                            // 与课表页共用**同一个** `WeekViewModel`——分享板渲染的就是课表页
+                                            // 那份状态（同一周、同一份课程与配色），另建一个会读到别的周。
+                                            var shareWeek by remember { mutableStateOf<Int?>(null) }
                                             WeekScreen(
                                                 viewModel = viewModel,
                                                 // 顶栏左侧汉堡 → 左侧抽屉（三个 Tab 页同一入口）
@@ -412,9 +417,25 @@ private fun IosRoot(services: IosServices) {
                                                         onDismiss = dismiss,
                                                     )
                                                 },
-                                                // 其余平台动作（时间表管理 / 调课 / 分享 / 日历同步 / 文件选择）
+                                                // 课表分享弹层里的「导出为图片」：挂上之后那一行才渲染
+                                                //（`WeekScreen` 第 4 行入口的可见性由它判，见 shared 侧）。
+                                                onOpenScheduleShare = { shareWeek = it },
+                                                // 其余平台动作（时间表管理 / 调课 / 日历同步 / 文件选择）
                                                 // 在 iOS 侧还没有实现，留默认值——对应入口本来就不渲染。
                                             )
+                                            // 分享板盖在课表页之上：同一容器内的兄弟节点，全屏不透明，
+                                            // 所以不需要额外的层级处理。不占二级页栈——返回即回课表，
+                                            // 与请假表单（`LEAVE_HUB`）同一做法。
+                                            shareWeek?.let { week ->
+                                                ScheduleShareScreen(
+                                                    viewModel = viewModel,
+                                                    onBack = { shareWeek = null },
+                                                    initialWeek = week,
+                                                    // 保存相册 / 分享两个槽位暂为 null：iOS 的
+                                                    // 「ImageBitmap → 相册 / 文件分享」还没接（§12.14）。
+                                                    // 这一页现在能看本周课表的完整预览，两个出口不渲染。
+                                                )
+                                            }
                                         }
 
                                         // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
