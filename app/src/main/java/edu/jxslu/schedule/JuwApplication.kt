@@ -69,6 +69,12 @@ class JuwApplication : Application() {
         // `Services.current` 拿仓库/同步链，这里把 Android 侧的 `Graph` 装进去。
         // 必须早于任何共享 ViewModel 的构造（下面 `Graph.repository(this)` 就会读偏好）。
         edu.jxslu.schedule.platform.Services.install(GraphServices(this))
+        // 「从 WebView 读 Cookie」的缝（`data/session/WebCookies`）：iOS 侧一直由 IosServices 装着，
+        // Android 侧此前是 null——导出成绩单搬进共享层后要的正是这条（签章系统的 `sid`）。
+        // 装在这里而不是某个页面里：Cookie 是随用户登录变化的**全局**状态，进页那一刻读到的
+        // 必须是这个进程里任何 WebView 窗口登出来的那一份（与 `initAppDirs` 同一个位置口径）。
+        edu.jxslu.schedule.data.session.WebCookies.source =
+            edu.jxslu.schedule.data.session.AndroidWebCookieSource
         // 预报名仪表板的前台判定（DESIGN §4.45，2026-10-21）：started 计数，进程内只装一次
         edu.jxslu.schedule.ui.wenqu.WenquAppForeground.install(this)
         // 崩溃留痕（2026-10-02，体检第三批）：JVM 级未捕获异常 + appScope 协程异常都落

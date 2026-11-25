@@ -7,7 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import edu.jxslu.schedule.ui.common.LaunchGate
-import edu.jxslu.schedule.ui.score.TranscriptScreen
+import edu.jxslu.schedule.ui.score.TranscriptScreenHost
 
 /**
  * 导出成绩单独立窗口（DESIGN §3.14）。
@@ -29,7 +29,9 @@ class TranscriptActivity : ComponentActivity() {
         enablePredictiveBackTransitions()
         setContent {
             JuwRoot {
-                TranscriptScreen(onBack = { finish() })
+                // 页面本体在 shared/commonMain（iOS 共用）；这里只接 Android 的平台动作
+                // （打开 / 分享 / 另存 / 最近导出 / 自动填表），见 TranscriptHosts.kt
+                TranscriptScreenHost(onBack = { finish() })
             }
         }
     }

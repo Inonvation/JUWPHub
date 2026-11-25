@@ -90,10 +90,8 @@ import edu.jxslu.schedule.data.repo.SelectionRoundsStore
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.TeachingCalendarSync
 import edu.jxslu.schedule.data.repo.TextbookSync
-import edu.jxslu.schedule.data.jw.TranscriptClient
 import edu.jxslu.schedule.data.jw.JwHttpSession
 import edu.jxslu.schedule.data.jw.JwVpnDetector
-import edu.jxslu.schedule.data.repo.TranscriptStore
 import edu.jxslu.schedule.data.AndroidSessionExpirySink
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.data.session.CredentialVault
@@ -341,12 +339,6 @@ object Graph {
 
     @Volatile
     private var powerReadingStore: PowerReadingStore? = null
-
-    @Volatile
-    private var transcriptClient: TranscriptClient? = null
-
-    @Volatile
-    private var transcriptStore: TranscriptStore? = null
 
     /** 进程级 applicationContext（后台协程里落盘等场景复用，免 Activity 引用泄漏）。 */
     val appContext: Context by lazy { contextProvider() }
@@ -1121,21 +1113,8 @@ object Graph {
                 .also { powerReadingStore = it }
         }
 
-    /**
-     * 成绩单导出客户端单例（DESIGN §4.25）：OkHttp 连接池只建一次。
-     *
-     * 不需要 Context，也没有凭证字段——会话 Cookie 每次由调用方从 WebView 的
-     * CookieManager 现取（[edu.jxslu.schedule.data.jw.TranscriptCookies]），
-     * 这个单例里不驻留任何用户身份。
-     */
-    fun transcriptClient(): TranscriptClient =
-        transcriptClient ?: synchronized(this) {
-            transcriptClient ?: TranscriptClient().also { transcriptClient = it }
-        }
-
-    /** 导出成绩单的落盘单例（DESIGN §4.25）：应用私有目录 transcripts，只留最近 10 份。 */
-    fun transcriptStore(context: Context): TranscriptStore =
-        transcriptStore ?: synchronized(this) {
-            transcriptStore ?: TranscriptStore(context.applicationContext).also { transcriptStore = it }
-        }
+    // 导出成绩单的两份单例（`transcriptClient` / `transcriptStore`）2026-11-26 随页面搬进
+    // `shared/commonMain` 一起消失：客户端改由 `ui/score/TranscriptScreen.kt` 的文件级
+    // `by lazy` 持有（进程内同样只有一份，且不再需要 Context 转一手），落盘改由
+    // `data/repo/TranscriptStore` 只认 `appDataDir()`，两端同一份。
 }

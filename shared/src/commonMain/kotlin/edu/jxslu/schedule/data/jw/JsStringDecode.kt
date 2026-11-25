@@ -10,8 +10,9 @@ package edu.jxslu.schedule.data.jw
  *
  * 纯逻辑、不依赖 android.*，可 JVM 单测。
  *
- * public 而非 internal：本层已搬进 `:shared`，而 `JwImportScreen` / `XgFormScreen` /
- * `TranscriptScreen` 留在 `:app`，跨模块看不见 internal。
+ * public 而非 internal：本层在 `:shared`，而调用方里有仍留在 `:app` 的页面
+ * （`JwImportScreen`、`XgFormScreen` 那张 Android 专用页），跨模块看不见 internal。
+ * 2026-11-26 起 `TranscriptScreen` 也已搬进 `shared/commonMain`，但同一条理由仍然成立。
  */
 fun unwrapJsString(raw: String?): String {
     if (raw.isNullOrBlank()) return ""

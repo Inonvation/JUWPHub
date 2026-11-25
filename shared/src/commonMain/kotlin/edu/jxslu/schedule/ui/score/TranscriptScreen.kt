@@ -1,25 +1,6 @@
 package edu.jxslu.schedule.ui.score
 
-import android.annotation.SuppressLint
-import android.graphics.Bitmap
-import android.net.http.SslError
-import android.view.View
-import android.view.ViewGroup
-import android.webkit.CookieManager
-import android.webkit.RenderProcessGoneDetail
-import android.webkit.SslErrorHandler
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.FrameLayout
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,10 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -58,43 +35,48 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import edu.jxslu.schedule.BuildConfig
-import edu.jxslu.schedule.Graph
-import edu.jxslu.schedule.SubpageActivity
-import edu.jxslu.schedule.SubpageScreen
-import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.jw.JwAutoLogin
+import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.jw.PtworkTranscript
-import edu.jxslu.schedule.data.jw.TranscriptCookies
+import edu.jxslu.schedule.data.jw.TranscriptClient
 import edu.jxslu.schedule.data.jw.TranscriptException
 import edu.jxslu.schedule.data.jw.TranscriptTerm
 import edu.jxslu.schedule.data.jw.unwrapJsString
+import edu.jxslu.schedule.data.repo.TranscriptStore
 import edu.jxslu.schedule.data.session.SessionStatus
+import edu.jxslu.schedule.data.session.WebCookies
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.TranscriptHistory
+import edu.jxslu.schedule.platform.AccountCredentials
+import edu.jxslu.schedule.platform.Logger
+import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardRow
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.CasLoginDialog
 import edu.jxslu.schedule.ui.common.EmptyHint
 import edu.jxslu.schedule.ui.common.InlineNoticeRow
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.NoticeTone
+import edu.jxslu.schedule.ui.common.PageBackButton
 import edu.jxslu.schedule.ui.common.SectionHeader
-import edu.jxslu.schedule.ui.common.CasLoginDialog
-import edu.jxslu.schedule.ui.common.handleWebViewRendererGone
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.icon.AppIcons
+import edu.jxslu.schedule.ui.web.WebContentView
+import edu.jxslu.schedule.ui.web.WebViewController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.IOException
+import okio.IOException
+
+/** 成绩单的 MIME（打开 / 分享 / 另存共用）。 */
+const val TRANSCRIPT_PDF_MIME: String = "application/pdf"
 
 /**
  * 导出成绩单（DESIGN §3.14 / §4.25）：选学期 → 取教务处盖章 PDF → 打开 / 分享 / 另存。
@@ -106,15 +88,68 @@ import java.io.IOException
  * 会话按需授权：先拿 WebView 里已有的 `sid` 直接调接口（多数情况下一屏就够），失效时才把授权
  * WebView 顶上来（统一认证 TGC 还在时会免密，通常一两秒）。账号密码不落任何存储，
  * 与「教务导入」同一条纪律（DESIGN §4.4）。
+ *
+ * ## iOS 移植（2026-11-26）：搬进 `shared/commonMain`
+ *
+ * 平台动作一律按 `design/ios-port.md` §11.2 ④ 收成**可空回调**，`null` = 本平台没这条通道，
+ * 对应入口整行不渲染（宁可少一个按钮，也不留一个点了没反应的）：
+ *
+ * | 动作 | Android（`ui/score/TranscriptHosts.kt`） | iOS |
+ * |---|---|---|
+ * | [onOpenPdf] 交给系统阅读器 | `ACTION_VIEW` + FileProvider 临时授权 | null → 不渲染（要 `QuickLook`，还没写） |
+ * | [onSharePdf] 系统分享面板 | `ShareIntents.shareFile`（`content://`） | null → 不渲染 |
+ * | [onSavePdf] 另存到用户自选位置 | SAF `CreateDocument` | null → 不渲染 |
+ * | [onOpenHistory] 「最近导出」二级页 | `SubpageActivity.start(TRANSCRIPTS)` | null → 顶栏图标不渲染 |
+ * | [casAutoFillScript] 落 CAS 页自动填表 | 凭证保险箱里的学号密码 | null → 只让用户手登 |
+ *
+ * 三件**没有**搬成回调、而是收进了共享层的东西：
+ * - **落盘**：[TranscriptStore] 只认 `appDataDir()` + okio，两端同一份（路径与搬移前逐字相同）。
+ * - **取 `sid`**：`WebCookies.headerFor(PtworkTranscript.COOKIE_URL)`——`data/session/WebCookieSource`
+ *   是「WebView 自己登出来的会话」那条既有的缝（Android `CookieManager`、iOS `WKWebsiteDataStore`）。
+ *   搬移前这一行是 `:app` 的 `TranscriptCookies`（`android.webkit`），已删。
+ * - **PDF 字节**：走 [TranscriptClient] 的 Ktor 请求，**不经过 WebView 的下载**。所以本页
+ *   **不装** `WebViewController.onDownload`：装了反而会让「网页里点了下载」这条我们根本
+ *   不依赖的路多出一个半成品（`design/ios-port.md` §11.4 的 `null` 语义 = 保持现状）。
+ *
+ * ## 授权层丢掉的三件 Android 专有能力（`ui/web/WebViewController` 没有对应事件）
+ *
+ * 1. **SSL 白名单放行**（原 `onReceivedSslError` → `JwUrls.TRUSTED_SSL_HOSTS`）：缝里没有这个
+ *    事件，WebView 回到「证书错就拒」。同一批域名 OkHttp / NSURLSession 用系统信任库能直连，
+ *    所以预期不改变登录结果，但这是**未在真机上验过**的一条。
+ * 2. **渲染进程被回收后不让 App 陪葬**（原 `onRenderProcessGone`）：缝没有该事件，落回系统默认。
+ * 3. **debug 包的 `setWebContentsDebuggingEnabled`**：开发便利，release 从来不开。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TranscriptScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val client = remember { Graph.transcriptClient() }
-    val store = remember { Graph.transcriptStore(context) }
+fun TranscriptScreen(
+    onBack: () -> Unit = {},
+    /** 打开导出好的 PDF（参数是沙箱里的绝对路径）。`null` = 本平台没有交给系统阅读器的通道。 */
+    onOpenPdf: ((path: String) -> Unit)? = null,
+    /** 分享 PDF（参数同上）。`null` = 本平台没有可用的分享面板。 */
+    onSharePdf: ((path: String) -> Unit)? = null,
+    /**
+     * 另存到用户自选位置。回调**必须回** [onResult]：那是「写完了 / 用户取消 / 写失败」的唯一
+     * 信号，页面据此给提示。`null` = 本平台没有等价物（iOS 要走 `UIDocumentPickerViewController`）。
+     */
+    onSavePdf: ((path: String, suggestedName: String, onResult: (TranscriptSaveOutcome) -> Unit) -> Unit)? = null,
+    /** 「最近导出」二级页。`null` = 本平台没有二级页栈。 */
+    onOpenHistory: (() -> Unit)? = null,
+    /**
+     * 停在统一认证登录页时注入的自动填表脚本；`null`/空白 = 不注入，用户自己手登。
+     *
+     * 为什么是宿主给而不是本页从凭证仓取：密码**永远不出实现类**（`platform/AccountServices.kt`
+     * 的 `AccountCredentials` 只回学号），而自动填表需要明文密码拼 JS。所以这一跳只能由
+     * 能把密码交给 WebView 的那一侧（Android 的 `CredentialVault`）自己拼好递进来；
+     * iOS 侧不接 = `null`，用户在网页里手登一次，功能不减。
+     */
+    casAutoFillScript: (() -> String?)? = null,
+) {
+    val store = remember { TranscriptStore() }
+    val client = remember { TranscriptClientHolder.instance }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    // 凭证侧能力（iOS / Android 都有；null 只发生在「本平台没有加密凭证存储」的口径下）
+    val credentials = remember { Services.current.accountCredentials() }
 
     var stage by remember { mutableStateOf<TxStage>(TxStage.Checking) }
     var terms by remember { mutableStateOf<List<TranscriptTerm>>(emptyList()) }
@@ -122,7 +157,8 @@ fun TranscriptScreen(onBack: () -> Unit) {
     var authVisible by remember { mutableStateOf(false) }
     /** 会话不可用时只自动开一次授权层，避免「授权 → 立刻又失效 → 再授权」空转。 */
     var autoAuthTried by remember { mutableStateOf(false) }
-    var savedFile by remember { mutableStateOf<File?>(null) }
+    var savedName by remember { mutableStateOf<String?>(null) }
+    var savedSize by remember { mutableStateOf(0L) }
     var savedTerms by remember { mutableStateOf<List<String>>(emptyList()) }
 
     fun notify(message: String, tone: NoticeTone) {
@@ -148,20 +184,23 @@ fun TranscriptScreen(onBack: () -> Unit) {
      * 落到「完成」页之后，文件仍可能被用户从「最近导出」里删掉。
      * 所有后续动作都先过这道闸：文件不在了就回就绪态，而不是让阅读器抛一个看不懂的错。
      */
-    fun withSavedFile(action: (File) -> Unit) {
-        val file = savedFile
-        if (file == null || !file.exists()) {
+    fun withSavedPath(action: (path: String, name: String) -> Unit) {
+        val name = savedName
+        val path = name?.let { store.existingPath(it) }
+        if (name == null || path == null) {
             notify("成绩单文件已不在了，请重新导出", NoticeTone.Warning)
             stage = TxStage.Ready
             return
         }
-        action(file)
+        action(path, name)
     }
 
     fun loadTerms() {
         scope.launch {
             stage = TxStage.Checking
-            val cookie = TranscriptCookies.sessionHeader()
+            // 必须留在主线程调：Android 的 `CookieManager` 要有 Looper（`WebCookieSource` 的
+            // Android 实现就是 `CookieManager.getCookie`），缝本身不做线程切换
+            val cookie = WebCookies.headerFor(PtworkTranscript.COOKIE_URL)
             if (cookie == null) {
                 requireReauth("还没登录学校统一认证")
                 return@launch
@@ -194,12 +233,14 @@ fun TranscriptScreen(onBack: () -> Unit) {
         scope.launch {
             stage = TxStage.Exporting
             try {
-                val cookie = TranscriptCookies.sessionHeader()
+                val cookie = WebCookies.headerFor(PtworkTranscript.COOKIE_URL)
                     ?: throw TranscriptException.SessionExpired()
                 val bytes = client.export(picked, cookie)
                 val name = PtworkTranscript.defaultFileName(picked, AppClock.nowMillis())
-                val file = withContext(Dispatchers.IO) { store.save(bytes, name) }
-                savedFile = file
+                // 落盘走 Default（commonMain 取不到 Dispatchers.IO，见 TranscriptStore 的类注释）
+                withContext(Dispatchers.Default) { store.save(bytes, name) }
+                savedName = name
+                savedSize = bytes.size.toLong()
                 savedTerms = picked
                 stage = TxStage.Done
             } catch (e: TranscriptException.SessionExpired) {
@@ -216,43 +257,19 @@ fun TranscriptScreen(onBack: () -> Unit) {
     LaunchedEffect(Unit) { loadTerms() }
 
     // 授权层打开时，返回键先收授权层，不直接关窗口
-    BackHandler(enabled = authVisible) { authVisible = false }
-
-    val saveLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument(PDF_MIME),
-    ) { uri ->
-        val file = savedFile
-        if (uri == null || file == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val result = runCatching {
-                withContext(Dispatchers.IO) {
-                    val sink = context.contentResolver.openOutputStream(uri)
-                        ?: error("无法写入所选位置")
-                    sink.use { out -> file.inputStream().use { it.copyTo(out) } }
-                }
-            }
-            if (result.isSuccess) {
-                notify("已保存到所选位置", NoticeTone.Success)
-            } else {
-                notify("保存失败：${result.exceptionOrNull()?.message.orEmpty()}", NoticeTone.Error)
-            }
-        }
-    }
+    AppBackHandler(enabled = authVisible) { authVisible = false }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("导出成绩单", style = MaterialTheme.typography.titleMedium) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
+                navigationIcon = { PageBackButton(onBack) },
                 actions = {
-                    IconButton(
-                        onClick = { SubpageActivity.start(context, SubpageScreen.TRANSCRIPTS) },
-                    ) {
-                        Icon(Icons.Filled.History, contentDescription = "最近导出")
+                    // 没有二级页栈的平台（iOS）整只图标不渲染，而不是点了没反应
+                    onOpenHistory?.let { open ->
+                        IconButton(onClick = open) {
+                            Icon(AppIcons.History, contentDescription = "最近导出")
+                        }
                     }
                 },
             )
@@ -304,11 +321,36 @@ fun TranscriptScreen(onBack: () -> Unit) {
                 )
 
                 TxStage.Done -> DoneContent(
-                    file = savedFile,
+                    fileName = savedName,
+                    sizeBytes = savedSize,
                     termLabel = termLabel(savedTerms),
-                    onOpen = { withSavedFile { openPdf(context, store.uriOf(it), ::notify) } },
-                    onShare = { withSavedFile { sharePdf(context, store.uriOf(it), ::notify) } },
-                    onSaveToDownloads = { withSavedFile { saveLauncher.launch(it.name) } },
+                    onOpen = onOpenPdf?.let { open ->
+                        { withSavedPath { path, _ -> open(path) } }
+                    },
+                    onShare = onSharePdf?.let { share ->
+                        { withSavedPath { path, _ -> share(path) } }
+                    },
+                    onSave = onSavePdf?.let { save ->
+                        {
+                            withSavedPath { path, name ->
+                                save(path, name) { outcome ->
+                                    // 用户取消不出声：SAF 面板自己已经给过反馈，
+                                    // 再补一条「已取消」只会多一次噪声（与搬移前同口径）
+                                    val tone = when (outcome) {
+                                        TranscriptSaveOutcome.Saved -> NoticeTone.Success
+                                        TranscriptSaveOutcome.Cancelled -> null
+                                        is TranscriptSaveOutcome.Failed -> NoticeTone.Error
+                                    }
+                                    val message = when (outcome) {
+                                        TranscriptSaveOutcome.Saved -> "已保存到所选位置"
+                                        TranscriptSaveOutcome.Cancelled -> null
+                                        is TranscriptSaveOutcome.Failed -> "保存失败：${outcome.message}"
+                                    }
+                                    if (message != null && tone != null) notify(message, tone)
+                                }
+                            }
+                        }
+                    },
                     onExportAgain = { stage = TxStage.Ready },
                 )
 
@@ -321,6 +363,8 @@ fun TranscriptScreen(onBack: () -> Unit) {
             if (authVisible) {
                 AuthorizationOverlay(
                     modifier = Modifier.fillMaxSize(),
+                    casAutoFillScript = casAutoFillScript,
+                    credentials = credentials,
                     onAuthorized = {
                         authVisible = false
                         loadTerms()
@@ -332,6 +376,20 @@ fun TranscriptScreen(onBack: () -> Unit) {
     }
 }
 
+/**
+ * 「另存到用户自选位置」的结果。
+ *
+ * 三档而不是一个布尔：用户点「取消」与真的写失败，用户该看到的话不一样
+ * （前者是「已取消」，后者要给出原因）。同 `ui/platform/FilePickers` 的 `false` 语义
+ * 不同的地方在于——那条缝只服务课表 JSON 导出，调用方本来就只说一句「保存失败」；
+ * 这里原本就会把 `openOutputStream` 的异常原话带给用户，别在搬移中把这条信息丢掉。
+ */
+sealed interface TranscriptSaveOutcome {
+    data object Saved : TranscriptSaveOutcome
+    data object Cancelled : TranscriptSaveOutcome
+    data class Failed(val message: String) : TranscriptSaveOutcome
+}
+
 /** 页面状态。学期与勾选分开存（它们跨状态存活，失败重试后仍保留）。 */
 private sealed interface TxStage {
     data object Checking : TxStage
@@ -341,6 +399,19 @@ private sealed interface TxStage {
     data object Exporting : TxStage
     data object Done : TxStage
     data class Failed(val message: String) : TxStage
+}
+
+/**
+ * 进程内唯一的 [TranscriptClient]。
+ *
+ * 为什么不是每次进页 new 一个：它内部持有一个 Ktor client（独立连接池），
+ * `SharedHttp.create` 的注释写得很清楚——「每调一次就是一个独立实例，模块内应该只建一次」。
+ * 为什么没走 `AppServices`：那个接口的每个成员都要两端的装配根各补一行，而这里**没有任何
+ * 平台差异**（`TranscriptClient` 只依赖 `TranscriptTransport` 那条缝），加进去只是多一处
+ * 要跟着改的地方。`by lazy` 在 Native 上同样安全（`AppIcons` 全文件就是这个写法）。
+ */
+private object TranscriptClientHolder {
+    val instance: TranscriptClient by lazy { TranscriptClient() }
 }
 
 @Composable
@@ -480,13 +551,20 @@ private fun TermRow(term: TranscriptTerm, checked: Boolean, onToggle: () -> Unit
     }
 }
 
+/**
+ * 「接下来」那块：三个动作**各自**按宿主给不给来决定渲不渲染。
+ *
+ * 一个都没有时整块（含下面那条说明）不出现——说明里写着「要长期留存请存到下载或分享出去」，
+ * 而两个出口都不在时那句话就成了指路指向空气。
+ */
 @Composable
 private fun DoneContent(
-    file: File?,
+    fileName: String?,
+    sizeBytes: Long,
     termLabel: String,
-    onOpen: () -> Unit,
-    onShare: () -> Unit,
-    onSaveToDownloads: () -> Unit,
+    onOpen: (() -> Unit)?,
+    onShare: (() -> Unit)?,
+    onSave: (() -> Unit)?,
     onExportAgain: () -> Unit,
 ) {
     Column(
@@ -505,28 +583,29 @@ private fun DoneContent(
             Text(termLabel, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(2.dp))
             Text(
-                listOfNotNull(
-                    file?.name,
-                    file?.let { TranscriptHistory.sizeLabel(it.length()) },
-                ).joinToString(" · "),
+                listOfNotNull(fileName, fileName?.let { TranscriptHistory.sizeLabel(sizeBytes) })
+                    .joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
         }
-        SectionHeader(title = "接下来")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onOpen, modifier = Modifier.weight(1f)) { Text("打开") }
-            OutlinedButton(onClick = onShare, modifier = Modifier.weight(1f)) { Text("分享") }
-            OutlinedButton(onClick = onSaveToDownloads, modifier = Modifier.weight(1f)) {
-                Text("存到下载")
+        if (onOpen != null || onShare != null || onSave != null) {
+            SectionHeader(title = "接下来")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                onOpen?.let { OutlinedButton(onClick = it, modifier = Modifier.weight(1f)) { Text("打开") } }
+                onShare?.let { OutlinedButton(onClick = it, modifier = Modifier.weight(1f)) { Text("分享") } }
+                onSave?.let {
+                    OutlinedButton(onClick = it, modifier = Modifier.weight(1f)) { Text("存到下载") }
+                }
             }
+            Spacer(Modifier.height(10.dp))
+            InlineNoticeRow(
+                "文件在应用私有目录，只保留最近 ${TranscriptHistory.DEFAULT_KEEP} 份；" +
+                    "要长期留存请「存到下载」或分享出去。",
+                NoticeTone.Info,
+            )
+            Spacer(Modifier.height(16.dp))
         }
-        Spacer(Modifier.height(10.dp))
-        InlineNoticeRow(
-            "文件在应用私有目录，只保留最近 10 份；要长期留存请「存到下载」或分享出去。",
-            NoticeTone.Info,
-        )
-        Spacer(Modifier.height(16.dp))
         TextButton(onClick = onExportAgain, modifier = Modifier.fillMaxWidth()) {
             Text("再导一份")
         }
@@ -553,36 +632,48 @@ private fun FailedContent(
     }
 }
 
+/** 自动登录结果只在日志里看，方便下次排查；不写 UI、不含凭证。 */
+private const val AUTH_TAG = "PtworkAuth"
+
 /**
  * 统一认证授权层。
  *
  * 只做一件事：把 CAS 那一跳走完，让签章系统在 WebView 里写下 `sid`。落点一到
  * 「签章系统域且不是它自己的登录页」就自动回调（判定见 [PtworkTranscript.isAuthorizedLanding]）。
  * 底部留一个手动「继续」按钮：自动识别万一失灵（页面结构变化），用户仍能往下走。
+ *
+ * ## 搬进共享层换掉的东西
+ *
+ * `AndroidView` + `WebView` + `FrameLayout` 壳 + `onRenderProcessGone` + SSL 白名单
+ * → `ui/web/WebContentView` 这条缝（`design/ios-port.md` §11.4）。缝里没有的三件能力
+ * （SSL 放行 / 渲染进程回收 / debug 远程调试）列在 [TranscriptScreen] 的 KDoc 里。
+ *
+ * 会话 Cookie 不再从这里读：`getCookieHeader` 只在原生视图活着时可用，而进页第一次探会话
+ * 发生在授权层还没挂上之前。两侧读的是同一份 Cookie 库（Android `CookieManager`、
+ * iOS `WKWebsiteDataStore`），所以走的是 `WebCookies` 那条缝而不是控制器。
  */
-/** 自动登录结果只在 logcat 里看，方便下次排查；不写 UI、不含凭证。 */
-private const val AUTH_TAG = "PtworkAuth"
-
 @Composable
 private fun AuthorizationOverlay(
     modifier: Modifier = Modifier,
+    casAutoFillScript: (() -> String?)?,
+    credentials: AccountCredentials?,
     onAuthorized: () -> Unit,
     onClose: () -> Unit,
 ) {
-    var webView by remember { mutableStateOf<WebView?>(null) }
+    // 视图是围着句柄建的，必须留在组合里：每次重组 new 一个等于每次重组重建 WebView
+    val controller = remember { WebViewController() }
     var problem by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
     // 停在统一认证登录页时用保存的凭证自动登一次（DESIGN §4.25）。只试一次：
     // 失败（结构变了 / 有验证码）就交给用户手登，反复试只会撞风控。
-    val context = LocalContext.current
-    var savedCas by remember { mutableStateOf(Graph.credentialVault(context).readCas()) }
+    var hasSavedCredentials by remember { mutableStateOf(credentials?.readJwUsername() != null) }
     var autoLoginTried by remember { mutableStateOf(false) }
     // 前置登录（DESIGN §4.27，2026-09-28）：本地没有凭据时进授权层先问一次，
     // 保存验证通过后 WebView 落 CAS 页由自动填表接管（与教务导入同一套闭环）
     var showCasLoginDialog by remember { mutableStateOf(false) }
     var casLoginDeclined by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (savedCas == null && !casLoginDeclined) showCasLoginDialog = true
+        // 没有加密凭证存储的平台（credentials == null）不问，问了也存不住
+        if (credentials != null && !hasSavedCredentials && !casLoginDeclined) showCasLoginDialog = true
     }
 
     // 自动识别会连着触发多次（落地后还有后续页面加载与非主框架回调），只认第一次
@@ -591,6 +682,38 @@ private fun AuthorizationOverlay(
         if (!fired) {
             fired = true
             onAuthorized()
+        }
+    }
+
+    remember(controller) {
+        controller.onPageFinished = { url ->
+            // 与教务导入 / 学工表单同一手法（DESIGN §4.27）：让 WebView 自己
+            // 填表提交，cookie 由 CAS 亲自 Set-Cookie——把 OkHttp 拿到的 cookie
+            // 注入 CookieManager 那条路在真机走不通（属性缺 SameSite）。
+            if (!autoLoginTried && JwUrls.isCasHost(url)) {
+                val script = casAutoFillScript?.invoke()
+                if (!script.isNullOrBlank()) {
+                    // 进程级节流（DESIGN §4.27）：页面级标记挡不住重开窗口。
+                    if (SessionStatus.tryAcquireAutoLogin(AppClock.nowMillis())) {
+                        autoLoginTried = true
+                        controller.evaluateJavascript(script) { raw ->
+                            val r = unwrapJsString(raw)
+                            Logger.d(AUTH_TAG, "auto-login on CAS page: $r")
+                            if (!r.startsWith(JwAutoLogin.OK_PREFIX)) {
+                                // 没找到表单不算一次登录尝试：退回共享节流，
+                                // 别把别的窗口（教务网页核对）也压 5 分钟（2026-10-21）
+                                SessionStatus.releaseAutoLoginAttempt()
+                                problem = "自动登录没走通，请在下方页面手动登录一次"
+                            }
+                        }
+                    }
+                }
+            }
+            if (PtworkTranscript.isAuthorizedLanding(url)) authorizeOnce()
+        }
+        controller.onError = { message ->
+            // 缝只在主 frame 失败时回调（子资源 404 不打扰用户），所以这里不用再判一次
+            problem = "登录页打不开：$message"
         }
     }
 
@@ -614,7 +737,7 @@ private fun AuthorizationOverlay(
                 )
             }
             IconButton(onClick = onClose) {
-                Icon(Icons.Filled.Close, contentDescription = "关闭登录页")
+                Icon(AppIcons.Cancel01, contentDescription = "关闭登录页")
             }
         }
         problem?.let {
@@ -624,109 +747,12 @@ private fun AuthorizationOverlay(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
-        AndroidView(
-            modifier = Modifier.weight(1f),
-            factory = { ctx ->
-                // 与教务导入同一手法：套一层 FrameLayout 当壳，Compose 重排时摘挂的是壳，
-                // WebView 本体不被直接摘挂（否则部分机型会丢渲染面）
-                FrameLayout(ctx).apply {
-                    val view = WebView(ctx).apply {
-                        configureForPtworkAuth(this)
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageStarted(
-                                view: WebView?,
-                                url: String?,
-                                favicon: Bitmap?,
-                            ) {
-                                if (PtworkTranscript.isAuthorizedLanding(url)) authorizeOnce()
-                            }
-
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                // 与教务导入 / 学工表单同一手法（DESIGN §4.27）：让 WebView 自己
-                                // 填表提交，cookie 由 CAS 亲自 Set-Cookie——把 OkHttp 拿到的 cookie
-                                // 注入 CookieManager 那条路在真机走不通（属性缺 SameSite）。
-                                if (!autoLoginTried && JwUrls.isCasHost(url)) {
-                                    savedCas?.let { cred ->
-                                        // 进程级节流（DESIGN §4.27）：页面级标记挡不住重开窗口。
-                                        if (!SessionStatus.tryAcquireAutoLogin(System.currentTimeMillis())) {
-                                            return@let
-                                        }
-                                        autoLoginTried = true
-                                        view?.evaluateJavascript(
-                                            JwAutoLogin.fillJs(cred.username, cred.password),
-                                        ) { raw ->
-                                            val r = unwrapJsString(raw)
-                                            Log.d(AUTH_TAG, "auto-login on CAS page: $r")
-                                            if (r?.startsWith(JwAutoLogin.OK_PREFIX) != true) {
-                                                // 没找到表单不算一次登录尝试：退回共享节流，
-                                                // 别把别的窗口（教务网页核对）也压 5 分钟（2026-10-21）
-                                                SessionStatus.releaseAutoLoginAttempt()
-                                                problem = "自动登录没走通，请在下方页面手动登录一次"
-                                            }
-                                        }
-                                    }
-                                }
-                                if (PtworkTranscript.isAuthorizedLanding(url)) authorizeOnce()
-                            }
-
-                            override fun onReceivedError(
-                                view: WebView?,
-                                request: WebResourceRequest?,
-                                error: WebResourceError?,
-                            ) {
-                                // 只有主框架失败才值得打扰用户：图标/CSS 这类子资源失败不影响登录
-                                if (request?.isForMainFrame == true) {
-                                    problem = "登录页打不开：${error?.description?.toString().orEmpty()}"
-                                }
-                            }
-
-                            override fun onReceivedSslError(
-                                view: WebView?,
-                                handler: SslErrorHandler?,
-                                error: SslError?,
-                            ) {
-                                // 只放行学校域（白名单见 JwUrls.TRUSTED_SSL_HOSTS）：这个 WebView
-                                // 里就是统一认证的密码表单，无条件 proceed 等于关掉传输层校验
-                                val host = error?.url?.let { JwUrls.hostOf(it) }
-                                if (host != null && host in JwUrls.TRUSTED_SSL_HOSTS) {
-                                    handler?.proceed()
-                                } else {
-                                    handler?.cancel()
-                                    problem = "证书校验失败，已阻止访问（$host）"
-                                }
-                            }
-
-                            /** 渲染进程被系统回收 / 崩溃：不处理会带走整个 App。 */
-                            override fun onRenderProcessGone(
-                                view: WebView?,
-                                detail: RenderProcessGoneDetail?,
-                            ): Boolean = handleWebViewRendererGone(context, AUTH_TAG, detail)
-                        }
-                        webChromeClient = WebChromeClient()
-                        // 直接加载：登录由页面上的自动填表完成（DESIGN §4.27）。
-                        // 这里不再预注入 cookie——注入在真机不被采用，等它还会让窗口白屏。
-                        loadUrl(PtworkTranscript.CAS_ENTRY)
-                    }
-                    webView = view
-                    addView(
-                        view,
-                        FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                        ),
-                    )
-                }
-            },
-            update = { /* 状态在 Compose 侧持有，不需要主动刷新 */ },
-            // 离开导出窗口时销毁 WebView：登录页/导出会话不应继续持有 Activity。
-            // 与教务导入窗口同一处理。
-            onRelease = { shell ->
-                (0 until shell.childCount).mapNotNull { shell.getChildAt(it) as? WebView }
-                    .forEach { wv ->
-                        wv.stopLoading()
-                        wv.destroy()
-                    }
-            },
+        WebContentView(
+            controller = controller,
+            url = PtworkTranscript.CAS_ENTRY,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
         )
         Row(
             modifier = Modifier
@@ -737,7 +763,7 @@ private fun AuthorizationOverlay(
             TextButton(
                 onClick = {
                     problem = null
-                    webView?.reload()
+                    controller.reload()
                 },
             ) { Text("重新加载") }
             Spacer(Modifier.weight(1f))
@@ -745,60 +771,28 @@ private fun AuthorizationOverlay(
         }
     }
 
-    if (showCasLoginDialog) {
+    if (showCasLoginDialog && credentials != null) {
         CasLoginDialog(
-            onVerify = { u, p -> Graph.casSession(context).tryLogin(u, p) },
-            onSave = { u, p -> Graph.credentialVault(context).saveCas(u, p) },
+            onVerify = { u, p -> credentials.verifyJw(u, p) },
+            onSave = { u, p -> credentials.saveJw(u, p) },
             title = "登录学校统一认证",
             description = "导出盖章成绩单需要统一认证账号。保存后 App 会自动登录，" +
                 "不再需要每次输入。密码加密存本机，可随时在「我的 → 学校统一认证」退出并清除。",
             onSaved = {
-                savedCas = Graph.credentialVault(context).readCas()
+                hasSavedCredentials = credentials.readJwUsername() != null
                 showCasLoginDialog = false
                 // 保存后立刻重载统一认证入口：WebView 可能已停在 CAS 登录页，
-                // 凭据是刚存的，重载后自动填表接管提交（用户不必退出重进）
-                // 清自动填表的 5 分钟进程级节流：自动填表失败一次就消耗窗口，
-                // 用户刚验证保存的正确密码不该被它压住（对齐引导页 onCredentialsUpdated 口径）
-                Graph.casSession(context).onCredentialsUpdated()
+                // 凭据是刚存的，重载后自动填表接管提交（用户不必退出重进）。
+                // 自动填表的 5 分钟进程级节流已由 `verifyJw` 清掉（它的实现里第一步就是
+                // `onCredentialsUpdated`），这里只需要放开页面级标记。
                 autoLoginTried = false
-                webView?.loadUrl(PtworkTranscript.CAS_ENTRY)
+                controller.loadUrl(PtworkTranscript.CAS_ENTRY)
             },
             onSkip = {
                 casLoginDeclined = true
                 showCasLoginDialog = false
             },
         )
-    }
-}
-
-/**
- * 授权 WebView 的配置。
- *
- * 软件渲染与宽视口两点照抄教务导入窗口（DESIGN §4.4.1）：MIUI 的 WebView 在硬件加速下
- * 会丢合成层导致白屏；统一认证页没有 `<meta viewport>`，不让页面用自身视口会错位。
- */
-@SuppressLint("SetJavaScriptEnabled")
-private fun configureForPtworkAuth(webView: WebView) {
-    webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
-    webView.setBackgroundColor(android.graphics.Color.WHITE)
-    webView.settings.apply {
-        javaScriptEnabled = true
-        domStorageEnabled = true
-        useWideViewPort = true
-        loadWithOverviewMode = true
-        setSupportZoom(true)
-        builtInZoomControls = true
-        displayZoomControls = false
-        textZoom = 100
-        // CAS 登录页在 HTTPS（eapp2），回跳是 HTTP（jwxyxx），同一跳里混内容
-        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-        cacheMode = WebSettings.LOAD_DEFAULT
-    }
-    CookieManager.getInstance().setAcceptCookie(true)
-    CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
-    if (BuildConfig.DEBUG) {
-        // 只给 debug：release 放开等于把用户登录会话暴露给 chrome://inspect
-        WebView.setWebContentsDebuggingEnabled(true)
     }
 }
 
