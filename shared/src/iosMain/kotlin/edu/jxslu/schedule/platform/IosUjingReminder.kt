@@ -82,7 +82,7 @@ class IosUjingReminder : UjingReminder {
 
     init {
         // 见文件头「前台横幅」：delegate 是 weak，握在这个长命对象手里的只有那一份进程级单例
-        center.delegate = IosNotificationPresenter
+        center.delegate = presenter
     }
 
     override fun schedule(orderId: String, triggerAtMillis: Long) {
@@ -210,8 +210,15 @@ private const val UJING_ID_PREFIX = "ujing."
  *
  * 只实现这一个方法：负责「App 开着时也弹横幅并响一声」。点通知进入 App 的落点这一版不做
  * （通知没有带 `userInfo`，点开就是回到 App，没有要跳的页面）。
+ *
+ * ## 为什么是 `class` + 手工单例，而不是 `object`
+ *
+ * 2026-11-25 第二轮 CI 实测：`private object` 同时继承 `NSObject` 与 `UNUserNotificationCenterDelegateProtocol`
+ * 会在**后端代码生成**阶段炸——`Allocation of Obj-C class … should have been lowered`。
+ * Obj-C 子类的实例必须由 ObjC runtime 分配（`alloc/init`），而 Kotlin 的 `object` 是静态单例，
+ * 两条路对不上。改成普通 `class`、由 [presenter] 持一份就是了。
  */
-private object IosNotificationPresenter : NSObject(), UNUserNotificationCenterDelegateProtocol {
+private class IosNotificationPresenter : NSObject(), UNUserNotificationCenterDelegateProtocol {
 
     override fun userNotificationCenter(
         center: UNUserNotificationCenter,
@@ -223,6 +230,9 @@ private object IosNotificationPresenter : NSObject(), UNUserNotificationCenterDe
         )
     }
 }
+
+/** 那个唯一实例（进程级）。见 [IosNotificationPresenter] 的 KDoc。 */
+private val presenter: IosNotificationPresenter by lazy { IosNotificationPresenter() }
 
 /** 权限结论的三态（进程内）。 */
 enum class IosNotificationPermissionState {
