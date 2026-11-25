@@ -10,6 +10,7 @@ import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
 import edu.jxslu.schedule.data.prefs.recordGuessOrder
 import edu.jxslu.schedule.data.qiekj.IosQiekjExpiryMarker
 import edu.jxslu.schedule.data.qiekj.IosQiekjOrderStore
+import edu.jxslu.schedule.data.qiekj.IosQiekjWateringStore
 import edu.jxslu.schedule.data.qiekj.QiekjRepository
 import edu.jxslu.schedule.data.qiekj.QiekjWateringSessions
 import edu.jxslu.schedule.data.qzxy.QzxyRepository
@@ -351,18 +352,15 @@ class IosServices : AppServices {
     }
 
     /**
-     * 「正在出水」登记：**iOS 侧是不落地的实现**。
+     * 「正在出水」登记：`appDataDir()/qiekj_watering.json` 落盘（iOS 移植 V2，2026-11-25）。
      *
-     * 这条状态唯一的读者是今日页服务卡与侧栏（都在 `:app`），iOS 侧两者都还没移植，
-     * 所以登记了也没有人看。等 iOS 接上 [qiekjRepository] 与今日页时，这里换成
-     * `appDataDir()` 下的 JSON 落盘实现（与 Android 的 `QiekjWateringStore` 同口径：
-     * 5 分钟过期、165 秒后不再显示「出水中」）。
+     * 上一版是空实现，理由是「读者（今日页服务卡）还在 `:app`」。服务卡搬进共享层之后
+     * iOS 今日页读的就是这条流，所以换成真实现：与 Android 的 `QiekjWateringStore` 逐条对齐
+     * （165 秒后不再显示「出水中」、5 分钟残留当没有），只换介质（见 [IosQiekjWateringStore]）。
+     *
+     * 单例：开水页的 `WaterViewModel` 写、今日页服务卡读，必须是同一份流。
      */
-    private val qiekjWatering: QiekjWateringSessions = object : QiekjWateringSessions {
-        override fun begin(startedAtMillis: Long, deviceName: String, goodsId: String?) = Unit
-
-        override fun clear() = Unit
-    }
+    private val qiekjWatering: QiekjWateringSessions by lazy { IosQiekjWateringStore() }
 
     override fun qiekjWateringSessions(): QiekjWateringSessions = qiekjWatering
 

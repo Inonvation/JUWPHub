@@ -24,6 +24,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.zxing.client.android.Intents
 import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.UnlockFlowState
 import edu.jxslu.schedule.domain.capabilities
@@ -50,23 +51,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * 今日页在 Android 侧的**槽位填充**（iOS 移植 V1，2026-11-25）。
+ * 今日页在 Android 侧的**槽位填充**（iOS 移植 V1，2026-11-25；服务卡 V2，2026-11-25 晚）。
  *
- * 今日页本体已搬进 `shared/commonMain`（`ui/today/TodayScreen.kt`）。它依赖的四个包
- * 搬不动——`ui/ebike`（高德 SDK）、`ui/qzxy`（蓝牙传输层）、`ui/reminder`（通知）、
- * 胖乖开水的落盘会话（`QiekjWateringSession` 还在 `:app`）——所以那些**渲染 + 状态**
- * 全部收到这里，页面只拿到 [TodayServiceSlot] / `qzxyPanel` / `onScanCode` 三个槽位。
+ * 今日页本体已搬进 `shared/commonMain`（`ui/today/TodayScreen.kt`），「进行中服务卡」本体
+ * （`ui/today/ActiveServiceCard.kt`）也一起搬了：开水与 U净 两端同源，快趣与趣智的数据类型
+ * 还留在 `:app` 的 `ui/ebike`（高德 SDK）与 `ui/qzxy`（蓝牙流程），所以卡片把那两行收成
+ * 可空槽位（`ActiveServiceSlot` / `QzxyWaterSlot`），行内容与状态在这里填。
  *
  * ## 这里为什么不是「再抄一份」
  *
- * 这些代码逐字来自搬走前的 `TodayScreen`（服务卡的四项真相源收集、RESUMED 静默查询、
- * 还车确认弹窗、结束免费计时的确认），只是位置从页面搬到了宿主。判据与注释都跟着走，
- * 一个字没改语义——特别是「位置判据必须用同步状态」那条（见 [TodayServiceSlot.pinned]）。
+ * 这些代码逐字来自搬走前的 `TodayScreen` / `ActiveServiceCard`（四项真相源收集、RESUMED
+ * 静默查询、还车确认弹窗、结束免费计时的确认、快趣行的判据与文案），只是位置从页面 /
+ * 卡片搬到了宿主。判据与注释都跟着走，一个字没改语义——特别是「位置判据必须用同步状态」
+ * 那条（见 [TodayServiceSlot.pinned]）。
  *
  * ## 谁调用
  *
  * `MainActivity` 的 `Routes.TODAY` 分支：`val slots = rememberTodayHostSlots(...)`，
- * 然后把三个值原样传给 `TodayScreen`。iOS 侧不调用——那里的槽位是 `null`。
+ * 然后把三个值原样传给 `TodayScreen`。iOS 侧不调用——那里的快趣 / 趣智槽位是 `null`，
+ * 服务卡由 `MainViewController` 直接给（只接开水与 U净）。
  */
 internal class TodayHostSlots(
     val serviceCards: TodayServiceSlot,
@@ -221,28 +224,81 @@ internal fun rememberTodayHostSlots(
     val kvcxRideActive = kvcxRideState?.ride != null && kvcxLoggedIn
     val rideInProgress = kvcxRideActive || kvcxDone || kvcxPinned || kvcxRideHint
 
+    // ── 服务卡的两个平台槽位（快趣 / 趣智）──
+    // 卡片本体已搬进共享层（`shared/commonMain` 的 `ui/today/ActiveServiceCard.kt`）：
+    // 开水与 U净 两端同源；快趣与趣智的数据类型还留在 `:app`（`ui/ebike` 的控制器状态、
+    // `ui/qzxy` 的蓝牙流程），所以只把「能力有没有 + 当前状态」交给卡片。
+    //
+    // 退场那 160ms 卡片还会再画一次进行中内容，而那一刻 `ride` 已经是 null——用
+    // `rememberLastValue` 留住最后一份非空值，否则淡出途中会变成空白行（2026-10-31 的老坑）。
+    val lastKvcxRide = rememberLastValue(kvcxRideState?.ride)
+    val lastKvcxSummary = rememberLastValue(kvcxRideState?.returnSummary)
+    val kvcxSlot = if (kvcxInAppRide && kvcxLoggedIn) {
+        ActiveServiceSlot(
+            active = kvcxRideState?.ride != null,
+            done = kvcxDone,
+            // 明确未锁车才点亮卡边：临时锁车 / 锁状态未知不点亮（与卡片里那条同口径）
+            highlighted = kvcxRideState?.ride?.locked == false,
+            activeContent = {
+                lastKvcxRide?.let { ride ->
+                    KvcxActiveRow(
+                        ride = ride,
+                        state = kvcxRideState ?: KvcxRideState(),
+                        freeStartAt = ebikeRideStartAt,
+                        onUnlock = { dispatchKvcxAction(KvcxAction.RESUME) },
+                        onLock = { dispatchKvcxAction(KvcxAction.LOCK) },
+                        onReturn = { dispatchKvcxAction(KvcxAction.RETURN) },
+                        onOpen = onOpenEbike,
+                    )
+                }
+            },
+            doneContent = {
+                KvcxDoneRow(
+                    summary = kvcxRideState?.returnSummary ?: lastKvcxSummary,
+                    onOpen = onOpenEbike,
+                )
+            },
+        )
+    } else {
+        null
+    }
+
+    // 趣智：**能力存在时就要给槽位**（`watering` 可为 null）——完成态那一行（「已结束用水」
+    // + 实扣金额）要在会话消失之后再亮 8 秒，槽位跟着会话一起变 null 就没有载体了。
+    val qzxySlot = if (qzxyViewModel != null) {
+        QzxyWaterSlot(
+            watering = qzxyEntryState.watering,
+            deviceEnded = qzxyEntryState.wateringDeviceEnded,
+            // 结束用水的两段反馈（2026-10-29）：行切「正在结束…」+ 副行展示当前步骤
+            stopping = qzxyEntryState.flow is QzxyFlowState.Working,
+            stopStep = (qzxyEntryState.flow as? QzxyFlowState.Working)?.step,
+            // 关水后的完成态要报实扣金额（2026-11-06）
+            settlement = qzxyEntryState.lastSettlement,
+            onStop = { qzxyViewModel?.stopWater() },
+        )
+    } else {
+        null
+    }
+
     val activeServicesCard: @Composable (Modifier) -> Unit = { cardModifier ->
         ActiveServiceCard(
-            kvcxState = kvcxRideState?.takeIf { kvcxInAppRide && kvcxLoggedIn },
-            kvcxFreeStartAt = ebikeRideStartAt.takeIf { kvcxInAppRide },
+            // 快趣骑行 / 趣智开水两个槽位：数据在 `:app`，行内容与状态由这里给；
+            // 能力不存在时传 null（卡片按 §11.2 ④ 整行不渲染）。
+            kvcx = kvcxSlot,
             freeRideStartAt = ebikeRideStartAt.takeIf { !kvcxInAppRide },
+            // 品牌位图是 Android 素材（`ic_brand_*`）；iOS 没有这套位图，那边传 null
+            brands = ServiceBrands(
+                kqcx = R.drawable.ic_brand_kqcx,
+                pangguai = R.drawable.ic_brand_pangguai,
+                qzxy = R.drawable.ic_brand_qzxy,
+                ujing = R.drawable.ic_brand_ujing,
+            ),
             waterSession = qiekjWateringSession,
             waterStopping = (waterEntryState.flow as? UnlockFlowState.Working)?.stopping == true,
             waterCanStop = waterEntryState.flow is UnlockFlowState.Working,
-            qzxyWatering = qzxyEntryState.watering,
-            qzxyDeviceEnded = qzxyEntryState.wateringDeviceEnded,
-            // 结束用水的两段反馈（2026-10-29）：行切「正在结束…」+ 副行展示当前步骤
-            qzxyStopping = qzxyEntryState.flow is QzxyFlowState.Working,
-            qzxyStopStep = (qzxyEntryState.flow as? QzxyFlowState.Working)?.step,
-            // 关水后的完成态要报实扣金额（2026-11-06）
-            qzxySettlement = qzxyEntryState.lastSettlement,
-            kvcxDone = kvcxDone,
+            qzxy = qzxySlot,
             ujingOrder = ujingOrder,
-            kvcxOnUnlock = { dispatchKvcxAction(KvcxAction.RESUME) },
-            kvcxOnLock = { dispatchKvcxAction(KvcxAction.LOCK) },
-            kvcxOnReturn = { dispatchKvcxAction(KvcxAction.RETURN) },
             waterOnEnd = { waterViewModel?.endSession() },
-            qzxyOnStop = { qzxyViewModel?.stopWater() },
             onOpenEbike = onOpenEbike,
             onOpenWater = onOpenWater,
             onOpenQzxy = onOpenQzxy,

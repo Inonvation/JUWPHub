@@ -936,7 +936,7 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 | `ui/ujing` | U净三页（主页 / 下单 / 历史）+ VM |
 | `ui/ai` | AI 调课整包（对话 / 设置 / 历史 / 提议卡 / 预览网格） |
 | `ui/common` | 59 个文件：对话框、卡片、Markdown 栈、附件图槽、快捷方式、账户卡、`KeepScreenOn`、`AppBackHandler` 等 |
-| `ui/today` | **还没搬**（v1 在搬，见 §12.2） |
+| `ui/today` | `TodayScreen` + `TodayViewModel` + 进行中服务卡（`ActiveServiceCard`）+ 猜你想用卡 + 收件箱卡 + `TodaySlots`（V1 2026-11-25；服务卡 V2 同日：开水 / 趣智 / U净 三行随之搬走，快趣行仍由 `:app` 注入槽位） |
 
 跨模块 `internal` 会失效：`TopBarHeight`、`GridTypography`、`quickCheckFeedback`、`OutcomeQueue`、
 `SchedulePreviewGrid` 的 `changedCellSet` / `previewWeeksOf` 因此放开成 `public`，KDoc 里各自写了原因。
@@ -949,8 +949,9 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 2. **iOS 文件选择 / 另存**：`onPickJsonFile` / `onSaveTextFile` 在 iOS 侧没有实现，
    JSON 导入导出因此不出现。要 `UIDocumentPickerViewController`。
 3. **iOS 系统日历写入**：`onSyncCalendar` 没有实现，分享弹层里那一行不出现。
-4. 今日页：`TodayScreen` 1493 行，挂着 `ActiveServiceCard`（1175 行，依赖尚未移植的单车 /
-   趣智 / U净 / 一卡通服务），要等那些服务搬完再动。
+4. 今日页**已搬完**（V1 页面 + V2 服务卡，2026-11-25）。服务卡在 iOS 上只接
+   **开水（胖乖，HTTP）**与 **U净 洗衣**两条链；快趣骑行（高德 SDK）与趣智开水（蓝牙）
+   由宿主注入槽位、iOS 传 `null` 整行不渲染；品牌位图与扫码在 iOS 侧仍缺。
 ### 10.4 充值与支付在 iOS 上的边界（2026-11-25 核查）
 
 四块充值**都不是 App 自己收钱**，都是把用户交给外部支付工具。因此可移植性取决于
@@ -982,10 +983,11 @@ iOS 走 `UIApplication.openURL` + scheme 白名单检查。一卡通、胖乖、
 |---|---|
 | `QiekjTokenStore` | 介质是 `EncryptedSharedPreferences`（Android Keystore）。iOS 实现必然是 Keychain，与 Android 无共用代码——立接口（`QiekjCredentialStore`）比立 expect/actual 干净 |
 | `QiekjOrderHistoryStore` | 介质是普通 `SharedPreferences`。改成 `JsonFileStore` 等于换介质，老用户设备上最多 50 笔本地账单当场读不出来 |
-| `QiekjWateringStore` | 只被 `ui/water` / `ui/today`（都在 `:app`）消费，搬过去是给共享层加一份没人读的状态 |
+| `QiekjWateringStore` | 介质是普通 `SharedPreferences`。会话类型 `QiekjWateringSession` 2026-11-25 已搬进共享层（今日页服务卡要在共享层读它），但 **store 本身仍留在 `:app`**：换介质等于让老用户设备上正在出水的那条记录读不出来。共享层要的那一面是 `QiekjWateringSessions`（写 + `watering` 读流），Android 由 `GraphServices` 转接、iOS 由 `IosQiekjWateringStore`（`appDataDir()` 下的 JSON）实现 |
 
-结论：`AppServices` 里**不需要** `qiekjRepository()`，因为它的消费者还都在 `:app`。
-等 iOS 接上 Keychain 版凭证存储再补，那时返回可空（null = 本平台还没接）。
+结论：这三份介质留在各端，`AppServices` 只收**接口**——`qiekjRepository()` 与
+`qiekjWateringSessions()` 两端都有实现（iOS 侧凭证走 Keychain、订单快照与会话走
+`appDataDir()` 下的 JSON）。
 ## 11. 页面层接线约定（2026-11-25 定，页面搬移一律照此）
 
 页面层开始大规模搬移时定的**唯一口径**。在此之前 S10/S13 搬的页面各写了一套（都不带 ViewModel），
@@ -1081,7 +1083,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | `ui/onboarding` | 1 | 2,592 | 首启引导；多步向导 + 权限申请 + 图片素材，iOS 侧这一版不做 |
 | `ui/jwvw` | 2 | 2,445 | `JwImportScreen`：教务导入总入口，WebView 全套 API + 文件选择 |
 | `ui/common` | 22 | 2,089 | 剩下的都是位图与 WebView 辅助（`DecodeSampled` / `CodeBitmaps` / `WebViewSupport` / `ImageViewerDialog`） |
-| `ui/today` | 3 | 1,914 | `ActiveServiceCard`（1,389）与 `GuessYouWantCardPlatform`：依赖 `ui.ebike` + `ui.qzxy` + 五张品牌位图，已按槽位反转成宿主注入，本机实现仍留 `:app` |
+| `ui/today` | 3 | 705 | `TodayHost`（槽位填充：四项真相源、RESUMED 静默查询、确认弹窗）、`ActiveServiceRows`（快趣行 / 已还车行，数据在 `ui/ebike`）、`GuessYouWantCardPlatform`（品牌位图）：都已按可空槽位反转成宿主注入 |
 | `ui/me` | 5 | 1,760 | 小组件设置（Glance）、权限与存储（七个 Android 权限 launcher + FileProvider + 缓存清理） |
 | `ui/wenqu` | 5 | 1,737 | 蹲点提醒 / 前台服务 / `AlarmManager`（见 12.1 通知那一行） |
 | `ui/week` | 4 | 1,568 | 课表页的平台槽（文件选择、日历写入、背景图） |

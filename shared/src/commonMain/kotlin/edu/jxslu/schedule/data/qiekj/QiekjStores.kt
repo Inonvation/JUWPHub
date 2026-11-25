@@ -1,5 +1,7 @@
 package edu.jxslu.schedule.data.qiekj
 
+import kotlinx.coroutines.flow.StateFlow
+
 /**
  * 胖乖仓库要的三条**存储缝**（iOS 移植 S11，2026-11-24）。
  *
@@ -83,24 +85,39 @@ interface QiekjExpiryMarker {
 }
 
 /**
- * 「正在出水」的本机会话登记（iOS 移植 T2，2026-11-25）。
+ * 「正在出水」的本机会话登记（iOS 移植 T2，2026-11-25；读侧 2026-11-25 晚补）。
  *
- * 介质是 `:app` 的 `QiekjWateringStore`（普通 `SharedPreferences` + `StateFlow`），
- * 它同时被今日页服务卡与侧栏读，所以类本身留在 `:app`；开水页搬进共享层后只需要
- * **写**这一面，于是收成两个方法——与 [QiekjOrderStore] 同一条「接口刻意做窄」的纪律。
+ * 介质各端自己的：Android 是 `:app` 的 `QiekjWateringStore`（普通 `SharedPreferences`
+ * + `StateFlow`），iOS 是 `appDataDir()/qiekj_watering.json`（`IosQiekjWateringStore`）。
+ * 类留在 `:app` / `iosMain`，共享层只认这一面。
  *
- * 读侧（`watering` 流）不在这里：目前唯一的读者是今日页 / 侧栏，两者都还在 `:app`，
- * 走 `Graph.qiekjWatering(context).watering`。等今日页搬过来时再加读侧，
- * **不要**提前把整条流搬进共享层（那会多一份没人读的状态）。
+ * ## 为什么现在有读侧
+ *
+ * T2 时这里只有 [begin] / [clear]：唯一的读者（今日页服务卡与侧栏）还在 `:app`，直接走
+ * `Graph.qiekjWatering(context).watering`。今日页服务卡搬进 `shared/commonMain` 后，
+ * 卡片本体要在共享层判断「有没有在出水 / 多久了」，`:app` 的 store 它看不见——
+ * 于是读侧收成 [watering] 一条流。这是**同一个事实的第二面**，不是新增状态：
+ * 两个实现都只是把自己那份存储包成 `StateFlow`，没有第二份真相源。
+ *
+ * 升级条件：胖乖会话改由服务端查询（`QiekjRepository` 已有 sync 接口，但 `workStatus`
+ * 会黏住十几分钟，不可信），这条缝连同 `QiekjWateringStore` 一起删。
  *
  * ## [AUTO_CLOSE_SECONDS] 为什么在这里
  *
  * 它是开水页 165 秒兜底与服务端自动关阀窗口的**唯一口径**，原来取自
- * `QiekjWateringSession.AUTO_CLOSE_SECONDS`（`:app`）。开水页搬走后那个常量在共享层看不见，
- * 所以在这里再声明一份；`:app` 的 `QiekjWateringSession.AUTO_CLOSE_SECONDS` 与它必须同值
- * （那边今日页的进度条也用它），**改一处必须两处一起改**。
+ * `QiekjWateringSession.AUTO_CLOSE_SECONDS`（当时在 `:app`）。开水页搬走后那个常量在共享层
+ * 看不见，所以在这里再声明一份；`QiekjWateringSession.AUTO_CLOSE_SECONDS` 现在也在共享层，
+ * 两者必须同值，**改一处必须两处一起改**。
  */
 interface QiekjWateringSessions {
+
+    /**
+     * 本机登记的「出水中」会话；null = 没有在出水。
+     *
+     * 过期残留（[QiekjWateringSession.isStale]）在读的时候就被清掉，订阅方拿到的永远是
+     * 值得展示的值——展示层只额外按 [QiekjWateringSession.isPastAutoClose] 收行。
+     */
+    val watering: StateFlow<QiekjWateringSession?>
 
     /**
      * 服务端确认出水时登记（流程首次进入 Working）。

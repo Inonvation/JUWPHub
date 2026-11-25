@@ -38,6 +38,27 @@ expect fun ResumedTickerEffect(intervalMillis: Long, onTick: () -> Unit)
 expect fun rememberResumedNow(intervalMillis: Long, key: Any? = null): State<Long>
 
 /**
+ * 读值型（带终止条件）：RESUMED 期间每 [intervalMillis] 更新一次「现在」，
+ * 一旦 [stillActive] 对最新值回 false 就**停表**（落一次最终值后不再走）。
+ *
+ * 与 [rememberResumedNow] 的差别只有「到点停表」这一条，但它不能用前者拼出来：
+ * 前者的循环不认终止条件，静态行会继续每秒重组（一行静态文案每秒重组一次，白白唤醒进程）。
+ *
+ * 为什么加在缝上而不是写在页面里：秒级走时的三道闸（RESUMED / 终止条件 / key 变化先落值）
+ * 在今日页的四条服务行上完全一样，页面侧各写一份必然漂移；而 `LocalLifecycleOwner` 与
+ * `repeatOnLifecycle` 在 `commonMain` 看不见（理由见本文件顶部）。
+ *
+ * [key] 必须带上状态位（如 `startedAtMillis to pending`）：状态翻面时 `produceState` 重启，
+ * 否则闭包里捕获的是旧 [stillActive]，行会一直空转。
+ */
+@Composable
+expect fun rememberResumedNowWhile(
+    intervalMillis: Long,
+    key: Any?,
+    stillActive: (Long) -> Boolean,
+): State<Long>
+
+/**
  * 「回到前台」计数：每次宿主窗口从后台（或被另一个窗口盖住）回到前台 +1。
  *
  * 用作 `remember` 的 key，强制重读一次**一次性快照**（登录态、磁盘上的考试快照、当前学期号）。
