@@ -150,6 +150,15 @@ object JwUrls {
     /** SSO 成功后学生端（端口 8080，HTTP） */
     const val XSD_BASE = "http://jiaowu.juwp.edu.cn:8080"
 
+    /**
+     * 教务预热入口（`:81`，HTTPS 明文端口）。
+     *
+     * 登录链第 4 步：先 GET 一次这个根地址，把 `bzb_njw` 写进教务域——`sso.jsp?ticket=`
+     * 的票据校验依赖它（Android `JwHttpSession` 与 iOS `IosCasTransport` 都要走这一步）。
+     * 与 WebView 侧那条 [SSO_WARMUP]（`/sso.jsp`）不是同一个地址：那条是给浏览器入口用的。
+     */
+    const val JW_WARMUP = "https://jiaowu.juwp.edu.cn:81/"
+
     /** 学期理论课表（需已登录；页面为 shell，真正数据在 iframe viweType=0） */
     const val SCHEDULE_LIST = "$XSD_BASE/jsxsd/xskb/xskb_list.do?viweType=0"
 

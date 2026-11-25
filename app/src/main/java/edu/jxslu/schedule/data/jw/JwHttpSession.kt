@@ -7,7 +7,9 @@ import edu.jxslu.schedule.data.net.AppHttp
 import edu.jxslu.schedule.data.session.CasLoginClassifier
 import edu.jxslu.schedule.data.session.CasLoginResult
 import edu.jxslu.schedule.data.session.CasTransport
+import edu.jxslu.schedule.data.session.JwPageRules
 import edu.jxslu.schedule.data.session.MemoryCookieJar
+import edu.jxslu.schedule.data.session.SessionCookie
 import okhttp3.Cookie
 import okhttp3.Dns
 import okhttp3.FormBody
@@ -39,77 +41,23 @@ class JwHttpSession private constructor(
     private val jar: MemoryCookieJar,
 ) : CasTransport {
 
-    sealed class JwHttpException(message: String, cause: Throwable? = null) : Exception(message, cause) {
-        /** 账号或密码错误（CAS 应答明确指向凭证）。计数口径见 DESIGN §4.27。 */
-        class Credential(message: String) : JwHttpException(message)
-
-        /** 网络/超时/DNS。静默重试口径，不发通知。 */
-        class Network(cause: Throwable) : JwHttpException(cause.message ?: "网络错误", cause)
-
-        /** 链路异常：execution 缺失、落点不对、会话校验不过、页面结构变更。 */
-        class Protocol(message: String) : JwHttpException(message)
-
-        /**
-         * 会话在服务端已经作废（2026-10-06 用户实测的强智**单会话**形态）。
-         *
-         * 两种表现都归这里：业务页面退回登录页，或直接回一段
-         * `{"flag1":3,"msgContent":"您的账号在其它地方登录"}`。
-         * **与 [Protocol] 分开**是因为调用方要据此作废本地会话再重登一次
-         * （`CasSession.fetchHtml` 的重试）——5xx / 页面结构变化那些 Protocol 重试没有意义。
-         */
-        class SessionInvalid(message: String) : JwHttpException(message)
-
-        /**
-         * 需要人工在网页里登录：命中验证码特征，或 CAS 返回了认不出的页面（§4.27）。
-         *
-         * **不计入失败计数**——成因不在密码上，计数只会把对的密码记成错的，
-         * 而那正是旧实现（无 Location 一律当凭证错）踩过的坑。
-         */
-        class Manual(message: String) : JwHttpException(message)
-    }
-
     companion object {
         private const val TAG = "JwHttpSession"
 
-        private const val CAS = "https://eapp2.juwp.edu.cn:9443"
-        private const val PORTAL = "http://portal.juwp.edu.cn"
-        private const val JW_SSO_SERVICE = "http://jiaowu.juwp.edu.cn/sso.jsp"
-        private const val JW_WARMUP = "https://jiaowu.juwp.edu.cn:81/"
+        private const val CAS = JwUrls.CAS_BASE
+        private const val PORTAL = JwUrls.PORTAL
+        private const val JW_SSO_SERVICE = JwUrls.JW_SSO_SERVICE
+        private const val JW_WARMUP = JwUrls.JW_WARMUP
         private const val STUDENT_HOME = JwUrls.STUDENT_HOME
-
-        /** 正常主页 ~150KB；退回登录提示页时只有 860 字节。 */
-        private const val HOME_MIN_BYTES = 20_000
-        private const val NOT_LOGGED = "用户没有登录"
-
-        /**
-         * 未登录时教务**就地渲染登录页**（HTTP 200，约 79KB，title「登录」，
-         * 表单是 `<form name="loginForm" action="/jsxsd/xk/LoginToXk">`）。
-         *
-         * 它比「用户没有登录」那张 860 字节的提示页更容易骗过判据：字节数阈值过得去，
-         * 提示文案也没有。2026-09-27 真机实测：WebView 里只剩一份**已过期**的 CAS cookie 时，
-         * `verifySession` 把这张 79KB 登录页判成「会话有效」，于是状态卡显示已登录、
-         * 学籍卡抓回来一张登录页（解析必失败），而「今天试过」的闸门又把重试挡到第二天。
-         *
-         * 顺带记一笔：`用户没有登录` 这个文案按 DESIGN §4.17 的实测在真实页面上出现 **0 次**，
-         * 它只是历史兜底；真正认得出登录页的是密码框特征。
-         *
-         * **⚠️ `LoginToXk` 不能当登录页特征（2026-09-28 真机实证）**：它是强智选课入口的
-         * 通用路径——**已登录主页（151KB）的「退出登录」隐藏表单 action 也是
-         * `/jsxsd/xk/LoginToXk?method=exit`**（实测出现 2 次）。把它当特征会把每一个
-         * 正常登录的主页判成登录页：探针永远失败 → 完整登录 → 第 6 步再校验又失败 →
-         * 「教务登录没走通」必现，整条自动续登链路瘫痪。唯一可靠的区分特征是
-         * `userPassword`（登录页密码框的 id/name，实测 11 处；已登录主页为 **0**）。
-         */
-        private val LOGIN_PAGE_MARKERS = listOf("userPassword")
 
         /**
          * 页面是不是登录页：既含 860 字节的提示页，也含就地渲染的登录页。
          *
-         * `internal` 而非 private：这条判据要有 JVM 单测钉住（`JwHttpSessionTest`），
-         * 它错了的代价是「把一张登录页当会话有效」，比漏判更难发现。
+         * 判据本体在 [JwPageRules]（iOS 的 `IosCasTransport` 用同一份）；这里保留 `internal`
+         * 包装是因为 `JwHttpSessionTest` 直接钉这两条判据——它们错了的代价是「把一张登录页
+         * 当会话有效」，比漏判更难发现。
          */
-        internal fun looksLikeLoginPage(html: String): Boolean =
-            NOT_LOGGED in html || LOGIN_PAGE_MARKERS.any { it in html }
+        internal fun looksLikeLoginPage(html: String): Boolean = JwPageRules.looksLikeLoginPage(html)
 
         /**
          * 强智的「账号在别处登录」应答（2026-10-06 用户实测）。
@@ -119,15 +67,10 @@ class JwHttpSession private constructor(
          * （URL 不变、也不是登录页形态）。不认它的话 [fetchHtml] 会把这段 JSON 当页面数据
          * 交给解析器，最后表现成「导入成功，但某些数据静默缺失」——教材抓取就是这么丢的。
          *
-         * 判据要**同时**命中业务文案与 `flag1` 键：单看 `flag1` 会把正常的 layui 应答
-         * 误判成会话失效（误判的代价是清 cookie + 白登一次 + 这次数据拿不回来），
-         * 单看文案则可能被任意页面正文撞上。两者齐备在教务应答里是唯一的。
+         * 判据本体在 [JwPageRules.looksLikeSessionConflict]（两端共用）。
          */
         internal fun looksLikeSessionConflict(body: String): Boolean =
-            SESSION_CONFLICT_MESSAGE in body && SESSION_CONFLICT_KEY in body
-
-        private const val SESSION_CONFLICT_MESSAGE = "您的账号在其它地方登录"
-        private const val SESSION_CONFLICT_KEY = "flag1"
+            JwPageRules.looksLikeSessionConflict(body)
 
         private const val MAX_REDIRECTS = 15
 
@@ -173,11 +116,16 @@ class JwHttpSession private constructor(
         }
     }
 
-    /** 当前会话里的 cookie 快照，用于注入 WebView（DESIGN §4.27）。 */
-    override fun cookies(): List<Cookie> = jar.snapshot()
+    /**
+     * 当前会话里的 cookie 快照，中性形态（`CasTransport` 在共享层，见 [SessionCookie]）。
+     *
+     * 两个方向都在这里转一次：OkHttp 的 `Cookie` ↔ [SessionCookie]。`MemoryCookieJar`
+     * 本体一行没改——它对 host 分桶、按 path 回放的行为就是会话要保持的行为。
+     */
+    override fun cookies(): List<SessionCookie> = jar.snapshot().map { it.toSessionCookie() }
 
     /** 回灌：用户在 WebView 里手登之后，把 `CookieManager` 的 cookie 抄回会话。 */
-    override fun adoptCookies(cookies: List<Cookie>) = jar.adopt(cookies)
+    override fun adoptCookies(cookies: List<SessionCookie>) = jar.adopt(cookies.map { it.toOkHttpCookie() })
 
     /** 会话里有没有任何 cookie。判断「有没有可复用的登录态」用。 */
     override fun hasCookies(): Boolean = !jar.isEmpty()
@@ -231,15 +179,15 @@ class JwHttpSession private constructor(
             // [6] 教务侧跟随 302 链落到 xsMainV，再校验会话真的有效
             getFollowRedirects(ssoLocation)
             val home = getFollowRedirects(STUDENT_HOME)
-            val homeOk = home.length >= HOME_MIN_BYTES && !looksLikeLoginPage(home)
-            if (!homeOk) {
+            if (!JwPageRules.isUsableHome(home)) {
                 // 每一环都可能独立坏掉（ticket 校验、预热 cookie、主页渲染），
                 // 不落日志的话「教务会话无效」永远查不出是哪一环（2026-09-28 用户复现）。
                 // 只记字节数与是否登录页形态，**不记任何 cookie 或页面内容**。
                 Log.w(
                     TAG,
                     "login step6 home check failed: bytes=${home.length} " +
-                        "looksLogin=${looksLikeLoginPage(home)} notLogged=${NOT_LOGGED in home}",
+                        "looksLogin=${looksLikeLoginPage(home)} " +
+                        "notLogged=${JwPageRules.NOT_LOGGED in home}",
                 )
                 throw JwHttpException.Protocol("教务登录没走通（CAS 已通过，教务侧会话未建立）。请在导入页手动登录一次，或稍后重试。")
             }
@@ -265,7 +213,7 @@ class JwHttpSession private constructor(
     override suspend fun verifySession(): Boolean = withContext(Dispatchers.IO) {
         try {
             val home = getFollowRedirects(STUDENT_HOME)
-            home.length >= HOME_MIN_BYTES && !looksLikeLoginPage(home)
+            JwPageRules.isUsableHome(home)
         } catch (e: IOException) {
             throw JwHttpException.Network(e)
         }
@@ -383,3 +331,34 @@ class JwHttpSession private constructor(
         runCatching { client.connectionPool.evictAll() }
     }
 }
+
+/**
+ * OkHttp cookie → 中性形态（`CasTransport` 在 `shared/commonMain`，用不了 OkHttp 的类型）。
+ *
+ * 只搬五个字段：`MemoryCookieJar` 分桶靠 [SessionCookie.host]（OkHttp 的 `domain` 不带前导点，
+ * 与 `adopt` 的分桶键同一口径），回放靠 path / secure。
+ */
+private fun Cookie.toSessionCookie(): SessionCookie = SessionCookie(
+    name = name,
+    value = value,
+    host = domain.removePrefix("."),
+    path = path,
+    secure = secure,
+)
+
+/**
+ * 中性形态 → OkHttp cookie（回灌方向）。
+ *
+ * 用 `hostOnlyDomain`：WebView 抄回来的是「某个 URL 下的 cookie」，本来就没有 Domain 属性，
+ * 与 `WebViewCookieBridge.adopt` 搬迁前的构造逐字一致（那时也是 hostOnly + path `/`）。
+ */
+private fun SessionCookie.toOkHttpCookie(): Cookie {
+    val builder = Cookie.Builder()
+        .name(name)
+        .value(value)
+        .hostOnlyDomain(host)
+        .path(path)
+    if (secure) builder.secure()
+    return builder.build()
+}
+

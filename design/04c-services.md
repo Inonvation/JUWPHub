@@ -906,6 +906,15 @@ SessionStatus             StateFlow<Map<LoginTarget, LoginState>>，供 §3.16 �
  └─ 各仓库请求后上报：Ok / SessionExpired / CredentialWrong / Captcha / Network
 ```
 
+**2026-11-25：`CasSession` / `CasTransport` / `WebCookieBridge` 已搬进
+`shared/commonMain`**，两端共用同一份会话策略（可信期 / 闸门 / 重登），只换传输层与 cookie
+库：Android 是 `JwHttpSession`（OkHttp）+ `WebViewCookieBridge`，iOS 是 `IosCasTransport`
+（Ktor）+ `IosWebCookieBridge`（`WKWebsiteDataStore`）。凭证契约是 `CredentialStore`
+（Android `CredentialVault` / iOS `IosCredentialVault`，Keychain service `secure_jw`）。
+搬家的动机就是本文件下面那句结论的边界：**「WebView 的会话只能由 WebView 自己登出来」
+说的是不能注入 cookie，不是「除了 WebView 没有别的登录方式」**——iOS 现在也能用存下的
+学号密码自己登一次，导入页关掉之后照样取得到数。
+
 `CredentialVault` 是加密存储的唯一读写口，**读一次缓存、写时同步**——
 `EncryptedSharedPreferences` 读取不便宜，现在各页 `remember { }` 各读一次、各持一份。
 现有 8 个读取点**签名不动**，`YktCredentialStore` 内部改为委托它（见「改动面」）。

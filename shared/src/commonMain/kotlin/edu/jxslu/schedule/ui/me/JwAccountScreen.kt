@@ -41,6 +41,7 @@ import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AccountCard
 import edu.jxslu.schedule.ui.common.AppConfirmDialog
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
+import edu.jxslu.schedule.ui.common.CasLoginDialog
 import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.rememberResumeTick
@@ -55,7 +56,7 @@ import kotlinx.coroutines.launch
  * 「一卡通」点进去是原生的账户页。同样是一行账户，行为不一致；而且用户想看的是
  * 「我是谁、这个账号现在什么状态」，不是立刻跳进一个网页。
  *
- * 这里只展示与账号相关的只读信息 + 几个明确动作（更新密码 / 导入 / 退出），
+ * 这里只展示与账号相关的只读信息 + 几个明确动作（保存账号密码 / 更新密码 / 导入 / 退出），
  * 具体取数交给各自的页面。
  *
  * ## iOS 移植 W1（2026-11-25）搬进 `commonMain`
@@ -65,10 +66,13 @@ import kotlinx.coroutines.launch
  * | 原来 | 现在 |
  * |---|---|
  * | `Graph.credentialVault(context).readCas()` | `Services.current.accountCredentials()?.readJwUsername()`（null = 本平台没有加密凭证存储） |
- * | `Graph.casSession(context).logout()` | `Services.current.jwSessionLogout()`（null = 没有原生教务会话，iOS） |
+ * | `Graph.casSession(context).logout()` | `Services.current.jwSessionLogout()`（null = 没有原生教务会话） |
  * | `WebViewCookieBridge.hasAnyCookie()` | `Services.current.hasJwWebSession()`（null = 判断不了，按「没有」算） |
  * | `Graph.dormRepairStore(context).clear()` | `Services.current.dormRepairStore()` |
  * | `OnboardingActivity` / `JwImportActivity` / `TranscriptActivity` | 可空回调，null = 入口整行不渲染（§11.2 ④） |
+ *
+ * 2026-11-25 补「保存账号密码」：两端现在都能存教务凭证（Android 加密 prefs / iOS Keychain），
+ * 所以这一格用共享层的 [CasLoginDialog]（先验后存、错误分类、冷却都是既有的那一份）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,7 +101,8 @@ fun JwAccountScreen(
     // 登录态快照只在组合期读一次：从引导页（更新账号密码）回来时组合不重建，
     // 用「回到前台」计数当 key 重读，否则卡片会停在旧状态（2026-09-27）
     val resumeTick = rememberResumeTick()
-    val casUsername = remember(resumeTick) { credentials?.readJwUsername() }
+    // 保存成功后要就地刷新这一格（不重建组合），所以是可变状态而不是 val
+    var casUsername by remember(resumeTick) { mutableStateOf(credentials?.readJwUsername()) }
     val profileName by prefs.profileName.collectAsStateWithLifecycle(initialValue = "")
     val profileClass by prefs.profileClass.collectAsStateWithLifecycle(initialValue = "")
     val profileStudentId by prefs.profileStudentId.collectAsStateWithLifecycle(initialValue = "")
@@ -114,6 +119,7 @@ fun JwAccountScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     var confirmLogout by remember { mutableStateOf(false) }
+    var showSaveCas by remember { mutableStateOf(false) }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -156,6 +162,22 @@ fun JwAccountScreen(
                 },
                 statusState = jwState,
             )
+
+            // 「自动续登」只有真能存凭据的平台才出现（`accountCredentials()` 为 null 时整节不渲染）
+            if (credentials != null) {
+                SettingsSection(title = "自动续登") {
+                    SettingItem(
+                        title = "保存账号密码",
+                        subtitle = if (casUsername == null) {
+                            "填一次学号与统一认证密码，会话过期时自动重新登录"
+                        } else {
+                            "已保存；学校改过密码后在这里重填"
+                        },
+                        icon = AppIcons.LockPassword,
+                        onClick = { showSaveCas = true },
+                    )
+                }
+            }
 
             SettingsSection(title = "学业信息") {
                 InfoRow("当前学期", state.semester?.startDate?.let { "$it 起" } ?: "未配置")
@@ -216,12 +238,32 @@ fun JwAccountScreen(
             }
             if (casUsername == null) {
                 Text(
-                    "当前没有保存密码：导入课表时需要手动登录，也不会自动续登。",
+                    "当前没有保存密码：导入课表时需要手动登录，也不会自动续登。" +
+                        "在上面填一次学号密码即可自动续登。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
             }
         }
+    }
+
+    // 保存凭据走共享层那个前置登录弹层：**先经 `verifyJw` 验证、通过才落库**
+    // （错密码存进来会让自动续登反复撞 CAS 失败计数直到账号停用）。
+    // 弹层的错误分类、3~5 秒冷却、取消异常穿透都是既有的，别在这里另写一套表单。
+    if (showSaveCas && credentials != null) {
+        CasLoginDialog(
+            title = "保存教务账号密码",
+            description = "填一次学号与统一认证密码，密码只存本机加密存储；" +
+                "之后会话过期时 App 会自己重新登录，不必再进导入页手登。",
+            onVerify = { username, password -> credentials.verifyJw(username, password) },
+            onSave = { username, password -> credentials.saveJw(username, password) },
+            onSaved = {
+                showSaveCas = false
+                casUsername = credentials.readJwUsername() ?: casUsername
+                scope.launch { snackbar.showSnackbar("已保存：会话过期时会自动重新登录") }
+            },
+            onSkip = { showSaveCas = false },
+        )
     }
 
     if (confirmLogout && jwLogout != null) {

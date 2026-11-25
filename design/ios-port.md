@@ -1173,8 +1173,8 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 |---|---|---|
 | 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份）；底栏三格「今日 / 课表 / 教务」（M3 `NavigationBar` + 图标 + 文字，选中主色 / 未选中 `onSurface` 0.6）。**2026-11-25 晚（S1）抽屉排版整块对齐 Android**：身份卡 → 账号与登录 → 我的·设置 → 分隔线 → 钱包卡 → 生活服务区 → 二级页紧凑分组 → 付款码，段头 / 行 / 钱包卡 / 付款码**全部是 `shared/commonMain/ui/life/SideDrawerParts.kt` 的同一份 Composable**（钱包卡文案走 `walletCardTexts`，服务行走 `lifeServiceRows`，缺服务的平台传 null 即整行不渲染）。白名单 41 条仍在且全部可达，其中 8 条由卡片 / 行直接承担。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的**手势视差**（iOS 用 `ModalNavigationDrawer`，是另一套实现）；服务行右侧的实时状态（开水余额 / U净 空闲数）未接——聚合逻辑还在 `:app` 的 `SideDrawerContent`；钱包卡的「充值」按钮不渲染（充值宿主 `RechargeHost` / `PowerBankPayScreen` 仍在 `:app`）；余额取数是「首次组合拉一次」而不是「抽屉展开时」（`IosDrawer` 签名固定三参数，拿不到 `DrawerState`） |
 | 教务登录后的自动填表 | iOS 用 `WKWebView` 让用户手点登录，登录成功落地后自动 `archive` | Android 有自动填表；iOS 需要注入 JS，能做 |
-| 凭证存储 | `IosKeychain`（CoreFoundation）+ 七个存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI / **一卡通**）已写，**iOS 编译验证卡在 runner 容量** | 教务（CAS）那套仍返回 `null`：iOS 从不保存教务密码，登录只在 `WKWebView` 里；一卡通已接（`IosYktCredentialStore`，service `secure_ykt`，含落盘 token 与失效标记），账号中心 / 消费流水 / 电费读得到学号。**2026-11-25 晚起录入界面也搬完了**（校园卡设置页 + 付款码页进 `commonMain`，见 §12.8），四处入口不再停在「凭证未配置」 |
-| 第三方仓库 | **胖乖 / U净 / 问渠 / 快趣会话已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账）。快趣：**数据层两端已是同一份**（`KqcxSessionCore` + `IosKqcxCredentialStore`，S23 起 `IosServices.kqcxSession()` 给真实现），账号中心的快趣行能读登录态 / 退出；**差的是页面**——`ui/ebike` 被高德 Android SDK 挡住（§12.1），所以快趣账号页 / 订单页 / 骑行页在 iOS 上仍不路由 |
+| 凭证存储 | `IosKeychain`（CoreFoundation）+ 八个存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI / **一卡通** / **教务**）已写，**iOS 编译验证卡在 runner 容量** | 教务（CAS）2026-11-25 晚起也是真的（`IosCredentialVault`，service `secure_jw`，见 §12.10）——此前恒为 `null`，因为 iOS 从不保存教务密码、登录只在 `WKWebView` 里；一卡通已接（`IosYktCredentialStore`，service `secure_ykt`，含落盘 token 与失效标记），账号中心 / 消费流水 / 电费读得到学号。**2026-11-25 晚起录入界面也搬完了**（校园卡设置页 + 付款码页进 `commonMain`，见 §12.8），四处入口不再停在「凭证未配置」 |
+| 第三方仓库 | **胖乖 / U净 / 问渠 / 快趣会话已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账）。快趣：**数据层两端已是同一份**（`KqcxSessionCore` + `IosKqcxCredentialStore`，S23 起 `IosServices.kqcxSession()` 给真实现），账号中心的快趣行能读登录态 / 退出；**差的是页面**——`ui/ebike` 被高德 Android SDK 挡住（§12.1），所以快趣账号页 / 订单页 / 骑行页在 iOS 上仍不路由（地图层已用 MapKit 打通，见 §12.11） |
 | 支付调起 | 一卡通走「收银台 URL 进 `WKWebView`」；胖乖 / 趣智走 `alipays://` 深链 | `Info.plist` 还没有 `LSApplicationQueriesSchemes`（`alipays` / `weixin`），深链会被系统拦 |
 | App 图标 | **已补**（2026-11-25）：`iosApp/JUWPHub/Assets.xcassets/AppIcon.appiconset`，1024 单尺寸 universal。用 `tools/app-icon/source.png` 的**前景层**重新合成满幅图——原图把圆角与投影烤进了像素，直接用会与 iOS 遮罩叠成双层圆角 | 启动屏仍不给（`UILaunchScreen` 空 dict = 纯色） |
 
@@ -1389,3 +1389,39 @@ App）在这个 App 的实际使用里成立（查课表、看今日页都会进
 余量不足时按「上课 > 作业 > 洗衣 > 成绩」的顺序砍最远的那些。
 
 
+
+### 12.10 教务凭证直登：导入页关掉之后还能取数（2026-11-25 晚，C1）
+
+**用户报的现象**：首启登录教务、课表导入都成功，点返回课表又说要导入 / 登录。
+
+**根因**（代码上可复现）：iOS 的教务会话此前只有一条路——活着的 `WKWebView` 同源取页，
+或者读 `WKWebsiteDataStore` 的 Cookie。两个都是「导入页关掉就没」的形态，而 App 手里
+**没有任何能重建会话的东西**：学号密码从不保存。Android 不是这样（`CasSession` +
+`CredentialVault` + OkHttp 随时自己重登）。
+
+**处置**：把 Android 那条链整段搬进 `shared/commonMain`，两端共用同一份会话策略，只换传输层。
+
+| 件 | 位置 | Android | iOS |
+|---|---|---|---|
+| `CasTransport`（cookie 换成中性 `SessionCookie`） | `shared/commonMain` | `JwHttpSession`（OkHttp） | `IosCasTransport`（Ktor + `InMemoryCookieStorage`） |
+| `CasSession`（可信期 / 闸门 / 重登 / 回灌） | `shared/commonMain` | 同一份 | 同一份 |
+| `CredentialStore`（含 `saveCas`） | `shared/commonMain` | `CredentialVault`（加密 prefs） | `IosCredentialVault`（Keychain，service `secure_jw`） |
+| `WebCookieBridge` | `shared/commonMain` | `WebViewCookieBridge`（`CookieManager`） | `IosWebCookieBridge`（`WKWebsiteDataStore`） |
+| `JwPageRules`（登录页 / 被顶 JSON / 主页判据） | `shared/commonMain` | 同一份 | 同一份 |
+
+`IosJwReadSession.ensureValid` 的四档（顺序不能反）：① WebView 活着 → `Ready`
+（用户可能刚在网页里登了另一个账号）；② jar 里已有可用会话 → `Ready`；③ Keychain 存过
+学号密码 → 自动登一次；④ 都没有 → `NeedsManualLogin`，文案带 cookie 库现状。
+
+**录入入口**：`JwAccountScreen` 新增「自动续登 → 保存账号密码」，弹层复用 `CasLoginDialog`
+（先验后存）。iOS 的 `jwSessionLogout` 由 null 变成真实现：清 Ktor jar +
+`WKWebsiteDataStore` 的 cookie/localStorage + Keychain 凭证。
+
+**这条链闭合到哪、哪一步只能真机验**：
+
+| 环节 | 闭合状态 |
+|---|---|
+| 保存学号密码（先 `tryLogin` 验证再落库） | 代码闭合，`CasSessionTest` 33 例钉住闸门与失败分类；真机要验一次输错的反馈 |
+| 导入页登录 → 关页 → 当天取数 | ①（WebView 在）或 ②（jar 里已有会话）能覆盖 |
+| 隔天冷启动 → 成绩 / 教材 / 学业 | ② jar 为空 → ③ 用 Keychain 凭证自动登录；**这一步只能在真机验**（Keychain 读写 + CAS 链路 + 真账号） |
+| iOS 的 Ktor 登录链本身 | **未验**：Windows 上编不了 iOS，CI 只验编译；真机若出现「重复 Cookie 头」，修法见 `IosCasTransport` 的「未验」段 |

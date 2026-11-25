@@ -90,6 +90,7 @@ import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.TeachingCalendarSync
 import edu.jxslu.schedule.data.repo.TextbookSync
 import edu.jxslu.schedule.data.jw.TranscriptClient
+import edu.jxslu.schedule.data.jw.JwHttpSession
 import edu.jxslu.schedule.data.jw.JwVpnDetector
 import edu.jxslu.schedule.data.repo.TranscriptStore
 import edu.jxslu.schedule.data.AndroidSessionExpirySink
@@ -100,6 +101,7 @@ import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.data.session.SessionExpiryStore
 import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.data.session.SessionStatus
+import edu.jxslu.schedule.data.session.WebViewCookieBridge
 import edu.jxslu.schedule.data.ykt.YktClient
 import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktRepository
@@ -944,6 +946,10 @@ object Graph {
         casSession ?: synchronized(this) {
             casSession ?: CasSession(
                 vault = credentialVault(context),
+                // 传输与 cookie 库没有默认值：`CasSession` 在共享层，默认值只可能是某一端的
+                // 实现。Android 这端就是 OkHttp 的 JwHttpSession + CookieManager 桥。
+                http = JwHttpSession.create(),
+                webCookies = WebViewCookieBridge,
                 // 代理/VPN 开着时登录必然失败（学校对代理出口超时或 500，DESIGN §4.27），
                 // 先拦下并点名提示，省一次必然失败的往返、也免得把锅记到凭证上
                 isProxyActive = { JwVpnDetector.isVpnActive(context.applicationContext) },
