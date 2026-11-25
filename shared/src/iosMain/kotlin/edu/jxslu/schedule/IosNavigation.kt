@@ -9,15 +9,19 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -799,60 +804,65 @@ private fun IosNotPortedScreen(screen: SubpageScreen, onBack: () -> Unit) {
 }
 
 /**
- * 左侧抽屉（iOS 版）：分组列表，点条目 push 一个二级页。
+ * 左侧抽屉（iOS 版）：与 Android 的 `SideDrawer` **同一份内容、同一种交互**。
  *
- * 与 Android 的 `SideDrawer` 是**同一份内容、不同外壳**：Android 用 `StackedDrawerState`
- * 做手势与视差，iOS 这一版先给「遮罩 + 面板 + 点外部关闭」，手势等页面搬齐再补。
+ * 2026-11-25 晚改版：从「自己画遮罩 + 面板 + 点外部关闭」换成 Material3 的
+ * [ModalDrawerSheet]，由 `ModalNavigationDrawer` 提供左缘右滑手势、遮罩渐隐、面板位移
+ * 与无障碍语义。自己写那套手势，本机（Windows）一行都验不了，而它恰恰是最容易出错的地方。
+ *
+ * 分组顺序照 Android：教务 / 学习 / 钱包 / 生活 / 设置 / 账号 / 江水生活。
+ * 点条目由宿主关抽屉并 push 二级页。
  */
 @Composable
-internal fun IosDrawer(
-    onPick: (IosRoute) -> Unit,
-    onDismiss: () -> Unit,
-) {
+internal fun IosDrawer(onPick: (IosRoute) -> Unit) {
     val entries = remember { iosDrawerEntries() }
     val sections = remember(entries) { entries.groupBy { it.section } }
 
-    Box(Modifier.fillMaxSize()) {
+    ModalDrawerSheet {
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 12.dp)) {
+            Text(
+                text = "JUWPHub",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "江西水利电力大学 · 非官方",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        // 分隔线用 1dp 的 Box 而不是 HorizontalDivider：后者在不同 material3 小版本里名字与
+        // 可用性都变过（`Divider` → `HorizontalDivider`），不值得为一条线赌一次 CI。
         Box(
             Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-                .clickable(onClick = onDismiss),
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
         )
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(end = 64.dp)
-                .background(MaterialTheme.colorScheme.surface),
+        LazyColumn(
+            modifier = Modifier.fillMaxHeight(),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
         ) {
-            Text(
-                text = "全部功能",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 8.dp),
-            )
-            LazyColumn(
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-            ) {
-                sections.forEach { (section, rows) ->
-                    item(key = "h-$section") {
-                        Text(
-                            text = section,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 4.dp),
-                        )
-                    }
-                    items(rows, key = { it.route.screen.name }) { entry ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onPick(entry.route) }
-                                .padding(horizontal = 12.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(entry.label, style = MaterialTheme.typography.bodyLarge)
-                        }
+            sections.forEach { (section, rows) ->
+                item(key = "h-$section") {
+                    Text(
+                        text = section,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 4.dp),
+                    )
+                }
+                items(rows, key = { it.route.screen.name }) { entry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onPick(entry.route) }
+                            .padding(horizontal = 12.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(entry.label, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
             }

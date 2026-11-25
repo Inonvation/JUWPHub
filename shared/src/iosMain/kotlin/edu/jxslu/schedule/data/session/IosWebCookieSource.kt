@@ -48,19 +48,26 @@ object IosWebCookieSource : WebCookieSource {
      * 读 [url] 这个域下的 Cookie 并拼成 `"k=v; k2=v2"`。
      *
      * 没有任何 Cookie 时回 null（不是空串）：调用方靠 null 区分「没登录」。
+     *
+     * **必须切主队列**：`WKWebsiteDataStore` / `WKHTTPCookieStore` 是 WebKit 对象，只能在主线程
+     * 上碰。调用方不一定在主线程——2026-11-25 晚冷启动探活就是从 `Dispatchers.Default` 进来的，
+     * 结果 App 一启动就闪退。这条 dispatch 是唯一正确的修法（ObjC 的断言 Kotlin 的 try/catch
+     * 兜不住）。
      */
     fun readCookieHeader(url: String, onResult: (String?) -> Unit) {
         val host: String? = NSURL.URLWithString(url)?.host
-        WKWebsiteDataStore.defaultDataStore().httpCookieStore.getAllCookies { cookies ->
-            // `getAllCookies` 的入参在 Kotlin/Native 里是**可空**的 `List<*>?`
-            // （ObjC 的 NSArray 没做非空标注），先 orEmpty 再过滤。
-            val header = cookies.orEmpty()
-                .filterIsInstance<NSHTTPCookie>()
-                .filter { cookie -> host == null || domainMatches(host, cookie.domain) }
-                .mapNotNull { cookie -> cookie.value?.let { value -> "${cookie.name}=$value" } }
-                .joinToString("; ")
-            val result: String? = if (header.isEmpty()) null else header
-            dispatch_async(dispatch_get_main_queue()) { onResult(result) }
+        dispatch_async(dispatch_get_main_queue()) {
+            WKWebsiteDataStore.defaultDataStore().httpCookieStore.getAllCookies { cookies ->
+                // `getAllCookies` 的入参在 Kotlin/Native 里是**可空**的 `List<*>?`
+                // （ObjC 的 NSArray 没做非空标注），先 orEmpty 再过滤。
+                val header = cookies.orEmpty()
+                    .filterIsInstance<NSHTTPCookie>()
+                    .filter { cookie -> host == null || domainMatches(host, cookie.domain) }
+                    .mapNotNull { cookie -> cookie.value?.let { value -> "${cookie.name}=$value" } }
+                    .joinToString("; ")
+                val result: String? = if (header.isEmpty()) null else header
+                dispatch_async(dispatch_get_main_queue()) { onResult(result) }
+            }
         }
     }
 
@@ -76,9 +83,12 @@ object IosWebCookieSource : WebCookieSource {
     suspend fun describeStore(timeoutMs: Long = 3_000L): String {
         val all = withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine<List<NSHTTPCookie>> { cont ->
-                WKWebsiteDataStore.defaultDataStore().httpCookieStore.getAllCookies { cookies ->
-                    if (cont.isActive) {
-                        cont.resume(cookies.orEmpty().filterIsInstance<NSHTTPCookie>())
+                // 同上：WebKit 对象只能在主线程碰
+                dispatch_async(dispatch_get_main_queue()) {
+                    WKWebsiteDataStore.defaultDataStore().httpCookieStore.getAllCookies { cookies ->
+                        if (cont.isActive) {
+                            cont.resume(cookies.orEmpty().filterIsInstance<NSHTTPCookie>())
+                        }
                     }
                 }
             }

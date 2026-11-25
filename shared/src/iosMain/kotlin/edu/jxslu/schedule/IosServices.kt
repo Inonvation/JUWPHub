@@ -73,9 +73,11 @@ import edu.jxslu.schedule.platform.AccountCredentials
 import edu.jxslu.schedule.platform.AiApiKeyStore
 import edu.jxslu.schedule.platform.AppServices
 import edu.jxslu.schedule.platform.JwSessionLogout
+import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
 import edu.jxslu.schedule.platform.ThirdPartySession
 import edu.jxslu.schedule.platform.UjingReminder
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -111,10 +113,22 @@ import edu.jxslu.schedule.ui.ai.AiApiKeys
  * `Graph.appScope`（挂着崩溃上报的 handler）；iOS 侧还没有那套上报，所以这里自建一个
  * `SupervisorJob` 作用域——一个子协程失败不影响其它订阅。**别改回 `Dispatchers.Main`**：
  * 仓库里的热流有文件/DB 读取，挂在主线程上会卡 UI。
+ *
+ * **2026-11-25 晚补 [CoroutineExceptionHandler]**：Kotlin/Native 上作用域里没人接的异常
+ * **会直接终止进程**。冷启动那次「安装后一开就闪退」就是这条路径（`warmUp` 里新加的 Cookie
+ * 探活碰到 WebKit 主线程约束）。Android 有崩溃上报兜着，iOS 这边只能自己接：记一条日志，
+ * 不让一个后台订阅把整个 App 带走。
  */
 class IosServices : AppServices {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(
+        SupervisorJob() +
+            Dispatchers.Default +
+            CoroutineExceptionHandler { _, error ->
+                // 用 toString() 而不是 `::class.simpleName`：后者在 Native 上的反射支持不值得赌
+                Logger.w(TAG, "后台任务失败：$error")
+            },
+    )
 
     private val prefs: DisplayPrefsStore by lazy { DisplayPrefsStore() }
 
@@ -673,4 +687,9 @@ class IosServices : AppServices {
     override fun campusCalendarStore(): CampusCalendarStore = campusCalendarStoreImpl
 
     override fun internshipBasesLoader(): InternshipBasesLoader = internshipBasesLoaderImpl
+
+    private companion object {
+        /** 日志 tag：崩溃/后台失败都记在这个名字下，排查时先 grep 它。 */
+        const val TAG = "IosServices"
+    }
 }

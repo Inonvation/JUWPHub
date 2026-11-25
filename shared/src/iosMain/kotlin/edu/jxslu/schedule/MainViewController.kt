@@ -13,10 +13,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -44,7 +47,6 @@ import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.common.AppBackHandler
-import edu.jxslu.schedule.ui.jw.JwHubScreen
 import edu.jxslu.schedule.ui.jwvw.JwWebFit
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
@@ -70,7 +72,12 @@ private fun IosRoot(services: IosServices) {
         var tab by remember { mutableStateOf(IosTab.Today) }
         // 二级页栈：Android 是 SubpageActivity 的任务栈，iOS 用一份列表顶上（见 IosNavigation.kt）
         val stack = remember { mutableStateListOf<IosRoute>() }
-        var drawerOpen by remember { mutableStateOf(false) }
+        // 左侧抽屉（2026-11-25 晚改版）：交给 Material3 的 `ModalNavigationDrawer`，
+        // 手势（左缘右滑）、遮罩、动画、无障碍都是现成的——与 Android 的
+        // `StackedDrawerState` 是两种实现、同一种手感。自己写一套手势只会多一处没法真机验的代码。
+        val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+        val shellScope = rememberCoroutineScope()
+        val openDrawer: () -> Unit = { shellScope.launch { drawerState.open() } }
         // 「我的」与课表显示设置共用同一个 VM（Android 侧是 Activity 作用域，两边等价）。
         // iOS 没有配置变更重建，`remember` 的生命周期就是这一屏；见 design/ios-port.md §11.2 ①。
         val meViewModel = remember { MeViewModel(services.scheduleRepository()) }
@@ -88,11 +95,25 @@ private fun IosRoot(services: IosServices) {
         if (jwOpen) {
             JwLoginScreen(services = services, onClose = { jwOpen = false })
         } else {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.background),
+            ModalNavigationDrawer(
+                drawerState = drawerState,
+                // 手势开着：课表 / 我的 两页没有汉堡位（共享页顶栏的槽位不由 iOS 决定），
+                // 左缘右滑是那两页唯一的抽屉入口，与 iOS 原生习惯一致。
+                gesturesEnabled = true,
+                drawerContent = {
+                    IosDrawer(
+                        onPick = { route ->
+                            shellScope.launch { drawerState.close() }
+                            pushRoute(route)
+                        },
+                    )
+                },
             ) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background),
+                ) {
                 Box(
                     Modifier
                         .weight(1f)
@@ -142,7 +163,7 @@ private fun IosRoot(services: IosServices) {
                                 TodayScreen(
                                     viewModel = viewModel,
                                     // 顶栏汉堡 → 左侧抽屉（Android 同一入口）
-                                    onOpenDrawer = { drawerOpen = true },
+                                    onOpenDrawer = openDrawer,
                                     // 顶栏课表句 / 「当前课表不在本学期」的 CTA → 课表 Tab
                                     onOpenWeek = { tab = IosTab.Week },
                                     // 空态「从教务导入」→ 教务登录页（WKWebView 登录后自动抓取落库）
@@ -223,34 +244,6 @@ private fun IosRoot(services: IosServices) {
                                 )
                             }
 
-                            // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
-                            // 十二个入口全部接真页面（2026-11-25 晚补齐学业 / 培养方案 / 实习基地 /
-                            // 请假 / 报修 / 校历六条——它们早就有页面，只是这里没传，Tab 上就整块消失）；
-                            // 评教与「在教务网页核对」要 WebView 浏览窗口，传 null 即整条不渲染。
-                            IosTab.Jw -> JwHubScreen(
-                                onOpenTheorySchedule = {
-                                    stack.add(IosRoute(SubpageScreen.THEORY_SCHEDULE))
-                                },
-                                onOpenLabSchedule = {
-                                    stack.add(IosRoute(SubpageScreen.LAB_SCHEDULE))
-                                },
-                                onOpenScores = { stack.add(IosRoute(SubpageScreen.SCORES)) },
-                                onOpenExams = { stack.add(IosRoute(SubpageScreen.EXAMS)) },
-                                onOpenTextbooks = { stack.add(IosRoute(SubpageScreen.TEXTBOOKS)) },
-                                onOpenScholar = { stack.add(IosRoute(SubpageScreen.SCHOLAR)) },
-                                onOpenCurriculum = { stack.add(IosRoute(SubpageScreen.CURRICULUM)) },
-                                onOpenSelection = { stack.add(IosRoute(SubpageScreen.SELECTIONS)) },
-                                onOpenInternship = {
-                                    stack.add(IosRoute(SubpageScreen.INTERNSHIP_BASES))
-                                },
-                                onOpenTeachingCalendar = {
-                                    stack.add(IosRoute(SubpageScreen.TEACHING_CALENDAR))
-                                },
-                                onOpenLeaveHub = { stack.add(IosRoute(SubpageScreen.LEAVE_HUB)) },
-                                onOpenRepair = { stack.add(IosRoute(SubpageScreen.DORM_REPAIR)) },
-                                onOpenCalendar = { stack.add(IosRoute(SubpageScreen.CAMPUS_CALENDAR)) },
-                            )
-
                             // 「我的」= 设置首页（S17 搬进共享层）。每个入口都 push 一个路由，
                             // 没搬的页面落在 IosNotPortedScreen（一句确定的话，不是点了没反应）。
                             IosTab.Me -> SettingsScreen(
@@ -263,7 +256,8 @@ private fun IosRoot(services: IosServices) {
                         }
                     }
                 }
-                // 底栏只在根层出现：二级页有自己的返回键，再压一条底栏会把返回路径搞混
+                // 底栏只在根层出现：二级页有自己的返回键，再压一条底栏会把返回路径搞混。
+                // 三格与 Android 一致（今日 / 课表 / 我的），抽屉靠左缘右滑或今日页的汉堡打开。
                 if (top == null) {
                     Row(
                         Modifier
@@ -274,38 +268,26 @@ private fun IosRoot(services: IosServices) {
                         IosTab.entries.forEach { entry ->
                             TextButton(onClick = { tab = entry }) { Text(entry.label) }
                         }
-                        // Android 的入口在左侧抽屉里；iOS 这一版把抽屉收到「更多」按钮后面
-                        TextButton(onClick = { drawerOpen = true }) { Text("更多") }
                     }
                 }
+                }
             }
-        }
-
-        if (drawerOpen) {
-            IosDrawer(
-                onPick = { route ->
-                    drawerOpen = false
-                    pushRoute(route)
-                },
-                onDismiss = { drawerOpen = false },
-            )
         }
     }
 }
 
 /**
- * iOS 底栏的三个 Tab。
+ * iOS 底栏的三个 Tab（2026-11-25 晚改回三格）。
  *
- * 2026-11-25（V1）：今日页搬进共享层后改回 Android 的原序——**今日 / 课表 / 教务**，
- * 「我的」仍在第三格（Android 是从左侧抽屉进的，iOS 这一版还没有抽屉那一格，
- * 见 `design/ios-port.md` §12.3 第一条）。今日页的**进行中服务卡**已接上（只接开水与
- * U净，2026-11-25 晚）；快趣骑行 / 趣智开水 / 趣智面板 / 扫码在 iOS 上没有实现，
- * 槽位传 `null`，对应内容整块不渲染（§11.2 ④）。
+ * 与 Android 对齐：**今日 / 课表 / 我的**。教务汇总页不再是 Tab——它下面的每一个入口
+ * 都在左侧抽屉的「教务」分组里，少一层跳转反而更快。抽屉靠左缘右滑或今日页的汉堡打开。
+ *
+ * 今日页的**进行中服务卡**已接上（只接开水与 U净）；快趣骑行 / 趣智开水 / 趣智面板 /
+ * 扫码在 iOS 上没有实现，槽位传 `null`，对应内容整块不渲染（§11.2 ④）。
  */
 private enum class IosTab(val label: String) {
     Today("今日"),
     Week("课表"),
-    Jw("教务"),
     Me("我的"),
 }
 
@@ -321,18 +303,18 @@ private enum class IosTab(val label: String) {
  * | 区域 | 内容 | 说明 |
  * |---|---|---|
  * | 主体 | 二级页栈顶（[IosRouteContent]）或三个 Tab 之一 | 栈空时显示 Tab，栈非空时显示栈顶 |
- * | 底栏 | 今日 / 课表 / 教务 / 我的 + 「更多」 | 只在栈空时出现；「更多」打开左侧抽屉 |
- * | 抽屉 | [IosDrawer] | 分组列出**已经搬过来**的二级页（白名单在 `IosNavigation.kt`） |
+ * | 底栏 | 今日 / 课表 / 我的 | 只在栈空时出现，三格与 Android 一致 |
+ * | 抽屉 | [IosDrawer]（`ModalNavigationDrawer`） | 左缘右滑或今日页汉堡打开；分组列出**已经搬过来**的二级页（白名单在 `IosNavigation.kt`） |
  * | 覆盖层 | [JwLoginScreen] | 点「去导入」进来的教务登录 WebView（WKWebView） |
  *
  * 路由键用的是共享层的 [SubpageScreen]（Android 的 `SubpageActivity` 消费同一份），
  * 所以两端不会出现「一边有入口、一边没有」。还没搬的页面落在 `IosNotPortedScreen`，
  * 看到的是确定的一句话而不是点了没反应；完整清单见 `design/ios-port.md` §12。
  *
- * 与 Android 的**已知差异**：iOS 是四格底栏（今日 / 课表 / 教务 / 我的），Android 是三格
- * 底栏加左侧抽屉里的「我的」。今日页 2026-11-25（V1）搬进共享层后已回到首格；**进行中服务卡**
- * 2026-11-25 晚接上（只接开水与 U净），快趣骑行 / 趣智开水 / 趣智面板 / 扫码仍是空的
- * （槽位 `null`），见 `design/ios-port.md` §12.3。
+ * 与 Android 的**已知差异**：教务汇总页在 iOS 上不再是 Tab（它下面的每个入口都在抽屉的
+ * 「教务」分组里）；其余三格与 Android 同序。**进行中服务卡** 2026-11-25 晚接上
+ * （只接开水与 U净），快趣骑行 / 趣智开水 / 趣智面板 / 扫码仍是空的（槽位 `null`），
+ * 见 `design/ios-port.md` §12.3。
  *
  * 搬掉的两个旧面板：`WeekGridPreview`（样例网格）与 `LinkValidationScreen`（定点小数对照）。
  * 它们的验收目的都已达成——真网格取代样例网格，小数口径由 2419 条 JVM 单测继续钉住。
