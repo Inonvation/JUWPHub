@@ -40,7 +40,9 @@ import edu.jxslu.schedule.data.local.DB_VERSION
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.local.juwDatabasePath
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.GuessTarget
+import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.ui.DataSelfTestResult
 import edu.jxslu.schedule.ui.DataSelfTestStrip
@@ -57,6 +59,7 @@ import edu.jxslu.schedule.ui.web.WebContentView
 import edu.jxslu.schedule.ui.web.WebViewController
 import edu.jxslu.schedule.ui.week.WeekScreen
 import edu.jxslu.schedule.ui.week.WeekViewModel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import platform.UIKit.UIViewController
 
@@ -444,13 +447,8 @@ private fun JwLoginScreen(services: IosServices, onClose: () -> Unit) {
                 importing = true
                 status = "已登录，正在从教务导入课表…"
                 scope.launch {
-                    val failure = services.scheduleTermImport()
-                        .archive(manual = true) as? ScheduleTermImport.Result.Failed
-                    status = if (failure == null) {
-                        "导入完成，返回课表即可看到"
-                    } else {
-                        "导入失败：${failure.reason}"
-                    }
+                    val result = services.scheduleTermImport().archive(manual = true)
+                    status = describeImport(result, services)
                     importing = false
                 }
             } else {
@@ -480,8 +478,9 @@ private fun JwLoginScreen(services: IosServices, onClose: () -> Unit) {
             Text(
                 // 有状态就说状态：导入中 / 导入结果比 URL 有用得多
                 text = error ?: status ?: currentUrl ?: startUrl,
-                fontSize = 11.sp,
-                maxLines = 2,
+                // 4 行：导入结果要能同时容下「库里几门 / 开学日 / 第几周 / 示例一门课」
+                fontSize = 10.sp,
+                maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
                 color = when {
                     error != null -> MaterialTheme.colorScheme.error
@@ -512,6 +511,59 @@ private fun JwLoginScreen(services: IosServices, onClose: () -> Unit) {
 
 /** 自动重试上限：两次之后交给用户点「刷新」，真故障时不能打转。 */
 private const val MAX_AUTO_RETRY = 2
+
+/**
+ * 把归档结果说成一句人话（2026-11-25 晚补）。
+ *
+ * ## 为什么必须写清数字
+ *
+ * 上一版只判 `is Result.Failed`，于是 `Archived(createdTerms = [], failed = [...])`——
+ * 一个学期都没导入成功——也显示「导入完成，返回课表即可看到」。用户看到的就是
+ * 「说成功了但课表是空的」，比报错更糟。
+ *
+ * 现在三种结局分开说，并且**把库里真实条数、开学日、当前周次、第一门课的例子一起打出来**：
+ * 这张屏是唯一能同时看到「教务那边有什么」和「库里落了什么」的地方，用户截一张图就能定位
+ * 是没导进来、还是周次/星期对不上、还是今天本来没课。
+ */
+private suspend fun describeImport(
+    result: ScheduleTermImport.Result,
+    services: IosServices,
+): String = when (result) {
+    is ScheduleTermImport.Result.Failed -> "导入失败：${result.reason}"
+
+    ScheduleTermImport.Result.InProgress -> "上一次导入还在进行，等它跑完再看"
+
+    is ScheduleTermImport.Result.Archived -> {
+        if (result.createdTerms.isEmpty() && result.failed.isNotEmpty()) {
+            // 一个学期都没落地：把教务给的第一条原因说出来，再带上「教务当前学期」与跳过数
+            // ——这两项能区分「学期下拉没解析出来」和「页面结构变了」
+            "导入失败：${result.failed.first().second}" +
+                "（教务当前学期 ${result.currentTerm ?: "未识别"} · 跳过 ${result.skipped}）"
+        } else {
+            val repo = services.scheduleRepository()
+            val courses = repo.courses.first()
+            val semester = repo.semester.first()
+            val week = ScheduleCalculator.todayWeekOf(semester, AppClock.today()) ?: 0
+            val sample = courses.firstOrNull()?.let { c ->
+                "${c.name.take(10)} ${weekdayLabel(c.day)} ${c.startSection}-${c.endSection}节 " +
+                    ScheduleCalculator.formatWeeks(c.weeks)
+            }
+            buildString {
+                append("导入完成：库里 ${courses.size} 门 · 开学 ${semester?.startDate ?: "—"} · 现第 $week 周")
+                append(" · 教务 ${result.currentTerm ?: "未识别"}")
+                if (result.createdTerms.isNotEmpty()) {
+                    append(" · 新建 ${result.createdTerms.joinToString("、")}")
+                }
+                if (result.failed.isNotEmpty()) append(" · ${result.failed.size} 个学期失败")
+                if (sample != null) append("\n示例：$sample")
+            }
+        }
+    }
+}
+
+/** 1..7 → 周一..周日（只用于上面那句示例，越界回「—」）。 */
+private fun weekdayLabel(day: Int): String =
+    listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日").getOrNull(day - 1) ?: "—"
 
 /**
  * 空白页探针：返回正文字符数（去掉空白），`"0"` = 空白页。
