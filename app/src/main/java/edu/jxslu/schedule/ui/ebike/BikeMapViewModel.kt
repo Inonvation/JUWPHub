@@ -49,20 +49,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
-/**
- * 一次「把镜头移过去」的请求。
- *
- * 用 [nonce] 当 LaunchedEffect 的 key：同样的坐标连点两次也要能动，比较坐标做不到这点。
- * [zoom] 为 null 表示保持当前缩放；[animated] 为 false 用于恢复上次视野，那一下不该
- * 从校园中心慢慢滑过去，直接落位。
- */
-data class CameraRequest(
-    val lat: Double,
-    val lng: Double,
-    val zoom: Double?,
-    val nonce: Long,
-    val animated: Boolean = true,
-)
+// [CameraRequest] 与地图层的其余参数契约已搬进 `shared/commonMain`
+// （`ui/ebike/BikeMapContract.kt`，2026-11-25）：那份类型要同时喂给高德、osmdroid 与 iOS 的
+// MapKit，留在 `:app` 的话 iOS 拿不到。包名相同，所以这个文件不需要 import。
 
 /** 地图页的一次性提示（用车动作结果等）；[tone] 决定提示语气。 */
 sealed interface BikeMapEvent {
