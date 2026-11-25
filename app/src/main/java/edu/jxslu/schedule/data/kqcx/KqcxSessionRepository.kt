@@ -1,7 +1,5 @@
 package edu.jxslu.schedule.data.kqcx
 
-import edu.jxslu.schedule.data.session.SessionExpiryStore
-import edu.jxslu.schedule.data.session.SessionService
 import edu.jxslu.schedule.domain.CarDetailResult
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KvcxZones
@@ -13,31 +11,22 @@ import java.time.YearMonth
  *
  * ## 它为什么还留在 `:app`
  *
- * 逻辑本体已经整段搬进共享层 [KqcxSessionCore]，这里只做两件搬不动的事：
+ * 逻辑本体已经整段搬进共享层 [KqcxSessionCore]，这里只做一件搬不动的事：
+ * **`java.time.YearMonth` 适配**——订单历史的「月」与全量扫描区间，`ui/ebike` 下的
+ * 那一批页面（`KvcxViewModel` / `KvcxOrdersViewModel`）直接把 `YearMonth` 传进来、
+ * 把 `OrderHistoryScan.from/to` 读进 `YearMonth?` 字段。本轮不许改那些页面，而
+ * `java.time` 进不了 `commonMain`，所以共享层用 `yyyy-MM` 字符串键，这一层负责换算。
  *
- * 1. **`java.time.YearMonth` 适配**——订单历史的「月」与全量扫描区间，`ui/ebike` 下的
- *    那一批页面（`KvcxViewModel` / `KvcxOrdersViewModel`）直接把 `YearMonth` 传进来、
- *    把 `OrderHistoryScan.from/to` 读进 `YearMonth?` 字段。本轮不许改那些页面，而
- *    `java.time` 进不了 `commonMain`，所以共享层用 `yyyy-MM` 字符串键，这一层负责换算。
- * 2. **`SessionExpiryStore` 接线**——「登录状态已过期」留痕表在 `:app` 的
- *    `data/session`（同样本轮不动），共享层只收两个回调。
+ * 「登录状态已过期」的留痕接线**不在这一层**（S23 起）：它在装配根 `Graph.kqcxCore`
+ * ——会话状态是 core 的，壳只是它的 `YearMonth` 视图；两端（Android 壳 / iOS 直用 core）
+ * 因此共用同一处接线，不会有一边漏写。
  *
- * 除了这两处，**下面每个方法都是一行转发**：不要在这里加逻辑，否则又变成两份口径。
+ * 除了月份换算，**下面每个方法都是一行转发**：不要在这里加逻辑，否则又变成两份口径。
  * iOS 侧不经过这个类，直接用 [KqcxSessionCore]。
  */
 class KqcxSessionRepository(
-    client: KqcxAuthClient,
-    credentials: KqcxCredentialStore,
-    /** 「登录状态已过期」留痕（见 [SessionExpiryStore]）：静默重登失败时写、进页消费。 */
-    expiry: SessionExpiryStore? = null,
+    private val core: KqcxSessionCore,
 ) : KvcxRideSession, KvcxZoneSource {
-
-    private val core = KqcxSessionCore(
-        client = client,
-        credentials = credentials,
-        onSessionExpired = { expiry?.mark(SessionService.Kqcx) },
-        onSessionCleared = { expiry?.clear(SessionService.Kqcx) },
-    )
 
     /** 会话流：UI（hub 登录态、快趣页）统一订阅这条。 */
     override val loggedIn: StateFlow<Boolean> get() = core.loggedIn

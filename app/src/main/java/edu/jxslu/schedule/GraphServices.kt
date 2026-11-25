@@ -2,6 +2,7 @@ package edu.jxslu.schedule
 
 import android.content.Context
 import edu.jxslu.schedule.data.ai.AiScheduleClient
+import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
 import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.power.PowerReadingStore
@@ -61,7 +62,6 @@ import edu.jxslu.schedule.platform.AiApiKeyStore
 import edu.jxslu.schedule.platform.AppServices
 import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
-import edu.jxslu.schedule.platform.ThirdPartySession
 import edu.jxslu.schedule.platform.UjingReminder
 import edu.jxslu.schedule.ui.reminder.BalanceAlertReminder
 import edu.jxslu.schedule.ui.reminder.UjingDoneReminder
@@ -249,14 +249,15 @@ class GraphServices(private val context: Context) : AppServices {
     override fun ujingRepository(): UjingRepository = Graph.ujing(appContext)
 
     /**
-     * 快趣会话：`:app` 的 `KqcxSessionRepository` 只对外给登录态与退出
-     * （它的 core 是私有字段，见 `ThirdPartySession` 的 KDoc）。
+     * 快趣会话本体（S23 起直接给 `KqcxSessionCore`）。
+     *
+     * 上一版这里包了个只含「登录态 + 退出」的匿名对象，原因是 `KqcxSessionRepository`
+     * 把 core 包成私有字段、装配根拿不到本体（见 `AppServices.kqcxSession` 的 KDoc）。
+     * 现在 core 由 `Graph.kqcxCore` 装配，这一层不再需要转接：账号中心读 `loggedIn` /
+     * 调 `logout()` 照旧，而 iOS 侧要用到的那一面（骑行状态、开锁还车、订单、卡券）
+     * 也终于能从装配根取到。
      */
-    override fun kqcxSession(): ThirdPartySession = object : ThirdPartySession {
-        override val loggedIn: StateFlow<Boolean> get() = Graph.kqcx(appContext).loggedIn
-
-        override fun logout() = Graph.kqcx(appContext).logout()
-    }
+    override fun kqcxSession(): KqcxSessionCore = Graph.kqcxCore(appContext)
 
     override fun wenquRepository(): WenquRepository = Graph.wenqu(appContext)
 
