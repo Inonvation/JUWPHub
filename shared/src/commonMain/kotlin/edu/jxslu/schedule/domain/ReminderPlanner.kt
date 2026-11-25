@@ -292,3 +292,47 @@ fun nextHomeworkReminder(items: List<Homework>, now: LocalDateTime): HomeworkRem
         homeworkReminderPoints(homework, due).firstOrNull { it.triggerAt > now }
     }.minByOrNull { it.triggerAt }
 }
+
+/**
+ * 全部（未完成）作业里**还没到点**的提醒点，按触发时刻从近到远，最多 [limit] 个（iOS 排本地通知用）。
+ *
+ * 与 [nextHomeworkReminder] 的差别是「取几个」：Android 只需要一个最近的时刻去排那一枚闹钟
+ * （到点后整组重新求值，见 `ClassReminder.postHomeworkReminderIfAny`）；iOS 的本地通知
+ * **到点不执行代码**，所以必须把未来若干个提醒点**提前排上**，系统到点自己投递。
+ *
+ * 三条口径都是刻意的：
+ *
+ * 1. **只取 `triggerAt > now` 的点**。已到点但还在有效期窗口内的（20:00 之后、午夜之前）不补排：
+ *    iOS 每次重排（进 App、改作业）都会再走一遍这个函数，把过去的点排成「1 秒后」等于
+ *    用户在窗口里开几次 App 就响几次。代价是**漏掉的点就是漏掉**——Android 那份会由闹钟落点
+ *    或 15 分钟核对补发，iOS 不能，这条写在 `design/ios-port.md` §12.9。
+ * 2. **按「触发时刻 → 作业 id」排**。同一时刻多条作业时用 id 兜底，保证每次重排选到的是
+ *    **同一批**（[limit] 截断时不稳定的排序会让同一门作业时有时无）。
+ * 3. **截断口径 = 截止日从近到远**：触发时刻就是截止日前一天/当天的 20:00，所以按 [triggerAt]
+ *    升序取前 [limit] 条等价于「先保最近的截止日」。同一门作业的两个点各占一个槽位
+ *    （「明天截止」比「今天截止」先到，先被保留）。
+ *
+ * 无截止日期 / 已逾期 / 已完成（[Homework.done]）的作业没有未来的提醒点，自然被排除；
+ * 截止日超过 [HOMEWORK_HORIZON_DAYS] 天的不排（与 [nextHomeworkReminder] 同一个 30 天口径）。
+ */
+fun upcomingHomeworkReminders(
+    items: List<Homework>,
+    now: LocalDateTime,
+    limit: Int,
+): List<HomeworkReminderPlan> {
+    if (limit <= 0) return emptyList()
+    val horizon = now.date.plus(DatePeriod(days = HOMEWORK_HORIZON_DAYS.toInt()))
+    return items
+        .asSequence()
+        .filter { !it.done }
+        .mapNotNull { homework ->
+            val due = homework.dueDate ?: return@mapNotNull null
+            if (due > horizon) return@mapNotNull null
+            homework to due
+        }
+        .flatMap { (homework, due) -> homeworkReminderPoints(homework, due).asSequence() }
+        .filter { it.triggerAt > now }
+        .sortedWith(compareBy({ it.triggerAt }, { it.homework.id }))
+        .take(limit)
+        .toList()
+}

@@ -61,6 +61,7 @@ import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.platform.AccountCredentials
 import edu.jxslu.schedule.platform.AiApiKeyStore
 import edu.jxslu.schedule.platform.AppServices
+import edu.jxslu.schedule.platform.HomeworkReminder
 import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
 import edu.jxslu.schedule.platform.UjingReminder
@@ -68,6 +69,7 @@ import edu.jxslu.schedule.ui.ebike.AndroidBikeHeading
 import edu.jxslu.schedule.ui.ebike.AndroidBikeLocation
 import edu.jxslu.schedule.ui.ebike.BikeLocationSource
 import edu.jxslu.schedule.ui.reminder.BalanceAlertReminder
+import edu.jxslu.schedule.ui.reminder.ClassReminder
 import edu.jxslu.schedule.ui.reminder.UjingDoneReminder
 import edu.jxslu.schedule.ui.widget.LifeWidgetSync
 import edu.jxslu.schedule.ui.widget.WaterWidgetSync
@@ -491,4 +493,19 @@ class GraphServices(private val context: Context) : AppServices {
     override fun bikeLocation(): BikeLocationSource = bikeLocation
 
     override fun bikeHeading(): Flow<Float> = AndroidBikeHeading(appContext).heading()
+
+    // ---- 作业截止提醒（iOS 移植 N2，2026-11-25） ----
+
+    /**
+     * 作业截止提醒：转接 `ui/reminder/ClassReminder.enqueueCheck`（一次性 `AlarmManager` 闹钟
+     * + 15 分钟兜底核对，与上课提醒共用最近的那一枚闹钟）。
+     *
+     * **与 `SubpageActivity` 四处作业页的 `onHomeworkChanged` 指向同一个函数**，所以这里不是
+     * 第二套实现：两处都只是「喊一声重排」，时刻算法与发通知全在 `ClassReminder` 里。
+     * 那一份直调 `AlarmManager` / `NotificationCompat`，故意留在 `:app`（搬进共享层只会得到
+     * 一个 expect/actual 空壳），共享层只持有这个接口。
+     */
+    private val homeworkReminderSink = HomeworkReminder { ClassReminder.enqueueCheck(appContext) }
+
+    override fun homeworkReminder(): HomeworkReminder = homeworkReminderSink
 }

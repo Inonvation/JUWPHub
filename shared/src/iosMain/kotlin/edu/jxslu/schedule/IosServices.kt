@@ -87,6 +87,9 @@ import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.platform.AccountCredentials
 import edu.jxslu.schedule.platform.AiApiKeyStore
 import edu.jxslu.schedule.platform.AppServices
+import edu.jxslu.schedule.platform.HomeworkReminder
+import edu.jxslu.schedule.platform.IosHomeworkReminder
+import edu.jxslu.schedule.platform.IosLocalNotifications
 import edu.jxslu.schedule.platform.IosNotificationPermission
 import edu.jxslu.schedule.platform.IosUjingReminder
 import edu.jxslu.schedule.platform.JwSessionLogout
@@ -758,6 +761,9 @@ class IosServices : AppServices {
             } else {
                 IosJwSessionFlag.markLost()
             }
+            // 作业截止提醒：冷启动重排一次。iOS 的本地通知到点不执行代码，必须**提前**排上；
+            // 上一次进程排的那批可能已被投递，作业也可能已被勾完成 / 删掉（重排会按前缀清空重来）。
+            homeworkReminder().reschedule()
         }
     }
 
@@ -907,6 +913,23 @@ class IosServices : AppServices {
      * 系统气球旋转后造型别扭），没有消费方就不装传感器。蓝点画成无方向圆点。
      */
     override fun bikeHeading(): Flow<Float>? = null
+
+    // ---- 作业截止提醒（iOS 移植 N2，2026-11-26） ----
+
+    /**
+     * 作业截止提醒：`UNUserNotificationCenter` 上排若干条**一次性**本地通知（**非空**）。
+     *
+     * 时刻算法与 Android 同一份（`domain/ReminderPlanner.kt`），差别在「到点不执行代码」：
+     * 未来若干个提醒点必须提前排上，上限 [HOMEWORK_REMINDER_SLOTS]（15 条，占 64 条待发额度的
+     * 一份，分配表见 `HomeworkReminderPlatform.kt` / §12.9.3）。
+     *
+     * 惰性单例：它自己**不持有状态**（状态在系统的待发队列里），每次 `reschedule` 都重读库与开关。
+     */
+    private val homeworkReminderImpl: HomeworkReminder by lazy {
+        IosHomeworkReminder(repo = homeworkRepository(), prefs = prefs, scope = scope)
+    }
+
+    override fun homeworkReminder(): HomeworkReminder = homeworkReminderImpl
 
     private companion object {
         /** 日志 tag：崩溃/后台失败都记在这个名字下，排查时先 grep 它。 */

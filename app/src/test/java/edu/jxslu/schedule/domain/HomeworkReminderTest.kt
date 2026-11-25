@@ -221,4 +221,108 @@ class HomeworkReminderTest {
         )
         assertEquals(emptyList<HomeworkReminderPlan>(), homeworkReminderGroup(emptyList(), at(due, 20, 30)))
     }
+
+    // ---- 列表版（iOS 提前排若干条本地通知，N2）----
+    //
+    // iOS 的本地通知到点**不执行代码**，所以这里要一次给出未来若干个提醒点，
+    // 而不是像 Android 只给最近那一个。截断与顺序都是用户可感知的（少一条 = 少一次提醒）。
+
+    @Test
+    fun upcoming_ordersByTriggerThenHomeworkId() {
+        // 9/21 08:00：1 号截止 9/22、2 号截止 9/24 → 1 号两个点都在 2 号之前
+        val items = listOf(
+            homework(id = 1, dueDate = due),
+            homework(id = 2, dueDate = due.plusDays(2)),
+        )
+        val plans = upcomingHomeworkReminders(items, at(LocalDate.parse("2026-09-21"), 8, 0), limit = 10)
+        assertEquals(listOf(1L, 1L, 2L, 2L), plans.map { it.homework.id })
+        assertEquals(
+            listOf(
+                HomeworkReminderPlan.Kind.Tomorrow,
+                HomeworkReminderPlan.Kind.Today,
+                HomeworkReminderPlan.Kind.Tomorrow,
+                HomeworkReminderPlan.Kind.Today,
+            ),
+            plans.map { it.kind },
+        )
+        assertEquals(
+            listOf(
+                LocalDateTime(2026, 9, 21, 20, 0),
+                LocalDateTime(2026, 9, 22, 20, 0),
+                LocalDateTime(2026, 9, 23, 20, 0),
+                LocalDateTime(2026, 9, 24, 20, 0),
+            ),
+            plans.map { it.triggerAt },
+        )
+    }
+
+    @Test
+    fun upcoming_sameTrigger_isStableByHomeworkId() {
+        // 同一截止日 = 同一触发时刻：截断时必须每次都选到同一批（否则同一门课时有时无）
+        val items = listOf(homework(id = 9), homework(id = 4))
+        val plans = upcomingHomeworkReminders(items, at(due.minusDays(1), 8, 0), limit = 2)
+        assertEquals(listOf(4L, 9L), plans.map { it.homework.id })
+    }
+
+    @Test
+    fun upcoming_truncatesByNearestDeadline() {
+        // 截断口径：截止日从近到远（= 触发时刻从近到远），取前 limit 条；
+        // 同一门作业的两个点各占一个槽位。9/22 20:00 上有两个点（7 号「今天截止」与
+        // 3 号「明天截止」），同刻按作业 id 排 → 3 在前
+        val items = listOf(
+            homework(id = 5, dueDate = due.plusDays(2)),
+            homework(id = 7, dueDate = due),
+            homework(id = 3, dueDate = due.plusDays(1)),
+        )
+        val plans = upcomingHomeworkReminders(items, at(due.minusDays(1), 8, 0), limit = 3)
+        assertEquals(listOf(7L, 3L, 7L), plans.map { it.homework.id })
+        assertEquals(3, plans.size)
+        // 截掉的是最远那条（5 号，9/23 起才有提醒点）
+        assertTrue(plans.none { it.homework.id == 5L })
+    }
+
+    @Test
+    fun upcoming_skipsPassedPointsDoneAndNoDue() {
+        // 9/22 21:00：9/22 截止那条的两个点（9/21、9/22 的 20:00）都已过 → 不补排
+        assertEquals(
+            emptyList<HomeworkReminderPlan>(),
+            upcomingHomeworkReminders(listOf(homework()), at(due, 21, 0), limit = 10),
+        )
+        // 已完成 / 无截止日期 / 已逾期 都不参与（9/22 21:00 时，9/21 截止那条的两个点都过了）
+        assertEquals(
+            emptyList<HomeworkReminderPlan>(),
+            upcomingHomeworkReminders(
+                listOf(
+                    homework(id = 1, dueDate = due.plusDays(1), done = true),
+                    homework(id = 2, dueDate = null),
+                    homework(id = 3, dueDate = due.minusDays(1)),
+                ),
+                at(due, 21, 0),
+                limit = 10,
+            ),
+        )
+    }
+
+    @Test
+    fun upcoming_ignoresDueDatesBeyondHorizon() {
+        val now = at(due.minusDays(1), 8, 0)
+        // 31 天后截止：两个提醒点都在 30 天窗口外 → 不排
+        assertEquals(
+            emptyList<HomeworkReminderPlan>(),
+            upcomingHomeworkReminders(listOf(homework(dueDate = now.date.plusDays(31))), now, limit = 10),
+        )
+        // 30 天整仍在范围内（两个点都排）
+        assertEquals(
+            2,
+            upcomingHomeworkReminders(listOf(homework(dueDate = now.date.plusDays(30))), now, limit = 10).size,
+        )
+    }
+
+    @Test
+    fun upcoming_zeroLimit_isEmpty() {
+        assertEquals(
+            emptyList<HomeworkReminderPlan>(),
+            upcomingHomeworkReminders(listOf(homework()), at(due.minusDays(1), 8, 0), limit = 0),
+        )
+    }
 }

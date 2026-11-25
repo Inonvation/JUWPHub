@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.CourseKind
+import edu.jxslu.schedule.platform.IosLocalNotifications
 import edu.jxslu.schedule.ui.ai.AiChatScreen
 import edu.jxslu.schedule.ui.ai.AiChatViewModel
 import edu.jxslu.schedule.ui.ai.AiHistoryScreen
@@ -311,6 +312,8 @@ internal fun IosRouteContent(
             },
             images = null,
             markdown = null,
+            // 勾完成 / 删作业后重排截止提醒（2026-11-26 起 iOS 真有排程，见 IosHomeworkReminder）
+            onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
         SubpageScreen.HOMEWORK_TODO -> HomeworkTodoScreen(
@@ -321,6 +324,7 @@ internal fun IosRouteContent(
             onOpenLibrary = { push(IosRoute(SubpageScreen.HOMEWORK)) },
             images = null,
             markdown = null,
+            onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
         SubpageScreen.HOMEWORK_COURSE -> HomeworkCourseScreen(
@@ -331,16 +335,17 @@ internal fun IosRouteContent(
             },
             images = null,
             markdown = null,
+            onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
         // 作业详情（V4 搬进共享层）：与笔记详情同一组 null——平台能力都还没有。
-        // 另加 `onHomeworkChanged = null`：iOS 没有截止提醒排程（通知 + BGTask），
-        // 改完只落库，不重排提醒。截止日期与完成勾选本身是真的能存。
+        // 改截止日 / 勾完成会重排截止提醒（2026-11-26 起）；正文里的图片与公式仍只有 Android 能渲染。
         SubpageScreen.HOMEWORK_DETAIL -> HomeworkDetailScreen(
             courseName = route.arg.orEmpty(),
             homeworkId = route.itemId,
             startEditing = route.startEditing,
             onBack = pop,
+            onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
         SubpageScreen.THEORY_SCHEDULE -> JwScheduleListScreen(
@@ -658,7 +663,19 @@ internal fun IosRouteContent(
 
         SubpageScreen.REMINDER_SETTINGS -> {
             val vm = remember { ReminderSettingsViewModel(services.scheduleRepository()) }
-            ReminderSettingsScreen(onBack = pop, viewModel = vm)
+            ReminderSettingsScreen(
+                onBack = pop,
+                viewModel = vm,
+                // 上课提醒在 iOS 上还没有排程（§12.9.2：缺「课表 → 绝对时刻」的换算与 64 条分配），
+                // 所以 onReschedule 仍是 null——开关照常落库，只是这一侧不排闹钟。
+                // 作业截止提醒 2026-11-26 起真能用：进本页与改开关都会重排一次。
+                onRecheckHomework = { services.homeworkReminder().reschedule() },
+                // iOS 的授权是 `UNUserNotificationCenter.requestAuthorization`（三类提醒共用
+                // 一次请求）；拒绝不阻塞开关，与 Android 的 `POST_NOTIFICATIONS` 同口径。
+                onRequestNotifPermission = { onDenied ->
+                    IosLocalNotifications.ensureAuthorized { granted -> if (!granted) onDenied() }
+                },
+            )
         }
 
         SubpageScreen.SHORTCUTS -> {

@@ -674,6 +674,21 @@ interface AppServices {
      * （见 `BikeMapContract.kt` 第四节），没有消费方就不装传感器。
      */
     fun bikeHeading(): Flow<Float>? = null
+
+    // ---- 作业截止提醒（iOS 移植 N2，2026-11-25） ----
+
+    /**
+     * 作业截止提醒（DESIGN §3.11）：作业数据或提醒开关变了就调一次 [HomeworkReminder.reschedule]。
+     *
+     * **非空**：两端都建得起来。Android 转接 `ui/reminder/ClassReminder.enqueueCheck`
+     * （与 `SubpageActivity` 四处、课表变化收集器指向同一个函数）；iOS 是
+     * `platform/IosHomeworkReminder`（`UNUserNotificationCenter` 上排若干条一次性本地通知）。
+     *
+     * 为什么不给 `?`：`null` 的语义是「本平台没有任何通知能力」，而两端都有；给 `?` 只会让
+     * 每个调用点多一行空判，且掩盖「作业提醒在 iOS 上其实能用」这个事实（上一版正是这么丢的，
+     * 见 §12.9.2 的旧表述）。
+     */
+    fun homeworkReminder(): HomeworkReminder
 }
 
 /**
