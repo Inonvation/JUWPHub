@@ -70,6 +70,35 @@ object HttpSupport {
 
         /** 当前持有的 cookie 条数，仅供诊断显示。 */
         fun size(): Int = byHost.values.sumOf { it.size }
+
+        /**
+         * 全量快照（对应 Android `MemoryCookieJar.snapshot`）。
+         *
+         * 两个用途：诊断「罐子里到底有什么」，以及 `CasTransport.cookies()` 那个只读自述口
+         * （Android 的 `MemoryCookieJar.snapshot()` 是同一个形状）。
+         */
+        fun snapshot(): List<Cookie> = byHost.values.flatten()
+
+        /**
+         * 回灌：把一批 cookie 直接写进罐子（对应 Android `MemoryCookieJar.adopt`）。
+         *
+         * **分桶键用 `domain` 去掉前导点**：`Set-Cookie` 常带 `Domain=.juwp.edu.cn`，
+         * 而本罐按请求 host 分桶、[get] 时再按后缀匹配父域，不去点就会落到一个谁都不查的桶里。
+         * 同名同路径的旧值替换掉，避免回灌几次后请求头里出现重复 cookie。
+         *
+         * 为什么是同步方法而不是走 `CookiesStorage.addCookie`：那条是挂起契约，而
+         * `CasTransport.adoptCookies` 是同步接口（Android 的 jar 也是同步写），
+         * 回灌发生在不关心网络往返的路径上，加一层 suspend 只会让调用方被迫开协程。
+         */
+        fun adopt(cookies: List<Cookie>) {
+            cookies.forEach { cookie ->
+                val host = cookie.domain?.removePrefix(".").orEmpty()
+                if (host.isEmpty()) return@forEach
+                val bucket = byHost.getOrPut(host) { mutableListOf() }
+                bucket.removeAll { it.name == cookie.name && it.path == cookie.path }
+                bucket.add(cookie)
+            }
+        }
     }
 
     /**

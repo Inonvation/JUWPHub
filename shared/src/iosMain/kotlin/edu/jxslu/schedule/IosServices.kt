@@ -48,12 +48,16 @@ import edu.jxslu.schedule.data.repo.ScholarProgressRepository
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.repo.TeachingCalendarSync
 import edu.jxslu.schedule.data.repo.TextbookSync
+import edu.jxslu.schedule.data.session.CasSession
+import edu.jxslu.schedule.data.session.IosCasTransport
+import edu.jxslu.schedule.data.session.IosCredentialVault
 import edu.jxslu.schedule.data.session.IosJwReadSession
 import edu.jxslu.schedule.data.session.IosJwSessionFlag
 import edu.jxslu.schedule.data.session.IosAiApiKeyStore
 import edu.jxslu.schedule.data.session.IosQiekjCredentialStore
 import edu.jxslu.schedule.data.session.IosSessionExpirySink
 import edu.jxslu.schedule.data.session.IosUjingSessionStore
+import edu.jxslu.schedule.data.session.IosWebCookieBridge
 import edu.jxslu.schedule.data.session.IosWenquSessionStore
 import edu.jxslu.schedule.data.session.IosWebCookieSource
 import edu.jxslu.schedule.data.session.IosYktCredentialStore
@@ -103,17 +107,16 @@ import edu.jxslu.schedule.ui.ai.AiApiKeys
  * | 偏好 | `DisplayPrefsStore()`，DataStore 落在 `appDataDir()`（沙箱私有目录） |
  * | 课表仓库 | `ScheduleRepository` + `BundledSQLiteDriver` 的 Room（v21，无迁移链）+ 基线快照 |
  * | 收件箱 | `InboxRepository(juwDatabase().inboxDao())` |
- * | 教务会话 | [IosJwReadSession]：Cookie 来自 `WebCookies`（WKWebView 登录后写入） |
+ * | 教务会话 | [IosJwReadSession]：WebView 活着就同源取，否则交给共享层 `CasSession`（Ktor + Keychain 凭证） |
  * | 教务三件套 | `ScheduleSync` / `ExamSync` / `ScheduleTermImport`，全部走上面那条会话 |
  *
  * ## M2 的关键点：会话来源换了，调用方一行没改
  *
- * Android 的会话是 `CasSession`（OkHttp + 凭证保险箱 + 自动填表）；iOS 没有保险箱，
- * 也不该拿明文密码去填表——登录交给 `WKWebView` 里人自己完成，App 只从
- * `WKWebsiteDataStore` 读 Cookie（见 `data/session/WebCookieSource.kt`）。
- * 两条实现都实现 [JwReadSession]，所以 `ScheduleSync` / `ExamSync` / `ScheduleTermImport`
- * 这三个已经在共享层的类**一个字都不用改**，`WeekScreen` 的「检测」图标也会自动出现
- * （它读的是 `WeekViewModel.canQuickCheck`，而那读的是这三个服务是否非空）。
+ * Android 的会话是 `CasSession`（OkHttp + 凭证保险箱 + 自动填表）。2026-11-25 那份
+ * `CasSession` 搬进了 `shared/commonMain`，iOS 现在**用的是同一个类**，只换三件平台物
+ * （Ktor 传输 / Keychain 凭证 / WebKit cookie 桥，见 [jwCas]）。两条实现都实现
+ * [JwReadSession]，所以 `ScheduleSync` / `ExamSync` / `ScheduleTermImport` 这三个已经在
+ * 共享层的类**一个字都不用改**，`WeekScreen` 的「检测」图标也会自动出现。
  *
  * ## 作用域为什么是 `Dispatchers.Default`
  *
@@ -152,8 +155,37 @@ class IosServices : AppServices {
         )
     }
 
-    /** 教务读取会话。Cookie 在请求时才从 `WebCookies` 取，所以登录前后都能立刻生效。 */
-    private val session: JwReadSession by lazy { IosJwReadSession() }
+    /**
+     * 统一认证凭证（Keychain，service `secure_jw`）+ 登录闸门（`NSUserDefaults`，前缀 `login_gate`）。
+     *
+     * 与 Android 的 `CredentialVault` 同一份契约（[CredentialStore]），所以
+     * [CasSession] 这条链两端逐条一致：可信期、失败闸门、凭证错才计数。
+     */
+    private val jwVault: IosCredentialVault by lazy { IosCredentialVault() }
+
+    /**
+     * 教务 CAS 会话（共享层 `CasSession`），iOS 的三件平台物都换成这边的实现：
+     * Ktor 传输（[IosCasTransport]）、Keychain 凭证（[jwVault]）、WebKit cookie 桥
+     * （[IosWebCookieBridge]）。
+     *
+     * 它替掉了原先那条「只有 WebView cookie 一条路」的形态：用户存过学号密码之后，
+     * 导入页关掉、进程重启都还能自己重新登录，不必再回导入页手登一次。
+     */
+    private val jwCas: CasSession by lazy {
+        CasSession(
+            vault = jwVault,
+            http = IosCasTransport(),
+            webCookies = IosWebCookieBridge,
+            // iOS 没有 vpnDetector 的等价物（NSURLSession 自己走系统代理），留默认 false
+        )
+    }
+
+    /**
+     * 教务读取会话：`WKWebView` 活着时同源取，否则交给 [jwCas]。
+     *
+     * 四档判定与「为什么 WebView 优先」写在 `IosJwReadSession` 的 KDoc 里。
+     */
+    private val session: JwReadSession by lazy { IosJwReadSession(cas = jwCas) }
 
     private val sync: ScheduleSync by lazy {
         ScheduleSync(cas = session, repo = repository, prefs = prefs, inbox = inbox)
@@ -436,23 +468,17 @@ class IosServices : AppServices {
     /**
      * 教务 / 一卡通的凭证快照（账号中心与「我的」页的账户卡读它）。
      *
-     * **一卡通那一半是真的**：学号来自 [yktVault]（Keychain，`secure_ykt` 的 `username`）。
+     * **两半都是真的**：一卡通来自 [yktVault]（Keychain，`secure_ykt`），教务来自 [jwVault]
+     * （Keychain，`secure_jw`）。2026-11-25 之前教务这一半恒为 null——那时 iOS 从不保存
+     * 教务密码，登录只发生在导入页的 `WKWebView` 里。现在补上了凭证直登：用户在
+     * 「我的 → 教务账户」保存一次学号密码，会话过期时 `CasSession` 自己重新登录。
      *
-     * **教务那一半恒为 null**，不是漏做：iOS 从不保存教务密码（登录只在导入页的
-     * `WKWebView` 里由用户完成，见 `IosJwReadSession`），`CredentialVault` 里的 CAS 学号
-     * 在本端没有对应的写入方。给它一个值就只能靠「拿一卡通学号顶上」这类推定，
-     * 那正是 `login-session.md` 里「别猜」那条。两个页面都有兜底：`JwAccountScreen` 的
-     * 学号位回退到学籍卡的 `profileStudentId`，账号中心的教务行靠 [hasJwWebSession]
-     * 显示「已登录」——所以这里给 null 不会让那一行变成假话。
-     *
-     * `resetLoginGates` 在本端是空实现：登录闸门（连续失败次数 / 停用标记）只服务于
-     * `CasSession` 的自动填表，iOS 没有那套，也没有第二处落盘。唯一存在的「闸门类状态」
-     * 是 [SessionStatus] 里的进程内停用标记，它已由 [AccountCredentials.clearYkt] 那条路
-     * （`IosYktCredentialStore.clear()`）撤掉，这里再清一次只是重复。
+     * `resetLoginGates` 仍然只清一卡通与胖乖：教务那格的闸门由 [jwSessionLogout] 那条链
+     * （`CasSession.logout` → `onCredentialsUpdated`）自己处理，与 Android 同口径。
      */
     private val iosAccountCredentials: AccountCredentials = object : AccountCredentials {
 
-        override fun readJwUsername(): String? = null
+        override fun readJwUsername(): String? = jwVault.readCas()?.username
 
         override fun readYktUsername(): String? = yktVault.read()?.username
 
@@ -462,7 +488,9 @@ class IosServices : AppServices {
         }
 
         override fun resetLoginGates() {
-            // 本端没有落盘闸门，见本段 KDoc。
+            // 本端没有一卡通 / 胖乖的落盘闸门：那两份只服务于各自仓库的重登退避，
+            // 而 iOS 侧的一卡通走「token 401 就重登」、胖乖没有闸门。教务那格的闸门
+            // 由 [jwSessionLogout]（`CasSession.logout`）自己清。
         }
     }
 
@@ -472,14 +500,14 @@ class IosServices : AppServices {
     override fun sessionExpirySink(): SessionExpirySink = sessionExpiry
 
     /**
-     * 退出教务原生会话：**iOS 侧返回 null**。
+     * 退出教务原生会话：清 Ktor 的 cookie 罐、`WKWebsiteDataStore` 的 cookie 与 localStorage、
+     * 再加上 Keychain 里的学号密码（`CasSession.logout`）。
      *
-     * iOS 的登录只发生在 `WKWebView` 里，没有「OkHttp 会话」可退；退出的正确做法是清
-     * `WKWebsiteDataStore` 的 cookie 与 `localStorage`，而 `WebCookieSource` 现在只有
-     * 读的方向（反向被明确否决，见那个文件）。等那里补上「清本机 WebView 数据」再给实现。
-     * 页面在 null 时跳过这一步，其余凭证照常清。
+     * 2026-11-25 之前这里是 null（iOS 没有「原生会话」可退）。现在有了凭证直登，
+     * 退出必须把三样一起清：只清凭证的话 WebView 里手登的会话还活着，
+     * 「已登录」照旧成立，退出形同虚设（Android 侧 2026-09-28 踩过同一个坑）。
      */
-    override fun jwSessionLogout(): JwSessionLogout? = null
+    override fun jwSessionLogout(): JwSessionLogout = JwSessionLogout { jwCas.logout() }
 
     /**
      * AI Key：**iOS 侧已接 Keychain**（[IosAiApiKeyStore]）。
