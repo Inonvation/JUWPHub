@@ -10,7 +10,7 @@ package edu.jxslu.schedule.platform
  * | 缝 | 为什么不能搬 | 谁实现 |
  * |---|---|---|
  * | [UjingPay] | `PayTask` 只能在 `Activity` 上拉起 | `:app` 宿主（`SubpageActivity`） |
- * | [UjingReminder] | `AlarmManager` + 通知渠道 | `AppServices.ujingReminder()`（`GraphServices`） |
+ * | [UjingReminder] | `AlarmManager` + 通知渠道 | `AppServices.ujingReminder()`（`GraphServices` / `IosUjingReminder`） |
  * | [UjingLocateOutcome] | 定位权限要 `ActivityResultLauncher` | `:app` 宿主（`SubpageActivity`） |
  *
  * **[UjingPay] 为什么是 ViewModel 构造参数而不是 `AppServices` 成员**：装配根只持有
@@ -62,8 +62,10 @@ fun interface UjingPay {
  * - [cancel]：终结态 / 退出登录时就地撤闹钟；
  * - [revoke]：用户确认取衣（或「知道了」）时**连已发出的通知与免扰队列挂起条一起撤**。
  *
- * `AppServices.ujingReminder()` 返回 `null` = 本平台没有闹钟与通知渠道（iOS 待接），
- * 此时排 / 撤提醒整体跳过——订单卡与轮询照常工作，只是没有「洗好提醒」。
+ * `AppServices.ujingReminder()` 返回 `null` = 本平台没有任何通知能力，此时排 / 撤提醒整体跳过
+ * ——订单卡与轮询照常工作，只是没有「洗好提醒」。两端现在都非空：Android 转接
+ * `ui/reminder/UjingDoneReminder`（`AlarmManager`），iOS 是 `platform/IosUjingReminder`
+ * （`UNUserNotificationCenter`，2026-11-25 晚接上）。
  */
 interface UjingReminder {
 

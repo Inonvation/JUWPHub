@@ -137,8 +137,9 @@ private const val FooterDisclaimerText =
  * **业务口径一字未改**：写操作零自动重试、订单 15 秒轮询（离开页面即停）、
  * 完成提醒闹钟、扫码跳独立下单页、会话过期不自动重登——这次只换排版与文案层级。
  *
- * 洗涤中的订单由平台提醒缝（`AppServices.ujingReminder()`，Android 是
- * `ui/reminder/UjingDoneReminder`）在到点时发系统通知（渠道：洗衣完成提醒）。
+ * 洗涤中的订单由平台提醒缝（`AppServices.ujingReminder()`）在到点时发系统通知：
+ * Android 是 `ui/reminder/UjingDoneReminder`（`AlarmManager` + 通知渠道），
+ * iOS 是 `platform/IosUjingReminder`（`UNUserNotificationCenter`，2026-11-25 晚接上）。
  *
  * ## iOS 移植 S21（2026-11-25）：搬进 `shared/commonMain`
  *

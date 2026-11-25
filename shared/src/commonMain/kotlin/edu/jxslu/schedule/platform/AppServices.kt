@@ -442,10 +442,11 @@ interface AppServices {
     /**
      * 洗衣完成提醒（闹钟 + 系统通知）。
      *
-     * **null = 本平台没有闹钟与通知渠道**（iOS 待接 `UNUserNotificationCenter` +
-     * `UNTimeIntervalNotificationTrigger`）：排 / 撤提醒整体跳过，订单卡与 15 秒轮询照常工作。
-     * Android 侧转接 `ui/reminder/UjingDoneReminder`（那个文件留在 `:app`，是 `AlarmManager`
-     * 直调，搬不动也不该搬）。
+     * **null = 本平台没有任何通知能力**：排 / 撤提醒整体跳过，订单卡与 15 秒轮询照常工作。
+     * 两端现在都非空——Android 转接 `ui/reminder/UjingDoneReminder`（`AlarmManager` + 通知渠道，
+     * 那个文件留在 `:app`，搬不动也不该搬），iOS 是 `platform/IosUjingReminder`
+     * （`UNUserNotificationCenter` + `UNTimeIntervalNotificationTrigger`）。可空是为了让宿主
+     * 在没接这一层的平台上不必造假实现（口径同 §11.2 ④）。
      */
     fun ujingReminder(): UjingReminder?
 
