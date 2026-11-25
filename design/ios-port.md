@@ -935,8 +935,9 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 | `ui/wenqu` | 问渠整包（主页 / 蹲点 / 记录 / 设置 / 活动弹层 / 卡片） |
 | `ui/ujing` | U净三页（主页 / 下单 / 历史）+ VM |
 | `ui/ai` | AI 调课整包（对话 / 设置 / 历史 / 提议卡 / 预览网格） |
-| `ui/common` | 59 个文件：对话框、卡片、Markdown 栈、附件图槽、快捷方式、账户卡、`KeepScreenOn`、`AppBackHandler` 等 |
+| `ui/common` | 61 个文件：对话框、卡片、Markdown 栈、附件图槽、快捷方式、账户卡、`KeepScreenOn`、`AppBackHandler`、`LegalDialogs`（S22 随引导一起搬上来，`rememberCloseLock` 由此全仓只剩一份）等 |
 | `ui/today` | `TodayScreen` + `TodayViewModel` + 进行中服务卡（`ActiveServiceCard`）+ 猜你想用卡 + 收件箱卡 + `TodaySlots`（V1 2026-11-25；服务卡 V2 同日：开水 / 趣智 / U净 三行随之搬走，快趣行仍由 `:app` 注入槽位） |
+| `ui/onboarding` | 首启引导六屏（`OnboardingScreen`，S22 2026-11-25）+ 两个平台槽位类型 `OnboardingJwLogin` / `OnboardingBrandIcons`；接法见 §10.6 |
 
 跨模块 `internal` 会失效：`TopBarHeight`、`GridTypography`、`quickCheckFeedback`、`OutcomeQueue`、
 `SchedulePreviewGrid` 的 `changedCellSet` / `previewWeeksOf` 因此放开成 `public`，KDoc 里各自写了原因。
@@ -988,6 +989,37 @@ iOS 走 `UIApplication.openURL` + scheme 白名单检查。一卡通、胖乖、
 结论：这三份介质留在各端，`AppServices` 只收**接口**——`qiekjRepository()` 与
 `qiekjWateringSessions()` 两端都有实现（iOS 侧凭证走 Keychain、订单快照与会话走
 `appDataDir()` 下的 JSON）。
+
+### 10.6 首启引导在 iOS 上怎么接（S22，2026-11-25）
+
+页面本体与它唯一的 `:app` 依赖（`NoticeDialog`）已搬进共享层。**本轮的边界是只搬不接**
+——`MainViewController.kt` 未改，iOS 现在首次打开**还不会**弹引导。接的时候照这张表：
+
+```kotlin
+OnboardingScreen(
+    onFinish = { /* 收窗；onboarding_seen 的写入由页面自己做完再回调 */ },
+    startAtJw = false,
+    jwLogin = null,            // iOS 没有原生教务会话 → 第 2 步改「去导入页登录」
+    onOpenJwLogin = { /* 打开现有导入页（JwImport 那条链）*/ },
+    brands = null,             // 没有 ic_brand_* 素材 → 图标位留白，布局不动
+    onOpenService = { /* 有二级页栈之后才给；null = 完成页「其他可选账号」整块不渲染 */ },
+    onBackAtWelcome = null,    // iOS 没有系统返回键，AppBackHandler 在那边本就是空实现
+    onDeclineNotices = null,   // iOS 不能主动退出进程 → 「不同意并退出」不渲染
+)
+```
+
+四件需要先定下来的事（都不是代码问题，是口径问题）：
+
+1. **首启判据**：`.agents/rules/login-session.md` 要求「`onboarding_seen` 为 false **且**
+   是新装」。Android 用 `PackageManager.firstInstallTime`；iOS 没有等价 API，接之前先定
+   判据（`CFBundleVersion` 变更 vs 沙箱首次创建时间），别退化成只看键——老用户会被凭空弹一遍。
+2. **步骤数会变**：`qzxyRepository()` 在 iOS 返回 null，**趣智那一步整步不出现**，
+   进度条从 5 段变 4 段，完成页也没有「趣智 · 未配置」那一行。这是 `Step` 去掉固定序号的原因。
+3. **引导里没有权限申请**（2026-11-25 核对）：六屏全是账号配置，通知 / 日历 / 定位 / 存储
+   四类权限都不在这里，所以「iOS 没有对应能力就整步跳过」这条在本页没有适用对象。
+4. **登录只在网页里**：第 2 步在 iOS 上不存密码、也没有自动续登，文案已按这个事实另写了一份
+   （原来的「Android Keystore / 这是全应用唯一保存教务密码的地方」在 iOS 上是虚构承诺）。
+
 ## 11. 页面层接线约定（2026-11-25 定，页面搬移一律照此）
 
 页面层开始大规模搬移时定的**唯一口径**。在此之前 S10/S13 搬的页面各写了一套（都不带 ViewModel），
@@ -1080,9 +1112,8 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | `ui/reminder` | 15 | 4,107 | 见 12.1：通知 + WorkManager |
 | `ui/campus` | 8 | 3,735 | 学工表单 / 教务导入的 WebView 外壳（要文件上传、SSL、定位、WebSettings 那一层），`CampusCardViewModel` 被 `ui/life` 的禁改文件调着，`PayCodeScreen` 用 `FLAG_SECURE` + 屏幕亮度 |
 | `ui/widget` | 12 | 3,112 | 见 12.1：Glance |
-| `ui/onboarding` | 1 | 2,592 | 首启引导；多步向导 + 权限申请 + 图片素材，iOS 侧这一版不做 |
 | `ui/jwvw` | 2 | 2,445 | `JwImportScreen`：教务导入总入口，WebView 全套 API + 文件选择 |
-| `ui/common` | 22 | 2,089 | 剩下的都是位图与 WebView 辅助（`DecodeSampled` / `CodeBitmaps` / `WebViewSupport` / `ImageViewerDialog`） |
+| `ui/common` | 21 | 1,835 | 剩下的都是位图与 WebView 辅助（`DecodeSampled` / `CodeBitmaps` / `WebViewSupport` / `ImageViewerDialog`） |
 | `ui/today` | 3 | 705 | `TodayHost`（槽位填充：四项真相源、RESUMED 静默查询、确认弹窗）、`ActiveServiceRows`（快趣行 / 已还车行，数据在 `ui/ebike`）、`GuessYouWantCardPlatform`（品牌位图）：都已按可空槽位反转成宿主注入 |
 | `ui/me` | 5 | 1,760 | 小组件设置（Glance）、权限与存储（七个 Android 权限 launcher + FileProvider + 缓存清理） |
 | `ui/wenqu` | 5 | 1,737 | 蹲点提醒 / 前台服务 / `AlarmManager`（见 12.1 通知那一行） |
