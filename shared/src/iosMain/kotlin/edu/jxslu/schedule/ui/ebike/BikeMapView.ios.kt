@@ -27,6 +27,8 @@ import platform.MapKit.MKCoordinateRegionMakeWithDistance
 import platform.MapKit.MKMapView
 import platform.MapKit.MKMapViewDelegateProtocol
 import platform.MapKit.MKMarkerAnnotationView
+import platform.MapKit.MKOverlayProtocol
+import platform.MapKit.MKOverlayRenderer
 import platform.UIKit.UIColor
 import platform.darwin.NSObject
 import kotlin.math.PI
@@ -95,7 +97,9 @@ import kotlin.time.TimeSource
  *   K/N 到底暴露成 `zoomEnabled` 还是 `isZoomEnabled` 没把握。代价是 iOS 允许双指旋转与俯视，
  *   Android 关掉了；确认写法后补三行。
  * - **叠加层那一族**（`addOverlay(s)` / `removeOverlay(s)` / `MKPolygon` / `MKCircle`）：
- *   上一版被打回的就是这四个方法，全部移到 `BikeMapOverlays.ios.kt`（第二批）。
+ *   上一版被打回的就是这四个方法，全部移到 `BikeMapOverlays.ios.kt`（第二批，连符号表一起）。
+ *   本文件只剩**两处**引用覆盖物类型：`MapDelegate.rendererForOverlay` 与它转发的 lambda
+ *   （`MKOverlayProtocol` / `MKOverlayRenderer`）。要整批撤掉时照那个文件头第一节的清单删。
  *
  * ## 三、与 Android 的差异（同一契约，不追求像素级一致）
  *
@@ -205,16 +209,16 @@ fun IosBikeMap(input: BikeMapInput, modifier: Modifier = Modifier) {
 
 // ---------- 颜色与几何小工具 ----------
 
-/** ARGB int → UIColor。 */
-private fun argbToUIColor(argb: Int): UIColor = UIColor(
+/** ARGB int → UIColor。`internal` 是因为 `BikeMapOverlays.ios.kt` 的渲染器也要用它。 */
+internal fun argbToUIColor(argb: Int): UIColor = UIColor(
     red = ((argb shr 16) and 0xFF) / 255.0,
     green = ((argb shr 8) and 0xFF) / 255.0,
     blue = (argb and 0xFF) / 255.0,
     alpha = ((argb ushr 24) and 0xFF) / 255.0,
 )
 
-/** 坐标（GCJ-02 直传，见文件头第一节）。 */
-private fun coordinateOf(lat: Double, lng: Double): CValue<CLLocationCoordinate2D> =
+/** 坐标（GCJ-02 直传，见文件头第一节）。`internal` 是因为叠加层（第二批）也要造坐标。 */
+internal fun coordinateOf(lat: Double, lng: Double): CValue<CLLocationCoordinate2D> =
     CLLocationCoordinate2DMake(lat, lng)
 
 /** 视口宽度（point）；还没布局时是 0。 */
@@ -336,8 +340,11 @@ private class SettleSuppressor {
  * 与 Android 那版的差别：这里把 [userPoint] / [userAccuracyMeters] 也算进比对——
  * iOS 没有「蓝点单独增量更新」那条路（MapKit 的标注视图由系统管，改坐标比建新视图便宜），
  * 而定位读数本来也只到 1 Hz 量级，不进 10 Hz 的罗盘循环。
+ *
+ * `internal` 是因为叠加层（`BikeMapOverlays.ios.kt`）也吃同一份快照：围栏 / 禁停区 / 还车点
+ * 范围 / 精度圈那几层要与标注层看同一批输入，否则两层的指纹会各算一套。
  */
-private data class DrawableInputs(
+internal data class DrawableInputs(
     val colors: BikeMarkerColors,
     val clusters: List<BikeCluster>,
     val selectedKey: String?,
@@ -435,6 +442,9 @@ private class MapKitHost {
 
     private val suppressor = SettleSuppressor()
 
+    /** 覆盖物（围栏 / 禁停区 / 还车点范围 / 精度圈）：见 `BikeMapOverlays.ios.kt`（第二批）。 */
+    private val overlayLayer = IosOverlayLayer()
+
     fun attach(input: BikeMapInput): MKMapView {
         currentInput = input
         val view = MKMapView(frame = CGRectMake(0.0, 0.0, 0.0, 0.0))
@@ -456,6 +466,7 @@ private class MapKitHost {
             onRegionWillChange = { onRegionWillChange() },
             onRegionDidChange = { onRegionDidChange() },
             viewFor = { annotation -> viewForMarker(annotation) },
+            rendererFor = { overlay -> overlayLayer.renderer(overlay) },
         )
         view.delegate = delegate
         mapView = view
@@ -472,6 +483,8 @@ private class MapKitHost {
             drawn = drawable
             drawMarkers(drawable)
         }
+        // 覆盖物自己按指纹短路，不必等上面那份比对（它每轮都要看一次，见 BikeMapOverlays.ios.kt）
+        overlayLayer.update(view, drawable)
     }
 
     fun detach() {
@@ -479,6 +492,7 @@ private class MapKitHost {
         if (view != null) {
             view.delegate = null
             view.removeAnnotations(annotations.values.toList())
+            overlayLayer.clear(view)
         }
         annotations.clear()
         annotationViews.clear()
@@ -696,7 +710,7 @@ private class MapKitHost {
             plans["user"] = MarkerPlan(
                 lat = point.lat,
                 lng = point.lng,
-                style = MarkerStyle(glyphText = null, tint = colors.userDot, glyphTint = colors.spotGlyph),
+                style = MarkerStyle(glyphText = null, tint = colors.userDot, glyphTint = colors.label),
                 payload = null,
             )
         }
@@ -736,6 +750,7 @@ private class MapDelegate(
     private val onRegionWillChange: () -> Unit,
     private val onRegionDidChange: () -> Unit,
     private val viewFor: (MKAnnotationProtocol?) -> MKAnnotationView?,
+    private val rendererFor: (MKOverlayProtocol) -> MKOverlayRenderer,
 ) : NSObject(), MKMapViewDelegateProtocol {
 
     override fun mapView(
@@ -756,6 +771,12 @@ private class MapDelegate(
     override fun mapView(mapView: MKMapView, regionDidChangeAnimated: Boolean) {
         onRegionDidChange()
     }
+
+    /** 覆盖物渲染器（围栏 / 禁停区 / 还车点范围 / 精度圈），实现在 `BikeMapOverlays.ios.kt`。 */
+    override fun mapView(
+        mapView: MKMapView,
+        rendererForOverlay: MKOverlayProtocol,
+    ): MKOverlayRenderer = rendererFor(rendererForOverlay)
 }
 
 /** [BikeMapInput] → 图层输入的投影（只保留「画上去的东西」）。 */
