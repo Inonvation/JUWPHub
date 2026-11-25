@@ -3,6 +3,10 @@ package edu.jxslu.schedule.data.qiekj
 import edu.jxslu.schedule.data.local.JsonFileStore
 import edu.jxslu.schedule.data.session.SessionExpirySink
 import edu.jxslu.schedule.data.session.SessionServiceIds
+import edu.jxslu.schedule.domain.AppClock
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.builtins.ListSerializer
 
 /**
@@ -76,5 +80,68 @@ internal class IosQiekjExpiryMarker(
 
     override fun clearExpired() {
         sink.clear(SessionServiceIds.QIEKJ)
+    }
+}
+
+/**
+ * iOS 侧的「正在出水」登记（iOS 移植 V2，2026-11-25）。
+ *
+ * 与 Android 的 `QiekjWateringStore` 逐条对齐：服务端确认出水时 `begin`、结算 / 失败 /
+ * 165 秒超时收尾 `clear`、进程重启读到超过 5 分钟的残留就当没有（[QiekjWateringSession.isStale]）。
+ * 唯一差别是介质：Android 是 `SharedPreferences("qiekj_watering")`，这里是
+ * `appDataDir()/qiekj_watering.json`——同一台设备上两端的这份状态本来就不共享，
+ * 它记录的是「本机这次开阀」，没有跨端迁移的意义。
+ *
+ * ## 为什么现在必须是真的（上一版是空实现）
+ *
+ * 上一版登记了没人读：唯一的读者（今日页服务卡）还在 `:app`。服务卡搬进共享层之后
+ * iOS 今日页要显示「出水中」，读的就是 [watering] 这条流——再留空实现，开水页开了水、
+ * 回到今日页卡片一片空白，那等于没接。
+ *
+ * `StateFlow` 与写盘同一份对象：先落盘再更新流（与 Android 实现同序），订阅方拿到的
+ * 永远是已经落过盘的值。
+ */
+internal class IosQiekjWateringStore : QiekjWateringSessions {
+
+    private val store = JsonFileStore(
+        fileName = FILE,
+        serializer = QiekjWateringSession.serializer(),
+        json = QiekjJson.json,
+        tag = TAG,
+    )
+
+    private val _watering = MutableStateFlow(readInitial())
+
+    override val watering: StateFlow<QiekjWateringSession?> = _watering.asStateFlow()
+
+    override fun begin(startedAtMillis: Long, deviceName: String, goodsId: String?) {
+        val session = QiekjWateringSession(
+            startedAtMillis = startedAtMillis,
+            deviceName = deviceName,
+            goodsId = goodsId,
+        )
+        store.writeBlocking(session)
+        _watering.value = session
+    }
+
+    override fun clear() {
+        store.delete()
+        _watering.value = null
+    }
+
+    private fun readInitial(): QiekjWateringSession? {
+        val session = store.readBlocking() ?: return null
+        if (session.isStale(AppClock.nowMillis())) {
+            // 过期残留：进程死在流程中，服务端早已超时关阀。静默清掉（与 Android 同口径：
+            // 只涉及展示，不涉及金额记录）
+            store.delete()
+            return null
+        }
+        return session
+    }
+
+    private companion object {
+        const val FILE = "qiekj_watering.json"
+        const val TAG = "IosQiekjWateringStore"
     }
 }

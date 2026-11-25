@@ -189,13 +189,16 @@ class GraphServices(private val context: Context) : AppServices {
     /**
      * 「正在出水」登记的共享层视图。
      *
-     * `QiekjWateringStore` 自己留在 `:app`（它同时被今日页服务卡与侧栏读，`watering` 流
-     * 只在那边用得上）；这里只把开水页需要的两个写方法转过去。读侧仍走
-     * `Graph.qiekjWatering(context).watering`，两条路指向同一个 store 实例。
+     * `QiekjWateringStore` 自己留在 `:app`（介质是 `SharedPreferences`，换介质等于让老用户
+     * 设备上正在出水的那条记录读不出来），这里把它整面转过去：写侧两个方法 + 读侧那条流。
+     * 读侧 [QiekjWateringSessions.watering] 直接返回 store 自己的 `StateFlow`——共享层的今日页
+     * 服务卡与侧栏的 `Graph.qiekjWatering(context).watering` 是**同一条流**，没有第二份真相源。
      */
     private val qiekjWateringSessions: QiekjWateringSessions by lazy {
         val store = Graph.qiekjWatering(appContext)
         object : QiekjWateringSessions {
+            override val watering: StateFlow<QiekjWateringSession?> = store.watering
+
             override fun begin(startedAtMillis: Long, deviceName: String, goodsId: String?) {
                 store.begin(
                     QiekjWateringSession(

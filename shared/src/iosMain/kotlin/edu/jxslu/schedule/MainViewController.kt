@@ -40,10 +40,12 @@ import edu.jxslu.schedule.data.local.DB_VERSION
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.local.juwDatabasePath
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.platform.Services
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.DataSelfTestResult
 import edu.jxslu.schedule.ui.DataSelfTestStrip
 import edu.jxslu.schedule.ui.common.AppBackHandler
@@ -53,12 +55,15 @@ import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.SettingsScreen
 import edu.jxslu.schedule.ui.theme.JuwTheme
+import edu.jxslu.schedule.ui.today.ActiveServiceCard
 import edu.jxslu.schedule.ui.today.TodayScreen
+import edu.jxslu.schedule.ui.today.TodayServiceSlot
 import edu.jxslu.schedule.ui.today.TodayViewModel
 import edu.jxslu.schedule.ui.web.WebContentView
 import edu.jxslu.schedule.ui.web.WebViewController
 import edu.jxslu.schedule.ui.week.WeekScreen
 import edu.jxslu.schedule.ui.week.WeekViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import platform.UIKit.UIViewController
@@ -109,8 +114,8 @@ private fun IosRoot(services: IosServices) {
                     } else {
                         when (tab) {
                             // 今日 Tab（V1 搬进共享层）：主屏。课程 / 作业 / 收件箱 /
-                            // 猜你想用 / 开水面板都在共享层，直接可用；
-                            // 四项服务卡、趣智面板、扫码、品牌位图在 iOS 上没有实现，
+                            // 猜你想用 / 开水面板 / 进行中服务卡都在共享层，直接可用；
+                            // 快趣骑行、趣智开水、趣智面板、扫码、品牌位图在 iOS 上没有实现，
                             // 槽位留 null = 整块不渲染（design/ios-port.md §11.2 ④）。
                             IosTab.Today -> {
                                 // iOS 没有配置变更重建，`remember` 的生命周期就是这一屏（§11.2 ①）
@@ -123,6 +128,22 @@ private fun IosRoot(services: IosServices) {
                                         blockedGuessTargets = setOf(GuessTarget.WENQU),
                                     )
                                 }
+                                // 进行中服务卡（V2，2026-11-25 晚）：卡片本体已在共享层，
+                                // iOS 只接**开水（胖乖，HTTP）**与 **U净 洗衣**两条链；
+                                // 快趣骑行（高德 SDK）/ 趣智开水（蓝牙）/ 品牌位图在 iOS 上没有
+                                // 实现，对应槽位传 null = 整行不渲染（§11.2 ④）。
+                                // `ujingRepository()` 是可空的（落点缺失时为 null）：没有仓库就是
+                                // 一条恒空的订单流，卡片照旧只显示开水那行。
+                                val ujingRepo = remember { services.ujingRepository() }
+                                val ujingOrderFlow = remember(ujingRepo) {
+                                    ujingRepo?.orderState
+                                        ?: MutableStateFlow<UjingOrderSnapshot?>(null)
+                                }
+                                val ujingOrder by ujingOrderFlow.collectAsStateWithLifecycle()
+                                val wateringFlow = remember {
+                                    services.qiekjWateringSessions().watering
+                                }
+                                val watering by wateringFlow.collectAsStateWithLifecycle()
                                 TodayScreen(
                                     viewModel = viewModel,
                                     // 顶栏汉堡 → 左侧抽屉（Android 同一入口）
@@ -149,6 +170,27 @@ private fun IosRoot(services: IosServices) {
                                     onOpenSubpage = { screen, focus ->
                                         pushRoute(IosRoute(screen, focus))
                                     },
+                                    // 进行中服务卡：只给开水与 U净。
+                                    // `pinned` 恒 false——位置判据是「有在案快趣骑行」，iOS 没有快趣。
+                                    serviceCards = TodayServiceSlot(
+                                        pinned = false,
+                                        content = { cardModifier ->
+                                            ActiveServiceCard(
+                                                waterSession = watering,
+                                                ujingOrder = ujingOrder,
+                                                onOpenWater = {
+                                                    stack.add(IosRoute(SubpageScreen.WATER))
+                                                },
+                                                onOpenUjing = {
+                                                    stack.add(IosRoute(SubpageScreen.UJING))
+                                                },
+                                                // 「我已取走」只清订单快照：iOS 没有通知链路，
+                                                // 没有「撤完成闹钟 / 撤已发通知」那一步可做
+                                                onUjingDismiss = { ujingRepo?.dismissOrder() },
+                                                modifier = cardModifier,
+                                            )
+                                        },
+                                    ),
                                     // 扫码（onScanCode）与品牌位图（brandIcon）在 iOS 侧还没有实现，
                                     // 留 null：U净 弹窗的扫码钮点不动、猜你想用卡片没有图标位。
                                     // 升级条件写在 ui/today/TodaySlots.kt 的 KDoc 里。
@@ -245,8 +287,9 @@ private fun IosRoot(services: IosServices) {
  *
  * 2026-11-25（V1）：今日页搬进共享层后改回 Android 的原序——**今日 / 课表 / 教务**，
  * 「我的」仍在第三格（Android 是从左侧抽屉进的，iOS 这一版还没有抽屉那一格，
- * 见 `design/ios-port.md` §12.3 第一条）。今日页的四项服务卡 / 趣智面板 / 扫码
- * 在 iOS 上没有实现，槽位传 `null`，对应内容整块不渲染（§11.2 ④）。
+ * 见 `design/ios-port.md` §12.3 第一条）。今日页的**进行中服务卡**已接上（只接开水与
+ * U净，2026-11-25 晚）；快趣骑行 / 趣智开水 / 趣智面板 / 扫码在 iOS 上没有实现，
+ * 槽位传 `null`，对应内容整块不渲染（§11.2 ④）。
  */
 private enum class IosTab(val label: String) {
     Today("今日"),
@@ -277,8 +320,9 @@ private enum class IosTab(val label: String) {
  * 看到的是确定的一句话而不是点了没反应；完整清单见 `design/ios-port.md` §12。
  *
  * 与 Android 的**已知差异**：iOS 是四格底栏（今日 / 课表 / 教务 / 我的），Android 是三格
- * 底栏加左侧抽屉里的「我的」。今日页 2026-11-25（V1）搬进共享层后已回到首格；四项服务卡、
- * 趣智面板与扫码在 iOS 上仍是空的（槽位 `null`），见 `design/ios-port.md` §12.3。
+ * 底栏加左侧抽屉里的「我的」。今日页 2026-11-25（V1）搬进共享层后已回到首格；**进行中服务卡**
+ * 2026-11-25 晚接上（只接开水与 U净），快趣骑行 / 趣智开水 / 趣智面板 / 扫码仍是空的
+ * （槽位 `null`），见 `design/ios-port.md` §12.3。
  *
  * 搬掉的两个旧面板：`WeekGridPreview`（样例网格）与 `LinkValidationScreen`（定点小数对照）。
  * 它们的验收目的都已达成——真网格取代样例网格，小数口径由 2419 条 JVM 单测继续钉住。

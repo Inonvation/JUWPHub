@@ -38,6 +38,27 @@ actual fun rememberResumedNow(intervalMillis: Long, key: Any?): State<Long> =
     }
 
 /**
+ * 带终止条件的走表：iOS 侧同样**没有暂停条件**，只保留「到点停表」那一闸。
+ *
+ * 退到后台时系统会挂起整个进程，`delay` 随之冰冻，所以缺 RESUMED 闸门的实际代价只有
+ * 「回前台后第一拍立刻补一次」——比 Android 还轻。
+ *
+ * shortcut: 同 [ResumedTickerEffect]；升级条件 = CMP ≥ 1.8 与 Glance 1.2.0 的冲突被解开。
+ */
+@Composable
+actual fun rememberResumedNowWhile(
+    intervalMillis: Long,
+    key: Any?,
+    stillActive: (Long) -> Boolean,
+): State<Long> = produceState(initialValue = AppClock.nowMillis(), key) {
+    value = AppClock.nowMillis()
+    while (stillActive(value)) {
+        delay(intervalMillis)
+        value = AppClock.nowMillis()
+    }
+}
+
+/**
  * 「回到前台」计数：**iOS 侧恒为 0**。
  *
  * 没有 `LocalLifecycleOwner` 就无从知道「回来了」；但这一项在 iOS 上的用途只有

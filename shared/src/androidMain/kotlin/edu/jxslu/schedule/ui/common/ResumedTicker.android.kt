@@ -50,6 +50,36 @@ actual fun rememberResumedNow(intervalMillis: Long, key: Any?): State<Long> {
 }
 
 /**
+ * 带终止条件的走表：今日页四条服务行的原实现（原 `ActiveServiceCard.rememberResumedSecondWhile`，
+ * 2026-10-22 起就在用），逐字搬到这里——页面侧不再自己拿 `LocalLifecycleOwner`。
+ *
+ * 两道闸门都不能少：
+ * - **RESUMED**：`delay` 走的是 Dispatcher 定时器，**不随窗口 STOP 暂停**。服务卡在退后台时
+ *   组合还活着，一次 1 小时的趣智记账就是 3600 次进程唤醒 + 3600 次快照写。
+ * - **[stillActive]**：到点落一次最终值后停表，别让一行静态文案继续每秒重组。
+ */
+@Composable
+actual fun rememberResumedNowWhile(
+    intervalMillis: Long,
+    key: Any?,
+    stillActive: (Long) -> Boolean,
+): State<Long> {
+    val owner = LocalLifecycleOwner.current
+    return produceState(initialValue = AppClock.nowMillis(), key, owner) {
+        value = AppClock.nowMillis()
+        if (!stillActive(value)) return@produceState
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            // 回前台先补一拍：定格在退后台那一刻的值会让「已用时」少算一段
+            value = AppClock.nowMillis()
+            while (stillActive(value)) {
+                delay(intervalMillis)
+                value = AppClock.nowMillis()
+            }
+        }
+    }
+}
+
+/**
  * 「回到前台」计数：与搬迁前 `ui/common/ResumeTick.kt` 的实现逐字一致。
  *
  * `LocalLifecycleOwner` 同样从 `androidx.compose.ui.platform` 换到 `androidx.lifecycle.compose`

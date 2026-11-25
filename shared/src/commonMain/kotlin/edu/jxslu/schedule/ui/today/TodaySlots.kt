@@ -11,10 +11,14 @@ import edu.jxslu.schedule.ui.common.NoticeTone
  *
  * 今日页是**所有能力的汇合点**：它原来直接 import 八个 ui 包。其中
  * `ui/ebike`（高德 SDK）、`ui/qzxy`（蓝牙传输层）、`ui/reminder`（通知 + WorkManager）、
- * `ui/jwvw`（WebView）在 iOS 上**结构性做不到**（`design/ios-port.md` §12.1），
- * 胖乖开水的落盘会话（`QiekjWateringSession`）也还留在 `:app`（§10.5）。
+ * `ui/jwvw`（WebView）在 iOS 上**结构性做不到**（`design/ios-port.md` §12.1）。
  * 搬不动的那些包，页面自己不能 import——于是把它们的**渲染 + 状态**一起交给宿主，
  * 页面只留一个槽。
+ *
+ * 「进行中服务卡」的**本体**已搬进共享层（`ui/today/ActiveServiceCard.kt`，V2 2026-11-25）：
+ * 开水 / 趣智 / U净 三行与整卡状态机都在那里，只有快趣那两行（数据在 `ui/ebike`）仍由宿主
+ * 填 `ActiveServiceSlot`。所以这个槽位现在只负责**位置判据 + 页面级副作用**，
+ * `content` 里填的是共享层那张卡（iOS 也一样，只接开水与 U净）。
  *
  * 这是 `design/ios-port.md` §11.2 ④ 的落地口径：**`null` = 本平台确实没有这块能力**
  * （不是「以后补」的占位），对应内容整块不渲染。给一个点了没反应的入口比没有更糟。
@@ -23,7 +27,7 @@ import edu.jxslu.schedule.ui.common.NoticeTone
  *
  * | 槽位 | 形状 | null 的含义 | 谁填 |
  * |---|---|---|---|
- * | `serviceCards` | [TodayServiceSlot] | 没有快趣 / 胖乖 / 趣智 / U净 四项服务 | Android `ui/today/TodayHost.kt` |
+ * | `serviceCards` | [TodayServiceSlot] | 本平台一项进行中服务都没有 → 整卡不渲染 | 两端宿主（iOS 只填开水 / U净） |
  * | `qzxyPanel` | `@Composable (onDismiss, onNotice) -> Unit` | 没有趣智开水面板 | Android `ui/today/TodayHost.kt` |
  * | `brandIcon` | `@Composable (GuessTarget) -> Painter?` | 没有 `ic_brand_*` 位图素材 | Android `GuessYouWantCardPlatform.kt` |
  * | `onScanCode` | `(onResult: (String?) -> Unit) -> Unit` | 没有扫码能力 | Android `ui/today/TodayHost.kt` |
@@ -63,9 +67,10 @@ import edu.jxslu.schedule.ui.common.NoticeTone
  *
  * ## 谁填
  *
- * Android：`ui/today/TodayHost.kt` 的 `rememberTodayServiceSlot`（它同时收四项服务的真相源、
- * 挂 RESUMED 静默查询、转发动作与确认弹窗）。
- * iOS：**不填**（`null`）。四项服务在 iOS 上都没有实现，卡片整块不出现。
+ * Android：`ui/today/TodayHost.kt` 的 `rememberTodayHostSlots`（它收四项服务的真相源、
+ * 挂 RESUMED 静默查询、转发动作与确认弹窗，并把快趣 / 趣智两个槽位交给卡片）。
+ * iOS：`MainViewController` 的今日 Tab——只接开水（胖乖，HTTP）与 U净，快趣 / 趣智 /
+ * 品牌位图传 `null`，那两行整行不渲染。
  *
  * @property pinned 卡片是否置顶到课程区之前（有在案骑行 / 完成态停留 / 冷启动位置提示）。
  * @property content 卡片本体。`Modifier` 由列表层给（带 `animateItem`），

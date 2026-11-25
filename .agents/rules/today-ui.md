@@ -52,7 +52,13 @@
   位置会晚一帧翻真、`animateItem` 把卡片从列表下方滑到顶部（2026-11-12 用户报「切 Tab 时
   快趣卡从界面底部跳到顶部」）。与 `DoneLingerGate` 同一条纪律：位置判据必须同帧成立。
   key 始终是 `item(key = "active-services")`，两处条件渲染、不会同时出现；移动靠
-  `Modifier.animateItem()` 过渡。本体 `ui/today/ActiveServiceCard.kt`。
+  `Modifier.animateItem()` 过渡。本体在**共享层**
+  `shared/src/commonMain/kotlin/edu/jxslu/schedule/ui/today/ActiveServiceCard.kt`
+  （2026-11-25 从 `:app` 搬走，iOS 今日页同一份）；快趣那两行（进行中 / 已还车）仍在
+  `:app` 的 `ui/today/ActiveServiceRows.kt`，通过 `ActiveServiceSlot` 注入——数据
+  `KvcxRideState` / `KvcxAction` 在 `ui/ebike`，搬不进共享层。
+  **加第五项服务**：行本体写进共享层的卡片，能力有平台差异时加一个可空槽位（`null` =
+  本平台没有 → 整行不渲染），别在 `:app` 里另拼一张卡。
   快趣骑行 / 胖乖开水 / 趣智洗澡 / U净 洗烘谁在进行中谁占一行（一张 AppCard 平铺 +
   `AppCardDivider` 分隔，行进出场 220/160ms），全无整卡不渲染。
 - 各行真相源与刷新口径（**零新增常驻网络路径**）：
