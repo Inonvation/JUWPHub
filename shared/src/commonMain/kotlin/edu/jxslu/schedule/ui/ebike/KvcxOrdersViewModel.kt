@@ -1,19 +1,18 @@
 package edu.jxslu.schedule.ui.ebike
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.data.kqcx.KqcxOrderStore
 import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KqcxRefreshPolicy
 import edu.jxslu.schedule.domain.KvcBusinessError
-import java.io.IOException
-import java.io.InterruptedIOException
-import java.net.SocketTimeoutException
-import java.time.YearMonth
+import edu.jxslu.schedule.domain.YearMonthKey
+import io.ktor.client.network.sockets.ConnectTimeoutException
+import io.ktor.client.network.sockets.SocketTimeoutException
+import io.ktor.client.plugins.HttpRequestTimeoutException
+import io.ktor.utils.io.errors.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,23 +23,23 @@ import kotlinx.coroutines.launch
 
 /** 历史订单页状态（DESIGN §3.9 / §4.32，2026-11-05）。 */
 data class KvcxOrdersUiState(
-    val yearMonth: YearMonth = YearMonth.now(),
-    /** 1 = 电单车 / 2 = 单车（官方 `deviceType`）。 */
-    val deviceType: Int = KvcxOrdersViewModel.DEVICE_EBIKE,
+    val yearMonth: YearMonthKey = YearMonthKey.fromDate(AppClock.today()),
+    /** 1 = 电单车 / 2 = 单车（官方 `deviceType`，常量在 [KqcxSessionCore.DEVICE_EBIKE]）。 */
+    val deviceType: Int = KqcxSessionCore.DEVICE_EBIKE,
     val loading: Boolean = false,
     /** null = 这个月还没查到过；空列表 = 查到了、这个月没有订单。 */
     val orders: List<KqcxAuth.OrderItem>? = null,
     val error: String? = null,
     /** 有订单记录的月份（倒序，含当月）；月份选择器与前后翻页都只在这些月份里走。 */
-    val months: List<YearMonth> = emptyList(),
+    val months: List<YearMonthKey> = emptyList(),
     /** 只看有费用的单（2026-11-05 用户要求「仅显示金额大于 0」）。 */
     val onlyPaid: Boolean = false,
 ) {
     /** 当前月之前的最近一个有记录月份；null = 没有更早的记录。 */
-    val olderMonth: YearMonth? get() = months.filter { it < yearMonth }.maxOrNull()
+    val olderMonth: YearMonthKey? get() = months.filter { it < yearMonth }.maxOrNull()
 
     /** 当前月之后的最近一个有记录月份；null = 已经是最新的记录。 */
-    val newerMonth: YearMonth? get() = months.filter { it > yearMonth }.minOrNull()
+    val newerMonth: YearMonthKey? get() = months.filter { it > yearMonth }.minOrNull()
 
     /** 列表实际展示的订单：开了筛选就只留实付大于 0 的（进行中的单金额还是 0，自然被滤掉）。 */
     val visibleOrders: List<KqcxAuth.OrderItem>
@@ -53,6 +52,10 @@ data class KvcxOrdersUiState(
  * 接口 `queryOrderList` **按「年 + 月 + 车型」查**（官方历史订单页同款），所以状态就是
  * 「当前这个月 × 车型」，切月份 / 切车型各自重拉一次——没有一次给全部历史的接口，
  * 也不做后台批量预取（几十个月就是几十个请求，用户没点就不该发）。
+ *
+ * **iOS 移植 P4（2026-11-25）搬进共享层**，改写与账号页 ViewModel 同一套：
+ * `YearMonth` → [YearMonthKey]、`System.currentTimeMillis()` → [AppClock.nowMillis]、
+ * `java.io` 异常族 → Ktor 同类、`Graph.xxx(context)` → 构造注入（§11.2 ①③）。
  */
 class KvcxOrdersViewModel(
     /** 会话**本体**（iOS 移植 E2，2026-11-25）：原先吃 `:app` 的 `KqcxSessionRepository` 兼容壳。 */
@@ -67,7 +70,7 @@ class KvcxOrdersViewModel(
     private var loadJob: Job? = null
 
     /** 本次会话里每个「月 × 车型」最近一次成功联网的时刻（节流用，不落盘）。 */
-    private val fetchedAt = mutableMapOf<Pair<YearMonth, Int>, Long>()
+    private val fetchedAt = mutableMapOf<Pair<YearMonthKey, Int>, Long>()
 
     init {
         reload(pickLatest = true)
@@ -80,7 +83,7 @@ class KvcxOrdersViewModel(
         reload()
     }
 
-    fun selectMonth(yearMonth: YearMonth) {
+    fun selectMonth(yearMonth: YearMonthKey) {
         if (yearMonth == _uiState.value.yearMonth) return
         _uiState.update { it.copy(yearMonth = yearMonth, orders = null, error = null) }
         reload()
@@ -114,8 +117,9 @@ class KvcxOrdersViewModel(
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             val choices = loadMonths(requested.deviceType)
+            val thisMonth = YearMonthKey.fromDate(AppClock.today())
             val month = when {
-                pickLatest -> choices.recorded.firstOrNull() ?: YearMonth.now()
+                pickLatest -> choices.recorded.firstOrNull() ?: thisMonth
                 requested.yearMonth in choices.selectable -> requested.yearMonth
                 else -> choices.selectable.firstOrNull() ?: requested.yearMonth
             }
@@ -127,16 +131,16 @@ class KvcxOrdersViewModel(
             if (cached.isNotEmpty()) {
                 _uiState.update { it.copy(orders = cached) }
             }
-            if (!force && KqcxRefreshPolicy.isFresh(fetchedAt[key], System.currentTimeMillis())) {
+            if (!force && KqcxRefreshPolicy.isFresh(fetchedAt[key], AppClock.nowMillis())) {
                 _uiState.update { it.copy(loading = false, error = null) }
                 return@launch
             }
             _uiState.update { it.copy(loading = true, error = null) }
             try {
-                val orders = session.queryOrderHistory(month.year, month.monthValue, requested.deviceType)
+                val orders = session.queryOrderHistory(month.year, month.month, requested.deviceType)
                 // 顺手落缓存（失败不影响列表展示：缓存只是统计的加速层）
                 runCatching { orderCache.store(orders) }
-                fetchedAt[key] = System.currentTimeMillis()
+                fetchedAt[key] = AppClock.nowMillis()
                 // 新拉到的月份可能让「有记录的月份」变多，翻页范围跟着更新
                 val monthsAfter = loadMonths(requested.deviceType).selectable
                 _uiState.update {
@@ -162,7 +166,10 @@ class KvcxOrdersViewModel(
     }
 
     /** 月份候选：[recorded] = 真有订单的月份（定初始月份用），[selectable] = 选择器里的列表。 */
-    private data class MonthChoices(val recorded: List<YearMonth>, val selectable: List<YearMonth>)
+    private data class MonthChoices(
+        val recorded: List<YearMonthKey>,
+        val selectable: List<YearMonthKey>,
+    )
 
     /**
      * 月份候选：缓存里攒下的（按车型，倒序）+ 当月。
@@ -171,24 +178,30 @@ class KvcxOrdersViewModel(
      * 否则页面只有当月一个月份可翻，用户会以为历史订单丢了；账号页同步跑完后自然收敛成真实月份。
      */
     private suspend fun loadMonths(deviceType: Int): MonthChoices {
-        // 共享层按 `yyyy-MM` 键返回月份（[KqcxOrderStore.monthKeys]），本页状态仍用 `YearMonth`。
+        // 共享层按 `yyyy-MM` 键返回月份（[KqcxOrderStore.monthKeys]），本页状态用 [YearMonthKey]。
         // 解析失败的脏键直接丢掉（与壳里原来 `mapNotNull { YearMonth.parse }` 同口径）
         val recorded = runCatching {
             orderCache.monthKeys(deviceType).mapNotNull { key -> monthOf(key) }
         }.getOrDefault(emptyList())
-        val thisMonth = YearMonth.now()
+        val thisMonth = YearMonthKey.fromDate(AppClock.today())
         val selectable = if (recorded.isEmpty()) {
-            (0 until FALLBACK_MONTHS).map { thisMonth.minusMonths(it.toLong()) }
+            (0 until FALLBACK_MONTHS).map { thisMonth.plusMonths(-it) }
         } else {
             (recorded + thisMonth).distinct().sortedDescending()
         }
         return MonthChoices(recorded = recorded, selectable = selectable)
     }
-    /** `yyyy-MM` 键 → `YearMonth`；形态不对返回 null（脏行不参与月份选择器）。 */
-    private fun monthOf(key: String): YearMonth? =
-        runCatching { YearMonth.parse(key) }.getOrNull()
+    /** `yyyy-MM` 键 → [YearMonthKey]；形态不对返回 null（脏行不参与月份选择器）。 */
+    private fun monthOf(key: String): YearMonthKey? = YearMonthKey.parse(key)
 
-    /** 查询失败的文案分类（与快趣账号页同口径：业务错误给服务端原文，网络类给可操作建议）。 */
+    /**
+     * 查询失败的文案分类（与快趣账号页同口径：业务错误给服务端原文，网络类给可操作建议）。
+     *
+     * 判别口径与账号页、[kvcxErrorText] 一致：原来是 `java.net.SocketTimeoutException` /
+     * `java.io.InterruptedIOException` / `java.io.IOException` 三支，那三个类型进不了
+     * `commonMain`，换成 Ktor 的两类超时 + 引擎的 `SocketTimeoutException` + 共同父类
+     * `IOException`（JVM 上就是 `java.io.IOException` 的类型别名），**文案逐字不变**。
+     */
     private fun errorText(error: Throwable): String = when (error) {
         is KvcBusinessError ->
             if (error.message?.contains("未登录") == true) {
@@ -196,27 +209,15 @@ class KvcxOrdersViewModel(
             } else {
                 error.message ?: "查询失败"
             }
+        is HttpRequestTimeoutException -> "查询超时，请稍后重试"
         is SocketTimeoutException -> "查询超时，请稍后重试"
-        is InterruptedIOException -> "查询超时，请稍后重试"
+        is ConnectTimeoutException -> "查询超时，请稍后重试"
         is IOException -> "网络不可用，请检查网络后重试"
-        else -> "查询异常：${error.message ?: error.javaClass.simpleName}"
+        else -> "查询异常：${error.message ?: error::class.simpleName}"
     }
 
     companion object {
-        const val DEVICE_EBIKE = 1
-        const val DEVICE_BIKE = 2
-
         /** 缓存全空时月份选择器退回的月数（一年，够用户先翻起来）。 */
         private const val FALLBACK_MONTHS = 12
-
-        fun factory(context: Context): ViewModelProvider.Factory =
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    KvcxOrdersViewModel(
-                        session = Graph.kqcxCore(context.applicationContext),
-                        orderCache = Graph.kqcxOrderStore(context.applicationContext),
-                    ) as T
-            }
     }
 }

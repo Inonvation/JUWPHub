@@ -12,10 +12,14 @@ import java.time.YearMonth
  * ## 它为什么还留在 `:app`
  *
  * 逻辑本体已经整段搬进共享层 [KqcxSessionCore]，这里只做一件搬不动的事：
- * **`java.time.YearMonth` 适配**——订单历史的「月」与全量扫描区间，`ui/ebike` 下的
- * 那一批页面（`KvcxViewModel` / `KvcxOrdersViewModel`）直接把 `YearMonth` 传进来、
- * 把 `OrderHistoryScan.from/to` 读进 `YearMonth?` 字段。本轮不许改那些页面，而
- * `java.time` 进不了 `commonMain`，所以共享层用 `yyyy-MM` 字符串键，这一层负责换算。
+ * **`java.time.YearMonth` 适配**——订单历史的「月」与全量扫描区间。共享层用 `yyyy-MM`
+ * 字符串键，这一层负责换算成 `YearMonth`。
+ *
+ * **iOS 移植 P4（2026-11-25）之后，`YearMonth` 的理由已经没有了**：`KvcxViewModel` /
+ * `KvcxOrdersViewModel` 两页已搬进共享层并改用 `YearMonthKey`，它们不再经过这里。
+ * 现在仍在用这个壳的只剩 `:app` 里还没搬完的快趣骑行链（`EbikeAutoReturnReminder`
+ * 等拿 `loggedIn` 与 `KvcxRideSession` 的那几处）——等那条链搬完，本类连同
+ * [OrderHistoryScan] 与 `Graph.kqcx` 一起删。
  *
  * 「登录状态已过期」的留痕接线**不在这一层**（S23 起）：它在装配根 `Graph.kqcxCore`
  * ——会话状态是 core 的，壳只是它的 `YearMonth` 视图；两端（Android 壳 / iOS 直用 core）

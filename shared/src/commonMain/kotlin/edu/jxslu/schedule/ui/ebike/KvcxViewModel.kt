@@ -398,7 +398,10 @@ class KvcxViewModel(
         val thisMonth = YearMonthKey.fromDate(AppClock.today())
         val fetched = buildList {
             for (month in listOf(thisMonth, thisMonth.plusMonths(-1))) {
-                for (device in intArrayOf(KvcxDevice.EBIKE, KvcxDevice.BIKE)) {
+                for (device in intArrayOf(
+                    KqcxSessionCore.DEVICE_EBIKE,
+                    KqcxSessionCore.DEVICE_BIKE,
+                )) {
                     addAll(
                         runCatching {
                             session.queryOrderHistory(month.year, month.month, device)
@@ -464,17 +467,4 @@ class KvcxViewModel(
         is IOException -> "网络不可用，请检查网络后重试"
         else -> "查询异常：${error.message ?: error::class.simpleName}"
     }
-}
-
-/**
- * 快趣车型档（服务端 `deviceType` 的唯一出处：电单车 / 单车）。
- *
- * 账号页的「超时费累计」与订单页的车型 tab 用的是同一组数字，且**必须一致**——
- * 各写一份字面量时，改一处就会让统计只算其中一种车。原先它是
- * `KvcxOrdersViewModel` 的伴生常量；账号页 ViewModel 先搬进共享层时把它提出来，
- * 两个页面（以及 iOS）从此共用一个来源。
- */
-object KvcxDevice {
-    const val EBIKE = 1
-    const val BIKE = 2
 }

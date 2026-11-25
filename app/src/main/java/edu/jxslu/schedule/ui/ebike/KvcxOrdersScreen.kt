@@ -37,9 +37,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.MoneyFormat
 import edu.jxslu.schedule.domain.RideRecord
+import edu.jxslu.schedule.domain.YearMonthKey
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppInfoDialog
 import edu.jxslu.schedule.ui.common.LabelValueRow
@@ -54,7 +58,6 @@ import edu.jxslu.schedule.ui.common.PageBackButton
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
 import edu.jxslu.schedule.ui.theme.semanticColors
-import java.time.YearMonth
 
 /**
  * 服务端历史订单（DESIGN §3.9 / §4.32，2026-11-05）。
@@ -71,10 +74,16 @@ import java.time.YearMonth
 @Composable
 fun KvcxOrdersScreen(onBack: () -> Unit = {}) {
     val context = LocalContext.current
-    val viewModel: KvcxOrdersViewModel = viewModel(factory = KvcxOrdersViewModel.factory(context))
+    // ViewModel 已搬进共享层（iOS 移植 P4）：构造改由宿主负责（design/ios-port.md §11.2 ①）
+    val viewModel: KvcxOrdersViewModel = viewModel {
+        KvcxOrdersViewModel(
+            session = Graph.kqcxCore(context.applicationContext),
+            orderCache = Graph.kqcxOrderStore(context.applicationContext),
+        )
+    }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val haptics = rememberAppHaptics()
-    val thisMonth = remember { YearMonth.now() }
+    val thisMonth = remember { YearMonthKey.fromDate(AppClock.today()) }
     var showMonthPicker by remember { mutableStateOf(false) }
     var detail by remember { mutableStateOf<KqcxAuth.OrderItem?>(null) }
     val visible = state.visibleOrders
@@ -102,7 +111,7 @@ fun KvcxOrdersScreen(onBack: () -> Unit = {}) {
                 },
             )
             MonthNavRow(
-                label = "${state.yearMonth.year} 年 ${state.yearMonth.monthValue} 月",
+                label = "${state.yearMonth.year} 年 ${state.yearMonth.month} 月",
                 onPrev = viewModel::prevMonth,
                 onNext = viewModel::nextMonth,
                 onPick = { if (state.months.isNotEmpty()) showMonthPicker = true },
@@ -269,8 +278,8 @@ private fun DeviceTabs(deviceType: Int, onSelect: (Int) -> Unit) {
             .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
         listOf(
-            KvcxOrdersViewModel.DEVICE_EBIKE to "电单车",
-            KvcxOrdersViewModel.DEVICE_BIKE to "单车",
+            KqcxSessionCore.DEVICE_EBIKE to "电单车",
+            KqcxSessionCore.DEVICE_BIKE to "单车",
         ).forEachIndexed { index, (value, label) ->
             SegmentedButton(
                 selected = deviceType == value,

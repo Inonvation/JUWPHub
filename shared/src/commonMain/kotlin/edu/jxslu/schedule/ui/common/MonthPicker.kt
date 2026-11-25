@@ -41,8 +41,9 @@ import edu.jxslu.schedule.ui.icon.AppIcons
  *
  * iOS 移植 S20（2026-11-25）：本文件从 `:app` 的 `ui/common` 搬进 `shared/commonMain`，
  * 包名不变；月份参数从 `java.time.YearMonth` 换成 [YearMonthKey]（`java.time` 在
- * Kotlin/Native 上不存在）。仍在 `:app` 的 `ui/ebike` 订单页要吃 `YearMonth` 版，
- * 适配重载留在 `:app` 的 `MonthPickerJavaTime.kt`，这里不为了它把 `java.time` 引回来。
+ * Kotlin/Native 上不存在）。搬移期间 `:app` 的 `ui/ebike` 订单页还要 `YearMonth` 版，
+ * 那份适配重载（`ui/common/MonthPickerJavaTime.kt`）已在 P4 随订单页改用 [YearMonthKey]
+ * 一起删除——**现在这里只有一份弹窗实现**，别再为某个页面把 `java.time` 引回来。
  */
 
 /**

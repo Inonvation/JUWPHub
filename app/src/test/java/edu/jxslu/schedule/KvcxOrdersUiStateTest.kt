@@ -1,8 +1,8 @@
-package edu.jxslu.schedule
+﻿package edu.jxslu.schedule
 
 import edu.jxslu.schedule.domain.KqcxAuth
+import edu.jxslu.schedule.domain.YearMonthKey
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersUiState
-import java.time.YearMonth
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -41,22 +41,22 @@ class KvcxOrdersUiStateTest {
     fun `前后翻页只走有记录的月份`() {
         // 记录月份：2026-11、2026-08、2025-12（9、10 月整月空白）
         val state = KvcxOrdersUiState(
-            yearMonth = YearMonth.of(2026, 11),
+            yearMonth = YearMonthKey(2026, 11),
             months = listOf(
-                YearMonth.of(2026, 11),
-                YearMonth.of(2026, 8),
-                YearMonth.of(2025, 12),
+                YearMonthKey(2026, 11),
+                YearMonthKey(2026, 8),
+                YearMonthKey(2025, 12),
             ),
         )
-        assertEquals(YearMonth.of(2026, 8), state.olderMonth)
+        assertEquals(YearMonthKey(2026, 8), state.olderMonth)
         assertNull(state.newerMonth) // 已经是最新记录
 
-        val older = state.copy(yearMonth = YearMonth.of(2026, 8))
-        assertEquals(YearMonth.of(2025, 12), older.olderMonth)
-        assertEquals(YearMonth.of(2026, 11), older.newerMonth)
+        val older = state.copy(yearMonth = YearMonthKey(2026, 8))
+        assertEquals(YearMonthKey(2025, 12), older.olderMonth)
+        assertEquals(YearMonthKey(2026, 11), older.newerMonth)
 
         // 最早一条：再往前没有了
-        val oldest = state.copy(yearMonth = YearMonth.of(2025, 12))
+        val oldest = state.copy(yearMonth = YearMonthKey(2025, 12))
         assertNull(oldest.olderMonth)
     }
 
