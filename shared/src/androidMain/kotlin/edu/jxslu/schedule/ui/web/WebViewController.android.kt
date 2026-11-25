@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.net.http.SslError
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -13,6 +14,8 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
 import android.webkit.GeolocationPermissions
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -26,6 +29,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import edu.jxslu.schedule.data.jw.JwUrls
 import java.io.File
 
 /**
@@ -154,6 +158,45 @@ private class AndroidWebHost {
                 // 全报给用户等于每次都弹一条假故障
                 if (!request.isForMainFrame) return
                 controller.onError?.invoke(error.description?.toString().orEmpty().ifEmpty { "页面加载失败" })
+            }
+
+            /**
+             * 证书异常：**只放行学校域的**，其余一律取消。
+             *
+             * 2026-11-26 补。起因是盖章成绩单那页从「自己 new 一个 WebView」改用这条缝
+             * （`ui/score/TranscriptScreen` 搬进 `commonMain`），而原来那页的 `WebViewClient`
+             * 里有这条白名单。缝里若没有它，成绩单授权层在校内证书异常时直接停在错误页
+             * ——那是**已经能用的功能被改坏**，不是新功能没做。
+             *
+             * 判据与 `:app` 那两个还没搬的窗口逐字一致（`ui/jwvw/JwImportScreen`、
+             * `ui/campus/XgFormScreen`）：`host in JwUrls.TRUSTED_SSL_HOSTS` 才放行。
+             * 白名单在共享层的 `JwUrls` 里，所以这一条两端只有一份来源。
+             *
+             * 子 frame 不处理：与 [onReceivedError] 同一条口径。
+             */
+            override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+                val host = runCatching { Uri.parse(error.url).host }.getOrNull()
+                if (host != null && host in JwUrls.TRUSTED_SSL_HOSTS) {
+                    handler.proceed()
+                } else {
+                    handler.cancel()
+                    controller.onError?.invoke("证书校验失败：${host ?: "未知域名"}")
+                }
+            }
+
+            /**
+             * 渲染进程被系统回收：**必须接住，否则整个 App 一起死**。
+             *
+             * 内存吃紧时 Android 会单独杀掉 WebView 的渲染进程，默认行为是让宿主进程也跟着崩。
+             * 原来成绩单那页自己处理了这件事；改用这条缝之后要在这里补上，否则「开着教务页
+             * 切出去一会儿」就能把 App 带走。
+             *
+             * 回 `true` 表示已处置：拆掉这个 WebView、给用户一句话，其余界面照常。
+             */
+            override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                runCatching { view.destroy() }
+                controller.onError?.invoke("网页渲染进程被系统回收，请重新打开这一页")
+                return true
             }
         }
 
