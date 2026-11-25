@@ -52,7 +52,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -91,7 +90,6 @@ import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.theme.Motion
-import edu.jxslu.schedule.ui.theme.semanticColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -162,7 +160,6 @@ fun RideScreen(
     /** 开锁前骑行卡提醒的「今日不再提醒」日期读在这里（行为判定读原始值，不读页面快照）。 */
     val cardPrefs = remember(context) { Graph.displayPrefs(context) }
     val scheme = MaterialTheme.colorScheme
-    val semantic = MaterialTheme.semanticColors
     val haptics = rememberAppHaptics()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -782,31 +779,9 @@ fun RideScreen(
         }
     }
 
-    // 标记配色跟着主题走；只在主题色变化时重算
-    val markerColors = remember(scheme.primary, semantic.warning, scheme.outline, scheme.onPrimary, scheme.onSurface) {
-        BikeMarkerColors(
-            available = scheme.primary.toArgb(),
-            lowBattery = semantic.warning.toArgb(),
-            unavailable = scheme.outline.toArgb(),
-            label = scheme.onPrimary.toArgb(),
-            selectedRing = scheme.onSurface.toArgb(),
-            userDot = USER_DOT_GREEN.toArgb(),
-            userHalo = USER_HALO_GREEN.toArgb(),
-            centerMark = CENTER_PIN_BLACK.toArgb(),
-            centerGlyph = CENTER_PIN_DOT.toArgb(),
-            fenceStroke = Color(0xFF3D8BEF).copy(alpha = 0.85f).toArgb(),
-            fenceFill = Color(0xFF64B5F6).copy(alpha = 0.30f).toArgb(),
-            rideMarker = scheme.primary.toArgb(),
-            rideHalo = scheme.primary.copy(alpha = 0.22f).toArgb(),
-            rideGlyph = scheme.onPrimary.toArgb(),
-            nogoStroke = Color(0xFF333333).copy(alpha = 0.45f).toArgb(),
-            nogoFill = Color(0xFF333333).copy(alpha = 0.22f).toArgb(),
-            spotStroke = Color(0xFFD7535D).copy(alpha = 0.9f).toArgb(),
-            spotFill = Color(0xFFD7535D).copy(alpha = 0.26f).toArgb(),
-            spotBadge = Color(0xFFD7535D).toArgb(),
-            spotGlyph = Color(0xFFFFFFFF).toArgb(),
-        )
-    }
+    // 标记配色跟着主题走。**唯一实现在共享层**（`rememberBikeMarkerColors`）：iOS 的 MapKit
+    // 用同一份，配色口径不会再出现「一端改了另一端没改」。
+    val markerColors = rememberBikeMarkerColors()
     // 「我的车」坐标口径（2026-10-19 用户修订）：始终画车辆自己的坐标；不再并到蓝点。
     // 旧版在「开锁时人就在车边」后把车标画到用户坐标，用户看到的是开锁瞬间车标跳到
     // 自己位置、锁车后才回准确位置。镜头跟随是另一件事（见上面的 phase effect）。
@@ -1702,19 +1677,6 @@ private const val RIDE_NEAR_USER_METERS = 100.0
  * 只影响首帧的地图平移量与 Snackbar 垫高，估偏一点点也看不见。
  */
 private const val BLOCK_HEIGHT_FALLBACK_DP = 120f
-
-/**
- * 定位点与中心浮标的官方小程序色板（2026-10-19 对齐，值从官方截图取样）：
- * 绿色实心圆点 + 淡绿平铺光晕 + 黑色圆头浮标（针心薄荷绿）。
- *
- * **不跟主题走**：地图瓦片始终是浅色底图，官方这套绿/黑在浅底上对比稳定；
- * 旧版跟着 `scheme.primary` 走，换主题时定位点会变色，和官方观感也对不上。
- * 改色值前先看 DESIGN §3.9「定位」「地图中心针」两行。
- */
-private val USER_DOT_GREEN = Color(0xFF55B837)
-private val USER_HALO_GREEN = Color(0xFF63C46B).copy(alpha = 0.30f)
-private val CENTER_PIN_BLACK = Color(0xFF1F1F1F)
-private val CENTER_PIN_DOT = Color(0xFF63D099)
 
 /**
  * 面板高度上限要从窗口高度里预留的空间（dp）：**固定常数**，不跟底部块实测高度走。

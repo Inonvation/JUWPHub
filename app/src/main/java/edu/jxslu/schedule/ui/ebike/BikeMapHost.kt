@@ -29,6 +29,20 @@ import kotlinx.coroutines.flow.StateFlow
  *    高德服务不可达）。这一条才是 key 失效的主要表现——`initialize` 对失效 key 仍返回 true。
  *
  * 回退是**本进程内**的：下次冷启动会重新试一次官方 SDK，用户不必自己去设置里改。
+ *
+ * ## 2026-11-25：参数契约抬进 `commonMain`
+ *
+ * 逐条的形参收成一份 [BikeMapInput]（`shared/commonMain/.../ui/ebike/BikeMapContract.kt`），
+ * 目的是让 iOS 的 MapKit 实现（`BikeMapView.ios.kt`）吃**同一个类型**。这里只做三件 Android
+ * 特有的事，其余全部原样透传：
+ *
+ * 1. `amapChoice` 判据（用户同意隐私政策没有）——只有 Android 有这套开关；
+ * 2. `sdkReady` / `unavailable` 两个状态与 [AmapMapView] 的 `onSdkUnavailable` 回退；
+ * 3. 把 [BikeMapInput.onFallback] 转成上面那条回退（Android 侧唯一的降级信号）。
+ *
+ * **形参顺序与默认值一格没动**（页面的调用点不用改）；两个渲染实现也保持原来的形参表
+ * 不动。等页面本身搬进共享层时，[BikeMapInput] 会直接成为页面与槽位之间的货币，
+ * 这一份转手就会消失。
  */
 @Composable
 internal fun BikeMapHost(
@@ -69,7 +83,10 @@ internal fun BikeMapHost(
     initialCenter: GcjPoint? = null,
     /** 建图缩放；null 用默认级别。 */
     initialZoom: Double? = null,
-    /** 高德版权标识的底边距（px），见 [AmapMapView.logoBottomMarginPx]。 */
+    /**
+     * 高德版权标识的底边距（px），见 [AmapMapView.logoBottomMarginPx]。
+     * **Android 专用，iOS 忽略**（MapKit 没有可挪的版权标识），理由写在 [BikeMapInput] 上。
+     */
     logoBottomMarginPx: Int = 0,
     modifier: Modifier = Modifier,
 ) {
@@ -91,71 +108,105 @@ internal fun BikeMapHost(
     // 降级标记跟着选择走：设置里重新打开开关要能再试一次官方 SDK
     var unavailable by remember(amapChoice) { mutableStateOf(false) }
 
+    // 页面参数 → 共享契约。**一字段一行、两边同名**（`x = x`）：抄错一个字段编译器帮不上忙，
+    // 所以这里刻意不做任何重排或改名，便于逐行对照 `BikeMapContract.kt` 的字段表复核。
+    val input = BikeMapInput(
+        clusters = clusters,
+        selectedKey = selectedKey,
+        bikes = bikes,
+        byBike = byBike,
+        selectedBikeCarNum = selectedBikeCarNum,
+        onBikeTap = onBikeTap,
+        userLat = userLat,
+        userLng = userLng,
+        userAccuracyMeters = userAccuracyMeters,
+        userHeadingFlow = userHeadingFlow,
+        rideLat = rideLat,
+        rideLng = rideLng,
+        highlightLat = highlightLat,
+        highlightLng = highlightLng,
+        highlightLabel = highlightLabel,
+        showCampusFence = showCampusFence,
+        colors = colors,
+        camera = camera,
+        onCenterSettled = onCenterSettled,
+        onViewportMeasured = onViewportMeasured,
+        zones = zones,
+        onClusterTap = onClusterTap,
+        onRideTap = onRideTap,
+        onCameraApplied = onCameraApplied,
+        onUserPan = onUserPan,
+        onFallback = onFallback,
+        initialCenter = initialCenter,
+        initialZoom = initialZoom,
+        logoBottomMarginPx = logoBottomMarginPx,
+    )
+
     if (sdkReady && !unavailable) {
         AmapMapView(
-            clusters = clusters,
-            selectedKey = selectedKey,
-            bikes = bikes,
-            byBike = byBike,
-            selectedBikeCarNum = selectedBikeCarNum,
-            onBikeTap = onBikeTap,
-            userLat = userLat,
-            userLng = userLng,
-            userAccuracyMeters = userAccuracyMeters,
-            userHeadingFlow = userHeadingFlow,
-            rideLat = rideLat,
-            rideLng = rideLng,
-            highlightLat = highlightLat,
-            highlightLng = highlightLng,
-            highlightLabel = highlightLabel,
-            showCampusFence = showCampusFence,
-            colors = colors,
-            camera = camera,
-            onCenterSettled = onCenterSettled,
-            onViewportMeasured = onViewportMeasured,
-            zones = zones,
-            onClusterTap = onClusterTap,
-            onRideTap = onRideTap,
-            onCameraApplied = onCameraApplied,
-            onUserPan = onUserPan,
+            clusters = input.clusters,
+            selectedKey = input.selectedKey,
+            bikes = input.bikes,
+            byBike = input.byBike,
+            selectedBikeCarNum = input.selectedBikeCarNum,
+            onBikeTap = input.onBikeTap,
+            userLat = input.userLat,
+            userLng = input.userLng,
+            userAccuracyMeters = input.userAccuracyMeters,
+            userHeadingFlow = input.userHeadingFlow,
+            rideLat = input.rideLat,
+            rideLng = input.rideLng,
+            highlightLat = input.highlightLat,
+            highlightLng = input.highlightLng,
+            highlightLabel = input.highlightLabel,
+            showCampusFence = input.showCampusFence,
+            colors = input.colors,
+            camera = input.camera,
+            onCenterSettled = input.onCenterSettled,
+            onViewportMeasured = input.onViewportMeasured,
+            zones = input.zones,
+            onClusterTap = input.onClusterTap,
+            onRideTap = input.onRideTap,
+            onCameraApplied = input.onCameraApplied,
+            onUserPan = input.onUserPan,
             onSdkUnavailable = {
                 unavailable = true
                 fallbackCallback()
             },
-            initialCenter = initialCenter,
-            initialZoom = initialZoom,
-            logoBottomMarginPx = logoBottomMarginPx,
+            initialCenter = input.initialCenter,
+            initialZoom = input.initialZoom,
+            logoBottomMarginPx = input.logoBottomMarginPx,
             modifier = modifier,
         )
     } else {
         OsmMapView(
-            clusters = clusters,
-            selectedKey = selectedKey,
-            bikes = bikes,
-            byBike = byBike,
-            selectedBikeCarNum = selectedBikeCarNum,
-            onBikeTap = onBikeTap,
-            userLat = userLat,
-            userLng = userLng,
-            userAccuracyMeters = userAccuracyMeters,
-            userHeadingFlow = userHeadingFlow,
-            rideLat = rideLat,
-            rideLng = rideLng,
-            highlightLat = highlightLat,
-            highlightLng = highlightLng,
-            highlightLabel = highlightLabel,
-            showCampusFence = showCampusFence,
-            colors = colors,
-            camera = camera,
-            onCenterSettled = onCenterSettled,
-            onViewportMeasured = onViewportMeasured,
-            zones = zones,
-            onClusterTap = onClusterTap,
-            onRideTap = onRideTap,
-            onCameraApplied = onCameraApplied,
-            onUserPan = onUserPan,
-            initialCenter = initialCenter,
-            initialZoom = initialZoom,
+            clusters = input.clusters,
+            selectedKey = input.selectedKey,
+            bikes = input.bikes,
+            byBike = input.byBike,
+            selectedBikeCarNum = input.selectedBikeCarNum,
+            onBikeTap = input.onBikeTap,
+            userLat = input.userLat,
+            userLng = input.userLng,
+            userAccuracyMeters = input.userAccuracyMeters,
+            userHeadingFlow = input.userHeadingFlow,
+            rideLat = input.rideLat,
+            rideLng = input.rideLng,
+            highlightLat = input.highlightLat,
+            highlightLng = input.highlightLng,
+            highlightLabel = input.highlightLabel,
+            showCampusFence = input.showCampusFence,
+            colors = input.colors,
+            camera = input.camera,
+            onCenterSettled = input.onCenterSettled,
+            onViewportMeasured = input.onViewportMeasured,
+            zones = input.zones,
+            onClusterTap = input.onClusterTap,
+            onRideTap = input.onRideTap,
+            onCameraApplied = input.onCameraApplied,
+            onUserPan = input.onUserPan,
+            initialCenter = input.initialCenter,
+            initialZoom = input.initialZoom,
             modifier = modifier,
         )
     }

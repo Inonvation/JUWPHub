@@ -912,6 +912,7 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 | `ResumedTickerEffect` / `rememberResumedNow` | `ui/common/ResumedTicker.kt` | `repeatOnLifecycle(RESUMED)` | 无暂停条件 |
 | `platformFileSystem()` | `platform/FileSystem.kt` | `FileSystem.SYSTEM` | `FileSystem.SYSTEM`（okio Posix） |
 | WebView | `ui/web/WebViewController.kt` | `AndroidView` + `WebView` | `UIKitView` + `WKWebView` |
+| 共享单车地图 | `ui/ebike/BikeMapContract.kt` | `BikeMapHost` → `AmapMapView` / `OsmMapView`（`:app`，须留在那边：依赖 `com.amap.api` / osmdroid） | `IosBikeMap`（`shared/iosMain`，`platform.MapKit`） |
 
 **`lifecycle-runtime-compose` 不能进 `commonMain`**：它的 KMP 变体要 Compose 1.9，本仓锁 CMP 1.7.3。
 所以只加在 `androidMain`，给 `LifecycleState.android.kt` 转调用；`commonMain` 里那份是 expect。
@@ -1079,7 +1080,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 
 | 阻塞 | 挡住的页面 |
 |---|---|
-| `com.amap` 高德 SDK | `ui/ebike` 全部 30 文件 / 17,879 行 |
+| `com.amap` 高德 SDK | `ui/ebike` 其余页面（约 30 文件 / 1.7 万行）。**地图层本身已解**（2026-11-25）：参数契约与槽位在 `ui/ebike/BikeMapContract.kt`，iOS 实现在 `shared/iosMain/.../ui/ebike/BikeMapView.ios.kt`，两端吃同一份 `BikeMapInput` |
 | `android.bluetooth`（`QzxyGattLink`） | 趣智开阀的传输层；协议与状态机已在共享层 |
 | `androidx.glance` | `ui/widget` 12 文件 / 3,112 行（桌面小组件） |
 | 通知 + `WorkManager` | `ui/reminder` 15 文件 / 4,107 行 |

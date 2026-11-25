@@ -24,47 +24,6 @@ import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
-/** 标记配色。由 UI 层按当前主题传进来，本类不碰 Compose。 */
-internal data class BikeMarkerColors(
-    /** 圈里有一辆能骑的车。 */
-    val available: Int,
-    /** 圈里没有能骑的，但还有电。 */
-    val lowBattery: Int,
-    /** 圈里全是离线或被停用的车。 */
-    val unavailable: Int,
-    /** 圈内数字的颜色。 */
-    val label: Int,
-    /** 选中态的描边颜色。 */
-    val selectedRing: Int,
-    /** 用户位置圆点的实心色（官方小程序绿，2026-10-19）。 */
-    val userDot: Int,
-    /** 用户位置圆点的淡绿光晕（半透明平铺圆，官方小程序同款）。 */
-    val userHalo: Int,
-    /** 正中那枚「当前查的是这里」的浮标：黑色针头 + 针杆。 */
-    val centerMark: Int,
-    /** 浮标针头中央的小圆点（薄荷绿，官方小程序同款）。 */
-    val centerGlyph: Int,
-    /** 校区围栏描边色（半透明主色）。 */
-    val fenceStroke: Int,
-    /** 校区围栏填充色（更淡的主色）。 */
-    val fenceFill: Int,
-    /** 当前用车标记的实心色（主色）。 */
-    val rideMarker: Int,
-    /** 当前用车标记的外晕（半透明主色）。 */
-    val rideHalo: Int,
-    /** 当前用车标记里那辆小车的颜色。 */
-    val rideGlyph: Int,
-    /** 禁停区描边 / 填充（深灰，官方口径 `#333333`，透明度压淡一档）。 */
-    val nogoStroke: Int,
-    val nogoFill: Int,
-    /** 还车点范围描边 / 填充（官方口径 `#D7535D`）。 */
-    val spotStroke: Int,
-    val spotFill: Int,
-    /** 还车点图标：圆角方块底色 + 里面的「P」。 */
-    val spotBadge: Int,
-    val spotGlyph: Int,
-)
-
 /**
  * 停车点标记层（DESIGN §3.9）。
  *
@@ -75,6 +34,10 @@ internal data class BikeMarkerColors(
  * 调用顺序没有保证，缓存在冷路径上会是空表，点了没反应。
  *
  * 所有可变属性都由 Compose 侧在 `AndroidView.update` 里逐次刷新，构造时只固定画笔。
+ *
+ * 配色类型 [BikeMarkerColors] 2026-11-25 搬进了 `shared/commonMain`
+ * （`ui/ebike/BikeMapContract.kt`）：iOS 的 MapKit 要按同一份配色上色。包名相同，
+ * 这边不需要 import。
  */
 internal class BikeMarkerOverlay(private val density: Float) : Overlay() {
 
