@@ -306,8 +306,16 @@ class YktRepository(
                 token = token,
             )
         }.getOrNull() ?: return null   // 网络层失败：交上层走收银台兜底
-        val payEnv = runCatching { parse(payRaw) }.getOrNull()
-        if (payEnv == null) return null
+        val payEnv = try {
+            parse(payRaw)
+        } catch (e: YktException.Http) {
+            // HTTP 层的拒绝（4xx/5xx）在这一步与「业务码拒绝」同义：平台不受理这笔支付。
+            // 折回 Protocol 保持 2026-09-23 用户拍板的口径——App 内提示「不在服务时间」，
+            // **不降级跳浏览器**；否则一张被拒的单会静默打开收银台，用户以为要重付。
+            throw YktException.Protocol(e.detail)
+        } catch (e: Exception) {
+            null
+        } ?: return null
         if (payEnv.code != 200) {
             // 服务端业务拒绝（夜间时间闸门等）：带原话抛出，上层识别后 App 内提示
             throw YktException.Protocol(
@@ -576,7 +584,19 @@ class YktRepository(
         return data
     }
 
-    private fun parse(raw: YktClient.Raw): YktEnvelope =
-        runCatching { YktModels.parseEnvelope(raw.text) }
+    private fun parse(raw: YktClient.Raw): YktEnvelope {
+        // HTTP 层与业务层分开（2026-11-25）：4xx/5xx 是「服务器回了话、只是拒绝或出错」，
+        // 与「压根没连上」（YktException.Network）完全不同。各调用点该单独处理的 400（凭证错）
+        // 与 401（重登）都在调 parse **之前**就分支掉了，走到这里的 4xx/5xx 没有业务含义，
+        // 一律带状态码 + 脱敏后的响应体前 300 字上抛，别再说成「响应不是合法 JSON」。
+        if (raw.httpCode !in 200..299) {
+            throw YktException.Http(
+                code = raw.httpCode,
+                targetUrl = raw.url,
+                snippet = YktDiagnostics.bodySnippet(raw.text),
+            )
+        }
+        return runCatching { YktModels.parseEnvelope(raw.text) }
             .getOrElse { throw YktException.Protocol("响应不是合法 JSON（HTTP ${raw.httpCode}）") }
+    }
 }

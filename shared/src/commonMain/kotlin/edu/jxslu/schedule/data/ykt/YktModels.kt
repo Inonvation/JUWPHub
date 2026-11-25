@@ -177,8 +177,25 @@ data class YktTurnoverPage(
 /** 当期汇总（`statistics/turnover/count`，分）。 */
 data class YktTurnoverSummary(val expensesFen: Long, val incomeFen: Long)
 
-/** 业务异常分类：UI 据此给不同文案；[NeedCaptcha] 绝不重试（防撞风控）。 */
+/**
+ * 业务异常分类：UI 据此给不同文案；[NeedCaptcha] 绝不重试（防撞风控）。
+ *
+ * ## [detail] 是给排查用的，[message] 是给用户看的
+ *
+ * 2026-11-25 起分开：iOS 上报「一卡通登录提示服务器错误 / 无法连接」时，四类失败全被
+ * 压成一句「网络不可达」，连「是被服务器拒绝、还是根本没连上」都分不出来。现在
+ * [Network] 带底层异常类名 / message / 目标 URL，[Http] 单独成一档带状态码与响应体
+ * 片段（均已过 [YktDiagnostics] 脱敏）；页面把 [detail] 放进可复制的位置，
+ * [message] 仍走既有的业务码分类，不把技术细节塞进用户主文案。
+ */
 sealed class YktException(message: String, cause: Throwable? = null) : Exception(message, cause) {
+
+    /**
+     * 技术细节（一行到三行，**已脱敏、不含凭证**），供页面「复制诊断信息」与截图用。
+     * 默认等于 [message]——只有真正带实测信息的两个分支才覆盖它。
+     */
+    open val detail: String get() = message.orEmpty()
+
     /** 凭证错（HTTP 400 `Bad credentials`）。 */
     class Credential(message: String) : YktException(message)
 
@@ -191,8 +208,48 @@ sealed class YktException(message: String, cause: Throwable? = null) : Exception
     /** 响应结构/字形表/样板自检问题：协议漂移，需升级映射表。 */
     class Protocol(message: String) : YktException(message)
 
-    /** 网络不可达 / 超时。 */
-    class Network(cause: Throwable) : YktException("网络不可达：${cause.message ?: "未知错误"}", cause)
+    /**
+     * 连接层失败（DNS / TCP / TLS 握手 / 超时 / 被系统网络策略拒绝）。
+     *
+     * 三样东西必须留着，否则等于没记：**底层异常类名**（`NSURLErrorDomain`、
+     * `SSLHandshakeException`、`SocketTimeoutException` 各自指向完全不同的排查方向）、
+     * **原始 message**（iOS 侧常带 `-1200` / `-9802` 这类码）、**目标 URL**
+     * （拼错域名与连不上是两件事）。**不含响应体、不含任何凭证**——[targetUrl] 已过
+     * [YktDiagnostics.redactUrl]。
+     */
+    class Network(
+        val targetUrl: String,
+        val causeClass: String,
+        val causeMessage: String?,
+        cause: Throwable,
+    ) : YktException("网络不可达（$causeClass）", cause) {
+        override val detail: String
+            get() = buildString {
+                append("NETWORK · ").append(causeClass)
+                if (!causeMessage.isNullOrBlank()) append(": ").append(causeMessage)
+                if (targetUrl.isNotBlank()) append('\n').append("GET/POST ").append(targetUrl)
+            }
+    }
+
+    /**
+     * HTTP 层失败（4xx / 5xx）：**服务器回了话，只是拒绝或出错**——与连不上是两回事
+     * （2026-11-25 分开的一档，判据正是「有没有状态码」）。
+     *
+     * [snippet] 是响应体前 [YktDiagnostics.BODY_LIMIT] 字（已脱敏、压成一行）：
+     * 是网关的 502 页、还是平台自己吐的中文业务错、还是掉进了登录页 HTML，一眼能分。
+     */
+    class Http(
+        val code: Int,
+        val targetUrl: String,
+        val snippet: String,
+    ) : YktException("服务器返回 HTTP $code（不是密码问题）") {
+        override val detail: String
+            get() = buildString {
+                append("HTTP ").append(code)
+                if (targetUrl.isNotBlank()) append(" · ").append(targetUrl)
+                if (snippet.isNotBlank()) append('\n').append(snippet)
+            }
+    }
 
     /**
      * 平台服务时间外（支付一步被服务端业务拒绝，如「未获取到要充值的卡号」）。

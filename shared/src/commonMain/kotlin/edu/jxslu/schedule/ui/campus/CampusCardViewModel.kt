@@ -273,6 +273,38 @@ class CampusCardViewModel(
     val balanceLoaded: StateFlow<Boolean> = _balanceLoaded
 
     /**
+     * 上一次「保存并开启」失败的**技术细节**（2026-11-25）。
+     *
+     * 为什么要单独留一份而不是只发一条 Snackbar：提示会自己过期，而用户报障的方式是
+     * 截图。这里存的 [LoginFailure.detail] 已由数据层脱敏（无密码 / token / 卡号），
+     * 页面上以一行小字常驻 + 「复制诊断信息」按钮给出，用户截一次图就能定位到
+     * 「TLS 握手失败 / 服务器 502 / 平台回了什么业务码」中的哪一种。
+     *
+     * 成功即清空（`credentialStore.save` 那一步），所以它只会停留在真的失败的页面上。
+     */
+    private val _lastFailure = MutableStateFlow<LoginFailure?>(null)
+    val lastFailure: StateFlow<LoginFailure?> = _lastFailure
+
+    /** 清除诊断卡（用户点「知道了」，或下一次成功后自动掉）。 */
+    fun dismissFailure() {
+        _lastFailure.value = null
+    }
+
+    /** 一次失败的（用户文案, 技术细节）快照，见 [lastFailure]。 */
+    data class LoginFailure(
+        /** 给用户看的那句话：仍是既有业务码分类的结果，不是引擎原文。 */
+        val text: String,
+        /** 可复制的技术细节：[YktException.detail]，已脱敏。 */
+        val detail: String,
+    )
+
+    /** 记一条失败并返回给 Snackbar 的文案对象（保证两处说的是同一件事）。 */
+    private fun recordFailure(text: String, detail: String): NoticeFeedback {
+        _lastFailure.value = LoginFailure(text = text, detail = detail)
+        return NoticeFeedback(text, NoticeTone.Error)
+    }
+
+    /**
      * 刷新余额（生活页进页、点余额卡、生活页下拉刷新都走它）。无凭证/开关关时静默直返；
      * 失败静默（与 init 的口径一致，卡片副行维持旧值或「暂不可用」）。
      *
@@ -458,14 +490,21 @@ class CampusCardViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (e: YktException.Network) {
-            // 网络类失败：正文换成可操作的两句之一（关代理 / 换网络），别再报「网络不可达」原文
-            return NoticeFeedback(NetworkHint.of(isVpnActive()), NoticeTone.Error)
+            // 网络类失败：正文换成可操作的两句之一（关代理 / 换网络），别再报「网络不可达」原文；
+            // 技术细节（异常类名 + message + 目标 URL）落到诊断卡里，用户截图即可定位。
+            // 末尾那句指路是给报障用的：提示会过期，诊断卡不会，但用户得知道它就在下面。
+            return recordFailure(
+                NetworkHint.of(isVpnActive()) + "（页面下方「上次没成功的原因」可复制详情）",
+                e.detail,
+            )
         } catch (e: YktException) {
-            return NoticeFeedback(e.message ?: "登录失败，请检查账号密码", NoticeTone.Error)
+            // 其余分类（凭证错 / 协议漂移 / 服务器 4xx·5xx）正文仍是业务码分类的结果；
+            // Http 与 Protocol 的 detail 里带状态码与脱敏后的响应体前 300 字
+            return recordFailure(e.message ?: "登录失败，请检查账号密码", e.detail)
         } catch (e: Exception) {
-            return NoticeFeedback(
+            return recordFailure(
                 "登录异常：${e::class.simpleName.orEmpty()} ${e.message.orEmpty()}".trim(),
-                NoticeTone.Error,
+                (e::class.simpleName ?: e::class.toString()) + ": " + e.message.orEmpty(),
             )
         }
         // 开启即验证 CARD 账户（DESIGN §4.19 小优化）：绑多账号/无实体卡在这里暴露，
@@ -485,6 +524,8 @@ class CampusCardViewModel(
         }
         credentialStore.save(user, pwd)
         prefs.setCampusCardEnabled(true)
+        // 成功即清诊断卡：它只该停留在真的失败的那一屏上
+        _lastFailure.value = null
         return NoticeFeedback("已开启，左侧栏已可使用付款码、钱包与电费", NoticeTone.Success)
     }
 
