@@ -46,6 +46,7 @@ import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.repo.ScholarProgressRepository
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
+import edu.jxslu.schedule.data.repo.TextbookSync
 import edu.jxslu.schedule.data.session.IosJwReadSession
 import edu.jxslu.schedule.data.session.IosJwSessionFlag
 import edu.jxslu.schedule.data.session.IosAiApiKeyStore
@@ -747,6 +748,24 @@ class IosServices : AppServices {
     override fun campusCalendarStore(): CampusCalendarStore = campusCalendarStoreImpl
 
     override fun internshipBasesLoader(): InternshipBasesLoader = internshipBasesLoaderImpl
+
+    // ---- 教材（iOS 移植 W3，2026-11-25） ----
+
+    /**
+     * 教材抓取：构造只要三样，iOS 侧全都有——[session]（`IosJwReadSession`）、
+     * [repository]（课表仓库，教材按 `Timetable.term` 挂）与 [prefs]。
+     *
+     * 上一版这里没有实现，于是教材页在 iOS 上**永远空**（`textbooks` 表没有任何写入方），
+     * 而空态还写着「导入课表后会自动抓取」——用户会照着反复导入（2026-11-25 审计 P0）。
+     *
+     * 单例的理由与 Android 侧一致：`TextbookSync` 内部的 Mutex 是「一次只抓一轮」的全部依据；
+     * 页面「重新导入」与进页补抓两条路都读它。
+     */
+    private val textbookSyncImpl: TextbookSync by lazy {
+        TextbookSync(cas = session, repo = repository, prefs = prefs)
+    }
+
+    override fun textbookSync(): TextbookSync = textbookSyncImpl
 
     private companion object {
         /** 日志 tag：崩溃/后台失败都记在这个名字下，排查时先 grep 它。 */

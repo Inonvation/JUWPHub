@@ -355,9 +355,11 @@ internal fun IosRouteContent(
             onBack = pop,
         )
 
-        // 教材：iOS 没有 `TextbookSync`（那条链只被 `:app` 的 `Graph` 构造），数据永远空，
-        // 所以空态换成「本平台还没有教材抓取」，不再让用户反复导入（2026-11-25 审计 P0）
-        SubpageScreen.TEXTBOOKS -> TextbookScreen(onBack = pop, syncAvailable = false)
+        // 教材：抓取链由 `IosServices.textbookSync()` 给（与 Android 同一份 `TextbookSync`，
+        // 会话是 `IosJwReadSession`），所以这一页在 iOS 上真的能抓到数据：进页空态自动补抓一次，
+        // 顶栏「重新导入」是无闸门的强抓。上一版这里传 `syncAvailable = false`、空态说
+        // 「本平台还没有教材抓取」，是 2026-11-25 审计的 P0（用户会照着反复导入课表）。
+        SubpageScreen.TEXTBOOKS -> TextbookScreen(onBack = pop)
 
         SubpageScreen.TEACHING_CALENDAR -> TeachingCalendarScreen(onBack = pop)
 

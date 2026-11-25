@@ -38,6 +38,7 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.repo.TextbookSync
 import edu.jxslu.schedule.data.ujing.UjingDraftStore
 import edu.jxslu.schedule.data.ujing.UjingHistoryStore
 import edu.jxslu.schedule.data.ujing.UjingHouseStore
@@ -596,6 +597,22 @@ interface AppServices {
 
     /** 实习基地装载（DESIGN §4.43）：`JwReadSession` + 12 小时快照，进页默认零网络。 */
     fun internshipBasesLoader(): InternshipBasesLoader
+
+    // ---- 教材（iOS 移植 W3，2026-11-25） ----
+
+    /**
+     * 教材抓取（DESIGN §4.31）：`JwReadSession` + 课表仓库 + 偏好，按学期整批替换。
+     *
+     * **null = 本平台没有教材抓取链**。教材页据此把空态换成「本平台还没有教材抓取」，
+     * 两个出口都不给——导入了也不会变，让用户反复导入是最糟的一种「没有」。
+     *
+     * 两端现在都给非空：Android 转接 `Graph.textbookSync`（原本只有
+     * `JwImportScreen` 与冷启动补抓两个触发点，页面拿不到它）；iOS 用
+     * `IosJwReadSession` 建同一份实现。教材页因此成了**第三个触发点**，
+     * 但它只在「该学期一条教材都没有」时走 [TextbookSync.backfillIfMissing] 的闸门
+     * （抓过 / 6 小时内试过都跳过），手动「重新导入」才是无闸门的 [TextbookSync.syncForTerm]。
+     */
+    fun textbookSync(): TextbookSync? = null
 }
 
 /**
