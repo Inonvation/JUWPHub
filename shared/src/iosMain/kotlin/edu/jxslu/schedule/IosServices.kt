@@ -91,6 +91,7 @@ import edu.jxslu.schedule.platform.HomeworkReminder
 import edu.jxslu.schedule.platform.IosHomeworkReminder
 import edu.jxslu.schedule.platform.IosLocalNotifications
 import edu.jxslu.schedule.platform.IosNotificationPermission
+import edu.jxslu.schedule.platform.IosScoreReminder
 import edu.jxslu.schedule.platform.IosUjingReminder
 import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.Logger
@@ -764,6 +765,9 @@ class IosServices : AppServices {
             // 作业截止提醒：冷启动重排一次。iOS 的本地通知到点不执行代码，必须**提前**排上；
             // 上一次进程排的那批可能已被投递，作业也可能已被勾完成 / 删掉（重排会按前缀清空重来）。
             homeworkReminder().reschedule()
+            // 成绩提醒（降级形态）：进 App 查一次，有新成绩立刻弹一条。放在最后——它要打教务，
+            // 失败（没登录 / 没网）不该拖住上面两件事。
+            scoreReminderImpl.checkOnLaunch()
         }
     }
 
@@ -930,6 +934,17 @@ class IosServices : AppServices {
     }
 
     override fun homeworkReminder(): HomeworkReminder = homeworkReminderImpl
+
+    /**
+     * 成绩提醒（iOS 形态）：进 App 时查一次，有新成绩就立刻弹一条本地通知。
+     *
+     * **周期检查这一轮不做**：`BGTaskScheduler` 由系统决定何时跑、不保证周期（§12.1），
+     * 做出来的提醒会「有时有有时没有」。降级形态与三条口径见 [IosScoreReminder]；
+     * 它与 [scoreSyncImpl] 共用同一份 `ScoreSync`（那道 Mutex 是「一次只抓一轮」的依据）。
+     */
+    private val scoreReminderImpl: IosScoreReminder by lazy {
+        IosScoreReminder(prefs = prefs, sync = scoreSyncImpl)
+    }
 
     private companion object {
         /** 日志 tag：崩溃/后台失败都记在这个名字下，排查时先 grep 它。 */

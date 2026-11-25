@@ -24,7 +24,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.CourseKind
-import edu.jxslu.schedule.platform.IosLocalNotifications
 import edu.jxslu.schedule.ui.ai.AiChatScreen
 import edu.jxslu.schedule.ui.ai.AiChatViewModel
 import edu.jxslu.schedule.ui.ai.AiHistoryScreen
@@ -667,14 +666,10 @@ internal fun IosRouteContent(
                 onBack = pop,
                 viewModel = vm,
                 // 上课提醒在 iOS 上还没有排程（§12.9.2：缺「课表 → 绝对时刻」的换算与 64 条分配），
-                // 所以 onReschedule 仍是 null——开关照常落库，只是这一侧不排闹钟。
-                // 作业截止提醒 2026-11-26 起真能用：进本页与改开关都会重排一次。
+                // 所以 onReschedule 与授权入口都仍是 null——开关照常落库，这一侧不排闹钟，
+                // 也不为一个排不出东西的开关去弹系统授权框。
+                // 作业截止提醒 2026-11-26 起真能用：进本页与改开关都会重排一次（授权在重排里一并请求）。
                 onRecheckHomework = { services.homeworkReminder().reschedule() },
-                // iOS 的授权是 `UNUserNotificationCenter.requestAuthorization`（三类提醒共用
-                // 一次请求）；拒绝不阻塞开关，与 Android 的 `POST_NOTIFICATIONS` 同口径。
-                onRequestNotifPermission = { onDenied ->
-                    IosLocalNotifications.ensureAuthorized { granted -> if (!granted) onDenied() }
-                },
             )
         }
 
