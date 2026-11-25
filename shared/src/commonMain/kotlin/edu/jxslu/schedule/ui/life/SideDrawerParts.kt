@@ -249,7 +249,72 @@ fun AccountRow(onClick: () -> Unit) {
 }
 
 /**
- * 钱包区：校园卡余额大字 + 充值按钮 + 「电子账户 / 寝室电费」并排一行。
+ * 钱包卡的三格文案（校园卡余额 / 电子账户 / 寝室电费），由 [walletCardTexts] 产出。
+ *
+ * 单独成类型而不是三个 `String` 参数：三格是**一组**（水位、失败、未开启三种状态各自成句），
+ * 分开传会让调用点每次重复凑三段 `when`。
+ */
+data class WalletCardTexts(
+    val balance: String,
+    val account: String,
+    val power: String,
+)
+
+/**
+ * 钱包卡「写什么字」的唯一实现（2026-11-25 随 iOS 抽屉下沉）。
+ *
+ * ## 为什么要从 `:app` 挪进来
+ *
+ * 这三格的口径（未开启 / 读到值 / 读完了但没有 / 还在读 / 读失败）原先写在
+ * `SideDrawerContent` 里，各是一段 `when`。iOS 抽屉要同一张钱包卡，照抄就是同一份事实的
+ * 第二份拷贝——和 [DrawerHeader] 三行文案当初下沉是同一个理由。
+ *
+ * ## 三条别改坏
+ *
+ * 1. **顺序即优先级**：`noCredentials / roomNotBound` 是终态，压在旧读数之上——那份读数
+ *    已经不属于当前房间；`loading` 压在 `error` 之上，刷新中不喊上一次的失败。
+ * 2. **有旧读数时不退回「读取中…」**：侧栏展开每次都静默刷一轮，把已显示的电量抹掉再填
+ *    回来，读起来像在闪。
+ * 3. **小数用 [TextFmt.decimals] 不用 `"%.1f".format`**：后者是 JVM 专有 API，
+ *    `commonMain` 编不过；两者的等价性由 `TextFmtTest` 全量比对钉住。
+ *
+ * @param campusEnabled 一卡通总开关；关掉时余额格写「未开启」，不看有没有旧快照。
+ * @param cardFen 正式卡余额（分）；null = 还没读到。
+ * @param accountFen 电子账户余额（分）；null → 「—」（它没有加载中文案，只有得手与否）。
+ * @param balanceLoaded 余额状态是否已确定（尝试过、或压根没得加载）。
+ * @param power 寝室电费卡状态机（`LifeViewModel` 那份，字段语义见 [PowerCardState]）。
+ */
+fun walletCardTexts(
+    campusEnabled: Boolean,
+    cardFen: Long?,
+    accountFen: Long?,
+    balanceLoaded: Boolean,
+    power: PowerCardState,
+): WalletCardTexts {
+    val balance = when {
+        !campusEnabled -> "未开启"
+        cardFen != null -> MoneyFormat.fromFen(cardFen)
+        balanceLoaded -> "—"
+        else -> "读取中…"
+    }
+    val account = accountFen?.let { MoneyFormat.fromFen(it) } ?: "—"
+    val remain = power.snapshot?.meter?.remain
+    val powerText = when {
+        power.noCredentials || power.roomNotBound -> "—"
+        remain != null -> "${TextFmt.decimals(remain, 1)} 度"
+        power.loading -> "读取中…"
+        power.error != null -> "读取失败"
+        else -> "—"
+    }
+    return WalletCardTexts(balance = balance, account = account, power = powerText)
+}
+
+/**
+ * 钱包卡：校园卡余额大字 + 充值按钮 + 「电子账户 / 寝室电费」并排一行。
+ *
+ * @param onRecharge 充值入口。**null = 本平台没有这条充值路径，按钮整颗不渲染**
+ *   （`design/ios-port.md` §11.2 ④）；iOS 抽屉就是这一档——两个充值弹层的宿主
+ *   （`RechargeHost` / `PowerBankPayScreen`）还在 `:app`。
  */
 @Composable
 fun WalletHero(
@@ -260,7 +325,7 @@ fun WalletHero(
     arrivalWatching: Boolean,
     onCampusDetail: () -> Unit,
     onPowerDetail: () -> Unit,
-    onRecharge: () -> Unit,
+    onRecharge: (() -> Unit)? = null,
 ) {
     val primary = MaterialTheme.colorScheme.primary
     val onSurface = MaterialTheme.colorScheme.onSurface
@@ -332,13 +397,16 @@ fun WalletHero(
                 )
             }
             // 与余额数字同一行、垂直居中：上一版挂在「校园卡余额」小标题那一行，看着没对齐。
-            RechargeButton(
-                onClick = onRecharge,
-                // 一卡通充值有到账等待时锁入口（2026-10-22）：等待中再下一单会覆盖基线
-                // 与 pendingRecharge，第一笔的到账判定就丢了——与设置页「充值」按钮的
-                // enabled = watching == null 同一道闸。
-                enabled = !arrivalWatching,
-            )
+            // onRecharge 为 null（本平台没有充值路径）时整颗不渲染，余额大字自己吃掉这一行。
+            if (onRecharge != null) {
+                RechargeButton(
+                    onClick = onRecharge,
+                    // 一卡通充值有到账等待时锁入口（2026-10-22）：等待中再下一单会覆盖基线
+                    // 与 pendingRecharge，第一笔的到账判定就丢了——与设置页「充值」按钮的
+                    // enabled = watching == null 同一道闸。
+                    enabled = !arrivalWatching,
+                )
+            }
         }
         // 电子账户与寝室电费并成一行（2026-10-21 用户口径）：两项都是可点的余额，
         // 各占一半、中间一道细分隔线；从原来的两行（小字 + 电费行）压到一行，
@@ -667,9 +735,15 @@ internal fun formatTime(at: Long?): String {
         "${TextFmt.pad(t.hour)}:${TextFmt.pad(t.minute)}"
 }
 
-/** 侧栏一段（生活 / 江水生活 / 学习）：段头 + 若干行。 */
+/**
+ * 侧栏一段的段头（生活 / 江水生活 / 学习 …）。
+ *
+ * 单独拆出来是因为 iOS 抽屉的分组列表在 `LazyColumn` 里，段头得是**一个 item**，
+ * 不能跟着 [DrawerSection] 的 `ColumnScope` 走；两处共用这一份字级与间距，
+ * 免得 iOS 侧再调一遍（`labelSmall` + onSurface 45% + 24/14/2dp）。
+ */
 @Composable
-fun DrawerSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+fun DrawerSectionHeader(title: String) {
     Text(
         text = title,
         style = MaterialTheme.typography.labelSmall,
@@ -677,7 +751,31 @@ fun DrawerSection(title: String, content: @Composable ColumnScope.() -> Unit) {
         // 2026-10-21 收窄：上一版段头上下 18/4dp，钱包区收成一行后仍显松，压到 14/2dp
         modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 14.dp, bottom = 2.dp),
     )
+}
+
+/** 侧栏一段（生活 / 江水生活 / 学习）：段头 + 若干行。 */
+@Composable
+fun DrawerSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    DrawerSectionHeader(title)
     Column(content = content)
+}
+
+/**
+ * 侧栏的分隔线（1dp，`outlineVariant` 50%）。
+ *
+ * 只在 iOS 抽屉用：Android 侧栏靠段头与 16dp 留白分段，从来不用线；iOS 的
+ * `ModalDrawerSheet` 底色是 `surfaceContainerLow`、没有落影，身份卡与列表之间要一条线才读得
+ * 出层级。用 1dp 的 `Box` 而不是 `HorizontalDivider`：后者在不同 material3 小版本里名字与
+ * 可用性都变过（`Divider` → `HorizontalDivider`），不值得为一条线赌一次构建。
+ */
+@Composable
+fun DrawerDivider(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+    )
 }
 
 /**
@@ -872,9 +970,14 @@ fun SettingsEntry(onClick: () -> Unit) {
     }
 }
 
-/** 右下角的付款码图标入口：按下轻微缩放，松开回弹。 */
+/**
+ * 右下角的付款码图标入口：按下轻微缩放，松开回弹。
+ *
+ * @param onClick **null = 本平台没有付款码页，整颗不渲染**（`design/ios-port.md` §11.2 ④）。
+ */
 @Composable
-fun PaymentCodeEntry(onClick: () -> Unit) {
+fun PaymentCodeEntry(onClick: (() -> Unit)?) {
+    if (onClick == null) return
     val primary = MaterialTheme.colorScheme.primary
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
