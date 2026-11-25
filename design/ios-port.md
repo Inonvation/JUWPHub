@@ -1559,6 +1559,54 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 | **瓦片缓存**（`mapCache`） | 没有底图就没有瓦片可缓存 | 随地图一起 |
 
 口径：**码照出、计时照走、订单照查**——上面每一条缺的都是「入口不渲染」，不是「点了没反应」。
+### 12.14 iOS 通知四族与页面清单（2026-11-26 夜间批次收口）
+
+这一节取代 §12.9 里关于「上课提醒仍待定」的全部说法——那几句已经过期。
+
+#### 通知四族与 64 条额度
+
+| 族 | 前缀 | 标识符形状 | 上限 |
+|---|---|---|---|
+| 上课提醒（N3，2026-11-26） | `class.` | `class.<日期>.<课程id>.<起始分钟>` | **40** |
+| 作业截止 | `homework.` | `homework.<作业id>.<提醒点日期>` | 15 |
+| 洗衣完成 | `ujing.` | `ujing.<订单号>` | 1 |
+| 成绩 | `score.` | `score.latest` | 1 |
+
+合计 **57**，离系统 64 条留 7 条余量。**没有动态砍**：四族各占固定份额，谁都不去抢别人的额度。
+
+上课提醒排**未来 4 天**内每节一条「提前量那一刻」（Android 还有第二条「上课时刻」通知，iOS 不排）。
+为什么是 4 天不是 7 天：一周满课 77 节必然超 64，而第 5 天以后那批几乎一定在下次进前台时被
+「按前缀清空重排」覆盖掉，排了只占额度不产生收益。代价是连续 4 天不开 App 就断档。
+
+重排时机：冷启动（`IosServices.warmUpReminders`）＋ 提醒设置页改动。**课表变化不会自动重排**
+——改完课表要等下次冷启动，这是这一批唯一的已知功能缺口。
+
+#### 页面清单（截至 2026-11-26 夜间，iOS 能进的）
+
+学习：理论课表 / 实验课表 / 教材 / 教学日历 / 学业完成情况 / 培养方案。
+教务：成绩 / 成绩设置 / 考试 / 考试设置 / 选课 / 选课中心 / 已选课程 / 预选清单 / 学籍信息 /
+实习基地 / 校历 / 请假（三张表单）/ **学生评教** / **盖章成绩单（含最近导出）**。
+钱包：电费 / 消费流水 / 校园卡 / 付款码。
+生活：收件箱 / 宿舍报修 / 天气 / 天气设置。
+首页内嵌：**课表分享板**（课表页分享弹层第 4 行）。
+设置：调课 / 变动检测 / 课表管理 / 数据与备份 / 校历与日历同步 / **上课提醒（真排程）** /
+快捷方式 / 教务账号 / 关于与更新 / 条款与声明 / 权限与存储 / 支持开发 / 外观 / 课表 / 免扰时段。
+账号：账号中心 / 教务账户 / 校园卡 / 胖乖 / U净 / 快趣账号 / 快趣订单 / 快趣出行。
+江水生活：开水房 / U净洗衣房 / 洗衣账单 / 问渠（登录、活动、报名、工时、蹲点）。
+
+仍然进不去（`IosNotPortedScreen`）：`QZXY` / `QZXY_DEBUG` / `QZXY_BILLS`（蓝牙水控，无设备可验）、
+`WIDGET_SETTINGS`（要 Swift 扩展 target）、`TOOLBOX_WATERMARK` / `TOOLBOX_STITCH`（百宝箱已下线）。
+
+#### 这一批补上的 iOS 平台能力
+
+| 缝 | 状态 |
+|---|---|
+| 文件分享（`shareFile` / `sharePlainText`） | **打通**：根组合调 `IosSharePresenter()` 把 `LocalUIViewController` 装进 `IosShareHost`，之前没注入点所以恒回 false |
+| 保存图片到相册 | **打通**：`ImageBitmap` → PNG → `decodeBitmap` → `UIImageWriteToSavedPhotosAlbum`；`Info.plist` 已补 `NSPhotoLibraryAddUsageDescription` |
+| 成绩单 PDF 另存 | **打通**：拷一份到 `Documents/exports/`，「文件 App → JUWPHub」可见（iOS 没有「下载目录」，这就是等价物） |
+| 网页定位授权（`navigator.geolocation`） | **给不出**：Kotlin 2.1.21 的 `platform.WebKit` 绑定里 `WKUIDelegateProtocol` 没有任何定位 selector（CI 实测），试写即 `'webView' overrides nothing` |
+| 网页文件上传（`<input type=file>`） | **给不出**：`WKOpenPanelParameters` 缺失，且 JS 侧 `input.files` 只读，没有可用替代 |
+| 课表背景图（`scheduleBackgroundFiles`） | **仍是 null**（这一批没做完）。显示设置里「背景」整组不渲染 |
 ## 14. 外观与交互打磨（2026-11-25 晚，U1）
 
 用户的判断是对的：「外形还是非常粗糙」。这一轮只动**看得见的层级与过渡**，不碰页面内容。
