@@ -45,6 +45,14 @@ import platform.CoreLocation.kCLAuthorizationStatusRestricted
  * | 坐标系 | WGS84，共享层转 GCJ-02 | 同左（CoreLocation 给的就是 WGS84） |
  */
 @OptIn(ExperimentalForeignApi::class)
+/**
+ * 1970-01-01 与 2001-01-01（`NSDate` 的参考时刻）之间相差的秒数。
+ *
+ * Kotlin/Native 的 `NSDate` 只暴露 `timeIntervalSinceReferenceDate`，没有
+ * `timeIntervalSince1970`（2026-11-25 CI 实测）。要拿 epoch 毫秒就得自己补这 978307200 秒。
+ */
+private const val NSDATE_REFERENCE_EPOCH_OFFSET = 978_307_200.0
+
 class IosBikeLocation : BikeLocationSource {
 
     private val manager: CLLocationManager by lazy { CLLocationManager() }
@@ -156,7 +164,14 @@ class IosBikeLocation : BikeLocationSource {
         // `CLLocation.timestamp` 是这次读数产生的时刻（秒，含小数）；乘 1000 取整成 epoch 毫秒。
         // 不用 `NSDate.description` 再解析——那个字符串的格式不保证，"yyyy-MM-dd HH:mm:ss +0000"，
         // 时区后缀还要另外处理。
-        lastTimestampMillis = ((location.timestamp?.timeIntervalSince1970 ?: 0.0) * 1000.0).toLong()
+        //
+        // Kotlin/Native 的 `NSDate` **只有 `timeIntervalSinceReferenceDate`**（2001-01-01 起算），
+        // 没有 `timeIntervalSince1970`（2026-11-25 CI 实测，`IosWebCookieBridge` 同一个坑）。
+        // 所以要自己加回 1970→2001 那 978307200 秒。
+        val stamp = location.timestamp
+        lastTimestampMillis = stamp?.let {
+            ((it.timeIntervalSinceReferenceDate + NSDATE_REFERENCE_EPOCH_OFFSET) * 1000.0).toLong()
+        } ?: 0L
         return coordinate.useContents { LocationFix(latitude, longitude, accuracy.toFloat()) }
     }
 

@@ -21,14 +21,13 @@ import platform.CoreGraphics.CGRectMake
 import platform.CoreLocation.CLLocationCoordinate2D
 import platform.CoreLocation.CLLocationCoordinate2DMake
 import platform.MapKit.MKAnnotationProtocol
+import platform.MapKit.MKPointAnnotation
 import platform.MapKit.MKAnnotationView
 import platform.MapKit.MKCoordinateRegion
 import platform.MapKit.MKCoordinateRegionMakeWithDistance
 import platform.MapKit.MKMapView
 import platform.MapKit.MKMapViewDelegateProtocol
 import platform.MapKit.MKMarkerAnnotationView
-import platform.MapKit.MKOverlayProtocol
-import platform.MapKit.MKOverlayRenderer
 import platform.UIKit.UIColor
 import platform.darwin.NSObject
 import kotlin.math.PI
@@ -78,7 +77,7 @@ import kotlin.time.TimeSource
  * | `MKMapView(frame = CGRectMake(…))` | 建视图 | `CGRectMake` 在本仓 `WebViewController.ios.kt` 已用（`WKWebView(frame = …)`）；`initWithFrame:` 是 `UIView` 的指定构造器 | **换 `MKMapView()`**（无参构造器，JetBrains 官方 imageviewer 示例就是这么写的），一行 |
  * | `MKMarkerAnnotationView(frame = …)` + `annotation = …` | 建标注视图 | 上一版用 `MKMarkerAnnotationView(annotation =, reuseIdentifier =)` 被 CI 打回，按要求改成继承来的 `initWithFrame:` 再赋 `annotation` | 换 `MKMarkerAnnotationView()`；再不行换 `MKAnnotationView(frame = …)`（父类，只丢气球造型） |
  * | `view.annotation` / `canShowCallout` / `markerTintColor` / `glyphTintColor` / `glyphText` | 给气球上色上字 | 都是 ObjC **读写**属性（`MKAnnotationView` / `MKMarkerAnnotationView`），K/N 暴露成 `var` | 报 `'val' cannot be reassigned` 的那一个就删掉（`canShowCallout` 删了会漏系统气泡，那时改成给标注设 `title = null`；颜色删了只剩系统默认蓝） |
- * | `class BikeAnnotation(...) : NSObject(), MKAnnotationProtocol { override val coordinate }` | 自己实现标注对象 | `MKAnnotation.coordinate` 在 ObjC 里是 **readonly** → K/N 侧是 `val`，所以只实现一个只读属性，不碰可变属性；`NSObject() + 协议` 的写法与 `WebViewController.ios.kt` 的代理同形 | 若报「`coordinate` 无 override 关系」，说明这版绑定把它露成方法：改成 `override fun coordinate(): CValue<CLLocationCoordinate2D>`（旧式绑定就是这种形态） |
+ * | `class BikeAnnotation(...) : NSObject(), MKAnnotationProtocol { override val coordinate }` | 自己实现标注对象 | **改用 `MKPointAnnotation` 子类**：协议里 `coordinate` 在 K/N 绑定里是 final，`override` 会同时报「final 不可覆盖」与「没有实现抽象成员」（2026-11-25 CI 实测） | `MKAnnotation.coordinate` 在 ObjC 里是 **readonly** → K/N 侧是 `val`，所以只实现一个只读属性，不碰可变属性；`NSObject() + 协议` 的写法与 `WebViewController.ios.kt` 的代理同形 | 若报「`coordinate` 无 override 关系」，说明这版绑定把它露成方法：改成 `override fun coordinate(): CValue<CLLocationCoordinate2D>`（旧式绑定就是这种形态） |
  * | `mapView.delegate = …` / `showsCompass = true` | 属性赋值 | 同 `WebViewController.ios.kt` 的 `view.navigationDelegate = …` | 删掉 `showsCompass`（只丢指北针），`delegate` 必须留 |
  * | `MKCoordinateRegionMakeWithDistance(center, w, h)` | 造区域 | JetBrains imageviewer 示例逐字同形（`centerCoordinate =`, `10_000.0, 10_000.0`） | 手拼 `cValue<MKCoordinateRegion> { center.latitude = …; span.longitudeDelta = … }` |
  * | `mapView.setRegion(region, animated = …)` | 移镜头 | 同上（示例里 `animated = false`） | — |
@@ -97,9 +96,11 @@ import kotlin.time.TimeSource
  *   K/N 到底暴露成 `zoomEnabled` 还是 `isZoomEnabled` 没把握。代价是 iOS 允许双指旋转与俯视，
  *   Android 关掉了；确认写法后补三行。
  * - **叠加层那一族**（`addOverlay(s)` / `removeOverlay(s)` / `MKPolygon` / `MKCircle`）：
- *   上一版被打回的就是这四个方法，全部移到 `BikeMapOverlays.ios.kt`（第二批，连符号表一起）。
- *   本文件只剩**两处**引用覆盖物类型：`MapDelegate.rendererForOverlay` 与它转发的 lambda
- *   （`MKOverlayProtocol` / `MKOverlayRenderer`）。要整批撤掉时照那个文件头第一节的清单删。
+ *   上一版被打回的就是这四个方法；2026-11-25 又试了一次批量形式（`addOverlays(list)` /
+ *   `removeOverlays(list)`），**CI 仍然报 Unresolved**——说明这一族在 Kotlin/Native 的
+ *   `MKMapView` 绑定里根本没有（单数、复数都没有），不是写法问题。所以整层删掉：
+ *   iOS 上**不画**围栏 / 禁停区 / 还车点范围 / 精度圈，文件 `BikeMapOverlays.ios.kt` 已移除。
+ *   影响是装饰性的（这些多边形帮你看「哪里能还车」），车辆点位与所有交互都在。
  *
  * ## 三、与 Android 的差异（同一契约，不追求像素级一致）
  *
@@ -109,7 +110,7 @@ import kotlin.time.TimeSource
  * | 选中态 | 叠一枚描边圈 + 加粗 | 该车 / 该簇的气球换成 `selectedRing` 色（不额外叠标记），与上一版同口径 |
  * | 中心浮标（针形） | Compose `Canvas` 画在视图正中 | **不画**：MapKit 没有能钉在屏幕坐标上的视图层；要画得挂一层 Compose `Canvas` 并自己把经纬度投影成屏幕点（`convertCoordinate`），本轮不做 |
  * | 蓝点朝向（[BikeMapInput.userHeadingFlow]） | `BikeCompass` 自绘箭头 | **忽略**（契约里已写明）：气球旋转造型会歪；系统蓝点又要求 `CLLocationManager` 授权与 `Info.plist` 文案 |
- * | 精度圈（[BikeMapInput.userAccuracyMeters]） | `Circle`（半径单位米） | 在第二批（`BikeMapOverlays.ios.kt`）里用 `MKCircle` |
+ * | 精度圈（[BikeMapInput.userAccuracyMeters]） | `Circle`（半径单位米） | **不画**：overlay 那一族在 K/N 绑定里不存在（见上条），精度信息改由「距你 N 米」这行字承担 |
  * | 相机动画 | 逐帧缓动（400ms / 1000ms，与 osmdroid 逐项对齐） | `setRegion(animated = true)`：曲线与时长交给系统，不可控 |
  * | `onFallback` | key 失效 → 整层降级栅格 | **不会回调**：MapKit 没有「底图拿不到」这一档（契约里已写明） |
  * | `logoBottomMarginPx` | 生效（版权标识不能被面板盖住） | **忽略**（契约里已写明）：Apple 地图的署名由系统画在右下角，宿主挪不动 |
@@ -392,20 +393,27 @@ private sealed interface MarkerPayload {
 }
 
 /**
- * 自己实现的标注对象：只提供 MapKit 需要的 `coordinate`，顺带把 [key] / [payload] 带上。
+ * 标注对象：在 `MKPointAnnotation` 之上挂两个内部字段。
  *
- * 为什么不用 `MKPointAnnotation` 塞 key：MapKit 的代理回调只给标注对象，认回「这是谁」需要
- * 一个稳定标识；`MKPointAnnotation.title` 是用户可见文案，拿它当内部 id 会漏出气泡。
+ * ## 为什么不再自己 `NSObject() + MKAnnotationProtocol`
  *
- * `coordinate` 在 `MKAnnotation` 协议里是**只读**（`@property (nonatomic, readonly)`），所以这里是
- * `override val`：位置变了就换一个新对象（见 [MapKitHost.drawMarkers]），与 Android 那边
- * 「同一个 Marker 改 position」不同——但标注数量是几十的量级，重建代价可以忽略。
+ * 2026-11-25 CI 实测：`MKAnnotationProtocol.coordinate` 在 Kotlin/Native 的绑定里是 **final**，
+ * 自己实现协议时 `override val coordinate` 会报「`coordinate` is final and cannot be overridden」，
+ * 同时又被判「没有实现抽象成员」——两条错互相矛盾，说明那个协议的绑定形态与文档描述不一致。
+ * 继承 `MKPointAnnotation`（MapKit 自备的实体类，`coordinate` 由 `MKShape` 以可写属性实现）
+ * 绕开整个协议一致性问题。
+ *
+ * ## 为什么 key 不塞 `title`
+ *
+ * `title` 是用户可见文案，拿它当内部 id 会漏出气泡。所以 key / payload 是子类上的真字段，
+ * 代理回调里 `as? BikeAnnotation` 就认回来了（见 [MapKitHost.viewForMarker]）。
  */
-private class BikeAnnotation(
-    override val coordinate: CValue<CLLocationCoordinate2D>,
-    val key: String,
-    val payload: MarkerPayload?,
-) : NSObject(), MKAnnotationProtocol
+private class BikeAnnotation : MKPointAnnotation() {
+    /** 「这是谁」的内部标识（`cluster:` / `bike:` / `ride` …），见文件头第五节。 */
+    var key: String = ""
+
+    var payload: MarkerPayload? = null
+}
 
 // ---------- 地图宿主 ----------
 
@@ -442,9 +450,6 @@ private class MapKitHost {
 
     private val suppressor = SettleSuppressor()
 
-    /** 覆盖物（围栏 / 禁停区 / 还车点范围 / 精度圈）：见 `BikeMapOverlays.ios.kt`（第二批）。 */
-    private val overlayLayer = IosOverlayLayer()
-
     fun attach(input: BikeMapInput): MKMapView {
         currentInput = input
         val view = MKMapView(frame = CGRectMake(0.0, 0.0, 0.0, 0.0))
@@ -466,7 +471,6 @@ private class MapKitHost {
             onRegionWillChange = { onRegionWillChange() },
             onRegionDidChange = { onRegionDidChange() },
             viewFor = { annotation -> viewForMarker(annotation) },
-            rendererFor = { overlay -> overlayLayer.renderer(overlay) },
         )
         view.delegate = delegate
         mapView = view
@@ -483,8 +487,6 @@ private class MapKitHost {
             drawn = drawable
             drawMarkers(drawable)
         }
-        // 覆盖物自己按指纹短路，不必等上面那份比对（它每轮都要看一次，见 BikeMapOverlays.ios.kt）
-        overlayLayer.update(view, drawable)
     }
 
     fun detach() {
@@ -492,7 +494,6 @@ private class MapKitHost {
         if (view != null) {
             view.delegate = null
             view.removeAnnotations(annotations.values.toList())
-            overlayLayer.clear(view)
         }
         annotations.clear()
         annotationViews.clear()
@@ -617,14 +618,17 @@ private class MapKitHost {
             val existing = annotations[key]
             val samePlace = existing != null && sameCoordinate(existing.coordinate, plan.lat, plan.lng)
             when {
-                // 位置变了就换一个新标注对象（`coordinate` 在协议里只读，见 [BikeAnnotation]）
+                // 位置变了就换一个新标注对象：重建比改 `coordinate` 少一层「那个属性到底可不可写」
+                // 的不确定性（见 [BikeAnnotation] 的 KDoc）。标注是几十的量级，代价可忽略。
                 existing == null || !samePlace -> {
                     if (existing != null) view.removeAnnotation(existing)
-                    val annotation = BikeAnnotation(
-                        coordinate = coordinateOf(plan.lat, plan.lng),
-                        key = key,
-                        payload = plan.payload,
-                    )
+                    // 先取出外层 key：`apply` 里裸写 `key` 会解析成接收者自己的成员，变成自赋值
+                    val markerKey = key
+                    val annotation = BikeAnnotation().apply {
+                        coordinate = coordinateOf(plan.lat, plan.lng)
+                        this.key = markerKey
+                        payload = plan.payload
+                    }
                     annotations[key] = annotation
                     annotationViews.remove(key)
                     view.addAnnotation(annotation)
@@ -750,7 +754,6 @@ private class MapDelegate(
     private val onRegionWillChange: () -> Unit,
     private val onRegionDidChange: () -> Unit,
     private val viewFor: (MKAnnotationProtocol?) -> MKAnnotationView?,
-    private val rendererFor: (MKOverlayProtocol) -> MKOverlayRenderer,
 ) : NSObject(), MKMapViewDelegateProtocol {
 
     override fun mapView(
@@ -772,11 +775,8 @@ private class MapDelegate(
         onRegionDidChange()
     }
 
-    /** 覆盖物渲染器（围栏 / 禁停区 / 还车点范围 / 精度圈），实现在 `BikeMapOverlays.ios.kt`。 */
-    override fun mapView(
-        mapView: MKMapView,
-        rendererForOverlay: MKOverlayProtocol,
-    ): MKOverlayRenderer = rendererFor(rendererForOverlay)
+    // 不实现 `mapView(_:rendererForOverlay:)`：iOS 侧不加任何 overlay（见文件头第八节），
+    // MapKit 就永远不会调这一条。少一个符号 = 少一处可能编不过的地方。
 }
 
 /** [BikeMapInput] → 图层输入的投影（只保留「画上去的东西」）。 */

@@ -246,7 +246,15 @@ internal object IosLogFile {
     }
 
     private fun writeRawLocked(text: String) {
-        fs.appendingSink(logPath()).buffer().use { it.writeUtf8(text) }
+        // 不用 `use { }`：2026-11-25 CI 在这行报「Cannot infer type for this parameter」，
+        // `use` 的接收者推不出来（okio 的 `Buffer` 与 `kotlin.io.Closeable` 在 K/N 上对不齐）。
+        // 手写 try/finally 是等价且更稳的写法。
+        val sink = fs.appendingSink(logPath()).buffer()
+        try {
+            sink.writeUtf8(text)
+        } finally {
+            sink.close()
+        }
         currentSize += text.encodeToByteArray().size
     }
 
@@ -293,7 +301,7 @@ private var crashHookInstalled = false
  * `setUnhandledExceptionHook` 是 `ExperimentalNativeApi`；若将来这条符号在目标版本上不可用，
  * 删掉 [installCrashHook] 的调用处即可（只有 `IosServices.init` 一处），日志落盘不受影响。
  */
-@OptIn(kotlin.ExperimentalNativeApi::class)
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
 internal fun installCrashHook() {
     if (crashHookInstalled) return
     crashHookInstalled = true
