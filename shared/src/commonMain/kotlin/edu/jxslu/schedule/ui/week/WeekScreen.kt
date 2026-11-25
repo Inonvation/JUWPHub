@@ -183,6 +183,7 @@ val TopBarHeight = 62.dp
  * | [onSyncCalendar] | 平台没有系统日历写入 → 隐藏「同步到日历」 |
  * | [displaySettings] | 平台没有显示设置面板实现 → 隐藏顶栏「眼睛」 |
  * | [backgroundExists] | 平台没有背景图功能 → 跳过「文件丢了就清偏好」的校验 |
+ * | [onOpenDrawer] | 平台没有左侧抽屉 → 顶栏左侧不渲染汉堡 |
  *
  * 传 null 不等于功能坏掉，而是**这个平台确实没有这项能力**，所以入口直接不出现——
  * 让用户点一下再告诉他「不支持」比一开始就没有更糟。
@@ -217,6 +218,13 @@ fun WeekScreen(
     backgroundExists: ((name: String) -> Boolean)? = null,
     /** 显示设置覆盖面板；参数为表头高度的动态下限（与网格布局兜底同源）。 */
     displaySettings: (@Composable (headerMinDp: Float, onDismiss: () -> Unit) -> Unit)? = null,
+    /**
+     * 左侧抽屉入口（iOS 壳的 `ModalNavigationDrawer`）：非 null 时顶栏最左侧渲染汉堡。
+     *
+     * null = 本平台没有抽屉（Android 的侧栏由 `MainActivity` 的悬浮胶囊与今日页顶栏进），
+     * 顶栏布局与图标顺序**逐字不变**——这是 Android 侧「一个像素都不多」的判据。
+     */
+    onOpenDrawer: (() -> Unit)? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<Course?>(null) }
@@ -564,6 +572,7 @@ fun WeekScreen(
                     onOpenImport = { importOpen = true },
                     onOpenShare = { shareOpen = true },
                     onQuickCheck = { viewModel.quickCheck() },
+                    onOpenDrawer = onOpenDrawer,
                 )
             }
         },
@@ -1047,6 +1056,12 @@ fun GridTypography(fontScale: Float, content: @Composable () -> Unit) {
  * 图标区现在四个（分享 / 显示设置 / 快速检测 / 导入），**不要再往里加**：
  * 360dp 宽的机器上日期块只剩约 146dp，「2026/11/18」在 titleLarge 下已经贴着边界
  * （2026-11-18 加快速检测时核过）；下一件想放顶栏的事先想别的落点。
+ *
+ * 唯一的例外是**左侧**的抽屉汉堡（[onOpenDrawer] 非 null 时才有，2026-11-25 iOS）：
+ * 它排在日期块左侧、不碰右侧图标组（右对齐靠中间那条 `weight(1f)` 的 Spacer，顺序与间距不变）。
+ * 它占 48dp，行首内边距同时从 16dp 收到 4dp（M3 顶栏导航位本来就是 4dp 起），
+ * **净占 36dp**；iOS 现在亮着三只图标（眼睛 / 检测 / 导入）时，360dp 上日期块仍有 158dp，
+ * 高于上一条的 146dp 底线。
  */
 @Composable
 private fun WeekTopBar(
@@ -1066,6 +1081,8 @@ private fun WeekTopBar(
     onOpenImport: () -> Unit,
     onOpenShare: () -> Unit,
     onQuickCheck: () -> Unit,
+    /** 左侧抽屉入口；null = 本平台没有抽屉，行首不渲染汉堡（见函数头注释）。 */
+    onOpenDrawer: (() -> Unit)?,
 ) {
     val onSurface = MaterialTheme.colorScheme.onSurface
     val haptics = rememberAppHaptics()
@@ -1076,9 +1093,18 @@ private fun WeekTopBar(
             // 自绘顶栏自己让位；垫在 height 之外，总高 = 状态栏 + 56dp，与改动前一致。
             .windowInsetsPadding(WindowInsets.statusBars)
             .height(TopBarHeight)
-            .padding(start = 16.dp, end = 6.dp),
+            // 有汉堡时行首只留 4dp：IconButton 自带 12dp 内边距，4+48 与 M3 顶栏
+            // 「导航位 4dp 起 + 48dp」同几何；没有汉堡时仍是原来的 16dp。
+            .padding(start = if (onOpenDrawer != null) 4.dp else 16.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (onOpenDrawer != null) {
+            // 与今日页顶栏同一只（`TodayScreen` 的 navigationIcon）：同一个抽屉、同一套口径，
+            // 图标 24dp + 默认内容色，不像右侧动作图标那样缩到 20dp / 0.75 透明度。
+            IconButton(onClick = onOpenDrawer) {
+                Icon(AppIcons.Menu01, contentDescription = "打开生活侧栏")
+            }
+        }
         Column(
             modifier = Modifier
                 .clip(RoundedCornerShape(10.dp))
