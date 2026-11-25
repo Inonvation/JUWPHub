@@ -46,6 +46,7 @@ import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.repo.ScholarProgressRepository
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
+import edu.jxslu.schedule.data.repo.TeachingCalendarSync
 import edu.jxslu.schedule.data.repo.TextbookSync
 import edu.jxslu.schedule.data.session.IosJwReadSession
 import edu.jxslu.schedule.data.session.IosJwSessionFlag
@@ -766,6 +767,24 @@ class IosServices : AppServices {
     }
 
     override fun textbookSync(): TextbookSync = textbookSyncImpl
+
+    // ---- 首启引导（iOS 移植 S22，2026-11-25） ----
+
+    /**
+     * 开学日校准：构造只要 [session]（`IosJwReadSession`）与 [repository]，iOS 侧两样都有。
+     *
+     * 目前唯一的调用点是引导页的后台补抓，而 iOS 那条路走的是「去导入页登录」分支
+     * （`jwLogin` 为 null），所以**它现在还不会被调到**。仍然给实现而不是 null：
+     * 账号中心 / 导入页以后接同一个触发点时不用回来改这一层，而它会话不在时也只是
+     * `ensureValid` 返回 `NeedsManualLogin` → `Failed`，是真实结论不是假实现。
+     * 「没有调用方就不许加成员」这条纪律在这里成立的前提是**共享层有调用方**
+     * （`OnboardingScreen.startBgSync`），它确实有。
+     */
+    private val teachingCalendarSyncImpl: TeachingCalendarSync by lazy {
+        TeachingCalendarSync(cas = session, repo = repository)
+    }
+
+    override fun teachingCalendarSync(): TeachingCalendarSync = teachingCalendarSyncImpl
 
     private companion object {
         /** 日志 tag：崩溃/后台失败都记在这个名字下，排查时先 grep 它。 */

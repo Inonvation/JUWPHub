@@ -38,6 +38,7 @@ import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
+import edu.jxslu.schedule.data.repo.TeachingCalendarSync
 import edu.jxslu.schedule.data.repo.TextbookSync
 import edu.jxslu.schedule.data.ujing.UjingDraftStore
 import edu.jxslu.schedule.data.ujing.UjingHistoryStore
@@ -613,6 +614,21 @@ interface AppServices {
      * （抓过 / 6 小时内试过都跳过），手动「重新导入」才是无闸门的 [TextbookSync.syncForTerm]。
      */
     fun textbookSync(): TextbookSync? = null
+
+    // ---- 首启引导（iOS 移植 S22，2026-11-25） ----
+
+    /**
+     * 开学日校准（DESIGN §4.42）：导入课表写库成功后抓一次教学日历，把第 1 周周一写进
+     * 目标课表的开学日。
+     *
+     * 为什么现在才立成员：唯一调用点是**首启引导的后台补抓**（`OnboardingScreen.startBgSync`），
+     * 而引导页此前在 `:app`，直接调 `Graph.teachingCalendarSync` 就行；搬进共享层之后
+     * 这一行成了跨模块调用。它是「一个 `JwReadSession` + 课表仓库」就够的纯编排，
+     * 两端都建得起来（与 [textbookSync] / [profileSync] 同一档），所以非空。
+     *
+     * **必须是同一份实例**：它内部那道 Mutex 是「一次只校准一张表」的全部依据。
+     */
+    fun teachingCalendarSync(): TeachingCalendarSync
 }
 
 /**

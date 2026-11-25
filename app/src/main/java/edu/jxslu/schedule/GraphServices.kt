@@ -40,6 +40,7 @@ import edu.jxslu.schedule.data.repo.ScoreRepository
 import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.repo.ScholarProgressRepository
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
+import edu.jxslu.schedule.data.repo.TeachingCalendarSync
 import edu.jxslu.schedule.data.repo.TextbookSync
 import edu.jxslu.schedule.data.session.LoginGateRules
 import edu.jxslu.schedule.data.session.LoginTarget
@@ -448,4 +449,10 @@ class GraphServices(private val context: Context) : AppServices {
      * 全部依据。各 new 一个等于导入那一次与页面这次同时各打一遍教务。
      */
     override fun textbookSync(): TextbookSync = Graph.textbookSync(appContext)
+
+    // ---- 首启引导（iOS 移植 S22，2026-11-25） ----
+
+    /** 开学日校准：转接 `Graph.teachingCalendarSync` 的同一份单例（Mutex 即「一次一张表」的依据）。 */
+    override fun teachingCalendarSync(): TeachingCalendarSync =
+        Graph.teachingCalendarSync(appContext)
 }
