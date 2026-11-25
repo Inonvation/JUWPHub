@@ -654,12 +654,10 @@ class IosServices : AppServices {
      * 上一版返回 null，理由是「iOS 还没有通知能力」。现在有了：授权 + `UNTimeIntervalNotificationTrigger`
      * 排一条到点通知，两个 `remove…NotificationsWithIdentifiers` 对应 Android 的 cancel / revoke。
      * 权限被拒时 [IosUjingReminder] 自己降级成 no-op（不抛异常），结论记在
-     * [IosNotificationPermission] 里给页面读。
+     * [IosNotificationPermission] 里给页面读。授权与队列扫描在 `IosLocalNotifications`（三类共用）。
      *
-     * **非 lazy 是刻意的**：它的构造函数要把前台横幅代理挂到 `UNUserNotificationCenter.delegate`
-     * （那是 weak，必须由长命对象持有），而 [IosServices] 在 `MainViewController` 里是启动第一行。
-     * 换成 `by lazy` 就一直等到用户第一次进 U净 页才装代理——此前前台收到的通知不弹横幅。
-     * 构造只取一次系统单例，没有 IO，也没有副作用顺序问题。
+     * **非 lazy 是刻意的**：进 U净 页之前也可能要先撤一条（例如冷启动恢复在案订单），
+     * 而构造只取一次系统单例、没有 IO。前台横幅代理不靠它安装——那一步在 [init] 里，比页面更早。
      *
      * 这一端仍然**不能下单**（`UjingPay` 为 null，见 `UjingViewModel.createAndPay`），所以这条提醒
      * 在 iOS 上要等「有在案订单」才会被排到——闭环缺口不在提醒这一层。
@@ -735,6 +733,10 @@ class IosServices : AppServices {
     private val qzxyFlowLockInstance: Mutex = Mutex()
 
     init {
+        // 前台横幅代理（N2 起从 `IosUjingReminder` 提出来，三类提醒共用）：iOS 默认前台不弹横幅，
+        // 必须实现 `willPresentNotification` 并回 `banner | sound`。`delegate` 是 weak，
+        // 持有者必须是进程级对象，所以由这里（`MainViewController` 的第一行）装一次。
+        IosLocalNotifications.installForegroundPresentation()
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
         // 用户关掉导入页之后课表页的「检测」照样能读登录态。
         WebCookies.source = IosWebCookieSource

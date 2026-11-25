@@ -33,8 +33,8 @@ import platform.UIKit.UIViewController
  *
  * 共享页的 `permissionSections` 传 `null`。iOS 的授权模型与 Android 不是同一件事：
  * 电池优化白名单、自启动 / 锁后台在 iOS **不存在**；通知是
- * `UNUserNotificationCenter.requestAuthorization`（U净 洗衣完成提醒已经单独接好，
- * 见 `platform/IosUjingReminder`），日历 / 定位 / 相册各自一套 `Info.plist` 用途描述
+ * `UNUserNotificationCenter.requestAuthorization`（洗衣 / 作业截止 / 成绩三类提醒共用
+ * `platform/IosLocalNotifications` 的那一次请求），日历 / 定位 / 相册各自一套 `Info.plist` 用途描述
  * 与 `PHPhotoLibrary` 授权。按 `design/ios-port.md` §11.2 ④，平台没有的入口整块不渲染，
  * 比造一行「点了没反应」好。
  *
