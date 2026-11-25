@@ -115,6 +115,35 @@ sealed interface EbikeQrSaveResult {
 }
 
 /**
+ * 快趣地图的**离线缓存**（瓦片 + 还车点/禁停区数据）的统计与清理（设置弹层「地图缓存」卡）。
+ *
+ * **null = 本平台没有这份缓存可管**：iOS 的 MapKit 把底图交给系统，App 侧没有可统计、
+ * 可清理的瓦片目录，那张卡整块不渲染（口径同 `design/ios-port.md` §11.2 ④）。
+ *
+ * Android 实现是 `:app` 的 `AndroidBikeMapCache`（转接原有 `EbikeMapCache`，
+ * 那块还兼着「清理全部缓存」的聚合入口 `AppCacheCleaner`，所以实现留在 `:app`）。
+ */
+interface EbikeMapCachePort {
+
+    /**
+     * 缓存占用。[amapBytes] 是高德 SDK 自己的瓦片缓存（只有 Android 有）。
+     *
+     * 字段与语义逐条照搬 `:app` 的 `EbikeMapCache.Usage`——那边的 `totalBytes` 是三段之和，
+     * 显示文案由 `domain/SizeText` 出，两端同一份。
+     */
+    data class Usage(val tileBytes: Long, val zoneBytes: Long, val amapBytes: Long = 0L) {
+        val totalBytes: Long get() = tileBytes + zoneBytes + amapBytes
+        val isEmpty: Boolean get() = totalBytes == 0L
+    }
+
+    /** 进弹层时统计一次（瓦片是浏览地图的时长，弹层开着不会变多少）。 */
+    suspend fun measure(): Usage
+
+    /** 清缓存；true = 已清，false = 没清干净（调用方提示稍后重试）。 */
+    suspend fun clear(): Boolean
+}
+
+/**
  * 起免费时长计时并把结果映射成提示文案与语气（点扫一扫 / 本机开锁成功共用，**唯一实现**）。
  *
  * 搬迁前这段映射在 `:app` 的 `KvcxRideSideEffects.kt`，出码页另有一份；两处口径必须一致，

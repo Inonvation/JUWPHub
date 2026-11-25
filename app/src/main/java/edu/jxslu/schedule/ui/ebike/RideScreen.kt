@@ -1380,6 +1380,11 @@ fun RideScreen(
             onDismiss = { showSettings = false },
             onOpenKvcxAccount = openAccount,
             onNotice = { message, tone -> showNotice(scope, snackbar, message, tone) },
+            // 以下四项是 Android 侧的平台能力（iOS 宿主各传自己的一份或 null）
+            mapCache = AndroidBikeMapCache,
+            showMapSourceChoice = true,
+            requestNotificationPermission = withNotificationPermission,
+            onOpenNotificationSettings = { AppPermissions.jumpNotificationSettings(context) },
         )
     }
 
