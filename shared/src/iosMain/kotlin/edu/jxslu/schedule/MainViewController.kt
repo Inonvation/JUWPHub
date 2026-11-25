@@ -35,17 +35,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.ComposeUIViewController
 import edu.jxslu.schedule.data.jw.JwImportDiagnosis
 import edu.jxslu.schedule.data.jw.JwUrls
-import edu.jxslu.schedule.data.local.CourseEntity
-import edu.jxslu.schedule.data.local.DB_VERSION
-import edu.jxslu.schedule.data.local.juwDatabase
-import edu.jxslu.schedule.data.local.juwDatabasePath
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.session.IosJwSessionFlag
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.platform.Services
-import edu.jxslu.schedule.ui.DataSelfTestResult
-import edu.jxslu.schedule.ui.DataSelfTestStrip
 import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.jw.JwHubScreen
 import edu.jxslu.schedule.ui.jwvw.JwWebFit
@@ -161,6 +156,14 @@ private fun IosRoot(services: IosServices) {
                                     viewModel = viewModel,
                                     // 空态的「去导入课表」→ 教务登录页（WKWebView 登录后自动抓取落库）
                                     onOpenJwImport = { jwOpen = true },
+                                    // 切换课表弹层里的「管理课表…」与顶栏「检测 → 查看」：
+                                    // 两页都已在 iOS 上可进，只是上一版没接线，点了落在空 lambda 上
+                                    onOpenTimetableManage = {
+                                        stack.add(IosRoute(SubpageScreen.TIMETABLE_MANAGE))
+                                    },
+                                    onOpenScheduleChanges = {
+                                        stack.add(IosRoute(SubpageScreen.SCHEDULE_CHANGES))
+                                    },
                                     // 课程长按菜单里的「笔记 / 作业」在精简版下线：两个回调传 null，
                                     // 弹窗里那两行不渲染（shared 侧 CourseDetailSheet 的可空槽位）
                                     // 显示设置面板（S17 搬进共享层）：顶栏那只眼睛从此在 iOS 上也有入口。
@@ -179,8 +182,9 @@ private fun IosRoot(services: IosServices) {
                             }
 
                             // 教务 Tab（S18 搬进共享层）：概览数字读本地表（Room），两端同源。
-                            // 七个入口接真页面；学业 / 培养方案 / 实习基地 / 评教 / 请假 / 报修 /
-                            // 校历的页面还在 `:app`，传 null = 整行不渲染（§11.2 ④）。
+                            // 十二个入口全部接真页面（2026-11-25 晚补齐学业 / 培养方案 / 实习基地 /
+                            // 请假 / 报修 / 校历六条——它们早就有页面，只是这里没传，Tab 上就整块消失）；
+                            // 评教与「在教务网页核对」要 WebView 浏览窗口，传 null 即整条不渲染。
                             IosTab.Jw -> JwHubScreen(
                                 onOpenTheorySchedule = {
                                     stack.add(IosRoute(SubpageScreen.THEORY_SCHEDULE))
@@ -191,10 +195,18 @@ private fun IosRoot(services: IosServices) {
                                 onOpenScores = { stack.add(IosRoute(SubpageScreen.SCORES)) },
                                 onOpenExams = { stack.add(IosRoute(SubpageScreen.EXAMS)) },
                                 onOpenTextbooks = { stack.add(IosRoute(SubpageScreen.TEXTBOOKS)) },
+                                onOpenScholar = { stack.add(IosRoute(SubpageScreen.SCHOLAR)) },
+                                onOpenCurriculum = { stack.add(IosRoute(SubpageScreen.CURRICULUM)) },
                                 onOpenSelection = { stack.add(IosRoute(SubpageScreen.SELECTIONS)) },
+                                onOpenInternship = {
+                                    stack.add(IosRoute(SubpageScreen.INTERNSHIP_BASES))
+                                },
                                 onOpenTeachingCalendar = {
                                     stack.add(IosRoute(SubpageScreen.TEACHING_CALENDAR))
                                 },
+                                onOpenLeaveHub = { stack.add(IosRoute(SubpageScreen.LEAVE_HUB)) },
+                                onOpenRepair = { stack.add(IosRoute(SubpageScreen.DORM_REPAIR)) },
+                                onOpenCalendar = { stack.add(IosRoute(SubpageScreen.CAMPUS_CALENDAR)) },
                             )
 
                             // 「我的」= 设置首页（S17 搬进共享层）。每个入口都 push 一个路由，
@@ -224,7 +236,6 @@ private fun IosRoot(services: IosServices) {
                         TextButton(onClick = { drawerOpen = true }) { Text("更多") }
                     }
                 }
-                DbSelfTestStrip()
             }
         }
 
@@ -445,10 +456,20 @@ private fun JwLoginScreen(services: IosServices, onClose: () -> Unit) {
             }
             if (!importing && isStudentSide(url)) {
                 importing = true
+                // 刚落到学生端 = 教务会话此刻确实可用：立刻记下，账号中心/教务账号页据此显示已登录
+                IosJwSessionFlag.markUsable()
                 status = "已登录，正在从教务导入课表…"
                 scope.launch {
-                    val result = services.scheduleTermImport().archive(manual = true)
-                    status = describeImport(result, services)
+                    // 归档会遍历教务下拉里的全部学期（每个学期两张页 + 请求间隔），几十秒起步。
+                    // 顶栏跟着报进度：用户才知道「它在干活、别关页面」——WebView 一关，
+                    // 同源取页的桥就没了（见 IosWebFetch）。
+                    val result = services.scheduleTermImport().archive(manual = true) { done, total, term ->
+                        status = "正在导入 $term（$done/$total）…"
+                    }
+                    // 读库只为把数字说清楚；读失败不能把「导入」本身判死，也不能让 importing
+                    // 永远挂在 true（那会把闸门焊死，之后再也不自动重试）
+                    status = runCatching { describeImport(result, services) }
+                        .getOrElse { "导入结束（结果读取失败：${it.message ?: "未知"}）" }
                     importing = false
                 }
             } else {
@@ -549,11 +570,16 @@ private suspend fun describeImport(
                     ScheduleCalculator.formatWeeks(c.weeks)
             }
             buildString {
-                append("导入完成：库里 ${courses.size} 门 · 开学 ${semester?.startDate ?: "—"} · 现第 $week 周")
-                append(" · 教务 ${result.currentTerm ?: "未识别"}")
-                if (result.createdTerms.isNotEmpty()) {
+                if (result.createdTerms.isEmpty()) {
+                    // 全部跳过（每个学期库里都已有）：这不是失败，但「本次什么都没新建」必须说出来，
+                    // 否则用户以为刚导了一遍
+                    append("导入完成：${result.skipped} 个学期库里已有，本次没有新建")
+                } else {
+                    append("导入完成：库里 ${courses.size} 门")
                     append(" · 新建 ${result.createdTerms.joinToString("、")}")
                 }
+                append(" · 开学 ${semester?.startDate ?: "—"} · 现第 $week 周")
+                append(" · 教务 ${result.currentTerm ?: "未识别"}")
                 if (result.failed.isNotEmpty()) append(" · ${result.failed.size} 个学期失败")
                 if (sample != null) append("\n示例：$sample")
             }
@@ -590,40 +616,4 @@ private fun isStudentSide(url: String?): Boolean {
     val u = url.orEmpty()
     if (!JwUrls.isJwHost(u)) return false
     return ":8080" in u || "xsMain" in u || "xskb" in u
-}
-
-/**
- * 数据库自检（P2 验收，2026-11-24）：真实写入一门探针课 → 按 id 读回 → 删掉 → 再数一遍。
- *
- * 界面与状态机在 `ui/DataSelfTestStrip.kt`（commonMain），本机门禁能编；这里只留平台相关的
- * 十几行。探针用固定 `timetableId = 999999` 且写完即删，不会污染真实数据。
- */
-@Composable
-private fun DbSelfTestStrip() {
-    DataSelfTestStrip(
-        probe = {
-            val dao = juwDatabase().courseDao()
-            val probe = CourseEntity(
-                timetableId = 999_999,
-                name = "iOS 数据自检",
-                teacher = "-",
-                position = "-",
-                day = 1,
-                startSection = 1,
-                endSection = 1,
-                weeksCsv = "1",
-            )
-            val id = dao.upsert(probe)
-            val readBack = dao.getById(id)
-            dao.delete(probe.copy(id = id))
-            val left = dao.getForTimetable(999_999).size
-            if (readBack?.name == probe.name && left == 0) {
-                DataSelfTestResult(ok = true, text = "DB v$DB_VERSION · 写入并读回 1 门 · 清理后剩 $left 门")
-            } else {
-                DataSelfTestResult(ok = false, text = "读写不一致：读回「${readBack?.name}」，残留 $left 门")
-            }
-        },
-        footnote = juwDatabasePath(),
-        emptyHint = "数据库自检：进行中…",
-    )
 }

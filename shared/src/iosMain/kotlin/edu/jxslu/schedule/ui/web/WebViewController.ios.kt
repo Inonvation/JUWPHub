@@ -8,6 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.UIKitView
 import edu.jxslu.schedule.data.session.IosWebCookieSource
+import edu.jxslu.schedule.data.session.IosWebFetch
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCSignatureOverride
 import platform.CoreGraphics.CGRectMake
@@ -20,6 +21,8 @@ import platform.WebKit.WKUserContentController
 import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
 import platform.darwin.NSObject
+import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_main_queue
 
 /**
  * [WebContentView] 的 iOS 实现：`UIKitView` + `WKWebView`（iOS 移植，2026-11-24）。
@@ -130,6 +133,9 @@ private class IosWebHost {
     private var loadedUrl: String? = null
     private var installed: WebViewController.Impl? = null
 
+    /** 装给 [IosWebFetch] 的桥（留引用是为了在 [detach] 时只清自己装的那一份）。 */
+    private var fetchBridge: ((String, (String?) -> Unit) -> Unit)? = null
+
     /** 建 WKWebView 并接上代理与控制器。Compose 在 iOS 上跑在主线程，符合 UIKit 要求。 */
     fun attach(controller: WebViewController): WKWebView {
         val configuration = WKWebViewConfiguration()
@@ -152,6 +158,15 @@ private class IosWebHost {
         webView = view
         installed = impl
         controller.impl = impl
+        // 同源取页的桥（`IosWebFetch`）：教务导入优先走这条路，不再依赖 Cookie 提取。
+        // 包一层 dispatch 是因为抓取链可能从后台协程发起，而 WKWebView 只能在主线程调。
+        val bridge: (String, (String?) -> Unit) -> Unit = { script, onResult ->
+            dispatch_async(dispatch_get_main_queue()) {
+                view.evaluateJavaScript(script) { result, _ -> onResult(result as? String) }
+            }
+        }
+        fetchBridge = bridge
+        IosWebFetch.runScript = bridge
         return view
     }
 
@@ -167,6 +182,10 @@ private class IosWebHost {
         val view = webView ?: return
         view.stopLoading()
         view.navigationDelegate = null
+        // 只清自己装的那一份：另一个视图接管过桥时，别把它的拆掉
+        val bridge = fetchBridge
+        if (bridge != null && IosWebFetch.runScript === bridge) IosWebFetch.runScript = null
+        fetchBridge = null
         webView = null
         navigationDelegate = null
         loadedUrl = null

@@ -337,29 +337,28 @@ fun TodayScreen(
     // 江水生活 U净 弹窗的扫码按钮：三档判据与侧栏扫一扫同一套（domain/QuickScan），
     // 洗衣机机身码原文交给 U净 页识别；车身码 / 别家码就地提示，不跳页。
     val quickHaptics = rememberAppHaptics()
-    val startUjingScan: () -> Unit = {
-        quickHaptics.tap()
-        // shortcut: 没有扫码能力的平台（槽位为 null）点这个钮没有反应。
-        // `UjingEntrySheet` 的 `onScan` 是非空参数、且那个包本轮不动，所以整钮藏不掉。
-        // 升级条件：`UjingEntrySheet.onScan` 改成可空、`null` 时整钮不渲染。
-        // 现在 Android 恒给槽位、iOS 侧 `ujingRepository()` 为 null 时弹窗根本不出现，
-        // 所以这一支当下不可达。
-        onScanCode?.invoke { raw ->
-            when (val target = quickScanTargetOf(raw)) {
-                null -> Unit
-                is QuickScanTarget.Washer -> {
-                    showUjingSheet = false
-                    quickHaptics.tap()
-                    onOpenUjingScan(target.raw)
+    // null = 本平台没有扫码能力：`UjingEntrySheet` 的扫码钮与那句提示整块不渲染
+    // （2026-11-25 审计 P1；此前槽位为 null 时按钮还在，点了没反应）
+    val startUjingScan: (() -> Unit)? = onScanCode?.let { scan ->
+        {
+            quickHaptics.tap()
+            scan { raw ->
+                when (val target = quickScanTargetOf(raw)) {
+                    null -> Unit
+                    is QuickScanTarget.Washer -> {
+                        showUjingSheet = false
+                        quickHaptics.tap()
+                        onOpenUjingScan(target.raw)
+                    }
+
+                    is QuickScanTarget.Ebike ->
+                        showNotice("这是快趣车身码，不是洗衣机机身码", NoticeTone.Warning)
+
+                    is QuickScanTarget.Foreign -> showNotice(
+                        "这是${target.label}的码，不是洗衣机机身码",
+                        NoticeTone.Warning,
+                    )
                 }
-
-                is QuickScanTarget.Ebike ->
-                    showNotice("这是快趣车身码，不是洗衣机机身码", NoticeTone.Warning)
-
-                is QuickScanTarget.Foreign -> showNotice(
-                    "这是${target.label}的码，不是洗衣机机身码",
-                    NoticeTone.Warning,
-                )
             }
         }
     }

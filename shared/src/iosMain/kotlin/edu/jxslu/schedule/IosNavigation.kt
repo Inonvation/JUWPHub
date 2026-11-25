@@ -49,8 +49,11 @@ import edu.jxslu.schedule.ui.me.ReminderSettingsViewModel
 import edu.jxslu.schedule.ui.me.ShortcutSettingsScreen
 import edu.jxslu.schedule.ui.me.ShortcutSettingsViewModel
 import edu.jxslu.schedule.ui.me.hub.AboutUpdateScreen
+import edu.jxslu.schedule.ui.me.hub.AppearanceSettingsScreen
+import edu.jxslu.schedule.ui.me.hub.QuietHoursScreen
 import edu.jxslu.schedule.ui.me.hub.SupportDevScreen
 import edu.jxslu.schedule.ui.me.hub.TermsDeclarationsScreen
+import edu.jxslu.schedule.ui.me.hub.TimetableHubScreen
 import edu.jxslu.schedule.ui.timetable.ScheduleChangesScreen
 import edu.jxslu.schedule.ui.timetable.TimetableManageScreen
 import edu.jxslu.schedule.ui.timetable.TimetableViewModel
@@ -344,7 +347,9 @@ internal fun IosRouteContent(
             onBack = pop,
         )
 
-        SubpageScreen.TEXTBOOKS -> TextbookScreen(onBack = pop)
+        // 教材：iOS 没有 `TextbookSync`（那条链只被 `:app` 的 `Graph` 构造），数据永远空，
+        // 所以空态换成「本平台还没有教材抓取」，不再让用户反复导入（2026-11-25 审计 P0）
+        SubpageScreen.TEXTBOOKS -> TextbookScreen(onBack = pop, syncAvailable = false)
 
         SubpageScreen.TEACHING_CALENDAR -> TeachingCalendarScreen(onBack = pop)
 
@@ -547,6 +552,20 @@ internal fun IosRouteContent(
         // 六个子页在 iOS 上都能进。平台动作一律传 null（日历同步要系统 Calendar、
         // 提醒要通知渠道、快捷方式要 PackageManager 查已安装应用、赞赏码要位图），
         // 对应入口整行不渲染；页面本身（列表 / 开关 / 文案）照常可用。
+        // 三个设置子页（2026-11-25 晚补）：它们早就在 commonMain 里、签名只要 onBack + MeViewModel，
+        // 只是这一层没写分支，用户点进去得到的是「这一页还在 Android 侧」——一句假话。
+        SubpageScreen.APPEARANCE_SETTINGS -> AppearanceSettingsScreen(
+            onBack = pop,
+            viewModel = meViewModel,
+        )
+
+        SubpageScreen.TIMETABLE_HUB -> TimetableHubScreen(
+            onBack = pop,
+            viewModel = meViewModel,
+        )
+
+        SubpageScreen.QUIET_HOURS -> QuietHoursScreen(onBack = pop)
+
         SubpageScreen.CALENDAR_SETTINGS -> {
             val vm = remember {
                 CalendarSettingsViewModel(

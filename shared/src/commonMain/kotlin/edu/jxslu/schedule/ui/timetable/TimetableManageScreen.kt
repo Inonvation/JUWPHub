@@ -221,7 +221,13 @@ class TimetableViewModel(
                 is ScheduleTermImport.Result.Archived -> when {
                     result.createdTerms.isNotEmpty() ->
                         "已导入 ${result.createdTerms.size} 个学期课表（共 ${result.courseCount} 门）。" +
-                            SCHEDULE_IMPORT_CAVEAT
+                            // 部分学期失败必须说出来：只说「已导入 N 个」会让用户以为全好了
+                            // （2026-11-25 审计 P2）
+                            if (result.failed.isNotEmpty()) {
+                                "另有 ${result.failed.size} 个学期失败：${result.failed.first().second}"
+                            } else {
+                                SCHEDULE_IMPORT_CAVEAT
+                            }
                     result.failed.isNotEmpty() -> "没有导入成功：${result.failed.first().second}"
                     else -> "没有需要补的学期，课表已是最新"
                 }

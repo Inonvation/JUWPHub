@@ -182,6 +182,8 @@ fun SelectionWishesScreen(
     /** 头部状态行后缀：匹配中 / 失败 / 命中条数（都拿不到时不写）。 */
     val matchSummary: String? = when {
         round == null -> null
+        // 没有匹配客户端 = 本轮压根没查过。写「已开 0 条」是把「没查过」说成结论（2026-11-25 审计 P0）
+        client == null -> "本平台不支持本轮匹配"
         hitsLoading -> "本轮匹配中…"
         hitsError != null -> "本轮匹配失败，点右上角重试"
         else -> "本轮已开 ${hitCounts.count { it.value > 0 }} 条预选"
@@ -197,11 +199,15 @@ fun SelectionWishesScreen(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { loadHits() },
-                        enabled = round != null && !hitsLoading,
-                    ) {
-                        Icon(AppIcons.Refresh, contentDescription = "重新匹配")
+                    // 没有匹配客户端（iOS）时这一只整个不渲染：留一个点了不动的刷新钮，
+                    // 比没有它更让人以为「点了就会查」
+                    if (client != null) {
+                        IconButton(
+                            onClick = { loadHits() },
+                            enabled = round != null && !hitsLoading,
+                        ) {
+                            Icon(AppIcons.Refresh, contentDescription = "重新匹配")
+                        }
                     }
                     IconButton(onClick = { editing = SelectionWish() }) {
                         Icon(AppIcons.Add01, contentDescription = "添加")

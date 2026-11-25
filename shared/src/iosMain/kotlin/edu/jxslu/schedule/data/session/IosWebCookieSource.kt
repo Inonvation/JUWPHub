@@ -2,6 +2,7 @@ package edu.jxslu.schedule.data.session
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import platform.Foundation.NSHTTPCookie
 import platform.Foundation.NSURL
 import platform.WebKit.WKWebsiteDataStore
@@ -62,6 +63,34 @@ object IosWebCookieSource : WebCookieSource {
             dispatch_async(dispatch_get_main_queue()) { onResult(result) }
         }
     }
+
+    /**
+     * Cookie 库现状的一句话（2026-11-25 晚补，**只用于诊断**）。
+     *
+     * 起因：真机上 WebView 明明登进了教务，`ensureValid` 却判「还没登录」。当时界面只说了
+     * 「还没登录」，无法区分「库里一条都没有」和「有，但域名/名字对不上」——这两种的修法完全
+     * 不同。所以把条数一起打出来，用户截一张图就能定位。
+     *
+     * 读库是异步回调，可能永不回来（极端情况），所以带超时；超时本身也是一条信息。
+     */
+    suspend fun describeStore(timeoutMs: Long = 3_000L): String {
+        val all = withTimeoutOrNull(timeoutMs) {
+            suspendCancellableCoroutine<List<NSHTTPCookie>> { cont ->
+                WKWebsiteDataStore.defaultDataStore().httpCookieStore.getAllCookies { cookies ->
+                    if (cont.isActive) {
+                        cont.resume(cookies.orEmpty().filterIsInstance<NSHTTPCookie>())
+                    }
+                }
+            }
+        } ?: return "Cookie 库读取超时"
+        val jw = all.filter { domainMatches(JW_COOKIE_HOST, it.domain) }
+        if (jw.isEmpty()) return "Cookie 库里 ${all.size} 条，教务域 0 条"
+        val names = jw.mapNotNull { it.name }.take(4).joinToString("、")
+        return "Cookie 库里 ${all.size} 条，教务域 ${jw.size} 条（$names）"
+    }
+
+    /** 教务域的 host，只给 [describeStore] 统计用。 */
+    private const val JW_COOKIE_HOST = "jiaowu.juwp.edu.cn"
 }
 
 /**

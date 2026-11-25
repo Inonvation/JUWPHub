@@ -46,6 +46,7 @@ import edu.jxslu.schedule.data.repo.ScoreSync
 import edu.jxslu.schedule.data.repo.ScholarProgressRepository
 import edu.jxslu.schedule.data.repo.ScholarProgressSync
 import edu.jxslu.schedule.data.session.IosJwReadSession
+import edu.jxslu.schedule.data.session.IosJwSessionFlag
 import edu.jxslu.schedule.data.session.IosAiApiKeyStore
 import edu.jxslu.schedule.data.session.IosQiekjCredentialStore
 import edu.jxslu.schedule.data.session.IosSessionExpirySink
@@ -496,14 +497,17 @@ class IosServices : AppServices {
     override fun appScope(): CoroutineScope = scope
 
     /**
-     * WebView 里有没有有效教务会话：**iOS 侧返回 null（判断不了）**。
+     * WebView 里有没有有效教务会话。
      *
-     * `WKWebsiteDataStore.getAllCookies` 是异步回调（见 `IosWebCookieSource`），而这里要在
-     * 组合期同步给一个布尔。升级条件：给 `IosWebCookieSource` 加一份进程内缓存
-     * （登录页关闭时刷新），或把本方法改成 suspend 让页面在 `LaunchedEffect` 里读。
-     * 在那之前账号中心的教务行只按「凭证在不在」判——没凭证就显示未登录。
+     * 上一版返回 `null`（判断不了）——理由是「`getAllCookies` 是异步回调，这里要同步布尔」。
+     * 后果不是少一个功能，而是**给出错误结论**：用户刚登录成功、课表都落库了，账号中心仍显示
+     * 「登录」胶囊。2026-11-25 晚审计把它列为 P0。
+     *
+     * 现在读 [IosJwSessionFlag]（进程内标记）：冷启动由 [warmUp] 探一次 Cookie，每次抓取成功 /
+     * 失败由 [IosJwReadSession] 顺手更新，导入页落到学生端时立刻置真。所以这里给的是**真布尔**，
+     * 不再是「判断不了」。
      */
-    override fun hasJwWebSession(): Boolean? = null
+    override fun hasJwWebSession(): Boolean? = IosJwSessionFlag.hasSession
     // ---- U净（S21，2026-11-25） ----
     //
     // 页面与 ViewModel 已经搬进共享层，但 iOS 侧还**建不起仓库与两个本地表**：
@@ -605,7 +609,16 @@ class IosServices : AppServices {
 
     /** 首次打开时把作息表与默认学期写进库（与 Android 的 `ensureDefaults` 同步口径）。 */
     fun warmUp() {
-        scope.launch { repository.ensureDefaults() }
+        scope.launch {
+            repository.ensureDefaults()
+            // 顺手探一次「教务网页会话还在不在」：账号中心 / 教务账号页据此显示已登录，
+            // 而不是因为读 Cookie 是异步就永远显示「未登录」（见 [hasJwWebSession]）
+            if (session.hasCookies()) {
+                IosJwSessionFlag.markUsable()
+            } else {
+                IosJwSessionFlag.markLost()
+            }
+        }
     }
 
     // ---- 学业完成情况 / 培养方案（iOS 移植 V4，2026-11-25） ----

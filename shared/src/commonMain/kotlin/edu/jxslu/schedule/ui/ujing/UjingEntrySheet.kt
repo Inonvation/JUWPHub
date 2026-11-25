@@ -56,7 +56,13 @@ import edu.jxslu.schedule.ui.theme.Motion
 @Composable
 fun UjingEntrySheet(
     onDismiss: () -> Unit,
-    onScan: () -> Unit,
+    /**
+     * 扫码识别机身码。null = 本平台没有扫码能力（iOS）→ 扫码按钮与那句提示都不渲染。
+     *
+     * 上一版它是必填参数，iOS 传了个空 lambda：按钮照常出现、点了没反应，而下方提示还在
+     * 教用户「扫机身二维码即可下单」。2026-11-25 审计 P1。
+     */
+    onScan: (() -> Unit)? = null,
     onOpenPage: () -> Unit,
     /** U净 仓库（只读 `orderState`）：必须与主页 ViewModel 持有的那份是同一实例。 */
     repo: UjingRepository = requireNotNull(Services.current.ujingRepository()) {
@@ -90,21 +96,27 @@ fun UjingEntrySheet(
             ) {
                 liveOrder?.let { UjingOrderStatusLine(it) }
             }
-            Text(
-                text = "扫洗衣机机身上的二维码即可下单",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
-            Button(
-                onClick = onScan,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Icon(AppIcons.QrCodeScan, contentDescription = null, modifier = Modifier.size(21.dp))
-                Spacer(Modifier.width(9.dp))
-                Text("扫码识别洗衣机", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            if (onScan != null) {
+                Text(
+                    text = "扫洗衣机机身上的二维码即可下单",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+                Button(
+                    onClick = onScan,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Icon(AppIcons.QrCodeScan, contentDescription = null, modifier = Modifier.size(21.dp))
+                    Spacer(Modifier.width(9.dp))
+                    Text(
+                        "扫码识别洗衣机",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
             Row(
                 modifier = Modifier

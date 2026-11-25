@@ -51,6 +51,13 @@ fun TextbookScreen(
     onOpenWebPage: ((title: String, url: String) -> Unit)? = null,
     /** 去导入课表（Android 走 `JwImportActivity.start`）。 */
     onOpenJwImport: (() -> Unit)? = null,
+    /**
+     * 本平台有没有「导入课表时顺带抓教材」那条链（Android 的 `TextbookSync`）。
+     *
+     * false = iOS（2026-11-25 审计 P0）：那边没有任何一方写 `textbooks` 表，数据永远空。
+     * 空态如果还说「导入课表后会自动抓取」，用户会照着反复导入——所以文案与出口都要换掉。
+     */
+    syncAvailable: Boolean = true,
 ) {
     // 仓库由装配根提供（Android `GraphServices` / iOS `IosServices`），本页不再摸 `Context`。
     val repo = remember { Services.current.scheduleRepository() }
@@ -87,17 +94,20 @@ fun TextbookScreen(
         empty = if (empty) {
             // 两种空态的出口不同：没有学期号要去导入，有学期号则去网页核对。
             // 宿主没给对应动作时不给按钮（不给死入口）。
-            val action: Pair<String, () -> Unit>? = if (noTerm) {
-                onOpenJwImport?.let { run -> "去导入课表" to { run() } }
-            } else {
-                onOpenWebPage?.let { open -> "在教务网页核对" to { open("教材", JwUrls.TEXTBOOK_QUERY) } }
+            // 本平台没有抓取链时两个出口都不给：导入了也不会变（见 [syncAvailable]）。
+            val action: Pair<String, () -> Unit>? = when {
+                !syncAvailable -> null
+                noTerm -> onOpenJwImport?.let { run -> "去导入课表" to { run() } }
+                else -> onOpenWebPage?.let { open ->
+                    "在教务网页核对" to { open("教材", JwUrls.TEXTBOOK_QUERY) }
+                }
             }
             PageEmpty(
                 title = "还没有教材数据",
-                body = if (noTerm) {
-                    "当前课表还没有学期号；导入课表后会自动抓取本学期教材。"
-                } else {
-                    "导入课表后会自动抓取本学期教材；也可以先去教务网页核对。"
+                body = when {
+                    !syncAvailable -> "本平台还没有教材抓取，这一页暂时不会有数据。"
+                    noTerm -> "当前课表还没有学期号；导入课表后会自动抓取本学期教材。"
+                    else -> "导入课表后会自动抓取本学期教材；也可以先去教务网页核对。"
                 },
                 actionLabel = action?.first,
                 onAction = action?.second,
