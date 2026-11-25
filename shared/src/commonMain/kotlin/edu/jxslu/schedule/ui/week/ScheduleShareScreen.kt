@@ -1,7 +1,5 @@
 package edu.jxslu.schedule.ui.week
 
-import android.graphics.Bitmap
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -54,15 +52,13 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -71,32 +67,23 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import edu.jxslu.schedule.Graph
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.BgScale
 import edu.jxslu.schedule.domain.LocalTimeLike
-import edu.jxslu.schedule.domain.ScheduleBackground
 import edu.jxslu.schedule.domain.ScheduleShare
+import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
+import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.GallerySaveResult
+import edu.jxslu.schedule.ui.common.GallerySaveOutcome
 import edu.jxslu.schedule.ui.common.GridCellStyle
 import edu.jxslu.schedule.ui.common.LoadingHint
 import edu.jxslu.schedule.ui.common.NoticeTone
-import edu.jxslu.schedule.ui.common.shareFile
-import edu.jxslu.schedule.ui.common.saveBitmapToGallery
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.toKotlinLocalDate
-import java.io.ByteArrayOutputStream
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-
-private val fileNameDateFmt = DateTimeFormatter.ofPattern("yyyyMMdd")
 
 /** 板内边距。 */
 private val BoardPadding = 12.dp
@@ -146,21 +133,54 @@ private val BoardBottomChrome = 76.dp
  *
  * [initialWeek] 来自 `SubpageScreen.SCHEDULE_SHARE` 的 focusItemId（进页时正在看的那一周）；
  * 缺省落到本周。切周是**页内局部状态**，不动主页面当前周。
+ *
+ * ## iOS 移植 M2（2026-11-26）搬进 `commonMain`
+ *
+ * 这一页原来把四件平台事写死在页内：建 `WeekViewModel`（要 `Context`）、取窗口长边（要
+ * `DisplayMetrics`）、把截到的 `android.graphics.Bitmap` 存相册、把 PNG 字节交给
+ * `FileProvider` + `ACTION_SEND`。按 `design/ios-port.md` §11.2 收成**必填 ViewModel + 三个可空槽位**：
+ *
+ * | 参数 | 搬迁前的写法 | `null` 的后果 |
+ * |---|---|---|
+ * | [viewModel] | `viewModel { WeekViewModel(Graph.repository(context)) }` | 必填，由宿主建（Android `viewModel {}` / iOS `remember {}`） |
+ * | [loadBackground] | `loadScheduleBackground(context, …)`（`BitmapFactory` 解码） | 「保留课表背景图」整行不渲染，板也不画背景 |
+ * | [onSaveToGallery] | `saveBitmapToGallery(context, bitmap, …)`（`MediaStore`） | 「保存到相册」按钮不渲染 |
+ * | [onShareImage] | `ScheduleShareStore` 落盘 + `FileProvider` + `ACTION_SEND` | 「分享」按钮不渲染 |
+ *
+ * 截图本身**不再**是平台事：`GraphicsLayer.toImageBitmap()` 在两端都可用，`ImageBitmap` 也是
+ * Compose 的公共类型。所以共享层交出去的是「一张图 + 文件名」，怎么编码、写到哪、交给谁
+ * 全在宿主——共享层看不出 `Bitmap` / `ContentResolver` / `UIImage` 的存在。
+ *
+ * 传 `null` 不是「以后补」的占位：iOS 侧这三件要的是另一套原生 API（`UIImagePNGRepresentation`、
+ * `PHPhotoLibrary`、`UIActivityViewController`），接上之后这一页一行都不用改。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduleShareScreen(
+    /** 与课表页同一份状态源，由宿主创建（见上方参数表）。 */
+    viewModel: WeekViewModel,
     onBack: () -> Unit,
     initialWeek: Int? = null,
+    /**
+     * 解一张背景图给预览板用；`null` = 本平台没有背景图解码。
+     *
+     * 三个入参就是 `WeekUiState` 里那三格：文件名、缩放方式、模糊强度。解码目标尺寸由宿主算
+     * （Android 侧要读 `DisplayMetrics` 的长边，见 `ui/week/ScheduleBackground.kt`），共享层不猜。
+     */
+    loadBackground: (suspend (fileName: String, scale: BgScale, blur: Float) -> ImageBitmap?)? = null,
+    /** 落相册；结果由本页翻成提示。`null` = 本平台没有相册写入。 */
+    onSaveToGallery: (suspend (image: ImageBitmap, displayName: String) -> GallerySaveOutcome)? = null,
+    /**
+     * 分享这张图；返回 `null` = 已把分享面板交给系统，非 `null` = 给用户看的失败原因。
+     *
+     * `null` 槽位 = 本平台没有分享出口。成功/失败用「返回值 + 一句话」表达，不传 sealed 类型：
+     * 失败的两种原因（写不出文件 / 没有可用目标）只有宿主分得清，共享层只负责显示。
+     */
+    onShareImage: (suspend (image: ImageBitmap, displayName: String) -> String?)? = null,
 ) {
-    val context = LocalContext.current
-    // 与课表页同一份 ViewModel 口径：shared 里没有 `WeekViewModel.Factory`，
-    // 而 `viewModel { }` 的 initializer 是普通 lambda（不是 @Composable），
-    // 所以 `LocalContext.current` 必须先取到外面来。
-    val viewModel: WeekViewModel = viewModel { WeekViewModel(Graph.repository(context)) }
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     val totalWeeks = maxOf(state.semester?.totalWeeks ?: 20, 1)
     val sectionCount = maxOf(11, state.slots.maxOfOrNull { it.number } ?: 11)
@@ -186,60 +206,51 @@ fun ScheduleShareScreen(
     var includeFooter by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
 
-    val hasBackground = state.bgImageName != null
+    // 宿主给不出解码器就等于这个平台没有背景图功能：勾选行整行不渲染，板也不画背景。
+    val backgroundLoader = loadBackground
+    val hasBackground = state.bgImageName != null && backgroundLoader != null
     val wantBackground = includeBackground && hasBackground
 
-    // 背景位图：只给预览板用。cache = false —— 板上的解码目标与整屏渲染不同，
-    // 进单槽缓存会把整屏那张挤掉（与显示设置里的缩略图同一个坑）。
+    // 背景位图：只给预览板用。宿主按 `cache = false` 解码——板上的目标尺寸与整屏渲染不同，
+    // 进平台侧的单槽缓存会把整屏那张挤掉（与显示设置里的缩略图同一个坑）。
     val backgroundImage by produceState<ImageBitmap?>(null, state.bgImageName, wantBackground) {
         val name = if (wantBackground) state.bgImageName else null
-        value = name?.let { fileName ->
-            val target = if (state.bgImageScale == BgScale.Tile) {
-                ScheduleBackground.decodeLongSide(state.bgImageBlur)
-            } else {
-                ScheduleBackground.targetLongSide(screenLongSidePx(context), state.bgImageBlur)
-            }
-            loadScheduleBackground(context, fileName, target, cache = false)
+        value = if (name == null || backgroundLoader == null) {
+            null
+        } else {
+            backgroundLoader(name, state.bgImageScale, state.bgImageBlur)
         }
     }
     val backgroundLoading = wantBackground && backgroundImage == null
 
     val graphicsLayer = rememberGraphicsLayer()
-    val fileName = ScheduleShare.exportFileName(LocalDate.now().format(fileNameDateFmt), previewWeek)
+    val fileName = ScheduleShare.exportFileName(compactDate(AppClock.today()), previewWeek)
 
     // 生成 / 写盘 / 拉起分享期间不接受退出：写到一半被退出会把协程连同 IO 一起取消，
     // 相册里可能留下半张图（与旧弹层 `if (!busy) onDismiss()` 同一口径）
-    BackHandler(enabled = busy) {}
+    AppBackHandler(enabled = busy) {}
 
-    suspend fun capture(): Bitmap? =
-        runCatching { graphicsLayer.toImageBitmap().asAndroidBitmap() }.getOrNull()
+    suspend fun capture(): ImageBitmap? =
+        runCatching { graphicsLayer.toImageBitmap() }.getOrNull()
 
     fun notice(text: String, tone: NoticeTone) {
         scope.launch { snackbar.showNotice(AppNoticeVisuals(text, tone = tone)) }
     }
 
     fun startSave() {
+        val save = onSaveToGallery ?: return
         if (busy || backgroundLoading) return
         busy = true
         scope.launch {
-            val bitmap = capture()
-            if (bitmap == null) {
+            val image = capture()
+            if (image == null) {
                 notice("生成图片失败，请重试", NoticeTone.Error)
             } else {
-                when (
-                    val result = withContext(Dispatchers.IO) {
-                        saveBitmapToGallery(
-                            context = context,
-                            bitmap = bitmap,
-                            displayName = fileName,
-                            format = Bitmap.CompressFormat.PNG,
-                            quality = 100,
-                        )
-                    }
-                ) {
-                    is GallerySaveResult.Saved ->
+                // 编码 + 落盘是纯计算与文件 IO：共享层只用 Default 池（`Dispatchers.IO` 是 JVM 专有）
+                when (val result = withContext(Dispatchers.Default) { save(image, fileName) }) {
+                    is GallerySaveOutcome.Saved ->
                         notice("已保存到相册", NoticeTone.Success)
-                    is GallerySaveResult.Failed -> notice(result.message, NoticeTone.Error)
+                    is GallerySaveOutcome.Failed -> notice(result.message, NoticeTone.Error)
                 }
             }
             busy = false
@@ -247,31 +258,19 @@ fun ScheduleShareScreen(
     }
 
     fun startShare() {
+        val share = onShareImage ?: return
         if (busy || backgroundLoading) return
         busy = true
         scope.launch {
-            val bitmap = capture()
-            if (bitmap == null) {
+            val image = capture()
+            if (image == null) {
                 notice("生成图片失败，请重试", NoticeTone.Error)
                 busy = false
                 return@launch
             }
-            val uri = withContext(Dispatchers.IO) {
-                runCatching {
-                    val bytes = ByteArrayOutputStream().use { out ->
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-                        out.toByteArray()
-                    }
-                    val store = Graph.scheduleShareStore(context)
-                    store.uriOf(store.save(bytes, fileName))
-                }.getOrNull()
-            }
-            if (uri == null) {
-                notice("分享失败：无法写出图片", NoticeTone.Error)
-            } else {
-                val ok = shareFile(context, uri, "image/png", "分享课表图片")
-                if (!ok) notice("没有可用的分享目标", NoticeTone.Warning)
-            }
+            // 失败原因由宿主给（写不出图片 / 没有可用目标），本层只负责显示
+            val failure = withContext(Dispatchers.Default) { share(image, fileName) }
+            if (failure != null) notice(failure, NoticeTone.Error)
             busy = false
         }
     }
@@ -371,7 +370,10 @@ fun ScheduleShareScreen(
                             background = backgroundImage,
                             includeFooter = includeFooter,
                             cellStyle = gridCellStyle(state, typeSpec),
-                            todayDay = LocalDate.now().dayOfWeek.value,
+                            // 星期几：项目统一用 `dayOfWeek.ordinal + 1`（1=周一），
+                            // 与 `ExamMapper` / `HomeworkCenter` / `InboxMessage` 同一写法。
+                            // `DayOfWeek.value` 在这个 kotlinx-datetime 版本上不存在。
+                            todayDay = AppClock.today().dayOfWeek.ordinal + 1,
                         )
                     }
                     // 板按原始尺寸布局、只把**绘制**缩下来：`graphicsLayer` 不改布局，
@@ -420,34 +422,50 @@ fun ScheduleShareScreen(
                     }
                 }
 
-                // ---- 动作
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = { startSave() },
-                        enabled = !busy && !backgroundLoading,
+                // ---- 动作：两个都是平台能力，槽位为 null 的那一个不渲染
+                val canSave = onSaveToGallery != null
+                val canShare = onShareImage != null
+                if (canSave || canShare) {
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp),
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Icon(AppIcons.ImageDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("保存到相册")
-                    }
-                    Button(
-                        onClick = { startShare() },
-                        enabled = !busy && !backgroundLoading,
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp),
-                    ) {
-                        Icon(AppIcons.Share01, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("分享")
+                        if (canSave) {
+                            OutlinedButton(
+                                onClick = { startSave() },
+                                enabled = !busy && !backgroundLoading,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp),
+                            ) {
+                                Icon(
+                                    AppIcons.ImageDownload,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("保存到相册")
+                            }
+                        }
+                        if (canShare) {
+                            Button(
+                                onClick = { startShare() },
+                                enabled = !busy && !backgroundLoading,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp),
+                            ) {
+                                Icon(
+                                    AppIcons.Share01,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("分享")
+                            }
+                        }
                     }
                 }
             }
@@ -698,7 +716,7 @@ private fun BoardHeader(
 }
 
 /**
- * 板内背景图：与课表页 [ScheduleBackgroundLayer] 同一套画法（Fill/Fit/Tile + 压暗），
+ * 板内背景图：与课表页 `ScheduleBackgroundLayer` 同一套画法（Fill/Fit/Tile + 压暗），
  * 但不画顶部状态栏渐变——那层是给整屏页面托顶栏文字的，板里没有顶栏。
  *
  * **这里保留 `Image(alpha = opacity)`，与课表页不同**（2026-11-06）：课表页那张是常驻的
@@ -706,6 +724,9 @@ private fun BoardHeader(
  * 板是**一次性快照**（截图前组合一次、`record` 进 graphicsLayer 就结束），没有逐帧成本，
  * 且板的底色是 `surface`（课表页是 `background`），换算 scrim 要换颜色、换错就改变导出图观感。
  * 收益为零、风险不为零，故不动。
+ *
+ * 背景图的**解码**已不在本层：`ImageBitmap` 由宿主的 `loadBackground` 槽位给
+ * （Android 是 `BitmapFactory`，iOS 是另一套图像 API）。
  */
 @Composable
 private fun BoardBackground(

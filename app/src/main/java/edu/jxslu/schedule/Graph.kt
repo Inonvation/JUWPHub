@@ -655,11 +655,17 @@ object Graph {
     /**
      * 课表导出图片的分享落盘单例（DESIGN §4.12）：cacheDir/schedule_share，
      * 分享用的内容 Uri 走 FileProvider 临时授权，只留最近几份。
+     *
+     * 2026-11-26（iOS 移植 M2）：`ScheduleShareStore` 已搬进 `shared/commonMain`，
+     * 只剩「往一个目录写字节」——目录由宿主给，所以这里传 `cacheDir/schedule_share` 的
+     * 绝对路径（与 `res/xml/file_paths.xml` 的 `<cache-path name="schedule_share">` 对齐；
+     * 换成 `filesDir` 会让一次性图片跟着云备份走）。
      */
     fun scheduleShareStore(context: Context): ScheduleShareStore =
         scheduleShareStore ?: synchronized(this) {
-            scheduleShareStore ?: ScheduleShareStore(context.applicationContext)
-                .also { scheduleShareStore = it }
+            scheduleShareStore ?: ScheduleShareStore(
+                File(context.cacheDir, ScheduleShareStore.DIR_NAME).absolutePath,
+            ).also { scheduleShareStore = it }
         }
 
     /**
@@ -669,8 +675,7 @@ object Graph {
     fun toolboxShareStore(context: Context): ScheduleShareStore =
         toolboxShareStore ?: synchronized(this) {
             toolboxShareStore ?: ScheduleShareStore(
-                context.applicationContext,
-                ScheduleShareStore.DIR_TOOLBOX,
+                File(context.cacheDir, ScheduleShareStore.DIR_TOOLBOX).absolutePath,
             ).also { toolboxShareStore = it }
         }
 

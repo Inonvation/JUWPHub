@@ -31,6 +31,7 @@ import edu.jxslu.schedule.ui.common.GallerySaveResult
 import edu.jxslu.schedule.ui.common.ImageViewerDialog
 import edu.jxslu.schedule.ui.common.saveBitmapToGallery
 import edu.jxslu.schedule.ui.common.shareFile
+import edu.jxslu.schedule.ui.common.shareUriOf
 import java.io.ByteArrayOutputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -87,7 +88,7 @@ object ToolboxExport {
                     out.toByteArray()
                 }
                 val store = Graph.toolboxShareStore(context)
-                store.uriOf(store.save(bytes, fileName))
+                shareUriOf(context, store.save(bytes, fileName))
             }.getOrNull()
         } ?: return "分享失败：无法写出图片"
         val ok = shareFile(context, uri, "image/jpeg", "分享图片")
