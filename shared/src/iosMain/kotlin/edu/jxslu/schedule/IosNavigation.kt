@@ -311,6 +311,8 @@ internal fun IosRouteContent(
             },
             images = null,
             markdown = null,
+            // 勾完成 / 删作业后重排截止提醒（2026-11-26 起 iOS 真有排程，见 IosHomeworkReminder）
+            onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
         SubpageScreen.HOMEWORK_TODO -> HomeworkTodoScreen(
@@ -321,6 +323,7 @@ internal fun IosRouteContent(
             onOpenLibrary = { push(IosRoute(SubpageScreen.HOMEWORK)) },
             images = null,
             markdown = null,
+            onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
         SubpageScreen.HOMEWORK_COURSE -> HomeworkCourseScreen(
@@ -331,16 +334,17 @@ internal fun IosRouteContent(
             },
             images = null,
             markdown = null,
+            onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
         // 作业详情（V4 搬进共享层）：与笔记详情同一组 null——平台能力都还没有。
-        // 另加 `onHomeworkChanged = null`：iOS 没有截止提醒排程（通知 + BGTask），
-        // 改完只落库，不重排提醒。截止日期与完成勾选本身是真的能存。
+        // 改截止日 / 勾完成会重排截止提醒（2026-11-26 起）；正文里的图片与公式仍只有 Android 能渲染。
         SubpageScreen.HOMEWORK_DETAIL -> HomeworkDetailScreen(
             courseName = route.arg.orEmpty(),
             homeworkId = route.itemId,
             startEditing = route.startEditing,
             onBack = pop,
+            onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
         SubpageScreen.THEORY_SCHEDULE -> JwScheduleListScreen(
@@ -658,7 +662,15 @@ internal fun IosRouteContent(
 
         SubpageScreen.REMINDER_SETTINGS -> {
             val vm = remember { ReminderSettingsViewModel(services.scheduleRepository()) }
-            ReminderSettingsScreen(onBack = pop, viewModel = vm)
+            ReminderSettingsScreen(
+                onBack = pop,
+                viewModel = vm,
+                // 上课提醒在 iOS 上还没有排程（§12.9.2：缺「课表 → 绝对时刻」的换算与 64 条分配），
+                // 所以 onReschedule 与授权入口都仍是 null——开关照常落库，这一侧不排闹钟，
+                // 也不为一个排不出东西的开关去弹系统授权框。
+                // 作业截止提醒 2026-11-26 起真能用：进本页与改开关都会重排一次（授权在重排里一并请求）。
+                onRecheckHomework = { services.homeworkReminder().reschedule() },
+            )
         }
 
         SubpageScreen.SHORTCUTS -> {

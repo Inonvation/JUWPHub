@@ -87,7 +87,11 @@ import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.platform.AccountCredentials
 import edu.jxslu.schedule.platform.AiApiKeyStore
 import edu.jxslu.schedule.platform.AppServices
+import edu.jxslu.schedule.platform.HomeworkReminder
+import edu.jxslu.schedule.platform.IosHomeworkReminder
+import edu.jxslu.schedule.platform.IosLocalNotifications
 import edu.jxslu.schedule.platform.IosNotificationPermission
+import edu.jxslu.schedule.platform.IosScoreReminder
 import edu.jxslu.schedule.platform.IosUjingReminder
 import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.Logger
@@ -654,12 +658,10 @@ class IosServices : AppServices {
      * 上一版返回 null，理由是「iOS 还没有通知能力」。现在有了：授权 + `UNTimeIntervalNotificationTrigger`
      * 排一条到点通知，两个 `remove…NotificationsWithIdentifiers` 对应 Android 的 cancel / revoke。
      * 权限被拒时 [IosUjingReminder] 自己降级成 no-op（不抛异常），结论记在
-     * [IosNotificationPermission] 里给页面读。
+     * [IosNotificationPermission] 里给页面读。授权与队列扫描在 `IosLocalNotifications`（三类共用）。
      *
-     * **非 lazy 是刻意的**：它的构造函数要把前台横幅代理挂到 `UNUserNotificationCenter.delegate`
-     * （那是 weak，必须由长命对象持有），而 [IosServices] 在 `MainViewController` 里是启动第一行。
-     * 换成 `by lazy` 就一直等到用户第一次进 U净 页才装代理——此前前台收到的通知不弹横幅。
-     * 构造只取一次系统单例，没有 IO，也没有副作用顺序问题。
+     * **非 lazy 是刻意的**：进 U净 页之前也可能要先撤一条（例如冷启动恢复在案订单），
+     * 而构造只取一次系统单例、没有 IO。前台横幅代理不靠它安装——那一步在 [init] 里，比页面更早。
      *
      * 这一端仍然**不能下单**（`UjingPay` 为 null，见 `UjingViewModel.createAndPay`），所以这条提醒
      * 在 iOS 上要等「有在案订单」才会被排到——闭环缺口不在提醒这一层。
@@ -735,6 +737,10 @@ class IosServices : AppServices {
     private val qzxyFlowLockInstance: Mutex = Mutex()
 
     init {
+        // 前台横幅代理（N2 起从 `IosUjingReminder` 提出来，三类提醒共用）：iOS 默认前台不弹横幅，
+        // 必须实现 `willPresentNotification` 并回 `banner | sound`。`delegate` 是 weak，
+        // 持有者必须是进程级对象，所以由这里（`MainViewController` 的第一行）装一次。
+        IosLocalNotifications.installForegroundPresentation()
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
         // 用户关掉导入页之后课表页的「检测」照样能读登录态。
         WebCookies.source = IosWebCookieSource
@@ -756,6 +762,12 @@ class IosServices : AppServices {
             } else {
                 IosJwSessionFlag.markLost()
             }
+            // 作业截止提醒：冷启动重排一次。iOS 的本地通知到点不执行代码，必须**提前**排上；
+            // 上一次进程排的那批可能已被投递，作业也可能已被勾完成 / 删掉（重排会按前缀清空重来）。
+            homeworkReminder().reschedule()
+            // 成绩提醒（降级形态）：进 App 查一次，有新成绩立刻弹一条。放在最后——它要打教务，
+            // 失败（没登录 / 没网）不该拖住上面两件事。
+            scoreReminderImpl.checkOnLaunch()
         }
     }
 
@@ -905,6 +917,34 @@ class IosServices : AppServices {
      * 系统气球旋转后造型别扭），没有消费方就不装传感器。蓝点画成无方向圆点。
      */
     override fun bikeHeading(): Flow<Float>? = null
+
+    // ---- 作业截止提醒（iOS 移植 N2，2026-11-26） ----
+
+    /**
+     * 作业截止提醒：`UNUserNotificationCenter` 上排若干条**一次性**本地通知（**非空**）。
+     *
+     * 时刻算法与 Android 同一份（`domain/ReminderPlanner.kt`），差别在「到点不执行代码」：
+     * 未来若干个提醒点必须提前排上，上限 [HOMEWORK_REMINDER_SLOTS]（15 条，占 64 条待发额度的
+     * 一份，分配表见 `HomeworkReminderPlatform.kt` / §12.9.3）。
+     *
+     * 惰性单例：它自己**不持有状态**（状态在系统的待发队列里），每次 `reschedule` 都重读库与开关。
+     */
+    private val homeworkReminderImpl: HomeworkReminder by lazy {
+        IosHomeworkReminder(repo = homeworkRepository(), prefs = prefs, scope = scope)
+    }
+
+    override fun homeworkReminder(): HomeworkReminder = homeworkReminderImpl
+
+    /**
+     * 成绩提醒（iOS 形态）：进 App 时查一次，有新成绩就立刻弹一条本地通知。
+     *
+     * **周期检查这一轮不做**：`BGTaskScheduler` 由系统决定何时跑、不保证周期（§12.1），
+     * 做出来的提醒会「有时有有时没有」。降级形态与三条口径见 [IosScoreReminder]；
+     * 它与 [scoreSyncImpl] 共用同一份 `ScoreSync`（那道 Mutex 是「一次只抓一轮」的依据）。
+     */
+    private val scoreReminderImpl: IosScoreReminder by lazy {
+        IosScoreReminder(prefs = prefs, sync = scoreSyncImpl)
+    }
 
     private companion object {
         /** 日志 tag：崩溃/后台失败都记在这个名字下，排查时先 grep 它。 */
