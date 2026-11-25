@@ -107,8 +107,13 @@ private fun argbToUIImage(pixels: IntArray, width: Int, height: Int): UIImage? =
     UIImage.imageWithCGImage(cgImage)
 }
 
-/** `NSData` → 字节数组；取长度与指针的写法照 `IosKeychain.kt` 里 `CFDataGetBytePtr` 那段。 */
-private fun NSData.toByteArray(): ByteArray? {
+/**
+ * `NSData` → 字节数组；取长度与指针的写法照 `IosKeychain.kt` 里 `CFDataGetBytePtr` 那段。
+ *
+ * `internal`（2026-11-26）：课表背景图的导入（`ui/week/IosScheduleBackgroundImport.kt`）读
+ * `NSData` 之后也要同一份转换，别再写第二遍。
+ */
+internal fun NSData.toByteArray(): ByteArray? {
     val size = length.toInt()
     if (size <= 0) return null
     val pointer = bytes ?: return null

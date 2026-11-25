@@ -109,6 +109,7 @@ import platform.Foundation.NSBundle
 import edu.jxslu.schedule.ui.ai.AiApiKeys
 import edu.jxslu.schedule.ui.ebike.BikeLocationSource
 import edu.jxslu.schedule.ui.ebike.IosBikeLocation
+import edu.jxslu.schedule.ui.week.IosScheduleBackgroundFiles
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 
@@ -406,15 +407,16 @@ class IosServices : AppServices {
     override fun aiApplyHistoryStore(): AiApplyHistoryStore = aiHistory
 
     /**
-     * 课表页背景图：**iOS 侧还没有实现，返回 null**（iOS 移植 S17，2026-11-25）。
+     * 课表页背景图的文件删除（iOS 移植 M4，2026-11-26 补上）。
      *
-     * 升级条件：在 `iosMain` 里实现 [ScheduleBackgroundFiles]，介质换成
-     * `NSTemporaryDirectory()`/沙箱 `appDataDir()` 下的 `schedule_bg/` 目录，解码压缩用
-     * `UIImage` + `UIGraphicsImageRenderer`（对应 Android 的 `ImageImport`：
-     * 长边钳到 `ScheduleBackground.MAX_SIDE`、超 `MAX_BYTES` 重编码成 JPEG）。
-     * 在那之前显示设置面板的「背景」整组不渲染——选图入口给一个点了没反应的按钮更糟。
+     * 与 `:app` 的 `GraphServices` 同一个形状：只转接「删旧文件」这一件事，选图与解码压缩仍是
+     * 平台动作（`ui/week/IosScheduleBackgroundFiles.kt` 的类 KDoc 说明了为什么只有这一个方法）。
+     *
+     * 返回非 null 之后 `MeViewModel` 才会真的删旧文件；显示设置面板的「背景」整组、
+     * 以及课表页的背景图层，仍要靠宿主的接线条（前者看 `onPickBackground`，后者看
+     * `WeekScreen.backgroundLayer` 槽位）。
      */
-    override fun scheduleBackgroundFiles(): ScheduleBackgroundFiles? = null
+    override fun scheduleBackgroundFiles(): ScheduleBackgroundFiles? = IosScheduleBackgroundFiles()
 
     // ---- 设置首页（S17，2026-11-25） ----
 

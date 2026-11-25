@@ -190,6 +190,7 @@ val TopBarHeight = 62.dp
  * | [onSyncCalendar] | 平台没有系统日历写入 → 隐藏「同步到日历」 |
  * | [displaySettings] | 平台没有显示设置面板实现 → 隐藏顶栏「眼睛」 |
  * | [backgroundExists] | 平台没有背景图功能 → 跳过「文件丢了就清偏好」的校验 |
+ * | [backgroundLayer] | 平台画不出背景图层 → 这一层不画（页面仍是主题底色） |
  * | [onOpenDrawer] | 平台没有左侧抽屉 → 顶栏左侧不渲染汉堡 |
  *
  * 传 null 不等于功能坏掉，而是**这个平台确实没有这项能力**，所以入口直接不出现——
@@ -223,6 +224,21 @@ fun WeekScreen(
         ) -> Unit)? = null,
     /** 背景图文件是否还在磁盘上（`ScheduleBackgroundStore.exists`）。 */
     backgroundExists: ((name: String) -> Boolean)? = null,
+    /**
+     * 课表页的背景图层（DESIGN §4.21）。参数是本层的 `Modifier`，由本页给成整页大小。
+     *
+     * **为什么是一个 composable 槽位而不是 `ImageBitmap`**：背景图要从磁盘解成位图，
+     * 而 Compose 的 `ImageBitmap` 在 CMP 1.7.3 的 iOS 变体上**没有**「从字节构造」的入口
+     * （已解 klib 核实，见 `design/ios-port.md` §12.14 末段）。Android 用 `BitmapFactory` 解，
+     * iOS 用 `UIDocumentPicker` 那一套原生视图——两条路都不经过 `commonMain`，
+     * 所以这里只留一个「你来画，我给你大小」的空位。
+     *
+     * 调用点在**所有内容之下**、且**不消费 Scaffold 的 padding**：图要铺到状态栏与底栏之后，
+     * 与本页顶栏是否透明无关。
+     *
+     * null = 本平台没有背景图渲染（§11.2 ④）→ 这一层整块不画，不占位、不留灰块。
+     */
+    backgroundLayer: (@Composable (Modifier) -> Unit)? = null,
     /** 显示设置覆盖面板；参数为表头高度的动态下限（与网格布局兜底同源）。 */
     displaySettings: (@Composable (headerMinDp: Float, onDismiss: () -> Unit) -> Unit)? = null,
     /**
@@ -551,184 +567,192 @@ fun WeekScreen(
         )
     }
 
-    Scaffold(
-        // 底色透明（DESIGN §4.22）：背景图由 JuwApp 铺在外层 Scaffold 之下（要盖到状态栏与底栏），
-        // 本页的 Surface 若不透明就会把它整块盖住。不透明底只由外层 Scaffold 提供，不会露出窗口底。
-        containerColor = Color.Transparent,
-        // 底部导航栏 inset 已由外层底栏高度提供，内层不再消费（防底部双倍空白）；
-        // 顶栏为自绘 56dp Row，本就不消费状态栏 inset，顶部由外层 padding 避让。
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            // 加载中不渲染顶栏：否则会先显示默认的「第 1 周」，就绪后再跳成本周（同 Pager 的闪跳根因）
-            if (!state.loading) {
-                WeekTopBar(
-                    week = displayWeek,
-                    today = today,
-                    timetableName = state.timetableName,
-                    checking = checking,
-                    canQuickCheck = viewModel.canQuickCheck,
-                    canOpenDisplay = displaySettings != null,
-                    // 分享弹层里四行全部依赖平台动作；一个都给不出来时整只图标不出现，
-                    // 而不是弹一个空弹层或点了没反应的死入口。
-                    canShare = onSyncCalendar != null ||
-                        onSaveTextFile != null ||
-                        onOpenScheduleShare != null,
-                    onOpenPicker = { pickerOpen = true },
-                    onOpenDisplay = { displaySheetOpen = true },
-                    onOpenTimetables = { switchOpen = true },
-                    onOpenImport = { importOpen = true },
-                    onOpenShare = { shareOpen = true },
-                    onQuickCheck = { viewModel.quickCheck() },
-                    onOpenDrawer = onOpenDrawer,
-                )
-            }
-        },
-        snackbarHost = { AppSnackbarHost(snackbar) },
-    ) { padding ->
-        BoxWithConstraints(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                // 悬浮底栏的净空：网格按可用高度自适应，不扣掉这段最后几行会被胶囊压住。
-                // 背景图不受影响——它在窗口层，照旧铺到屏幕底（§4.22）。
-                .padding(bottom = LocalBottomBarClearance.current),
-        ) {
-            // 网格几何只在「可用区 / 列数 / 用户尺寸档」变化时重算：`buildGridLayout` 每次要
-            // 分配两个 11 元素的 ArrayList，而这一层会因任意 `state` 变化（改课、切课表、
-            // 翻周、窗口尺寸）重组，几何多半没变。入参全是稳定值（Dp / Int / Float）。
-            val layout = remember(
-                maxHeight,
-                maxWidth,
-                sectionCount,
-                days,
-                state.rowHeightScale,
-                state.railWidthDp,
-                state.dayHeaderHeightDp,
-                headerMinDp,
-            ) {
-                buildGridLayout(
-                    maxHeight = maxHeight,
-                    maxWidth = maxWidth,
-                    sectionCount = sectionCount,
-                    dayCount = days,
-                    rowHeightScale = state.rowHeightScale,
-                    railWidth = state.railWidthDp.dp,
-                    // 表头高度用户值与「装得下两行日期文字」的下限取大：用户把表头拖小、
-                    // 日期字号拉大时兜底防截断。只抬高渲染值，不改写存储值（滑块位置不动）。
-                    // 下限同时是显示设置弹层里滑块的动态起点（见 headerMinDp），两端一致
-                    dayHeaderHeight = maxOf(state.dayHeaderHeightDp.dp, headerMinDp.dp),
-                )
-            }
-            val fitsOneScreen = layout.gridHeight + layout.dayHeaderHeight <= maxHeight
+    // 背景图层槽位（DESIGN §4.21/§4.22）：iOS 侧画不了 Compose 位图（CMP 1.7.3 没有从字节
+    // 构造 ImageBitmap 的入口），交一个 `UIKitView` 包的原生视图；Android 由宿主的窗口层铺。
+    // 位置：Scaffold **之前**、同一个 Box 里 —— 在所有内容之下，且不消费 Scaffold 的 padding
+    //（图要铺到顶栏 / 状态栏与底栏背后）。null = 本平台不画这一层（§11.2 ④）。
+    Box(Modifier.fillMaxSize()) {
+        backgroundLayer?.invoke(Modifier.fillMaxSize())
 
-            val body: @Composable () -> Unit = {
-                val ps = pagerState
-                if (ps == null) {
-                    // 初始化未完成：网格不渲染，避免 Pager 以第 1 周先出一帧（根因见 pagerState 注释）。
-                    // 但也不能纯白屏——给水滴呼吸加载态（此前先是空白，后改裸 spinner）
-                    LoadingHint("正在准备课表", modifier = Modifier.fillMaxSize())
-                } else {
-                    Row(Modifier.fillMaxSize()) {
-                        TimeRail(
-                            layout = layout,
-                            slots = state.slots,
-                            monthLabel = monthLabel,
-                            railFontSp = railFontSp,
-                            dateFontSp = dateFontSp,
-                        )
-                        HorizontalPager(
-                            state = ps,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            verticalAlignment = Alignment.Top,
-                        ) { pageIndex ->
-                        val week = pageIndex + 1
-                        WeekPage(
-                            week = week,
-                            layout = layout,
-                            visibleDays = visibleDays,
-                            allCourses = state.allCourses,
-                            slots = state.slots,
-                            semester = state.semester,
-                            overrides = state.overrides,
-                            isTodayWeek = week == state.todayWeek,
-                            todayDay = todayDay,
-                            now = nowState,
-                            showNonCurrentWeek = state.showNonCurrentWeek,
-                            cellStyle = cellStyle,
-                            showNowLine = state.showNowLine,
-                            showGridLines = state.showGridLines,
-                            dateFontSp = dateFontSp,
-                            tapBlankToAdd = state.tapBlankToAdd,
-                            onOpenOverrideInfo = { w, d -> overrideInfo = w to d },
-                            onAddEmpty = { day, section ->
-                                editing = Course(
-                                    id = 0,
-                                    name = "",
-                                    teacher = "",
-                                    position = "",
-                                    day = day,
-                                    startSection = section,
-                                    endSection = section,
-                                    weeks = setOf(week),
-                                )
-                                editorOpen = true
-                            },
-                            onOpenCourse = { detailCourse = it },
-                        )
+        Scaffold(
+            // 底色透明（DESIGN §4.22）：背景图由 JuwApp 铺在外层 Scaffold 之下（要盖到状态栏与底栏），
+            // 本页的 Surface 若不透明就会把它整块盖住。不透明底只由外层 Scaffold 提供，不会露出窗口底。
+            containerColor = Color.Transparent,
+            // 底部导航栏 inset 已由外层底栏高度提供，内层不再消费（防底部双倍空白）；
+            // 顶栏为自绘 56dp Row，本就不消费状态栏 inset，顶部由外层 padding 避让。
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                // 加载中不渲染顶栏：否则会先显示默认的「第 1 周」，就绪后再跳成本周（同 Pager 的闪跳根因）
+                if (!state.loading) {
+                    WeekTopBar(
+                        week = displayWeek,
+                        today = today,
+                        timetableName = state.timetableName,
+                        checking = checking,
+                        canQuickCheck = viewModel.canQuickCheck,
+                        canOpenDisplay = displaySettings != null,
+                        // 分享弹层里四行全部依赖平台动作；一个都给不出来时整只图标不出现，
+                        // 而不是弹一个空弹层或点了没反应的死入口。
+                        canShare = onSyncCalendar != null ||
+                            onSaveTextFile != null ||
+                            onOpenScheduleShare != null,
+                        onOpenPicker = { pickerOpen = true },
+                        onOpenDisplay = { displaySheetOpen = true },
+                        onOpenTimetables = { switchOpen = true },
+                        onOpenImport = { importOpen = true },
+                        onOpenShare = { shareOpen = true },
+                        onQuickCheck = { viewModel.quickCheck() },
+                        onOpenDrawer = onOpenDrawer,
+                    )
+                }
+            },
+            snackbarHost = { AppSnackbarHost(snackbar) },
+        ) { padding ->
+            BoxWithConstraints(
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    // 悬浮底栏的净空：网格按可用高度自适应，不扣掉这段最后几行会被胶囊压住。
+                    // 背景图不受影响——它在窗口层，照旧铺到屏幕底（§4.22）。
+                    .padding(bottom = LocalBottomBarClearance.current),
+            ) {
+                // 网格几何只在「可用区 / 列数 / 用户尺寸档」变化时重算：`buildGridLayout` 每次要
+                // 分配两个 11 元素的 ArrayList，而这一层会因任意 `state` 变化（改课、切课表、
+                // 翻周、窗口尺寸）重组，几何多半没变。入参全是稳定值（Dp / Int / Float）。
+                val layout = remember(
+                    maxHeight,
+                    maxWidth,
+                    sectionCount,
+                    days,
+                    state.rowHeightScale,
+                    state.railWidthDp,
+                    state.dayHeaderHeightDp,
+                    headerMinDp,
+                ) {
+                    buildGridLayout(
+                        maxHeight = maxHeight,
+                        maxWidth = maxWidth,
+                        sectionCount = sectionCount,
+                        dayCount = days,
+                        rowHeightScale = state.rowHeightScale,
+                        railWidth = state.railWidthDp.dp,
+                        // 表头高度用户值与「装得下两行日期文字」的下限取大：用户把表头拖小、
+                        // 日期字号拉大时兜底防截断。只抬高渲染值，不改写存储值（滑块位置不动）。
+                        // 下限同时是显示设置弹层里滑块的动态起点（见 headerMinDp），两端一致
+                        dayHeaderHeight = maxOf(state.dayHeaderHeightDp.dp, headerMinDp.dp),
+                    )
+                }
+                val fitsOneScreen = layout.gridHeight + layout.dayHeaderHeight <= maxHeight
+
+                val body: @Composable () -> Unit = {
+                    val ps = pagerState
+                    if (ps == null) {
+                        // 初始化未完成：网格不渲染，避免 Pager 以第 1 周先出一帧（根因见 pagerState 注释）。
+                        // 但也不能纯白屏——给水滴呼吸加载态（此前先是空白，后改裸 spinner）
+                        LoadingHint("正在准备课表", modifier = Modifier.fillMaxSize())
+                    } else {
+                        Row(Modifier.fillMaxSize()) {
+                            TimeRail(
+                                layout = layout,
+                                slots = state.slots,
+                                monthLabel = monthLabel,
+                                railFontSp = railFontSp,
+                                dateFontSp = dateFontSp,
+                            )
+                            HorizontalPager(
+                                state = ps,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                                verticalAlignment = Alignment.Top,
+                            ) { pageIndex ->
+                            val week = pageIndex + 1
+                            WeekPage(
+                                week = week,
+                                layout = layout,
+                                visibleDays = visibleDays,
+                                allCourses = state.allCourses,
+                                slots = state.slots,
+                                semester = state.semester,
+                                overrides = state.overrides,
+                                isTodayWeek = week == state.todayWeek,
+                                todayDay = todayDay,
+                                now = nowState,
+                                showNonCurrentWeek = state.showNonCurrentWeek,
+                                cellStyle = cellStyle,
+                                showNowLine = state.showNowLine,
+                                showGridLines = state.showGridLines,
+                                dateFontSp = dateFontSp,
+                                tapBlankToAdd = state.tapBlankToAdd,
+                                onOpenOverrideInfo = { w, d -> overrideInfo = w to d },
+                                onAddEmpty = { day, section ->
+                                    editing = Course(
+                                        id = 0,
+                                        name = "",
+                                        teacher = "",
+                                        position = "",
+                                        day = day,
+                                        startSection = section,
+                                        endSection = section,
+                                        weeks = setOf(week),
+                                    )
+                                    editorOpen = true
+                                },
+                                onOpenCourse = { detailCourse = it },
+                            )
+                            }
                         }
                     }
                 }
-            }
 
-            if (fitsOneScreen) {
-                GridTypography(gridScale) { body() }
-            } else {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    Box(Modifier.height(layout.dayHeaderHeight + layout.gridHeight)) {
-                        GridTypography(gridScale) { body() }
+                if (fitsOneScreen) {
+                    GridTypography(gridScale) { body() }
+                } else {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Box(Modifier.height(layout.dayHeaderHeight + layout.gridHeight)) {
+                            GridTypography(gridScale) { body() }
+                        }
+                        if (state.totalCourseCount == 0) {
+                            EmptyScheduleHint(
+                                filter = state.courseFilter,
+                                onOpenJwImport = onOpenJwImport,
+                                tapBlankToAdd = state.tapBlankToAdd,
+                            )
+                        }
+                        Spacer(Modifier.height(72.dp))
                     }
-                    if (state.totalCourseCount == 0) {
+                }
+
+                if (fitsOneScreen && state.totalCourseCount == 0 && !state.loading) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                         EmptyScheduleHint(
                             filter = state.courseFilter,
                             onOpenJwImport = onOpenJwImport,
                             tapBlankToAdd = state.tapBlankToAdd,
+                            modifier = Modifier.padding(bottom = 24.dp),
                         )
                     }
-                    Spacer(Modifier.height(72.dp))
                 }
-            }
 
-            if (fitsOneScreen && state.totalCourseCount == 0 && !state.loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                    EmptyScheduleHint(
-                        filter = state.courseFilter,
-                        onOpenJwImport = onOpenJwImport,
-                        tapBlankToAdd = state.tapBlankToAdd,
-                        modifier = Modifier.padding(bottom = 24.dp),
+                // 「回到本周」悬浮按钮：非本周才出现，贴课表页右下角（与空态提示同层，故后者下移避让）。
+                // 根因：顶栏右侧图标区已排满（眼睛 + 导入），且「回到本周」是低频的**纠偏**动作、
+                // 不是常驻导航——放顶栏会与高频入口抢位置，也让顶栏在切周时左右跳动。
+                // 放右下角后：位置固定不参与顶栏布局，拇指可达，底部再抬 24dp 避让外层底栏。
+                // todayWeek == null（今天不在这张课表的学期内）= 没有「本周」可回，按钮不出现。
+                val todayWeek = state.todayWeek
+                val showBackToWeek = !state.loading && todayWeek != null && displayWeek != todayWeek
+                if (showBackToWeek) {
+                    BackToCurrentWeekButton(
+                        onClick = { viewModel.goToToday() },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 16.dp, bottom = 24.dp),
                     )
                 }
-            }
-
-            // 「回到本周」悬浮按钮：非本周才出现，贴课表页右下角（与空态提示同层，故后者下移避让）。
-            // 根因：顶栏右侧图标区已排满（眼睛 + 导入），且「回到本周」是低频的**纠偏**动作、
-            // 不是常驻导航——放顶栏会与高频入口抢位置，也让顶栏在切周时左右跳动。
-            // 放右下角后：位置固定不参与顶栏布局，拇指可达，底部再抬 24dp 避让外层底栏。
-            // todayWeek == null（今天不在这张课表的学期内）= 没有「本周」可回，按钮不出现。
-            val todayWeek = state.todayWeek
-            val showBackToWeek = !state.loading && todayWeek != null && displayWeek != todayWeek
-            if (showBackToWeek) {
-                BackToCurrentWeekButton(
-                    onClick = { viewModel.goToToday() },
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(end = 16.dp, bottom = 24.dp),
-                )
             }
         }
     }
