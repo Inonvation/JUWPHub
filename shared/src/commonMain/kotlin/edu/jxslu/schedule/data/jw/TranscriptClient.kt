@@ -47,9 +47,9 @@ fun interface TranscriptTransport {
  *
  * ## iOS 移植 S9（2026-11-24）：搬进 `shared/commonMain`
  *
- * 本类只依赖 [TranscriptTransport] 这一条缝，所以整段可以共享；Android 专属的部分只剩
- * 「从 WebView 读 `sid`」，它留在 `:app` 的 `TranscriptCookies`（`android.webkit`）。
- * iOS 要接这条链路时缺的不是这里，而是 WKWebView 的 cookie 存储——见那边的 KDoc。
+ * 本类只依赖 [TranscriptTransport] 这一条缝，所以整段可以共享；「从 WebView 读 `sid`」
+ * 那一半 2026-11-26 起走 `data/session/WebCookies`（Android `CookieManager`、
+ * iOS `WKWebsiteDataStore`），两端同一条缝，`:app` 的 `TranscriptCookies` 已删。
  */
 class TranscriptClient(
     private val transport: TranscriptTransport = KtorTranscriptTransport(),

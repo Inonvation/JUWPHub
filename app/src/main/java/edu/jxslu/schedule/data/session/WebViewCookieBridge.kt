@@ -7,7 +7,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
- * [WebCookieBridge] 的 Android 实现（接口与「只回灌不注入」的理由见那个文件）。
+ * [WebViewCookieBridge] 的 Android 实现（接口与「只回灌不注入」的理由见那个文件）。
  *
  * 搬迁史：本对象原先自带一份 `WebCookieBridge` 接口 + `List<okhttp3.Cookie>` 的签名，
  * 2026-11-25 随 `CasSession` 一起上移——接口进 `shared/commonMain`（两端共用），
@@ -68,5 +68,32 @@ object WebViewCookieBridge : WebCookieBridge {
         // 学工 token 在 localStorage（AppCacheCleaner 清缓存同款口径）：只清 cookie
         // 等于「退出」只退了一半，换账号后可能带出上一位用户的学工数据。
         WebStorage.getInstance().deleteAllData()
+    }
+}
+
+/**
+ * [WebCookieSource] 的 Android 实现（2026-11-26）。
+ *
+ * 与上面的 [WebViewCookieBridge] 同一个底座（都读 `CookieManager`），但签的口径不同：
+ * 那个回**解析过的 cookie 列表**（给 OkHttp 的会话续登用），这个回**请求头原文**——
+ * 共享层的抓取链只想要一个能直接塞进 `Cookie:` 头的字符串。
+ *
+ * iOS 侧的对应物是 `IosWebCookieSource`（`WKWebsiteDataStore.getAllCookies`）。Android 侧
+ * 此前一直没装（只有 `IosServices` 装过），直到导出成绩单搬进共享层：签章系统的 `sid`
+ * 就是这么取来的（`PtworkTranscript.COOKIE_URL`）。装点在 `JuwApplication.onCreate`。
+ *
+ * HttpOnly 的 Cookie 这里也读得到：`getCookie` 给的是**该 URL 会发出的 Cookie 头原文**，
+ * 不受脚本可见性限制。读不到只有一种解释——那个窗口还没登过。
+ *
+ * 线程：`CookieManager` 要有 Looper，所以统一切回主线程（与 [WebViewCookieBridge.adopt]
+ * 同一条纪律）。切线程不会让调用方卡住：`cookieHeader` 本来就是挂起函数。
+ */
+object AndroidWebCookieSource : WebCookieSource {
+
+    override suspend fun cookieHeader(url: String): String? = withContext(Dispatchers.Main) {
+        runCatching { CookieManager.getInstance().getCookie(url) }
+            .getOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
     }
 }

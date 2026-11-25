@@ -48,8 +48,9 @@ import kotlinx.serialization.json.JsonPrimitive
  *   两者只在「空格 → `%20` vs `+`」上有分歧。
  * - `java.time` → kotlinx-datetime（[defaultFileName] 的时区参数由 `ZoneId` 变 [TimeZone]）。
  *
- * 传输层（`TranscriptTransport` 的 Ktor 实现）在 `TranscriptClient.kt` 里；读 WebView
- * Cookie 的那一半仍是 Android 专属，留在 `:app`（见那边的 KDoc）。
+ * 传输层（`TranscriptTransport` 的 Ktor 实现）在 `TranscriptClient.kt` 里；取会话 Cookie 走
+ * `data/session/WebCookies`（Android `CookieManager` / iOS `WKWebsiteDataStore`）——2026-11-26
+ * 起两端同一条缝，`:app` 那份 `TranscriptCookies` 已删。
  */
 object PtworkTranscript {
 
