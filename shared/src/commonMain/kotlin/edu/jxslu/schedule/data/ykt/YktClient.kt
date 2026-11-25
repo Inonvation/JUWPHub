@@ -61,6 +61,11 @@ class YktClient private constructor(private val http: HttpClient) {
         val text: String,
         /** 302 场景需要 Location；其余场景常为 null。 */
         val location: String? = null,
+        /**
+         * 本次请求的目标 URL（已过 [YktDiagnostics.redactUrl]）。只用于失败诊断——
+         * [YktRepository.parse] 把 4xx/5xx 归一成 [YktException.Http] 时要带上它。
+         */
+        val url: String = "",
     )
 
     /**
@@ -139,19 +144,35 @@ class YktClient private constructor(private val http: HttpClient) {
      * 不判 `isSuccess`：一卡通有大量「HTTP 200 但业务码报错」的应答，也有「HTTP 400 带
      * 可读文案」的登录失败，状态码原样交给 [YktRepository] 分类——这里只把「连不上 / 超时」
      * 这类真正的基础设施失败换算成 [YktException.Network]。
+     *
+     * 2026-11-25：异常**不再只带一个 Throwable**。先自己 build 出请求（与 `http.request { }`
+     * 内部同一个 `HttpRequestBuilder`），才能在 catch 里说清「是哪一跳、往哪里、抛了什么」。
+     * URL 先过 [YktDiagnostics.redactUrl]：query 里的 `account` / `prepay_id` 是卡号与支付
+     * 凭证，不能跟着诊断信息出 App。
      */
     private suspend fun send(build: io.ktor.client.request.HttpRequestBuilder.() -> Unit): Raw {
+        val builder = io.ktor.client.request.HttpRequestBuilder().apply(build)
+        val target = YktDiagnostics.redactUrl(builder.url.toString())
         val response: HttpResponse = try {
-            http.request { build() }
+            http.request(builder)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            throw YktException.Network(e)
+            // 类名即结论：iOS 的 NSURLErrorDomain -1200 是 TLS 证书，-1004 是连不上，
+            // SocketTimeoutException 是超时，三者此后不会再被同一句「网络不可达」盖住
+            throw YktException.Network(
+                targetUrl = target,
+                causeClass = e::class.simpleName ?: e::class.toString(),
+                // message 可能很长（有的引擎把整段 TLS 报告塞进去），留一行够判断即可
+                causeMessage = e.message?.replace('\n', ' ')?.take(200),
+                cause = e,
+            )
         }
         return Raw(
             httpCode = response.status.value,
             text = YktModels.stripBom(response.bodyAsText()),
             location = response.headers["Location"],
+            url = target,
         )
     }
 }

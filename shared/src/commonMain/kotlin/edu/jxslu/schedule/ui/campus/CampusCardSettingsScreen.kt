@@ -40,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -70,6 +71,7 @@ import edu.jxslu.schedule.ui.common.SettingItem
 import edu.jxslu.schedule.ui.common.SettingSwitchRow
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WheelValueDialog
+import edu.jxslu.schedule.ui.common.copyPlainText
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberResumeTick
@@ -138,6 +140,7 @@ fun CampusCardSettingsScreen(
     val enabled by viewModel.enabled.collectAsStateWithLifecycle()
     val balance by viewModel.balance.collectAsStateWithLifecycle()
     val arrivalState by viewModel.arrivalState.collectAsStateWithLifecycle()
+    val lastFailure by viewModel.lastFailure.collectAsStateWithLifecycle()
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
@@ -479,6 +482,42 @@ fun CampusCardSettingsScreen(
                             enabled = !busy,
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text("取消") }
+                    }
+                }
+            }
+
+            // 上次失败的技术细节（2026-11-25）：Snackbar 会过期，而用户报障靠截图。
+            // 正文仍是业务码分类那句话，下面一行小字是「异常类名 + 目标地址 / HTTP 状态码
+            // + 脱敏后的响应体片段」——它才是能区分「TLS 被拒 / 服务器 502 / 密码错」的东西。
+            // 位置固定钉在「账号与凭证」下面：用户刚点完「保存并开启」，视线就在这一块。
+            val failure = lastFailure
+            if (failure != null) {
+                SettingsSection(
+                    title = "上次没成功的原因",
+                    subtitle = "复制或截图下面这行小字发给开发者，能直接定位；不含密码、卡号与 token",
+                ) {
+                    Text(
+                        failure.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        failure.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    Row(
+                        modifier = Modifier.padding(top = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(
+                            onClick = {
+                                copyPlainText("一卡通登录诊断", failure.text + "\n" + failure.detail)
+                                showNotice("诊断信息已复制", NoticeTone.Success)
+                            },
+                        ) { Text("复制诊断信息") }
+                        TextButton(onClick = { viewModel.dismissFailure() }) { Text("知道了") }
                     }
                 }
             }
