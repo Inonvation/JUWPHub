@@ -917,9 +917,9 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 **`lifecycle-runtime-compose` 不能进 `commonMain`**：它的 KMP 变体要 Compose 1.9，本仓锁 CMP 1.7.3。
 所以只加在 `androidMain`，给 `LifecycleState.android.kt` 转调用；`commonMain` 里那份是 expect。
 
-### 10.2 已搬进 commonMain 的页面（2026-11-25 02:30 盘点）
+### 10.2 已搬进 commonMain 的页面（2026-11-25 02:30 盘点，2026-11-26 补 `ui/xg`）
 
-共享层 `ui/` 现在有 23 个包，`:app/ui` 剩下的见 §12.2。
+共享层 `ui/` 现在有 33 个包（2026-11-26 复核），`:app/ui` 剩下的见 §12.2。
 
 | 包 | 已搬的内容 |
 |---|---|
@@ -940,6 +940,7 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 | `ui/today` | `TodayScreen` + `TodayViewModel` + 进行中服务卡（`ActiveServiceCard`）+ 猜你想用卡 + 收件箱卡 + `TodaySlots`（V1 2026-11-25；服务卡 V2 同日：开水 / 趣智 / U净 三行随之搬走，快趣行仍由 `:app` 注入槽位） |
 | `ui/onboarding` | 首启引导六屏（`OnboardingScreen`，S22 2026-11-25）+ 两个平台槽位类型 `OnboardingJwLogin` / `OnboardingBrandIcons`；接法见 §10.6 |
 | `ui/ebike` | **E2（2026-11-25）**：`BikeMapViewModel`（附近单车地图页的 VM，产出 `BikeMapInput`）、`KvcxRideController`（本机用车编排，出码页与地图页共用一份）、`performReturnBike`（还车 + 结算口径的唯一实现）、`EbikeRideSignal`、以及 `ui/ebike` 的位置 / 罗盘三件（S23）。**页面本身（`RideScreen` / `RidePanels` / `KvcxScreen` / 出码页）与高德视图仍在 `:app`**，见 §11.3 |
+| `ui/xg` | **2026-11-26**：`XgFormScreen`（学工表单窗口，报修 / 请假 / 销假 / 续假共用一张页，走 `ui/web/WebViewController` 那条缝）。iOS 上能开、能填、能提交；附件上传与销假的定位仍缺（§11.4 那两格 iOS 未接）。`:app` 那张同名页**暂留**——它压着接缝给不了的四件（`goBack` / `cacheMode` / 直取 `ClipData` 的选文件 / 定位授权），删了 Android 会丢附件上传与返回回退；升级条件写在文件头 `// shortcut:` |
 
 跨模块 `internal` 会失效：`TopBarHeight`、`GridTypography`、`quickCheckFeedback`、`OutcomeQueue`、
 `SchedulePreviewGrid` 的 `changedCellSet` / `previewWeeksOf` 因此放开成 `public`，KDoc 里各自写了原因。
@@ -1161,7 +1162,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 |---|---|---|---|
 | `ui/ebike` | 30 | 17,879 | 见 12.1：高德 Android SDK |
 | `ui/reminder` | 15 | 4,107 | 见 12.1：通知 + WorkManager。洗衣 / 作业截止 / 成绩三类的**通知层**已在 iOS 侧独立实现（`shared/iosMain/.../platform/Ios*Reminder`），`:app` 那 15 个文件仍只在 Android 用；上课提醒、问渠蹲点、免费骑行倒计时、自动还车四类仍待 `AlarmManager` / `WorkManager` 的等价物 |
-| `ui/campus` | 2 | 646 | 只剩学工表单（`XgFormScreen`：文件上传、SSL、定位、WebSettings 那一层）与校历图解码（`CampusCalendarImageUiAndroid`）。校园卡设置 / 付款码 / 充值弹层 2026-11-25 晚已搬（§12.8） |
+| `ui/campus` | 2 | 646 | 只剩学工表单（`XgFormScreen`：文件上传、SSL、定位、WebSettings 那一层）与校历图解码（`CampusCalendarImageUiAndroid`）。**2026-11-26**：表单**窗口**已在 `ui/xg/XgFormScreen`（iOS 用），`:app` 那张留着专供上面四件平台动作，合并条件见 §10.2 的 `ui/xg` 行。校园卡设置 / 付款码 / 充值弹层 2026-11-25 晚已搬（§12.8） |
 | `ui/widget` | 12 | 3,112 | 见 12.1：Glance |
 | `ui/jwvw` | 2 | 2,445 | `JwImportScreen`：教务导入总入口，WebView 全套 API + 文件选择 |
 | `ui/common` | 21 | 1,835 | 剩下的都是位图与 WebView 辅助（`DecodeSampled` / `CodeBitmaps` / `WebViewSupport` / `ImageViewerDialog`） |
