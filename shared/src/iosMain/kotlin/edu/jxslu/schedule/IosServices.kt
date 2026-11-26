@@ -108,8 +108,11 @@ import platform.Foundation.NSBundle
 import edu.jxslu.schedule.ui.ai.AiApiKeys
 import edu.jxslu.schedule.ui.ebike.BikeLocationSource
 import edu.jxslu.schedule.ui.ebike.IosBikeLocation
+import edu.jxslu.schedule.ui.ebike.KvcxNotice
+import edu.jxslu.schedule.ui.ebike.KvcxRideController
 import edu.jxslu.schedule.ui.week.IosScheduleBackgroundFiles
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.combine
 
 /**
@@ -962,6 +965,89 @@ class IosServices : AppServices {
     }
 
     override fun kqcxSession(): KqcxSessionCore = kqcxCoreImpl
+
+    // ---- 今日页的快趣骑行槽位（iOS 移植，2026-11-26） ----
+    //
+    // 今日页服务卡那两行（`ui/today/KvcxActiveRows.kt` 的 `KvcxActiveRow` / `KvcxDoneRow`）
+    // 早在共享层，缺的只是**一个进程级控制器**：Android 用 `Graph.kvcxRide(context)` 单例，
+    // iOS 之前只有出行页里 `BikeMapViewModel` 自建的那一份（宿主传 `rideController = null`），
+    // 今日页再建一份就是两个状态源，各查各的、互相覆盖——控制器里 `snapshotSeq` / `readSeq`
+    // 防的正是这种旧包盖新包。
+
+    /**
+     * 控制器的作用域：主线程（`Dispatchers.Main` 在 Darwin 由 kotlinx-coroutines 提供，
+     * 仓里 `ui/week/IosCalendarSync.kt` 已在用）。
+     *
+     * 为什么不用本类的 [scope]（`Dispatchers.Default`）：出行页此前那份控制器跑在
+     * `viewModelScope`（Main.immediate）上，换成后台线程会让「开锁成功 → 立刻读控制器状态」
+     * 这类顺序在两端不一致；而控制器自己的网络 / 落盘全在挂起函数里，不占主线程。
+     *
+     * **未核实（Windows 编不了 Kotlin/Native）**：`.immediate` 这一半。本机只核到仓里
+     * `Dispatchers.Main` 的既有用法（`ui/week/IosCalendarSync.kt`）；`MainCoroutineDispatcher.immediate`
+     * 是 kotlinx-coroutines 的公共声明（各平台都覆写），能否在本仓的 2.1.21 / coroutines 版本上
+     * 由 Darwin 解析出来，等 macOS CI 编译时确认。
+     */
+    private val kvcxScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * 用车事件的共享流（提示 / 开锁成功信号 / 远程用车计数）。
+     *
+     * 单例化之后回调只有一个槽位，消费方却有两个（出行页的 `BikeMapViewModel` 与今日页），
+     * 流才是多消费方的载体——`BikeMapViewModel` 注入控制器时订的就是 [KvcxRideController.notices]
+     * 与 [KvcxRideController.unlockedSignal]。
+     */
+    private val kvcxNotices = MutableSharedFlow<KvcxNotice>(extraBufferCapacity = 16)
+    private val kvcxUnlocked = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val kvcxRemoteRide = MutableSharedFlow<Int>(extraBufferCapacity = 1)
+
+    /**
+     * 快趣本机用车控制器（进程级单例，与 Android `Graph.kvcxRide` 同口径）。
+     *
+     * ## 为什么是单例
+     *
+     * 今日页服务卡与出行页必须看到**同一份**骑行状态：两个实例会各查各的在案订单、互相覆盖，
+     * 出行页还好的车在今日页仍显示骑行中。Android 那边是 `Graph.kvcxRide(context)`，
+     * 本端由 `IosServices` 持有——它本来就是 iOS 的装配根（`AppServices` 的实现）。
+     *
+     * ## 为什么 `onNotice` 给空实现
+     *
+     * 事件只走 [kvcxNotices] / [kvcxUnlocked] / [kvcxRemoteRide] 三条流：控制器见流就不再回调
+     * （`KvcxRideController.notice` 的判据），两条同时发会让消费方收到两遍。空实现只是防重复投递。
+     *
+     * ## 为什么 `effects = null`
+     *
+     * `KvcxSideEffects` 那几件事（免费时长计时与倒计时通知 / 提醒开关 / 自动还车闹钟 /
+     * 还车善后与相册焚码 / 本机骑行记账）全要 `AlarmManager` + 通知渠道，iOS 侧结构性没有
+     * （`design/ios-port.md` §12.1）。`null` = 本平台没有这套能力、整体不调用，与出行页现在
+     * 那份（`BikeMapViewModel` 自建、`sideEffects = null`）同口径：开锁 / 锁车 / 还车照常，
+     * 只是没有通知栏倒计时、没有自动还车。
+     *
+     * ## 与 Android 那份的差别
+     *
+     * | 参数 | Android | iOS |
+     * |---|---|---|
+     * | `launchHadRide` / `onRideActiveChanged` | `KvcxRideHintPrefsStore`（`SharedPreferences`） | 不传：那份存储 `internal` 在 `:app`，iOS 没有对应介质 |
+     * | `onOrderCreated` | `recordGuessOrder(GuessTarget.KVCX)` | 不传：本端有 [recordGuessOrder]，但「猜你想用」卡在 iOS 是否读它未核实，这一轮不接 |
+     *
+     * `locate` 走默认值（`BikeLocator` → [bikeLocation] → `IosBikeLocation`），与 Android 同形。
+     * 缺的这两项只影响「冷启动首帧卡片位置」与「猜你想用」的一条记账，不碰骑行状态与动作；
+     * 而且 iOS 今日页的 `pinned` 目前恒 false（接线还没做），前者的差异暂时看不出来。
+     */
+    private val kvcxRideImpl: KvcxRideController by lazy {
+        KvcxRideController(
+            session = kqcxCoreImpl,
+            scope = kvcxScope,
+            // 事件只走共享流（见上），这里给空实现防重复投递
+            onNotice = { _, _ -> },
+            rideNotices = kvcxNotices,
+            rideUnlocked = kvcxUnlocked,
+            remoteRideReminder = kvcxRemoteRide,
+            effects = null,
+        )
+    }
+
+    /** 快趣本机用车控制器（进程级单例，与 Android `Graph.kvcxRide` 同口径）。 */
+    fun kvcxRideController(): KvcxRideController = kvcxRideImpl
 
     // ---- 快趣出行页面层（iOS 移植 P4，2026-11-25） ----
 
