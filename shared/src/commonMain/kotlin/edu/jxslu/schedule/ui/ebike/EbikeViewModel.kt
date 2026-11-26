@@ -144,6 +144,20 @@ class EbikeViewModel(
     /** 本平台有没有提醒能力（免费时长提醒 / 自动还车的设置组据此不渲染）。 */
     val hasReminders: Boolean get() = reminders != null
 
+    /**
+     * 本平台能不能跑到点执行代码（自动还车）。iOS 为 false：本地通知到点只弹一次、
+     * 不执行代码，`BGTaskScheduler` 又不保证时刻（`design/ios-port.md` §12.13）。
+     * 那一组设置整块不渲染，免得上一个拨了没反应的开关。
+     */
+    val hasAutoReturn: Boolean get() = reminders?.supportsAutoReturn == true
+
+    /**
+     * 本平台能不能删掉已存进相册的码（扫完即焚）。iOS 为 false：`UIImageWriteToSavedPhotosAlbum`
+     * 不回头给句柄，删相册资产要 PhotoKit（仓里没有先例，见 `EbikeQrGallery.canDelete`）。
+     * false 时那个开关不渲染，**也不记录待焚毁 key**。
+     */
+    val hasBurnAfterScan: Boolean get() = gallery?.canDelete == true
+
     private val _uiState = MutableStateFlow(EbikeUiState())
     val uiState: StateFlow<EbikeUiState> = _uiState.asStateFlow()
 
@@ -447,8 +461,11 @@ class EbikeViewModel(
         if (result is EbikeQrSaveResult.Saved) {
             // 同 [generate]：开关真值读原始流。快照在冷启动首帧还是默认值（true），
             // 用户明明关掉了焚毁也会被记上待焚毁 key；读失败按「不记焚毁」兜底
-            // （宁可在相册留一张码，也不做没把握的删除）
-            val burn = runCatching { prefs.ebikeBurnAfterScan.first() }.getOrDefault(false)
+            // （宁可在相册留一张码，也不做没把握的删除）。
+            // 本平台删不掉（[EbikeQrGallery.canDelete] = false，iOS）就一条都不记：
+            // 记了也删不掉，只会让每次核对拖着一串永远清不掉的目标空转。
+            val burn = current.canDelete &&
+                runCatching { prefs.ebikeBurnAfterScan.first() }.getOrDefault(false)
             if (burn) {
                 prefs.updateEbikePendingDelete {
                     EbikeQr.mergePendingDelete(it, result.pendingKey)
@@ -466,7 +483,8 @@ class EbikeViewModel(
      * 无计时在案时回 App（页面 ON_RESUME 兜底）。
      */
     fun burnPending(force: Boolean = false) {
-        if (gallery == null) return // 没有相册能力 = 从来没有 key 被记上，不必绕一圈
+        // 没有相册能力 / 删不掉（iOS）= 从来没有 key 被记上，不必绕一圈
+        if (gallery?.canDelete != true) return
         viewModelScope.launch {
             val deleted = burnPendingCodes(prefs, gallery, force)
             if (deleted > 0) {
