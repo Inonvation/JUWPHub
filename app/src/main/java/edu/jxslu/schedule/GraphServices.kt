@@ -162,7 +162,7 @@ class GraphServices(private val context: Context) : AppServices {
 
     // ---- 课表页背景图 / 主题换色（S17） ----
     //
-    // 背景图只转接「删旧文件」这一件事：选图与解码压缩仍是 `:app` 的平台动作
+    // 背景图只转接「删旧文件」与「文件还在不在」两件事：选图与解码压缩仍是 `:app` 的平台动作
     // （`ScheduleBackgroundStore.importUri`），文件名由平台动作回传给 ViewModel。
     // 写偏好与删旧文件的顺序由 ViewModel 保证，这里不掺和。
 
@@ -170,6 +170,8 @@ class GraphServices(private val context: Context) : AppServices {
         val store = Graph.scheduleBackground(appContext)
         object : ScheduleBackgroundFiles {
             override suspend fun delete(fileName: String?) = store.delete(fileName)
+            // 判据在 store 里（`fileFor` 过白名单 + `isFile`），这里只转接，不另写一份
+            override fun exists(fileName: String): Boolean = store.exists(fileName)
         }
     }
 
