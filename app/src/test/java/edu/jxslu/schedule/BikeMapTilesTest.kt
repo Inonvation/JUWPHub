@@ -19,7 +19,9 @@ import kotlin.math.pow
  * 1. 瓦片级别 = 相机级别的整数档低一级，钳在 1..18（高德 z19 起回空瓦片）；
  * 2. 一块瓦片在画布上的边长 = 256 × 2^(相机 - 瓦片)，与投影同一单位（设备像素）；
  * 3. 视野中心一定落在算出来的某一瓦片里（否则拖动时会有一块永远补不上）；
- * 4. 脏尺寸 / 超密视野回空列表（宁可这一帧不贴底图，也不发几十个请求）。
+ * 4. 脏尺寸 / 超密视野回空列表（宁可这一帧不贴底图，也不发几十个请求）；
+ * 5. **同输入同输出**：画布用 `distinctUntilChanged` 去重，结果不稳定就等于每帧重发请求
+ *    （2026-11-26 起手势帧不再重组，瓦片清单只在 flow 里算一次、靠值相等判「视野没变」）。
  */
 class BikeMapTilesTest {
 
@@ -149,5 +151,25 @@ class BikeMapTilesTest {
         result.forEach { key ->
             assertTrue("x=${key.x} 应绕回 0..${count - 1}", key.x in 0 until count)
         }
+    }
+
+    @Test
+    fun `同一视野重复算出的瓦片清单逐项相等`() {
+        // iOS 画布的瓦片请求走 `snapshotFlow { 视野 }.distinctUntilChanged()`：只有值**相等**
+        // 才会被去重，否则拖动时每帧都判定「视野变了」、把去重与 120ms 节流全废掉，一屏十几块
+        // 瓦片的请求被反复取消/重发（表现就是底图迟迟不出现）。
+        // 前提是 visibleKeys 是纯函数：同输入两次调用结果必须逐项相等，且比较不能退化成身份相等。
+        val first = keys()
+        val second = keys()
+        assertTrue("同一视野不该算出空清单", first.isNotEmpty())
+        assertEquals("同一视野两次调用必须逐项相等", first, second)
+        // 清单里是 data class：两次调用是两批不同实例，相等靠的是内容（这就是去重能生效的依据）
+        assertTrue("两次调用必须是不同实例，否则钉不住内容相等", first !== second)
+        first.forEachIndexed { index, key ->
+            assertTrue("第 $index 项不是不同实例", key !== second[index])
+        }
+        // 反过来也要成立：视野真的动了，清单必须变，否则去重会把该重新请求的也吞掉
+        val moved = BikeMapTiles.visibleKeys(centerLat, centerLng + 0.01, 17.0, widthPx, heightPx)
+        assertTrue("视野移动 0.01° 后瓦片清单仍在原地", moved != first)
     }
 }
