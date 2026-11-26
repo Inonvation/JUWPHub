@@ -338,7 +338,13 @@ class YktRepository(
         // [3] 中间页抓 weixin:// 拉起链接（HTML 实体未转义，原文即 weixin://wap/pay?prepayid%3D…）
         val wechatUrl = Regex("weixin://wap/pay\\?[^\"'\\s]+").find(mid.text)?.value
             ?: return null
-        return YktRechargeOrder.WechatPay(orderId = orderId, wechatUrl = wechatUrl)
+        // 同一笔单的收银台地址随直拉结果一起带出去：iOS 不能直拉 weixin://，
+        // 它要的是这一条（见 YktRechargeOrder.WechatPay.cashierUrl）
+        return YktRechargeOrder.WechatPay(
+            orderId = orderId,
+            wechatUrl = wechatUrl,
+            cashierUrl = buildCashierUrl(orderId, token),
+        )
     }
 
     /** 官方收银台 URL 兜底拼法（正常路径 = 服务端 302 Location 直发，不走这里）。 */

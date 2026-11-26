@@ -66,6 +66,15 @@ fun RechargeSheet(
      * 与下单链路同一份判断；取不到就不显示卡号（宁可不显示，也不显示一张可能不对的卡）。
      */
     cardAccount: String? = null,
+    /**
+     * 支付是不是先落在**官方收银台页**（而不是直拉微信）。
+     *
+     * 只影响两句说明文案（金额框下方的提示、二次确认里的去向）。iOS 必须置 true：那边不能
+     * 直拉 `weixin://`，钱是在收银台页里选的（`design/ios-port.md` §10.4），照 Android 的
+     * 「直接拉起微信」写就是一句假话，而这是钱要出去的最后一屏。
+     * Android 保持默认 false（文案逐字不变）。
+     */
+    opensCashierPage: Boolean = false,
     onDismiss: () -> Unit,
     /** [toElectricAccount] = true 表示充到电子账户（`yktcard` 走 accinfo type）。 */
     onLaunch: (yuan: String, toElectricAccount: Boolean) -> Unit,
@@ -143,11 +152,17 @@ fun RechargeSheet(
                             amount.isEmpty() ->
                                 if (toElectric) {
                                     "0.01 – 500.00 元；电子账户用于电费等线上缴费"
+                                } else if (opensCashierPage) {
+                                    "0.01 – 500.00 元；下一步在官方收银台里选支付方式"
                                 } else {
                                     "0.01 – 500.00 元；将直接拉起微信支付"
                                 }
                             !valid -> "金额需在 0.01 – 500.00 元之间"
-                            else -> "确认后在微信内完成支付"
+                            else -> if (opensCashierPage) {
+                                "确认后打开官方收银台，在页面里完成支付"
+                            } else {
+                                "确认后在微信内完成支付"
+                            }
                         },
                     )
                 },
@@ -204,8 +219,14 @@ fun RechargeSheet(
                     if (toElectric) {
                         append("电子账户用于电费等线上缴费。")
                     }
-                    append("点击「${if (toElectric) "立即支付" else "去支付"}」会直接拉起微信（微信充值渠道），")
-                    append("在微信内确认支付；未支付的订单会自动失效，不会扣款。")
+                    if (opensCashierPage) {
+                        // iOS：支付方式在平台收银台页里选，别说「直接拉起微信」（那是假话）
+                        append("点击「${if (toElectric) "立即支付" else "去支付"}」会打开官方收银台页，")
+                        append("在页面里选微信等支付方式并付款；未支付的订单会自动失效，不会扣款。")
+                    } else {
+                        append("点击「${if (toElectric) "立即支付" else "去支付"}」会直接拉起微信（微信充值渠道），")
+                        append("在微信内确认支付；未支付的订单会自动失效，不会扣款。")
+                    }
                 },
             )
             // 跳转前的风险小字：账户核对 + 上游接口变更（口径单一来源，见 RechargeRiskNote）

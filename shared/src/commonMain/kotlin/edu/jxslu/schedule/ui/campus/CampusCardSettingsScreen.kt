@@ -98,7 +98,7 @@ import kotlinx.coroutines.launch
  *
  * | 槽位 | 谁给 | null 时 iOS 上少什么 |
  * |---|---|---|
- * | [onOpenPaymentUrl] | Android：`openExternal`（`Intent.ACTION_VIEW` + 过渡静止） | 余额卡上的「充值」按钮、充值免责声明、充值弹层 → **这一版不做充值** |
+ * | [onOpenPaymentUrl] | Android：`openExternal`（`Intent.ACTION_VIEW` + 过渡静止）；iOS：`RechargeRequests.openPaymentPage`（配 [preferCashierPage] = true，不直拉微信） | 余额卡上的「充值」按钮、充值免责声明、充值弹层 → **本平台不做充值** |
  * | [notificationPermission] | Android：`POST_NOTIFICATIONS` launcher | 「余额提醒」整节（阈值 / 间隔 / 两个开关） |
  * | [powerRoomPicker] | 两端都给（电费仓库 + 凭证存储两端都有） | 拿不到仓库时才为 null → 「寝室电费」整节的房间行不渲染 |
  *
@@ -124,6 +124,15 @@ fun CampusCardSettingsScreen(
      * 消费流水入口照常在——它不依赖任何平台能力。
      */
     onOpenPaymentUrl: ((String) -> Boolean)? = null,
+    /**
+     * 交给 [onOpenPaymentUrl] 的只能是**官方收银台地址**（不直拉 `weixin://`）。
+     *
+     * iOS 必须置 true：从原生 App 直拉微信会被拒（商户域名与 referer 对不上，
+     * `design/ios-port.md` §10.4），正确做法是收银台 URL 进 `WKWebView`；宿主把
+     * [onOpenPaymentUrl] 接到「内嵌收银台页」上即可（`RechargeRequests.openPaymentPage`）。
+     * Android 保持默认 false（直拉微信最快，行为零变化）。
+     */
+    preferCashierPage: Boolean = false,
     /**
      * 通知权限申请；**null = 本平台没有余额提醒的通知渠道** → 「余额提醒」整节不渲染。
      *
@@ -715,6 +724,8 @@ fun CampusCardSettingsScreen(
             accountFen = balance?.accountFen,
             // 二次确认弹窗里加粗展示的目标卡号：与下单链路同一份选取口径
             cardAccount = balance?.cards?.rechargeTargetCard()?.account,
+            // 支付落在哪一页，说明文案跟着变（iOS 是收银台页，不是直拉微信）
+            opensCashierPage = preferCashierPage,
             onDismiss = { showRechargeSheet = false },
             onLaunch = { yuan, toElectric ->
                 showRechargeSheet = false
@@ -736,6 +747,8 @@ fun CampusCardSettingsScreen(
                     viewModel.recharge(
                         yuan,
                         targetAccount = target,
+                        // 见形参 KDoc：iOS 只走收银台页（不直拉 weixin://）
+                        preferCashierPage = preferCashierPage,
                         // 平台动作由宿主注入：Android 那边顺手把本窗口的推入/滑出过渡换成静止，
                         // 防止从外部应用返回时重放右推动画（2026-09-26 修页面跳动）
                         launchExternal = openPayment,
