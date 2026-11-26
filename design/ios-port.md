@@ -1563,6 +1563,36 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 （dyld / 签名）、Objective-C 异常（WebKit 主线程断言）、以及首帧之后的协程与回调。
 它只负责组合期那一段——而那正是最可疑的一段。
 
+#### 真因：`roundToInt` 撞上 NaN（2026-11-26 上午，已修）
+
+上一条那版装上仍然闪退。于是又打了一版**启动自检屏**：把启动路径拆成 13 条独立探针
+（沙箱目录 / 写日志 / 服务装配 / 偏好库两条 / Room 读写 / Keychain 句柄 / Keychain 往返 /
+教务 Cookie 库 / 通知中心代理 / `MeViewModel` / 抽屉条目），一条一条跑，结果直接画在屏上。
+真机读数：**13 条全绿**。
+
+这组读数把范围一次砍到底——启动链路、偏好库、Room、Keychain、WebKit cookie 库、通知中心
+全都没问题，问题只能在「画出主界面」那一步。真因随之确认：
+
+| 项 | 内容 |
+|---|---|
+| 异常 | `kotlin.IllegalArgumentException: Cannot round NaN value` |
+| 崩溃链 | `MetalView.layoutSubviews → MetalRedrawer.draw → placeWithLayer`（**绘制期**，不是组合期） |
+| 抛出点 | `ui/common/DrawerCardTransform.kt` 的 `(eased * DrawerCardCornerSteps).roundToInt()` |
+| NaN 从哪来 | iOS 的 `ModalNavigationDrawer`：`DrawerState.currentOffset` 在**首帧测量之前是 NaN**，调用点归一化成 `-NaN / 侧栏宽` 喂进绘制 lambda |
+
+两个必须记住的结论：
+
+1. **组合期的兜底救不了绘制期。** 上一版加的 `try`/可空早返回只覆盖组合；Compose 也不允许
+   `try` 包 composable 调用。绘制 lambda 里的异常直接 abort 进程，屏幕上什么字都没有——
+   这就是「图标一闪就回桌面、没有任何提示」的全部。
+2. **两端只有一端会暴露。** Android 的 `StackedDrawerState.progress` 由自己的拖动状态给出，
+   恒是 0…1 的有限值；只有 iOS 的 M3 `DrawerState` 会先给 NaN。所以这类「共用算式 + 平台取值」
+   的部件，收敛必须做在**共用那一侧**，不能指望调用点各自的取值是合法的。
+
+修法是一处：`drawerCardTransform` 先把进度过一遍 `drawerCardProgress()`（NaN / ±Inf → 0，
+即抽屉合上的静止态），公式一个字没动，调用点也没动。`DrawerCardProgressTest` 三条钉住它。
+`IosBootSelfTest.kt` 定位完即删；`MainViewController()` 改回直接进主界面。
+
 ### 12.13 快趣出行在 iOS 上的真实形态（2026-11-26，P4）
 
 页面层（`RideScreen` / `RidePanels` / `EbikeSettingsSheet` / `EbikeViewModel` / 账号页 / 订单页）

@@ -103,7 +103,7 @@ import kotlinx.coroutines.launch
 import platform.UIKit.UIViewController
 
 @Composable
-internal fun IosRoot(services: IosServices) {
+private fun IosRoot(services: IosServices) {
     // ⑥ 组合开始（B2 启动留痕）：这一句只要出现，说明首帧已经在画了，
     // 闪退就不在「构造 / 装配」那几步上。`remember` 保证每次进程只写一条。
     remember { IosBootSteps.step("⑥ IosRoot 开始组合"); true }
@@ -694,15 +694,46 @@ fun MainViewController(): UIViewController {
     // ——那时再崩，钩子还没装上，日志里连栈都没有。纯 Kotlin 调用，不碰系统框架，符合 §12.12。
     runCatching { installCrashHook() }
     return ComposeUIViewController {
-        // SELFTEST 2026-11-26：这一版打启动自检屏，而不是直接进主界面。
-        // 理由见 IosBootSelfTest.kt 的类注释：闪退三次都拿不到现场，只能把启动路径
-        // 拆成十几条探针、把结果直接画在屏幕上。定位完成后这里改回下面这段：
-        //
-        //     val booted = remember { runCatching { IosServices().also { Services.install(it); it.warmUp() } } }
-        //     val services = booted.getOrNull()
-        //     if (services == null) IosBootCrashScreen("服务装配（IosServices）", …)
-        //     else { IosSharePresenter(); LaunchedEffect(services) { … }; IosRoot(services) }
-        IosBootSelfTest()
+        remember { IosBootSteps.step("⑤ Compose 根开始组合") }
+        // 服务装配与首启写库都挪进组合期，唯一的目的是**让它们可被捕获**：
+        // 2026-11-25/26 那几次闪退里，`IosServices()` 与 `warmUp()` 都在
+        // `ComposeUIViewController` 之前同步跑，一旦抛异常进程直接消失，屏幕上什么也不留。
+        // 组合期同样在主线程上，行为不变，但失败时能落到 [IosBootCrashScreen] 上。
+        val booted = remember {
+            runCatching {
+                IosServices().also { services ->
+                    Services.install(services)
+                    // 首启把作息表与默认学期写进库（Android 在 JuwApplication.ensureDefaults 里
+                    // 做同一件事）。这一步只碰本地库与 WebKit 的 cookie 库（后者自己切主队列），
+                    // **不碰通知中心**。
+                    services.warmUp()
+                }
+            }
+        }
+        val services = booted.getOrNull()
+        if (services == null) {
+            val error = booted.exceptionOrNull() ?: IllegalStateException("IosServices 构造后为空")
+            IosBootSteps.step("② 服务装配失败：$error")
+            Logger.e(TAG_BOOT, "服务装配失败", error)
+            IosBootCrashScreen("服务装配（IosServices）", error)
+        } else {
+            remember { IosBootSteps.step("② IosServices 构造完成 / ③ Services 已安装 / ④ warmUp 已派发") }
+            // 分享面板要一个「当前在屏」的 UIViewController，共享层拿不到它。
+            // 这一步在根组合里把 `LocalUIViewController` 装进 `IosShareHost`，之后
+            // `ShareIntents` 的两个 actual（`sharePlainText` / `shareFile`）就能自己弹面板了
+            // —— 不装的话它们恒回 false，页面上表现为「点了没反应」。
+            IosSharePresenter()
+            // 提醒三件（前台横幅代理 / 作业截止重排 / 成绩核对）挪到**首帧之后、主线程**上。
+            // 2026-11-26 之前它们藏在 `IosServices.init` 与 `warmUp` 里，等于在 Swift
+            // `makeUIViewController` 执行期间就去碰 `UNUserNotificationCenter`，而那时 App
+            // 还没进 active——这是真机「一开就闪退」的直接嫌疑。延迟不是为了慢，
+            // 是为了让第一帧真的渲染出来（`LaunchedEffect` 在首次组合之后才跑）。
+            LaunchedEffect(services) {
+                delay(REMINDERS_DELAY_MS)
+                runCatching { services.warmUpReminders() }
+            }
+            IosRoot(services)
+        }
     }
 }
 

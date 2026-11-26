@@ -124,7 +124,7 @@ fun Modifier.drawerCardTransform(
     transform: DrawerCardTransform,
     progress: () -> Float,
 ): Modifier = graphicsLayer {
-    val p = progress()
+    val p = drawerCardProgress(progress())
     val eased = FastOutSlowInEasing.transform(abs(p))
     val scale = 1f - DrawerCardShrink * eased
     scaleX = scale
@@ -136,3 +136,38 @@ fun Modifier.drawerCardTransform(
     shadowElevation = transform.shadowMaxPx * eased
     clip = true
 }
+
+/**
+ * 把绘制期读到的原始进度收成**有限值**：`NaN` / `±Inf` 一律当 `0`（抽屉关着的静止态）。
+ *
+ * ## 为什么必须有这一句（2026-11-26，iOS 侧载包「启动瞬间回桌面」的根因）
+ *
+ * iOS 侧的进度来自 Material3 的 `DrawerState.currentOffset`：
+ * `-drawerState.currentOffset / drawerWidthPx`（见 `MainViewController.drawerCardTransform(...)`）。
+ * **首帧测量之前那个 offset 是 `NaN`**——这是 `DrawerState` 的已知行为，不是我们的错。
+ * `NaN` 一路传进 `abs()` 与 `FastOutSlowInEasing`，最后落到
+ * `(eased * DrawerCardCornerSteps).roundToInt()`，而 Kotlin 的 `Float.roundToInt()`
+ * **碰到 NaN 直接抛 `IllegalArgumentException: Cannot round NaN value`**。
+ *
+ * 抛点在 `graphicsLayer` 的绘制 lambda 里，链路是
+ * `MetalView.layoutSubviews → MetalRedrawer.draw → placeWithLayer`，也就是**绘制期**，
+ * 不在组合期——所以：
+ *
+ * - 组合期的 `try` / 可空兜底接不住它（Compose 也不允许 `try` 包 composable 调用）；
+ * - 进程被 abort，屏幕上什么字都没有，`logs/app.log` 里也只留一条未捕获异常。
+ *
+ * 这正是「装机后图标一闪就回桌面、没有任何提示」的形态。
+ *
+ * `drawerWidthPx` 为 0（密度还没就绪）时会算出 `±Inf`，同一条兜住。
+ *
+ * ## 为什么归 0 而不是别的
+ *
+ * 0 = 抽屉完全合上：缩放 1、圆角 0、位移 0、阴影 0，就是首帧本该有的静止态。
+ * 归 1 会让首帧凭空变成「侧栏展开」，归 0.5 是一个谁也没要求的中间态。
+ *
+ * ## 为什么是公开函数
+ *
+ * `:app` 的单测要钉住它（`DrawerCardProgressTest`），跨模块 `internal` 不可见。
+ * 公式本身留在 [drawerCardTransform] 里，这里只做一次合法性收敛，**不要**把算式搬进来。
+ */
+fun drawerCardProgress(raw: Float): Float = if (raw.isFinite()) raw else 0f
