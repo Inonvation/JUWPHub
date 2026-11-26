@@ -177,6 +177,14 @@ internal fun IosDrawer(
      * 两端的入口位置不一致，用户换个设备就要重新找。
      */
     onOpenMe: () -> Unit,
+    /**
+     * 抽屉当前是否展开（2026-11-26 晚）。
+     *
+     * 服务行右侧那三格状态（胖乖余额 / U净空闲数 / 问渠工时）按它开闸：抽屉是常驻组合，
+     * 不看这个闸就会在用户根本没打开侧栏时也打几次平台请求。Android 的
+     * `SideDrawerContent(drawerVisible = …)` 是同一个语义。
+     */
+    drawerVisible: Boolean = true,
 ) {
     val entries = remember { iosDrawerEntries() }
     // 「江水生活」是**唯一分成两半**的段：服务行（共享层的 `lifeServiceRows`）在钱包卡下面渲染，
@@ -252,6 +260,7 @@ internal fun IosDrawer(
     // 没有服务 → 传 null，那一行整行不渲染。问渠 2026-11-26 晚随精简版恢复一起接上。
     // 右侧状态（开水余额 / U净 空闲数）也没有接：那两个数的聚合逻辑还在 `:app` 的
     // `SideDrawerContent` 里（`loadUjingFreeText` 等），本轮不搬——行照常可点，只是不带状态。
+    val drawerStatus = rememberIosDrawerServiceStatus(services, drawerVisible)
     val serviceRows = lifeServiceRows(
         onOpenCampusAccount = { onPick(IosRoute(SubpageScreen.CAMPUS_CARD_SETTINGS)) },
         onOpenWater = { onPick(IosRoute(SubpageScreen.WATER)) },
@@ -262,6 +271,11 @@ internal fun IosDrawer(
         onOpenRide = { onPick(IosRoute(SubpageScreen.RIDE)) },
         // 问渠 · 志愿服务（2026-11-26 晚恢复）：仓库与五页都在共享层，`wenquRepository()` 非空。
         onOpenWenqu = { onPick(IosRoute(SubpageScreen.WENQU)) },
+        // 右侧三格状态（2026-11-26 晚接）：口径与 Android 逐字一致，
+        // 取数闸门在 `rememberIosDrawerServiceStatus` 里。null = 该格不显示。
+        waterBalance = drawerStatus.waterBalance,
+        ujingFreeText = drawerStatus.ujingFreeText,
+        wenquHours = drawerStatus.wenquHours,
     )
 
     // 面板铺满整屏高度（窗口已 ignoresSafeArea）：合上时看不见，展开时状态栏那一条

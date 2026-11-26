@@ -333,6 +333,10 @@ private fun IosRoot(services: IosServices) {
                                 showAllFeatures = false
                                 meOpen = true
                             },
+                            // 服务行右侧三格状态的取数闸（2026-11-26 晚）：抽屉常驻组合，
+                            // 只在真的展开时打平台请求。`isOpen` 读的是当前值（动画结束后的状态），
+                            // 拖动中途不会提前发请求——与 Android「完全展开才拉」同口径。
+                            drawerVisible = drawerState.isOpen,
                         )
                     },
                 ) {

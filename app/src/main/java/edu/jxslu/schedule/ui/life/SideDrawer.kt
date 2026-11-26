@@ -36,8 +36,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import edu.jxslu.schedule.Graph
 import edu.jxslu.schedule.R
-import edu.jxslu.schedule.data.ujing.UjingHouseStore
-import edu.jxslu.schedule.data.ujing.UjingRepository
 import edu.jxslu.schedule.domain.ShortcutSettings
 import edu.jxslu.schedule.ui.campus.CampusCardViewModel
 import edu.jxslu.schedule.ui.campus.campusCardViewModel
@@ -47,64 +45,19 @@ import edu.jxslu.schedule.ui.common.ShortcutPinner
 import edu.jxslu.schedule.ui.common.ShortcutSheet
 import edu.jxslu.schedule.ui.common.postNotice
 import edu.jxslu.schedule.ui.common.rememberResumeTick
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 
 /** 侧栏 U净 行右侧空闲状态的刷新节流：空闲看板本身约 30 秒滞后，刷更勤没意义。 */
 private const val UJING_FREE_REFRESH_TTL_MILLIS = 30_000L
 
-/** 侧栏 U净 聚合的并发上限（与 U净 页看板同口径，别一次打满收藏店）。 */
-private const val UJING_FREE_CONCURRENCY = 4
-
 /** 侧栏寝室电费读数的刷新节流（2026-10-22：旧生活页删除后，侧栏是它的唯一展示位）。 */
 private const val DRAWER_POWER_REFRESH_TTL_MILLIS = 60_000L
 
 /** 侧栏校园卡余额的刷新节流（余额仓库自身还有 60 秒缓存）。 */
 private const val DRAWER_CAMPUS_REFRESH_TTL_MILLIS = 60_000L
-
-/**
- * 拉收藏洗衣房的洗衣机空闲聚合（侧栏 U净 行右侧的展示数）。
- * 多店求和（free / total），数据源与 U净 页看板同源：`stores/near?keyword=<店名>`
- * 的门店统计（`devices/reserve` 在本校已被服务端关闭）。
- * 未登录 / 没收藏店 / 没有任何成功数据 → null：右侧不显示状态，整行点击直接进页。
- */
-private suspend fun loadUjingFreeText(
-    repo: UjingRepository,
-    houseStore: UjingHouseStore,
-): String? {
-    if (!repo.loggedIn.value) return null
-    val houses = houseStore.list()
-    if (houses.isEmpty()) return null
-    // 多店并发、单店失败只算这一家不参与求和（`runCatching` 会把取消一起吞掉，
-    // 这里手写 catch：侧栏收起时必须照常向上抛，不把取消当失败）。
-    val limiter = Semaphore(UJING_FREE_CONCURRENCY)
-    val lines = coroutineScope {
-        houses.map { house ->
-            async {
-                try {
-                    val groups = limiter.withPermit { repo.storeCounts(house.name) }
-                    repo.boardLine(groups)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    null
-                }
-            }
-        }.awaitAll()
-    }.filterNotNull()
-    val free = lines.sumOf { it.free }
-    val total = lines.sumOf { it.total }
-    if (lines.isEmpty() || total <= 0) return null
-    return if (free > 0) "空闲 $free/$total" else "暂无空闲"
-}
 
 /**
  * 左侧栏内容（2026-10-20 第二轮）。
@@ -253,7 +206,10 @@ fun SideDrawerContent(
         ujingFreeLoading = true
         try {
             ujingFreeText = withContext(Dispatchers.IO) {
-                loadUjingFreeText(ujingRepo, ujingHouseStore)
+                // 2026-11-26 晚起这份聚合在共享层（`ui/life/DrawerServiceStatus.kt`）：
+                // iOS 抽屉同样显示这一格，两端必须同一份算法。写全限定名是因为本文件的
+                // 局部变量同名（`var ujingFreeText`），不写会读成「自己赋给自己」。
+                edu.jxslu.schedule.ui.life.ujingFreeText(ujingRepo, ujingHouseStore)
             }
             // 只在正常走完时落节流时刻：侧栏收起取消掉的请求不算数，下次展开要补拉
             ujingFreeRefreshedAt = now
