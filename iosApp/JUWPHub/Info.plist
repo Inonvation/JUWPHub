@@ -76,6 +76,15 @@
 	<string>用于把课表、成绩单等图片保存到你的相册。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>用于从相册选择图片，例如给图片加水印或拼接。</string>
+	<!-- 日历两个用途说明（2026-11-26 补）。「课表 → 系统日历」走 EventKit
+	     （shared/.../ui/week/IosCalendarSync.kt）：系统按部署目标挑键——
+	     iOS 17 起读 NSCalendarsFullAccessUsageDescription，15/16 只认 NSCalendarsUsageDescription。
+	     缺了对应那条不是报错，而是请求权限时进程被系统直接终止（与相册那条同款），
+	     现象是「点同步就闪退」，栈顶看不到我们的代码。两条都写明，15 与 17 都能装上用。 -->
+	<key>NSCalendarsUsageDescription</key>
+	<string>用于把课表导出的课程写入你的系统日历。</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>用于把课表导出的课程写入你的系统日历。</string>
 	<!-- 拉起微信（快趣出行「打开微信扫一扫」/「去微信结清」）。iOS 只开放 `weixin://`
 	     一个公有 scheme，落点是微信首页（扫一扫要用户自己点）；`weixinULAPI` 是微信
 	     OpenSDK 回跳用的，先声明着，将来接 SDK 就不用再改 plist。

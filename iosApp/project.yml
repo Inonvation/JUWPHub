@@ -78,3 +78,8 @@ targets:
           # 少了这行是链接期 Undefined symbols，Kotlin 编译期不会报。
           - -framework
           - MapKit
+          # `EKEventStore` / `EKEvent` / `EKAlarm`（课表写入系统日历，shared/.../ui/week/
+          # IosCalendarSync.kt，2026-11-26）在这个框架里。同一条纪律：静态 framework
+          # 不自带 load command，漏了是链接期 Undefined symbols。
+          - -framework
+          - EventKit
