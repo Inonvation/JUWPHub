@@ -2041,11 +2041,14 @@ AVFoundation 的 17 处符号（KDoc 有清单，最可能卡在 `UIViewControll
 | 已过窗口 | 只发一条「没来得及执行」（`TITLE_MISSED` / `MISSED_TEXT`），**并落去重键**——iOS 的 reconcile 每次进页都跑，不落键就是每进一次页弹一条 |
 | 窗口外再进页 | 什么都不做（去重键已落） |
 
-**能力边界写在这里，别在别处许更大的愿**：`BGAppRefreshTask` 这一轮不做。它要 `Info.plist` 的
-`BGTaskSchedulerPermittedIdentifiers` + `UIBackgroundModes`（`iosApp/` 不在这一层能改的范围），
+**能力边界写在这里，别在别处许更大的愿**：`BGAppRefreshTask` 这一轮不做。它要 `Info.plist` 的`BGTaskSchedulerPermittedIdentifiers` + `UIBackgroundModes`（`iosApp/` 不在这一层能改的范围），
 而且系统不保证触发时刻——接一半的后台能力会让用户以为它一定会自己还，比明说「只在 App 打开时」更糟。
 真要提升可靠性，正确的下一步是 **ActivityKit Live Activity**（倒计时一直挂在锁屏上，
 用户看得见剩余时间）+ 后台推送，而不是硬塞一个不保证时刻的 refresh task。
+
+**成功那一单会补记本机骑行记录**（`RideRecordStore.add`，字段与「拿不到结算结果按未结清记」
+的口径与 Android 的 `AppKvcxSideEffects.recordRide` 逐一相同）：不记的话，自动还掉的单会在
+账号页的「骑行记录」里静默消失。**没接的是入箱留痕**（`postKvcxReturnInbox` 还在 `:app`）。
 
 界面必须说实话，两处都改了：`EbikeSettingsSheet` 的「自动还车」区多一行
 「到点只会先发一条通知；真正的还车在下一次打开 App（进「骑行」页）时补做」；

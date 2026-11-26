@@ -2,6 +2,7 @@ package edu.jxslu.schedule.platform
 
 import edu.jxslu.schedule.data.kqcx.KvcxRideSession
 import edu.jxslu.schedule.data.prefs.DisplayPrefsStore
+import edu.jxslu.schedule.data.repo.RideRecordStore
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.EbikeAutoReturn
 import edu.jxslu.schedule.domain.EbikeFreeRide
@@ -10,6 +11,7 @@ import edu.jxslu.schedule.ui.ebike.EbikeFreeRideNotifications
 import edu.jxslu.schedule.ui.ebike.EbikeReminderOutcome
 import edu.jxslu.schedule.ui.ebike.EbikeReminderPort
 import edu.jxslu.schedule.ui.ebike.EbikeRideSignal
+import edu.jxslu.schedule.ui.ebike.KvcxReturnSummary
 import edu.jxslu.schedule.ui.ebike.runAutoReturn
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -311,6 +313,9 @@ class IosEbikeReminder(
         )
         when (result) {
             is AutoReturnResult.Returned -> {
+                // 本机骑行记录要留痕（与 Android `AppKvcxSideEffects.recordRide` 同口径）：
+                // 自动还掉的那一单不记，账号页的「骑行记录」就会静默漏掉它
+                recordRide(result.summary)
                 EbikeRideSignal.notifyEnded("已自动还车，订单已结束")
                 notifyResult(
                     AUTO_RETURN_RESULT_ID,
@@ -375,6 +380,29 @@ class IosEbikeReminder(
      */
     private fun errorText(error: Throwable): String =
         error.message?.takeIf { it.isNotBlank() } ?: "未知错误"
+
+    /**
+     * 记一次本机骑行记录（iOS 侧唯一调用点：自动还车成功那一刻）。
+     *
+     * 与 Android 的 `AppKvcxSideEffects.recordRide` 逐字段同口径（含「拿不到结算结果按未结清记」
+     * ——宁可多提醒去核对，也不把不确定写成"已结清"）。失败静默：记账坏掉不该让还车结果
+     * 反过来变成失败（那辆车已经还了）。
+     *
+     * 库从装配根取（`Services.current.database()`，两端同一份 Room 库）；`carNum` 拿不到时
+     * 没有可记的键，直接跳过。
+     */
+    private suspend fun recordRide(summary: KvcxReturnSummary) {
+        val carNum = summary.carNum ?: return
+        runCatching {
+            RideRecordStore(Services.current.database().rideRecordDao()).add(
+                carNum = carNum,
+                endAt = AppClock.nowMillis(),
+                durationSeconds = summary.durationSeconds ?: 0L,
+                feeCents = summary.feeCents,
+                settled = summary.settled ?: (summary.needPay == false),
+            )
+        }
+    }
 
     /** 自动还车的会话：优先用构造参数，否则从装配根取（`IosServices` 那份进程级会话）。 */
     private fun sessionOrNull(): KvcxRideSession? =
