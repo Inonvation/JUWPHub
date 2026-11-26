@@ -18,14 +18,15 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * ## 一、为什么它在 `commonMain`
  *
- * 地图是快趣出行最重的一块，也是最不可能「一套代码两端跑」的一块：底图是原生视图，
- * Android 是高德 SDK / osmdroid，iOS 是 MapKit。但**页面与地图之间交换的东西**全是纯数据
+ * 地图是快趣出行最重的一块，也是最不可能「一套代码两端跑」的一块：底图是原生视图或网络瓦片。
+ * Android 是高德 SDK / osmdroid，iOS 是共享层画布 + 高德栅格瓦片（2026-11-26 晚起，不再用
+ * MapKit——那套绑定在本仓 Kotlin 版本上放不了标注）。但**页面与地图之间交换的东西**全是纯数据
  * ——车辆、聚合点、还车点、相机指令、回调。把这层数据契约抬进共享层之后：
  *
  * ```
  * 页面（ViewModel）→ BikeMapInput → ┬ AmapMapView（:app，官方矢量）
  *                                   ├ OsmMapView （:app，栅格回退）
- *                                   └ IosBikeMap （shared/iosMain，MapKit）
+ *                                   └ BikeMapCanvas（shared/commonMain，画布 + 瓦片）
  * ```
  *
  * 三个实现吃**同一个类型**，页面不需要知道底下是谁。Android 侧的选择器仍是
@@ -36,36 +37,33 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * 槽位类型是 [BikeMapSlot]。**`null` = 本平台确实没有地图能力**，页面据此只渲染底部的
  * 车辆列表、不渲染地图（`design/ios-port.md` §11.2 ④：给一个点了没反应的入口比没有更糟）。
- * 现在两端都填得上这个槽（Android 高德 / osmdroid，iOS MapKit），`null` 留给将来某个
- * 没有地图实现的宿主——不要为了让签名好看而传一个空实现。
+ * 现在两端都填得上这个槽（Android 高德 / osmdroid，iOS `BikeMapCanvas`），`null` 留给将来
+ * 某个没有地图实现的宿主——不要为了让签名好看而传一个空实现。
  *
  * ## 三、坐标基准：直接传，**不转换**
  *
  * 应用内部一律 GCJ-02（`Gcj02.kt` 的 KDoc）：运营方给的车辆 / 还车点 / 围栏是 GCJ-02，
  * 手机定位在进应用时已经转成 GCJ-02。三条底图也都是 GCJ-02：
  * - 高德官方矢量（Android 主路径）；
- * - 高德栅格瓦片（Android 回退路径）；
- * - **中国区 Apple 地图（iOS）—— Apple 在中国大陆的底图数据即高德提供，坐标系同为 GCJ-02**。
+ * - 高德栅格瓦片（Android 回退路径，也是 **iOS 的唯一底图**——`IosBikeMapTiles` 用的就是同一个接口）。
  *
  * 所以 [BikeMapInput] 里的坐标**原样交给底图**，谁都不许再转一次（转两次就是几百米的
  * 双重偏移，见 `Gcj02.kt` 里「反向转换已删」那段）。
  *
- * > 万一 iOS 真机上看到约几百米的**系统性**偏移（不是零星的定位抖动）：说明这份接口数据
- * > 其实是 WGS-84，那时才在 `BikeMapView.ios.kt` 里过一遍 `Gcj02.toGcj02`。**先量，
- * > 不要凭感觉加**——同一批车在高德上是对的、在 MapKit 上偏一个固定方向才说明是坐标系问题，
- * > 方向乱跳是定位精度问题。
+ * > 万一真机上看到约几百米的**系统性**偏移（不是零星的定位抖动）：先确认那批数据是不是
+ * > WGS-84，再决定要不要在底图侧转一次。**先量，不要凭感觉加**——方向乱跳是定位精度问题。
  *
  * ## 四、平台差异（同一契约，不保证像素级一致）
  *
  * | 项 | Android | iOS |
  * |---|---|---|
- * | 底图 | 高德矢量 / 高德栅格 | MapKit（系统件） |
- * | 指北针 | `BikeCompass` 自绘（磁力计 + 屏幕朝向） | `MKMapView.showsCompass` 系统件 |
- * | 相机动画曲线 | 逐帧缓动（400ms 带缩放 / 1000ms 只平移，照抄 osmdroid） | 系统 `setRegion(animated = true)`，曲线与时长不可控 |
- * | 聚合 / 车标 / P 标的**造型** | 离屏位图自绘（`AmapMarkerBitmaps` / `BikeMarkerOverlay`） | 系统气球（`MKMarkerAnnotationView`），靠 `BikeMarkerColors` 上色 |
- * | [BikeMapInput.logoBottomMarginPx] | 生效（高德版权标识必须不被面板遮挡） | **忽略**：MapKit 没有可挪的版权标识 |
- * | [BikeMapInput.userHeadingFlow] | 生效（蓝点上的朝向箭头） | **忽略**：系统气球旋转后造型别扭，见 `BikeMapView.ios.kt` |
- * | [BikeMapInput.onFallback] | 生效（key 失效 → 整层降级，页面给一行说明） | 不会回调（MapKit 没有「底图拿不到」这一档） |
+ * | 底图 | 高德矢量 / 高德栅格 | 共享层画布（`BikeMapCanvas`）+ 高德栅格瓦片（`IosBikeMapTiles`） |
+ * | 指北针 | `BikeCompass` 自绘（磁力计 + 屏幕朝向） | 画布不画朝向扇形（`userHeadingFlow` 收下不用） |
+ * | 相机动画曲线 | 逐帧缓动（400ms 带缩放 / 1000ms 只平移，照抄 osmdroid） | 直接落位（画布不做缓动） |
+ * | 聚合 / 车标 / P 标的**造型** | 离屏位图自绘（`AmapMarkerBitmaps` / `BikeMarkerOverlay`） | 同一套 `DrawScope` 造型（簇 12/15dp、P 徽标、中心浮标），不是系统气球 |
+ * | [BikeMapInput.logoBottomMarginPx] | 生效（高德版权标识必须不被面板遮挡） | **忽略**：版权信息烤在瓦片图里，挪不动 |
+ * | [BikeMapInput.userHeadingFlow] | 生效（蓝点上的朝向箭头） | **忽略**：画布没有朝向扇形 |
+ * | [BikeMapInput.onFallback] | 生效（key 失效 → 整层降级，页面给一行说明） | 不会回调：瓦片取不到就退回网格 + 车标，没有「换底图」这一档 |
  *
  * ## 五、别拿 `BikeMapInput` 做相等比较
  *
@@ -94,9 +92,8 @@ data class CameraRequest(
  * `public` —— 跨模块看不见 `internal`，而两端都要按同一份配色上色）。
  *
  * 值是 **ARGB int**，不是 Compose `Color`：这份数据要同时喂给
- * `android.graphics`（Android 的位图与多边形）与 `UIColor`（iOS 的 MapKit 标注），
- * 用 int 是两边都能零成本接收的那一种。Android 侧读法 `Color(colorInt)`，iOS 侧走
- * `BikeMapView.ios.kt` 里的 `argbToUIColor`。
+ * `android.graphics`（Android 的位图与多边形）与 Compose 画布（iOS 的 `BikeMapCanvas`，
+ * 用 `Color(colorInt)` 收），用 int 是两边都能零成本接收的那一种。
  *
  * 配色只从主题来，**唯一构造入口是 [rememberBikeMarkerColors]**（原来那段 20 行字面量写在
  * `RideScreen` 里，iOS 再抄一份必然两边漂移）。
@@ -247,8 +244,8 @@ fun rememberBikeMarkerColors(): BikeMarkerColors {
  * @property logoBottomMarginPx **Android 专用，iOS 忽略**：高德版权标识的底边距（px）。
  *   底部面板会盖住地图下沿，而 logo 默认钉在左下角，服务协议不允许遮挡版权声明；页面按
  *   「面板高度 + 底部常驻块」算好传进来，把 logo 顶到面板上沿之上（2026-11-18）。
- *   MapKit 没有可挪的版权标识（Apple 地图的版权署名由系统画在右下角，不受宿主控制），
- *   所以 iOS 收下这个字段但什么都不做。**不要删**——Android 还要用。
+ *   iOS 的版权信息烤在瓦片图里（画布没法挪），所以收下这个字段但什么都不做。
+ *   **不要删**——Android 还要用。
  */
 data class BikeMapInput(
     val clusters: List<BikeCluster>,
@@ -298,7 +295,7 @@ data class BikeMapInput(
  * ## 谁填
  *
  * - Android：`app/.../ui/ebike/BikeMapHost.kt`（内部再选高德 / osmdroid）；
- * - iOS：`shared/src/iosMain/.../ui/ebike/BikeMapView.ios.kt` 的 [iosBikeMapSlot]。
+ * - iOS：`shared/src/iosMain/.../ui/ebike/IosBikeMapCanvasSlot.kt` 的 [iosCanvasBikeMapSlot]。
  *
  * @property content 真正的渲染。`Modifier` 由页面给：整幅上移（被面板盖住那一段的一半）
  *   是页面侧的图层变换，地图层自己不该知道面板有多高。

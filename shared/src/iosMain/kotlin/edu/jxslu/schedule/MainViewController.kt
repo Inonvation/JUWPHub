@@ -96,6 +96,7 @@ import edu.jxslu.schedule.ui.week.iosShareScheduleImage
 import edu.jxslu.schedule.ui.week.IosScheduleBackgroundLayer
 import edu.jxslu.schedule.ui.week.IosScheduleBackgroundThumb
 import edu.jxslu.schedule.ui.week.iosImportScheduleBackground
+import edu.jxslu.schedule.ui.week.rememberIosWeekActions
 import edu.jxslu.schedule.ui.week.ScheduleShareScreen
 import edu.jxslu.schedule.ui.week.WeekScreen
 import edu.jxslu.schedule.ui.week.WeekViewModel
@@ -461,6 +462,13 @@ private fun IosRoot(services: IosServices) {
 
                                         IosTab.Week -> {
                                             val viewModel = remember { WeekViewModel(services.scheduleRepository()) }
+                                            // 课表页的三件平台动作（2026-11-26 晚接线）：导入 JSON、
+                                            // 导出 CSV / JSON、一键写入系统日历。前两件复用
+                                            // `ui/platform/FilePickers` 的既有缝（Android 也是转发它），
+                                            // 日历那件是新的 EventKit 实现（`ui/week/IosCalendarSync`）。
+                                            // 接线在 `rememberIosWeekActions()` 里收成一组回调，
+                                            // 免得把「待办槽 + saver 实例」搬进这个巨型 when。
+                                            val weekActions = rememberIosWeekActions()
                                             // 课表分享（2026-11-26 搬进共享层）：非空 = 分享板盖在课表页上。
                                             // 与课表页共用**同一个** `WeekViewModel`——分享板渲染的就是课表页
                                             // 那份状态（同一周、同一份课程与配色），另建一个会读到别的周。
@@ -524,8 +532,12 @@ private fun IosRoot(services: IosServices) {
                                                         )
                                                     }
                                                 },
-                                                // 其余平台动作（时间表管理 / 调课 / 日历同步 / 文件选择）
-                                                // 在 iOS 侧还没有实现，留默认值——对应入口本来就不渲染。
+                                                // 三件平台动作（2026-11-26 晚）：导入 JSON / 导出 CSV·JSON /
+                                                // 一键写入系统日历。三个回调都非空，分享弹层里那三行从此在
+                                                // iOS 上也会出现（此前 null = 整行不渲染）。
+                                                onPickJsonFile = weekActions.pickJsonFile,
+                                                onSaveTextFile = weekActions.saveTextFile,
+                                                onSyncCalendar = weekActions.syncCalendar,
                                             )
                                             // 分享板盖在课表页之上：同一容器内的兄弟节点，全屏不透明，
                                             // 所以不需要额外的层级处理。不占二级页栈——返回即回课表，

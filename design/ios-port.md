@@ -1182,11 +1182,11 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份）；底栏三格「今日 / 课表 / 教务」（M3 `NavigationBar` + 图标 + 文字，选中主色 / 未选中 `onSurface` 0.6）。**2026-11-25 晚（S1）抽屉排版整块对齐 Android**：身份卡 → 账号与登录 → 我的·设置 → 分隔线 → 钱包卡 → 生活服务区 → 二级页紧凑分组 → 付款码，段头 / 行 / 钱包卡 / 付款码**全部是 `shared/commonMain/ui/life/SideDrawerParts.kt` 的同一份 Composable**（钱包卡文案走 `walletCardTexts`，服务行走 `lifeServiceRows`，缺服务的平台传 null 即整行不渲染）。白名单 41 条仍在且全部可达，其中 8 条由卡片 / 行直接承担。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的**手势视差**（iOS 用 `ModalNavigationDrawer`，是另一套实现）；**主卡的缩放 / 圆角 / 阴影 2026-11-25 晚已对齐**，侧栏宽也统一成 300dp，Tab 与二级页的进出场补了过渡（§14）；服务行右侧的实时状态（开水余额 / U净 空闲数）未接——聚合逻辑还在 `:app` 的 `SideDrawerContent`；钱包卡的「充值」按钮不渲染（充值宿主 `RechargeHost` / `PowerBankPayScreen` 仍在 `:app`）；余额取数是「首次组合拉一次」而不是「抽屉展开时」（`IosDrawer` 签名固定三参数，拿不到 `DrawerState`） |
 | 教务登录后的自动填表 | iOS 用 `WKWebView` 让用户手点登录，登录成功落地后自动 `archive` | Android 有自动填表；iOS 需要注入 JS，能做 |
 | 凭证存储 | `IosKeychain`（CoreFoundation）+ 八个存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI / **一卡通** / **教务**）已写，**iOS 编译验证卡在 runner 容量** | 教务（CAS）2026-11-25 晚起也是真的（`IosCredentialVault`，service `secure_jw`，见 §12.10）——此前恒为 `null`，因为 iOS 从不保存教务密码、登录只在 `WKWebView` 里；一卡通已接（`IosYktCredentialStore`，service `secure_ykt`，含落盘 token 与失效标记），账号中心 / 消费流水 / 电费读得到学号。**2026-11-25 晚起录入界面也搬完了**（校园卡设置页 + 付款码页进 `commonMain`，见 §12.8），四处入口不再停在「凭证未配置」 |
-| 第三方仓库 | **胖乖 / U净 / 问渠 / 快趣会话已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账）。快趣：**数据层与页面层两端现在都是同一份**（`KqcxSessionCore` + `IosKqcxCredentialStore`；页面 P4 2026-11-26 搬完）。iOS 上账号页 / 订单页 / 出行页**都能进**，侧栏也有「快趣出行」行；缺的是车标（MapKit 绑定限制，见 §12.13）与提醒（`EbikeReminderPort` 未实现） |
+| 第三方仓库 | **胖乖 / U净 / 问渠 / 快趣会话已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账）。快趣：**数据层与页面层两端现在都是同一份**（`KqcxSessionCore` + `IosKqcxCredentialStore`；页面 P4 2026-11-26 搬完）。iOS 上账号页 / 订单页 / 出行页**都能进**，侧栏也有「快趣出行」行；**底图与车标 2026-11-26 晚已接**（画布 + 高德栅格瓦片，见 §12.16），提醒也已接。仍缺的只有「扫车身码」（无相机页）与「自动还车」（要 `BGTaskScheduler`） |
 | 支付调起 | 一卡通走「收银台 URL 进 `WKWebView`」；胖乖 / 趣智走 `alipays://` 深链 | `Info.plist` 还没有 `LSApplicationQueriesSchemes`（`alipays` / `weixin`），深链会被系统拦 |
 | App 图标 | **已补**（2026-11-25）：`iosApp/JUWPHub/Assets.xcassets/AppIcon.appiconset`，1024 单尺寸 universal。用 `tools/app-icon/source.png` 的**前景层**重新合成满幅图——原图把圆角与投影烤进了像素，直接用会与 iOS 遮罩叠成双层圆角 | 启动屏 2026-11-25 晚补上（§14.4）：`UILaunchScreen` 指向命名色 `LaunchBackground`，两档色值 = 主题 `background` |
 
-**iOS 上现在能进的页面**（精简版：抽屉 39 条 + 4 个底栏 Tab）：今日、课表、教务汇总、我的、
+**iOS 上现在能进的页面**（精简版：抽屉 9 行短面板 + 「全部功能」页 + 3 个底栏 Tab）：今日、课表、教务汇总、我的、
 理论课表、实验课表、教材、教学日历、学籍信息、学业完成情况、培养方案、实习基地、成绩 / 成绩设置、
 考试 / 考试设置、选课 / 选课中心 / 已选课程 / 预选清单、请假、校历、收件箱、天气 / 天气设置、
 电费、消费流水、宿舍报修、开水房、U净洗衣房 / 洗衣账单、课表管理 / 调课 / 变动检测、数据与备份、
@@ -1229,7 +1229,7 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 |---|---|---|---|
 | 1 | 打开 App | 进「今日」页，不闪退 | `PlistSanityCheck` 缺键（`CADisableMinimumFrameDurationOnPhone`）或 Compose 初始化失败 |
 | 2 | 底栏「课表」 | 空态显示「去导入课表」；有数据时出网格 | Room 没起来（iOS 沙箱目录问题） |
-| 3 | 「更多」→ 抽屉 | 39 条，分「学习 / 教务 / 钱包 / 生活 / 设置 / 账号 / 江水生活」七组；**没有**笔记 / 作业 / 百宝箱 / 问渠 / AI 调课 | 白名单没编进去 |
+| 3 | 「更多」→ 抽屉 | 9 行短面板（身份卡 / 账号与登录 / 全部功能 / 钱包卡 / 江水生活 / 底栏左侧「设置」+ 右侧付款码），与 Android 侧栏同构；二级页清单在「全部功能」页；**没有**笔记 / 作业 / 百宝箱 / 问渠 / AI 调课 | 白名单没编进去，或抽屉没走 `IosDrawer` |
 | 4 | 课表空态「去导入课表」 | 先落 `sso.jsp`（一闪），再跳统一身份认证；登录后顶栏开始报进度（`正在导入 2026-2027-1（1/12）…`），结束给一行结论 | 入口还是 CAS 直链（403 / 白屏的老毛病），或归档没走 WebView 同源取页 |
 | 4b | 导入页顶栏「刷新」 | 点一下重新加载当前页；403 / 白屏时刷一次通常就过去了 | 按钮没接上 `WebViewController.reload()` |
 | 4c | 导入结束那两行字 | `导入完成：库里 N 门 · 开学 2026-08-31 · 现第 13 周 · 教务 2026-2027-1 · 新建 …` + `示例：液压与气压传动A 周二 9-11节 1-16周` | 库里 N 门 = 0 说明没落地，第二行是定位用的样例课；「现第 13 周」应与教务页右上角的周次一致 |
@@ -1601,7 +1601,7 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 
 | 缺的 | 为什么现在给不出 | 升级条件 |
 |---|---|---|
-| **地图车标**（`bikeMap`） | 本仓 Kotlin 2.1.21 的 MapKit 绑定里 `MKAnnotationProtocol.coordinate` 是 final、`MKPointAnnotation.coordinate` 是 `val`、`addOverlay(s)` 全 Unresolved——标注与覆盖物都放不上去。没有车标的地图不如不摆，页面在地图位置渲染空态 | 换 Kotlin 版本后重试绑定；或改用 `MKAnnotationView` 当普通子视图 + `convertCoordinate(_:toPointToView:)`，或用 Compose Canvas 自绘 + 手算投影 |
+| **地图车标**（`bikeMap`） | 本仓 Kotlin 2.1.21 的 MapKit 绑定里 `MKAnnotationProtocol.coordinate` 是 final、`MKPointAnnotation.coordinate` 是 `val`、`addOverlay(s)` 全 Unresolved——标注与覆盖物都放不上去 | **已解（2026-11-26 晚）**：不走 MapKit，改由共享层 `BikeMapCanvas` 自绘 + 高德栅格瓦片，见 §12.16 |
 | **扫车身码** | 没有相机取景页（Android 是 zxing `EbikeScanActivity`）。`onScanBodyCode` 为 null | 接 `AVCaptureSession` 或复用 `ui/web` 那条 `<input type=file>` 的路 |
 | **拉起微信**（扫码取车 / 去微信结清） | `Info.plist` 没有 `LSApplicationQueriesSchemes`，`weixin://` 打不开 | 补 plist + `UIApplication.openURL` |
 | **免费时长提醒 / 自动还车** | `EbikeReminderPort` 没有 iOS 实现。免费时长到点用 `UNTimeIntervalNotificationTrigger` 是够的（`IosLocalNotifications` 已有现成的排 / 撤），**自动还车不行**：它要「到点执行代码」，iOS 只有 `BGTaskScheduler`，系统不保证触发时刻 | 先只做免费时长提醒那一半（排一条到点通知），自动还车留 Android 独占 |
@@ -1812,3 +1812,96 @@ iOS 根在 2026-11-26 之前是裸的 `JuwTheme { }`，后果是三条**看得�
 | 快趣登录「网络不可用」 | **未解决**。`KvcxViewModel` 原本把 `IOException` 的 message 吞了，真机上只剩一句「网络不可用」。现在错误条带上底层原因（与 `CasSession` 的教务登录同一口径），下一次截图就能区分 TLS / 超时 / 域名。**问题仍在，只换成了可诊断** |
 
 这批的教训记一条：**iosMain 在 Windows 上编不了，符号可见性、跨文件引用一律要等 CI**。「复用别的文件里的内部符号」这种动作必须先 `grep` 声明处看它是 `public` / `internal` / `private` 再写——`569604f2` 就是这么白跑了一次构建（`IOS_DRAWER_QUICK_SCREENS` 与 `CompactDrawerRow` 是 `private in file`，`DrawerSectionHeader` 在 `ui/life` 里要 import）。
+
+### 12.16 2026-11-26 晚批：快趣底图 / 设置入口归位 / 课表三件平台动作
+
+用户这三条诉求：①「快趣出行的地图不显示」；②「设置入口放到侧栏左下角，跟 Android 一样」；
+③「其他移植工作并行，合并后提交编译」。三条各自的做法与边界如下。
+
+#### 12.16.1 快趣底图：为什么是「画布 + 瓦片」，不是 MapKit
+
+上一批已经把车标、围栏、还车点、蓝点全部画进 `BikeMapCanvas`，但**没有底图**——装机第一眼
+是「浅底 + 网格」，用户说的「地图不显示」就是这个。补底图有两条路，选了后者：
+
+| 方案 | 为什么没选 / 选 |
+|---|---|
+| 垫一个 `MKMapView` 当底图，车标画在它上面 | 几何要对齐两次（MapKit 的 region 与我们的墨卡托投影），本机验不了；错位比没有底图更糟 |
+| **把 256px 栅格瓦片直接画进同一块画布** | **选这个**：车标 / 瓦片共用 `BikeMapProjection.toScreen`，**结构上不可能错位**；瓦片取不到时退回网格，页面不白 |
+
+数据源与 Android 的回退底图**同一个接口**（`app/.../OsmMapView.kt` 的 `AMAP_TILE_SOURCE`）：
+`wprd01..04.is.autonavi.com/appmaptile?...&lang=zh_cn&size=1&style=9`，坐标基准 GCJ-02，
+所以 iOS 与 Android 看到的是同一份路网与楼名，也不用再做一次坐标转换。
+
+三个实测结论（2026-11-26，本机直接请求接口，不需要真机）：
+
+| 参数 | 结果 |
+|---|---|
+| `size=1`（默认） | 256×256，**带路名与楼名**（校区 z16 已能看到「段锡明图书馆」「人文与艺术」） |
+| `scl=2` | 512×512，但**整张图没有任何注记**（纯路网绿地）——清晰度换不到楼名，不采用 |
+| `z=19` | 179 字节的空瓦片，所以瓦片级别上限 18 |
+
+**瓦片级别比相机低一级**（`BikeMapTiles.tileZoom`）：画布用设备像素投影（与 Android 同尺度），
+把 256px 栅格按 1:1 贴上去，3x 屏上 11px 的楼名只有约 3.7pt；降一级放大 2 倍后约 7pt，
+是「看得清字」与「还认得出楼」之间的那一档。再降一级字更大，但高德的低一级底图只剩主路。
+
+实现分三层，**每层都能在本机验**（除了最后一行）：
+
+| 层 | 文件 | 本机怎么验 |
+|---|---|---|
+| 瓦片算术（级别 / 可见范围 / 屏幕位置 / 环绕 / 上限） | `commonMain/ui/ebike/BikeMapTiles.kt` | `BikeMapTilesTest` 7 条：级别错位、半块偏移、超密视野都由它挡 |
+| 画布绘制（网格让位、边界取整、按 dp 尺寸绘车标） | `commonMain/ui/ebike/BikeMapCanvas.kt` | `:shared:metadataCommonMainClasses` + `:app:assembleDebug` |
+| 取图与解码（Ktor + skia → `ImageBitmap`、LRU 64 块、主线程写状态） | `iosMain/ui/ebike/IosBikeMapTiles.kt` | **只能 CI 编译**；真机行为未验 |
+
+三处**只在 CI 上编译过、真机未验**的符号（KDoc 里有完整清单）：`org.jetbrains.skia.Image.makeFromEncoded`
+/ `Bitmap.makeFromImage` / `Bitmap.toComposeImageBitmap()`。选 skia 是因为 CMP 1.7.3 没有
+「从字节造 `ImageBitmap`」的公共入口（`decodeToImageBitmap` 是 1.8+），而 iOS 的 Compose 本来
+就跑在 skia 上；`toComposeImageBitmap` 的接收者已在 §12.14 的导出面核查里确认是 `skia.Bitmap`。
+
+真机第一眼按这个顺序看：① 进快趣出行，1–2 秒内网格被瓦片替换；② 瓦片上的楼名与校区围栏 /
+P 标是否对齐（差半条街就是投影问题，不是瓦片问题）；③ 拖动 / 捏合时瓦片跟着走、松手后视野
+不回跳；④ 断网进页停在网格 + 车标（不白屏、不崩）。
+
+#### 12.16.2 抽屉设置入口：与 Android 同构（左下角齿轮）
+
+iOS 此前把设置做成列表里的一行「我的 · 设置」，Android 是底部一颗齿轮。同一件事两种排法，
+用户换设备就要重新找。现在 `IosDrawer` 底部改成 `Arrangement.SpaceBetween` + `SettingsEntry`
+（左）+ `PaymentCodeEntry`（右），与 `:app` 的 `SideDrawer.kt` 底部那一行逐项同构；列表里
+那一行删除。**iOS 的「我的」不在底栏，这颗齿轮是唯一入口**——删行与接齿轮必须同一次改完，
+否则设置页在 iOS 上不可达。
+
+#### 12.16.3 课表页三件平台动作：导入 JSON / 导出 CSV·JSON / 一键写系统日历
+
+这三件事共享层早有槽位（`WeekScreen` 的三个可空回调），iOS 一直传 null，所以分享弹层里对应
+三行不渲染。这一批补齐：
+
+| 动作 | iOS 实现 | 状态 |
+|---|---|---|
+| 选 JSON 文件 | 复用 `ui/platform/FilePickers.ios.kt` 的 `rememberTextFilePicker`（`UIDocumentPickerViewController`） | 形状与数据备份页同一份（那边早已在用） |
+| 导出 CSV / JSON | 复用 `rememberFileSaver`（写 `Documents/exports/`，「文件」App → JUWPHub 可见） | 同上 |
+| 一键同步到系统日历 | **新实现** `iosMain/ui/week/IosCalendarSync.kt`（EventKit） | 见下 |
+
+`IosWeekActions.kt` 把「待办槽 + 两个 saver + 日历」收成一组回调（与 Android 的
+`WeekScreenPlatformActions` 逐字段同形），`MainViewController` 只写一行装配。
+
+日历同步的口径与 Android 对齐：**先删后写**（`eventIdentifier` 记账在 `NSUserDefaults` 的
+`ios_calendar` 前缀下，EventKit 没有 `CUSTOM_APP_PACKAGE` 那种列，只能自己记账）、标题 =
+课程名、备注 = `teacherDescription`、`reminderMinutes > 0` 挂 `EKAlarm`（负偏移）、空课表
+按「成功 0 条」且**不动旧事件**。四种收场：`Synced` / `NoPermission` / `NoCalendarAccount` /
+`Error`；`Unsupported` / `Deleted` 不造。
+
+未验（iOS 只能 CI 编译）：EventKit 的六个 K/N 符号名（`requestFullAccessToEventsWithCompletion`、
+`requestAccessToEntityType`、`calendarsForEntityType`、`eventWithEventStore`、`saveEvent`、
+`removeEvent`）、iOS 17 与 15/16 两条授权分支、`Info.plist` 两条日历用途描述是否齐全。
+真机点验：分享弹层出现「一键同步到手机日历」→ 首次点弹出系统授权 → 日历 App 里出现课程
+（带提前提醒）→ 再点一次不产生重复。
+
+#### 12.16.4 今日页快趣骑行行：上移到共享层，iOS 暂未接
+
+`KvcxActiveRow` / `KvcxDoneRow` 从 `:app` 搬进 `shared/commonMain/ui/today/KvcxActiveRows.kt`
+（品牌位图改 `brandId` 参数，Android 传 `R.drawable.ic_brand_kqcx`、iOS 传 null），
+私有的 `rideElapsedSecondsShared` 与 `KvcxRideController.rideElapsedSeconds` 合并成一份。
+
+**iOS 今日页还没显示这一行**：卡片槽位要的是**进程级** `KvcxRideController`（Android 是
+`Graph.kvcxRide(context)` 单例），iOS 目前只有出行页里 `remember` 的那一份（页面级）。
+再建一份会出现两个状态源（今日页说「骑行中」、出行页说「没单」）。升级条件：把控制器提到
+`IosServices`，出行页与今日页共用同一份，然后按 `TodayHost` 的槽位写法接上。
