@@ -1286,10 +1286,20 @@ UI 见 §3.29。
 那是允许带署名复用的。
 
 **文件**：`domain/ToolboxImage.kt`（全部排版口径的纯函数）+
-`ui/toolbox/ToolboxRenderer.kt`（Canvas 渲染核）+ `ToolboxCommon.kt`（选图 / 滑杆 /
-出口）+ 四个页面（`ToolboxScreen` / `WatermarkScreen` / `StitchScreen` /
+`ui/toolbox/ToolboxRenderer.kt`（渲染核：Compose 离屏绘制）+ `ui/toolbox/ToolboxBitmaps.kt`
+（位图工厂与缩放小工具，`newToolboxImageBitmap` 是唯一建位图的口子）+
+`ui/platform/ImagePickers.kt`（选图 / 解码缝）+ `ui/toolbox/ToolboxExport.kt`（文件名的纯函数
++ 保存 / 分享两条 expect）+ `ToolboxCommon.kt`（滑杆 / 动作条 / 色点）+ `ToolboxPreview.kt`
+（预览区与全屏看图）+ 四个页面（`ToolboxScreen` / `WatermarkScreen` / `StitchScreen` /
 `CainiaoQueryScreen`）+ `domain/CainiaoQuery.kt`（菜鸟批量查的纯逻辑）。
 入口与开关见 §3.30。
+
+> 2026-11-26（iOS 移植 V4）：整条图片管线搬进 `shared/commonMain`，`android.graphics.Bitmap`
+> 与 `Canvas` / `Paint` / `StaticLayout` / `BitmapShader` 全部换成 Compose 的
+> `ImageBitmap` + `CanvasDrawScope` + `TextMeasurer`。两端跑同一份渲染与排版代码，
+> 平台侧只剩「读相册 / 写相册」（选图 + 解码、相册保存、分享落盘），见
+> `design/ios-port.md` §10.2 的 `ui/toolbox` 行。像素级差异（字体度量、抗锯齿）允许，
+> 版式级口径一律不变。
 
 **预览即所得（口径 1）**：所有尺寸**只按图片宽度取比例**（字号、边距、平铺块）。
 预览用长边 ≤ 1200 的降采样源、成品用长边 ≤ 2600 的源，
@@ -1298,11 +1308,12 @@ UI 见 §3.29。
 `ToolboxImageTest` 里钉住（字号比例 / 密度三档 = 尾部空行 / 拼接取宽
 与总高 / 像素上限 / alpha 换算）。
 
-**水印（平铺）**：文字先渲染成一小块平铺单元（多行 `StaticLayout`，行距 1.0——
+**水印（平铺）**：文字先渲染成一小块平铺单元（多行，行距保持字体的自然行高——
 密度档位靠**尾部空行**调，不靠行距，行距一改块内两行文字自己的间距也跟着变），
-再 `BitmapShader + TileMode.REPEAT` 铺满全图（「一个木函」同款做法）。
+再按 (0,0) 起点重复铺满全图（Compose 侧是 `clipRect` 里逐块 `drawImage`；
+改造前是 `BitmapShader + TileMode.REPEAT`，`commonMain` 没有 shader 等价物）。
 **改进一处**：平铺块先按旋转后的包围盒扩边再旋（原版直接旋原尺寸块，45° 时啃字边）。
-不透明度走 `Paint.alpha`（一层即可，文字色本身不透明度不参与）。
+不透明度走绘制时的 `alpha`（一层即可，文字色本身不透明度不参与）。
 
 **拼接（两种方式）**：默认**智能拼接**（PPIICC 那套）；**直接拼接**是拼接页里的可选档。
 
@@ -1312,9 +1323,10 @@ UI 见 §3.29。
 
 - **直接拼接**：目标宽取**最大源宽**（大图降采样、小图不放大；原版取第一张的宽，
   会让后面的大图降质）、逐张按比例算高累计、硬摞。内存纪律两条：① 先
-  `inJustDecodeBounds` 读全部尺寸（零像素内存），再**要一张、画一张、丢一张**
-  （`stitchStreaming`）——九张截屏同时解码就是上百 MB；② 总像素超过 2400 万按面积比开方
-  **等比缩宽**（不裁内容），超过 800 万换 `RGB_565`（每像素 2 字节）。
+  读全部尺寸（`PickedImage.bounds()`；Android 是 `inJustDecodeBounds`，零像素内存），
+  再**要一张、画一张、丢一张**（`stitchStreaming`）——九张截屏同时解码就是上百 MB；
+  ② 总像素超过 2400 万按面积比开方**等比缩宽**（不裁内容），超过 800 万换 `RGB_565`
+  （每像素 2 字节；**Android 侧照旧，iOS 没有可靠的 565 绘制目标，只按 8888**）。
   底色铺白（带透明通道的 PNG 截图拼出来不该是黑底）。单张解码失败 = 该槽留白继续拼，
   不让一张坏图作废整张长图。
 - **智能拼接**（2026-10-12，口径拆自 PPIICC `bos.consoar.imagestitch` 0.5.5，
@@ -1356,20 +1368,22 @@ UI 见 §3.29。
 `Bitmap.createBitmap(2147483647, h, ARGB_8888)`——原生 `SkBitmap::setInfo` 失败、
 colorType 留成未知，`LOG_ALWAYS_FATAL("unknown bitmap configuration")` **直接 abort**
 （整个进程被杀；用户看到的现象是「选完图页面自己跳回去了」，因为 SubpageStack 把恢复的
-页面又放回最上层——别拿这个现象去查导航）。布局宽取最宽行的 `paint.measureText`，
-块宽取 `layout.getLineWidth(i)` 的最大值。
+页面又放回最上层——别拿这个现象去查导航）。2026-11-26 起块宽取 Compose
+`TextLayoutResult.size`（同样是「布局自己的尺寸」，不是测量时给的约束宽度）。
 
 **位图 config 只走白名单（同日的防患，不是上面那次的病因）**：解码端两遍都钉死
-`inPreferredConfig = ARGB_8888`（`ui/common/DecodeSampled.kt`），出图端
-`ToolboxRenderer.safeCopyConfig` 只放行 ARGB_8888 / RGB_565、其余回退 ARGB_8888。
-**不要把 `src.config` 原样转发给 `createBitmap`**——10-bit / HDR 照片在 API 34+ 会解成
+`inPreferredConfig = ARGB_8888`（`ui/platform/ImagePickers.android.kt`），出图端
+`newToolboxImageBitmap` 只有 ARGB_8888 / RGB_565 两档（`ui/toolbox/ToolboxBitmaps.kt`）。
+**不要把源图的 config 原样转发**——10-bit / HDR 照片在 API 34+ 会解成
 RGBA_F16 / RGBA_1010102 这类非常规配置，不该漏给出图侧。
 
-**出口**：保存到相册走 `ui/common/BitmapSave`（MediaStore `Pictures/JUWPHub`；旧图留在 `Pictures/水贝贝`，不迁移）；
+**出口**：保存到相册走共享层的 `savePixelBitmapToGallery`（Android `MediaStore`
+`Pictures/JUWPHub`，iOS 交系统相册；旧图留在 `Pictures/水贝贝`，不迁移）；
 分享复用课表导出的 `ScheduleShareStore` 机制、目录换 `toolbox_share/`
-（`Graph.toolboxShareStore`，FileProvider 根已登记；两边各自裁到 5 份）。
+（Android 侧目录与 FileProvider 根不变，只是改由 `shareToolboxImage` 的 actual 拼；
+`Graph.toolboxShareStore` 随管线搬走已删除；两边各自裁到 5 份）。
 格式统一 **JPEG q92**：产物多为截图 / 照片，PNG 会把体积放大一个量级；课表导出是纯色块
-图才用 PNG。文件名 `JUWPHub-百宝箱-<工具>-<时间戳>.jpg`。
+图才用 PNG。文件名 `JUWPHub-百宝箱-<工具>-<时间戳>.jpg`（`ToolboxExport.fileName`）。
 
 **开关**：偏好键 `toolbox_enabled`（DataStore 全局项，**默认开**），
 经 `MiscPrefs` 切片进 `baseDisplayPrefs`（外层 combine 五参已满，新流只能进内层切片）；

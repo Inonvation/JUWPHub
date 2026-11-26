@@ -912,6 +912,7 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 | `ResumedTickerEffect` / `rememberResumedNow` | `ui/common/ResumedTicker.kt` | `repeatOnLifecycle(RESUMED)` | 无暂停条件 |
 | `platformFileSystem()` | `platform/FileSystem.kt` | `FileSystem.SYSTEM` | `FileSystem.SYSTEM`（okio Posix） |
 | WebView | `ui/web/WebViewController.kt` | `AndroidView` + `WebView` | `UIKitView` + `WKWebView` |
+| 选图（图片） | `ui/platform/ImagePickers.kt`（`PickedImage` / `rememberImagePicker`，2026-11-26 V4） | Photo Picker + `BitmapFactory` 两遍降采样 | `UIDocumentPicker(forOpeningContentTypes: UTTypeImage)` + skia `Image.makeFromEncoded` |
 | 共享单车地图 | `ui/ebike/BikeMapContract.kt` | `BikeMapHost` → `AmapMapView` / `OsmMapView`（`:app`，须留在那边：依赖 `com.amap.api` / osmdroid） | `IosBikeMap`（`shared/iosMain`，`platform.MapKit`） |
 
 **`lifecycle-runtime-compose` 不能进 `commonMain`**：它的 KMP 变体要 Compose 1.9，本仓锁 CMP 1.7.3。
@@ -941,6 +942,7 @@ arm64、Xcode 26.6）；但 Xcode 26 与 Kotlin 2.1.21 的兼容性未实测，�
 | `ui/onboarding` | 首启引导六屏（`OnboardingScreen`，S22 2026-11-25）+ 两个平台槽位类型 `OnboardingJwLogin` / `OnboardingBrandIcons`；接法见 §10.6 |
 | `ui/ebike` | **E2（2026-11-25）**：`BikeMapViewModel`（附近单车地图页的 VM，产出 `BikeMapInput`）、`KvcxRideController`（本机用车编排，出码页与地图页共用一份）、`performReturnBike`（还车 + 结算口径的唯一实现）、`EbikeRideSignal`、以及 `ui/ebike` 的位置 / 罗盘三件（S23）。**P4（2026-11-26）整页搬完**：账号页 `KvcxScreen` + `KvcxViewModel`、历史订单页 `KvcxOrdersScreen` + `KvcxOrdersViewModel`、出码页 `EbikeViewModel`（状态里存 `BarcodeMatrix`，不再是 `Bitmap`）、`EbikeSettingsSheet`、`RidePanels`、`RideScreen`，外加三条平台缝 `EbikeReminderPort` / `EbikeQrGallery` / `EbikeMapCachePort`（`EbikeCodePlatform.kt`）。`:app` 只剩高德 / osmdroid 视图、通知那四件，以及两个宿主文件（`AppRideScreen.kt` 装配页面、`AndroidEbikeCodePlatform.kt` 转接 MediaStore 与 AlarmManager），见 §11.3 |
 | `ui/xg` | **2026-11-26**：`XgFormScreen`（学工表单窗口，报修 / 请假 / 销假 / 续假共用一张页，走 `ui/web/WebViewController` 那条缝）。iOS 上能开、能填、能提交；附件上传与销假的定位仍缺（§11.4 那两格 iOS 未接）。`:app` 那张同名页**暂留**——它压着接缝给不了的四件（`goBack` / `cacheMode` / 直取 `ClipData` 的选文件 / 定位授权），删了 Android 会丢附件上传与返回回退；升级条件写在文件头 `// shortcut:` |
+| `ui/toolbox` | **2026-11-26（V4）整包**：`WatermarkScreen` / `StitchScreen` / `ToolboxRenderer` / `StitchSmart` / `ToolboxExport` / `ToolboxPreview` 全在 `commonMain`，渲染换成 Compose 离屏绘制（`ImageBitmap` + `CanvasDrawScope` + `TextMeasurer`），**智能拼接也完整可用**（算法本来就在 `domain/StitchScan`，装配只多一个 decode lambda）。平台侧只剩「读相册 / 写相册」：选图+解码走 `ui/platform/ImagePickers.kt`，保存走 `savePixelBitmapToGallery`，分享走 `shareFile` + `ScheduleShareStore`/`exports`。`:app` 的 `ui/toolbox/` 目录已删除，宿主调用点（`SubpageActivity` 两行）零改动。三处平台差异见 `.agents/rules/toolbox.md`「管线全在共享层」 |
 
 跨模块 `internal` 会失效：`TopBarHeight`、`GridTypography`、`quickCheckFeedback`、`OutcomeQueue`、
 `SchedulePreviewGrid` 的 `changedCellSet` / `previewWeeksOf` 因此放开成 `public`，KDoc 里各自写了原因。
@@ -1223,7 +1225,6 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | `ui/wenqu` | 5 | 1,737 | 蹲点提醒 / 前台服务 / `AlarmManager`（见 12.1 通知那一行） |
 | `ui/week` | 4 | 1,568 | 课表页的平台槽（文件选择、日历写入、背景图） |
 | `ui/life` | 5 | 1,311 | `RechargeHost` / `PowerBankPayScreen`（`android.webkit` 全家 + `@JavascriptInterface`） |
-| `ui/toolbox` | 5 | 1,249 | 水印 / 拼接 / 渲染器 / 智能拼接：纯 `android.graphics.Bitmap` 管线 |
 | `ui/score` | 4 | 1,215 | 盖章成绩单（`WebView` + PDF 另存 + `FileProvider`）与成绩页的平台槽 |
 | 其余 | — | < 250 各 | `ui/ai`（图片位图）、`ui/tile`（快捷设置磁贴）、`ui/qzxy`（充值深链）、`ui/selection` / `ui/exam` / `ui/jw` / `ui/water` / `ui/homework` 的平台槽 |
 

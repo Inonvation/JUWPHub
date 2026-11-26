@@ -18,6 +18,25 @@
 - `domain/ToolboxImage` 是纯函数，改动必须同步 `ToolboxImageTest`（字号比例 / 密度三档 =
   尾部空行 / 底块锚点与夹取 / 拼接取宽与总高 / 像素上限 / alpha 换算）。
 
+## 管线全在共享层（2026-11-26）
+
+水印 / 拼接 / 智能拼接的**渲染与排版**都在 `shared/commonMain/.../ui/toolbox/`，
+`:app` 里已经**没有** `ui/toolbox/` 目录（5 个文件整体搬走）：
+
+| 件 | 位置 | 平台侧只剩 |
+|---|---|---|
+| 选图 + 解码 | `ui/platform/ImagePickers.kt`（`PickedImage` / `rememberImagePicker`） | Android Photo Picker + `BitmapFactory`；iOS 文件选择器 + skia |
+| 渲染核 | `ui/toolbox/ToolboxRenderer.kt`（`ImageBitmap` + `CanvasDrawScope` + `TextMeasurer`） | — |
+| 智能拼接装配 | `ui/toolbox/StitchSmart.kt`（解码由调用方以 lambda 传入） | — |
+| 保存 / 分享 | `ui/toolbox/ToolboxExport.kt`（两个 expect） | Android MediaStore + FileProvider；iOS 相册 + `exports/` |
+
+- **水印渲染拆成两步**：`watermarkTile` 要摸 `TextMeasurer`，必须在组合线程；
+  `watermark` 只铺块，丢 `Dispatchers.Default`。measurer 必须是 `Density(1f)` 的
+  （`rememberToolboxTextMeasurer`），否则字号会被设备密度再乘一次。
+- 三处平台差异（**别当 bug 报**）：① iOS 解码没有 `inSampleSize` 等价物，是整幅解出再缩，
+  峰值内存高一档；② `RGB_565` 降档只在 Android 生效；③ `WindowInsets.statusBars` 在 iOS 上
+  可能为 0，智能拼接因此不跳状态栏那几行（识别质量下降，不影响出图）。
+
 ## 水印：平铺块先扩边再旋转
 
 - 文字 → `StaticLayout`（行距保持 1.0）→ 平铺单元 → `BitmapShader + TileMode.REPEAT`。
@@ -28,7 +47,7 @@
 
 ## 拼接：内存三条纪律
 
-1. **先读尺寸再解码**：`readImageBounds`（`inJustDecodeBounds`）拿全部尺寸，零像素内存；
+1. **先读尺寸再解码**：`PickedImage.bounds()`（Android 是 `inJustDecodeBounds`）拿全部尺寸，零像素内存；
 2. **流式渲染**（`ToolboxRenderer.stitchStreaming`）：要一张、画一张、丢一张，
    **不要**退回「先全部解码成 List<Bitmap> 再画」——九张截屏同时解码就是上百 MB；
 3. **上限两条**：总像素 > 2400 万按面积比开方等比缩宽（`stitchFitTargetWidth`），
@@ -81,13 +100,18 @@
 
 ## 出口只有两条
 
-- 保存：`ui/common/BitmapSave.saveBitmapToGallery`（MediaStore `Pictures/JUWPHub`；旧图留在 `Pictures/水贝贝`，不迁移）；
-- 分享：`Graph.toolboxShareStore`（`ScheduleShareStore` + `toolbox_share` 目录，
-  FileProvider 根在 `res/xml/file_paths.xml`）→ 系统分享面板。
+- 保存：共享层 `ui/common/BitmapSave.savePixelBitmapToGallery`（Android MediaStore
+  `Pictures/JUWPHub`；iOS 交系统相册；旧图留在 `Pictures/水贝贝`，不迁移）；
+- 分享：`ScheduleShareStore` + `toolbox_share` 目录（Android `cacheDir/toolbox_share`，
+  FileProvider 根在 `res/xml/file_paths.xml`；iOS 落 `appDataDir()/exports/`）→ 系统分享面板。
+  2026-11-26 起由 `ui/toolbox/ToolboxExport.kt` 的 `shareToolboxImage` 两端各接一条，
+  `Graph.toolboxShareStore` 已随管线搬走删除。
 - 格式 **JPEG q92**（`ToolboxExport`）：产物是截图 / 照片，PNG 体积放大一个量级。
   要改格式先想清楚这一点，并一并改文件名后缀。
 - 分享的拉起方式与课表导出逐字对齐（`Intent.createChooser` + `FLAG_GRANT_READ_URI_PERMISSION`），
   不套 `WindowTransitions.startActivityOutsideApp`——那是给跨 task 的外部页面用的。
+  共享层的 `shareFile` actual 走 `FLAG_ACTIVITY_NEW_TASK`（拿不到 Activity），
+  从二级页返回时可能重放一次推入动画，这是它 KDoc 里已记的既有降级。
 
 ## 两遍解码的判空陷阱（2026-10-12 真机踩过）
 
@@ -95,8 +119,11 @@
   不产图）。所以**不能**把它的返回值串进 `?:` / `takeIf` 之类的判空链：
   `openInputStream(uri)?.use { decodeStream(it, null, bounds) } ?: return null`
   会把「量到了尺寸」误判成「流打不开」，整条两遍解码永远返回 null——各图片工具全读不出图。
-- 正确形态（`ui/common/DecodeSampled.kt` 的 `decodeUriSampled` / `readImageBounds`）：
+- 正确形态（`ui/platform/ImagePickers.android.kt` 的 `PickedImage.bounds()` / `decode()`）：
   **流单独取出来判空**，`use { decodeStream(...) }` 只当语句用，成败看 `bounds.outWidth`。
+  （2026-11-26 起这两个函数从 `:app` 的 `ui/toolbox/ToolboxBitmap.kt` 与
+  `ui/common/DecodeSampled.kt` 合并搬进了共享层的选图缝；iOS 侧等价物是 skia 解码，
+  没有这条陷阱，但有它自己的：`Image.makeFromEncoded` 对坏数据会抛，必须 `runCatching`。）
 - 解码失败**不许静默**：预览 / 缩略图读到 null 时必须发提示，否则用户只看到空白预览，
   报障也只能说「读不出来」。
 
@@ -116,11 +143,11 @@
 
 ## 位图 config 仍走白名单（防患，不是上面那次的病因）
 
-- 两道闸都保留：① 解码端钉死 `inPreferredConfig = ARGB_8888`（`ui/common/DecodeSampled.kt`
-  两个解码口都钉）；② 出图端 `ToolboxRenderer.safeCopyConfig` 白名单
-  （只放行 ARGB_8888 / RGB_565，HARDWARE 的 `getConfig()` 返回 null 也落回退）。
+- 两道闸都保留：① 解码端钉死 `inPreferredConfig = ARGB_8888`（`ui/platform/ImagePickers.android.kt`
+  的解码口）；② 出图端 `ui/toolbox/ToolboxBitmaps.kt` 的 `newToolboxImageBitmap` 只有
+  ARGB_8888 / RGB_565 两档（改造前是 `ToolboxRenderer.safeCopyConfig`）。
   目的只是别把 10-bit / HDR 照片解出的 `RGBA_F16` / `RGBA_1010102` 这类非常规 config
-  漏给 `createBitmap`。
+  漏给建位图那一步。
 
 ## 加新工具时的固定动作
 
