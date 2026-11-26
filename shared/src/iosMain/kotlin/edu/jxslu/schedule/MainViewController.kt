@@ -279,12 +279,24 @@ private fun IosRoot(services: IosServices) {
                         Modifier
                             .fillMaxSize()
                             .background(MaterialTheme.colorScheme.background)
-                            // 主卡层级效果（与 Android 的层叠抽屉同一份算式）：`currentOffset`
-                            // 是侧栏自己的位移（全开 = −侧栏宽，单位 px），归一化成 0…1 交给共享层。
+                            // 主卡层级效果（与 Android 的层叠抽屉同一份算式）。进度 = 0 合上、1 全开。
+                            //
+                            // **符号是 `1 + offset/宽`，不是 `-offset/宽`**（2026-11-26 真机截图修正）。
+                            // Material3 的 `DrawerState` 把侧栏面板放在 `x = offset` 处，于是
+                            // **合上 = −侧栏宽、全开 = 0**。上一版按「全开 = −侧栏宽」写的，符号正好反了：
+                            // 抽屉合着的时候进度被算成 1，主卡被整条侧栏宽推到右边——真机首屏就是
+                            // 左边一大片空白、页面挤在右半屏。这个 bug 一直存在，只是之前被首帧
+                            // NaN 崩溃挡住，修掉崩溃之后才第一次露出来。
+                            //
                             // **读在绘制期**：`drawerCardTransform` 内部把它放在 `graphicsLayer` 的
                             // lambda 里求值，侧栏拖动时不会让整棵页面树重组。
                             .drawerCardTransform(cardTransform) {
-                                -drawerState.currentOffset / drawerWidthPx
+                                if (drawerWidthPx > 0f) {
+                                    1f + drawerState.currentOffset / drawerWidthPx
+                                } else {
+                                    // 密度未就绪：当合上处理（`drawerCardProgress` 也会拦 NaN/±Inf）
+                                    0f
+                                }
                             },
                     ) {
                     Box(
