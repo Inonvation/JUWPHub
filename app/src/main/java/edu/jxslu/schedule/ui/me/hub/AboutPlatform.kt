@@ -29,8 +29,18 @@ import edu.jxslu.schedule.ui.common.saveBitmapToGallery
  * 赞赏码是 `res/drawable-nodpi` 里的打包位图，落相册走 `MediaStore`。共享层都没有对应物。
  */
 
-/** 赞赏码打包资源（res/drawable-nodpi/ic_reward_qr.webp），固定 1037×1037；改图要同步这行。 */
-const val REWARD_QR_RES: Int = R.drawable.ic_reward_qr
+/**
+ * 赞赏码打包资源（res/drawable-nodpi/ic_reward_qr.webp），固定 1037×1037；改图要同步这行。
+ *
+ * **为什么不是 `const val`**（2026-11-26 晚）：`const val` 的初始值来自 Android `R`
+ * （Java 静态字段），Kotlin 2.1.21 的 IR 常量求值器会去"解释"这个 getter 并在
+ * `:app` 全量编译时崩掉——
+ * `AssertionError: Error occurred while optimizing an expression: CALL <get-REWARD_QR_RES>`，
+ * 紧接着 `InterpreterError: Unsupported number of arguments for invocation as builtin
+ * function: REWARD_QR_RES`。增量编译时命不中这段，所以是「合并删文件后重编译才炸」的形态。
+ * 改成普通 `val` 后不再进常量求值；没有调用点需要编译期常量（两处都只当 `Int` 用）。
+ */
+val REWARD_QR_RES: Int = R.drawable.ic_reward_qr
 
 /** 赞赏码落相册的文件名（`Pictures/JUWPHub`，目录口径见 domain/GalleryPaths）。 */
 private const val REWARD_FILE_NAME = "JUWPHub-赞赏码.png"

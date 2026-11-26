@@ -65,6 +65,7 @@ import edu.jxslu.schedule.ui.timetable.ScheduleChangesScreen
 import edu.jxslu.schedule.ui.timetable.TimetableManageScreen
 import edu.jxslu.schedule.ui.timetable.TimetableViewModel
 import edu.jxslu.schedule.ui.toolbox.CainiaoQueryScreen
+import edu.jxslu.schedule.ui.toolbox.StitchScreen
 import edu.jxslu.schedule.ui.ujing.UjingHistoryScreen
 import edu.jxslu.schedule.ui.ujing.UjingOrderScreen
 import edu.jxslu.schedule.ui.ujing.UjingScreen
@@ -80,6 +81,7 @@ import edu.jxslu.schedule.ui.wenqu.WenquViewModel
 import edu.jxslu.schedule.ui.xg.XgFormScreen
 import edu.jxslu.schedule.ui.water.WaterViewModel
 import edu.jxslu.schedule.ui.toolbox.ToolboxScreen
+import edu.jxslu.schedule.ui.toolbox.WatermarkScreen
 import edu.jxslu.schedule.ui.tweak.CourseTweakScreen
 import edu.jxslu.schedule.ui.tweak.CourseTweakViewModel
 import edu.jxslu.schedule.ui.campus.StatementScreen
@@ -813,7 +815,18 @@ internal fun IosRouteContent(
         //
         // 列表页与菜鸟批量查在 iOS 上可用；水印与拼接是纯位图管线（`android.graphics.Bitmap`），
         // 留在 `:app`，两个入口传 null 后那两张工具卡不渲染。
-        SubpageScreen.TOOLBOX -> ToolboxScreen(onBack = pop)
+        SubpageScreen.TOOLBOX -> ToolboxScreen(
+            onBack = pop,
+            // 水印 / 拼接（2026-11-26 晚，随百宝箱 Skia 化合并）：渲染管线整块搬进共享层，
+            // 两页在 iOS 上都是完整可用（选图、解码、保存相册、分享都在共享层里）。
+            // 传 null 的那一张卡会整块不渲染——这里两个都填。
+            onOpenWatermark = { push(IosRoute(SubpageScreen.TOOLBOX_WATERMARK)) },
+            onOpenStitch = { push(IosRoute(SubpageScreen.TOOLBOX_STITCH)) },
+        )
+
+        SubpageScreen.TOOLBOX_WATERMARK -> WatermarkScreen(onBack = pop)
+
+        SubpageScreen.TOOLBOX_STITCH -> StitchScreen(onBack = pop)
 
         SubpageScreen.TOOLBOX_CAINIAO -> CainiaoQueryScreen(onBack = pop)
 
