@@ -91,6 +91,7 @@ import edu.jxslu.schedule.platform.ClassReminder
 import edu.jxslu.schedule.platform.HomeworkReminder
 import edu.jxslu.schedule.platform.IosClassReminder
 import edu.jxslu.schedule.platform.IosHomeworkReminder
+import edu.jxslu.schedule.platform.IosKvcxSideEffects
 import edu.jxslu.schedule.platform.IosLocalNotifications
 import edu.jxslu.schedule.platform.IosNotificationPermission
 import edu.jxslu.schedule.platform.IosScoreReminder
@@ -1042,7 +1043,10 @@ class IosServices : AppServices {
             rideNotices = kvcxNotices,
             rideUnlocked = kvcxUnlocked,
             remoteRideReminder = kvcxRemoteRide,
-            effects = null,
+            // 副作用（2026-11-26 晚接上）：账号方式开锁后要写 `ebikeRideStartAt`、起免费计时、
+            // 排自动还车。给 null 的话「自动还车」开关渲染出来却永不触发
+            //（`reconcileAutoReturn` 每次判 `startAt <= 0` 直接撤排程），免费计时也起不来。
+            effects = IosKvcxSideEffects,
         )
     }
 

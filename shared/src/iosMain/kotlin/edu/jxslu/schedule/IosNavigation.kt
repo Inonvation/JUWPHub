@@ -87,7 +87,8 @@ import edu.jxslu.schedule.ui.tweak.CourseTweakViewModel
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
-import edu.jxslu.schedule.platform.IosEbikeReminder
+import edu.jxslu.schedule.platform.IosKvcxSideEffects
+import edu.jxslu.schedule.platform.iosWenquGrabHitAlert
 import edu.jxslu.schedule.ui.ebike.BikeMapViewModel
 import edu.jxslu.schedule.ui.ebike.EbikeViewModel
 import edu.jxslu.schedule.ui.ebike.IosEbikeQrGallery
@@ -657,10 +658,10 @@ internal fun IosRouteContent(
         // `IosServices.kqcxSession()`（Keychain 凭证 + 进程内 token），订单缓存与本机骑行记录
         // 都落在同一个 Room 库，与 Android 同一份代码。
         //
-        // 两处平台能力缺口，按 §11.2 ④ 传 null（不是「以后补」的占位）：
-        // - `onReconcileAutoReturn = null`：Android 用 `AlarmManager.setAlarmClock` + WorkManager
-        //   加急任务做自动还车的精确排程，iOS 的 `BGTaskScheduler` 不保证触发时刻，
-        //   排了是假承诺。传 null 后「进页 / 登录时那一轮兜底对账」不跑，页面其余照常。
+        // 两处平台能力缺口：
+        // - `onReconcileAutoReturn`（2026-11-26 晚接上）：iOS 没有精确闹钟，靠
+        //   `IosEbikeReminder.reconcileAutoReturn` 做「到点通知 + 唤起时补做」，账号页进页
+        //   也跑这一轮兜底对账。
         // - `brandIcon = null`：`R.drawable.ic_brand_kqcx` 只有 Android 有，头像位整块不占位。
         //
         // 订单页的入口这次给**真回调**（iOS 有二级页栈），所以账号页的「骑行记录」整块会渲染。
@@ -672,7 +673,11 @@ internal fun IosRouteContent(
                     records = RideRecordStore(database.rideRecordDao()),
                     prefs = services.displayPrefs(),
                     orderCache = KqcxOrderStore(database.kqcxOrderDao()),
-                    onReconcileAutoReturn = null,
+                    // 进页 / 登录后的兜底对账：iOS 上这一轮是「到点通知 + 唤起时补做」的入口，
+                    // `catchUp = false` = 只补检查、不当作已经错过。
+                    onReconcileAutoReturn = {
+                        IosKvcxSideEffects.reminder.reconcileAutoReturn(catchUp = false)
+                    },
                 )
             }
             KvcxScreen(
@@ -737,12 +742,13 @@ internal fun IosRouteContent(
             val ebikeViewModel = remember {
                 // 相册与提醒两个缝在 iOS 上是真实现（2026-11-26，T1 轨道）：
                 // 存相册走 `UIImageWriteToSavedPhotosAlbum`，免费时长提醒走本机通知。
-                // 「自动还车」与「扫完即焚」两项能力在 iOS 上关着（前者要 BGTaskScheduler，
-                // 后者要能删相册里的图），对应设置整块不渲染——见两个实现类的 KDoc。
+                // 「自动还车」2026-11-26 晚起在 iOS 上是**降级可用**（到点通知 + 唤起时补做，
+                // 见 `IosEbikeReminder` 的 KDoc）；「扫完即焚」仍关着（要能删相册里的图）。
+                // `reminders` 用副作用层那一份实例：骑行页与开锁副作用共用同一个前台计时器槽位。
                 EbikeViewModel(
                     prefs = services.displayPrefs(),
                     gallery = IosEbikeQrGallery(),
-                    reminders = IosEbikeReminder(services.displayPrefs()),
+                    reminders = IosKvcxSideEffects.reminder,
                 )
             }
             val bikeMapSlot = remember { iosCanvasBikeMapSlot() }
@@ -1040,7 +1046,13 @@ internal fun IosRouteContent(
                 IosNotPortedScreen(screen = route.screen, onBack = pop)
             } else {
                 val vm = remember { WenquGrabViewModel(repo, services.displayPrefs()) }
-                WenquGrabScreen(onBack = pop, viewModel = vm)
+                WenquGrabScreen(
+                onBack = pop,
+                viewModel = vm,
+                // 命中时补一条本地通知（2026-11-26 晚）：页面在前台才蹲，弹确认框那一下
+                // 用户可能正看别的窗口，横幅 + 提示音是唯一还能叫住他的东西。
+                onHitAlert = { activity -> iosWenquGrabHitAlert(activity) },
+            )
             }
         }
 
