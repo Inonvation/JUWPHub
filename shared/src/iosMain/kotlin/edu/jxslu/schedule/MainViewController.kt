@@ -172,6 +172,8 @@ private fun IosRoot(services: IosServices) {
         // 全 App 唯一的字形缩放覆盖点。
         ProvideFixedFontScale(locked = fontScaleLocked) {
             var jwOpen by remember { mutableStateOf(false) }
+            // 「全部功能」页（2026-11-26 抽屉瘦身）：本地覆盖层，与 jwOpen 同一做法，不新增路由枚举。
+            var showAllFeatures by remember { mutableStateOf(false) }
             var tab by remember { mutableStateOf(IosTab.Today) }
             // 二级页栈：Android 是 SubpageActivity 的任务栈，iOS 用一份列表顶上（见 IosNavigation.kt）
             val stack = remember { mutableStateListOf<IosRoute>() }
@@ -241,6 +243,16 @@ private fun IosRoot(services: IosServices) {
                     jwLogin = onboardingJwLogin,
                     onOpenJwLogin = { jwOpen = true },
                 )
+            } else if (showAllFeatures) {
+                // 「全部功能」覆盖层：原来抽屉里那六段站点地图整份搬到这里，
+                // 抽屉回到 Android 那条短面板（见 IosAllFeatures.kt）。
+                IosAllFeaturesScreen(
+                    onBack = { showAllFeatures = false },
+                    onPick = { route ->
+                        showAllFeatures = false
+                        pushRoute(route)
+                    },
+                )
             } else {
                 ModalNavigationDrawer(
                     drawerState = drawerState,
@@ -271,6 +283,10 @@ private fun IosRoot(services: IosServices) {
                             },
                             // 「我的 / 设置」那一行：Android 的侧栏里也是这一行进设置首页，
                             // 不是底栏。切换完顺手关抽屉。
+                            onOpenAllFeatures = {
+                                shellScope.launch { drawerState.close() }
+                                showAllFeatures = true
+                            },
                             onOpenMe = {
                                 shellScope.launch { drawerState.close() }
                                 tab = IosTab.Me

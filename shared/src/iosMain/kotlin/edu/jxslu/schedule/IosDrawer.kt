@@ -166,6 +166,8 @@ internal fun IosDrawer(
      * 身份卡点进去是学籍信息（只读），紧跟着一行「我的 · 设置」才符合「头像是我的」这个直觉。
      */
     onOpenMe: () -> Unit,
+    /**「全部功能」那一行：整份二级页清单搬到 [IosAllFeaturesScreen]（2026-11-26 抽屉瘦身）。*/
+    onOpenAllFeatures: () -> Unit,
 ) {
     val entries = remember { iosDrawerEntries() }
     // 「江水生活」是**唯一分成两半**的段：服务行（共享层的 `lifeServiceRows`）在钱包卡下面渲染，
@@ -175,11 +177,13 @@ internal fun IosDrawer(
     // `items` 的键在整条 LazyColumn 里必须唯一，同一个 `route.screen.name` 出两遍会崩在
     // 「key was already used」。
     val serviceSectionTitle = "江水生活"
-    val (serviceSectionExtras, otherSections) = remember(entries) {
-        val grouped = entries
+    // 抽屉只剩「江水生活」段里的二级页（洗衣账单）：其余六段整份搬到「全部功能」页
+    // （IosAllFeatures.kt，2026-11-26 抽屉瘦身）。**不要在这里把它们加回来**——
+    // 抽屉要的是 Android 那条短面板，不是站点地图。
+    val serviceSectionExtras = remember(entries) {
+        entries
             .filterNot { it.route.screen in IOS_DRAWER_QUICK_SCREENS }
-            .groupBy { it.section }
-        grouped[serviceSectionTitle].orEmpty() to (grouped - serviceSectionTitle)
+            .groupBy { it.section }[serviceSectionTitle].orEmpty()
     }
     // 身份区数据源与 Android 侧栏同一份 `DisplayPrefsStore`（iOS 落在沙箱私有目录的 DataStore）
     val prefs = remember { services.displayPrefs() }
@@ -290,6 +294,15 @@ internal fun IosDrawer(
                         onClick = onOpenMe,
                     )
                 }
+                item(key = "all-features") {
+                    // 「全部功能」：Android 的侧栏里没有这一行，但 iOS 需要它来承接原来那六段
+                    // 站点地图（学习 / 教务 / 钱包 / 生活 / 设置 / 账号），见 IosAllFeatures.kt。
+                    DrawerRow(
+                        label = "全部功能",
+                        icon = AppIcons.Menu01,
+                        onClick = onOpenAllFeatures,
+                    )
+                }
                 item(key = "wallet") {
                     // 钱包卡：三格文案走共享层的 `walletCardTexts`，视觉与 Android 逐像素同源。
                     // `onRecharge = null`：充值宿主还在 `:app`，本平台没有这条路径 →
@@ -324,13 +337,7 @@ internal fun IosDrawer(
                 items(serviceSectionExtras, key = { it.route.screen.name }) { entry ->
                     CompactDrawerRow(entry = entry, onClick = { onPick(entry.route) })
                 }
-                // 其余二级页：紧凑分组列表（键仍是 `route.screen.name`，与上一版一致）
-                otherSections.forEach { (section, rows) ->
-                    item(key = "h-$section") { DrawerSectionHeader(section) }
-                    items(rows, key = { it.route.screen.name }) { entry ->
-                        CompactDrawerRow(entry = entry, onClick = { onPick(entry.route) })
-                    }
-                }
+
             }
             // 底部付款码：与 Android 底栏同一个部件、同一处位置（右下），
             // 只少了左下那颗设置齿轮（iOS 的设置是上面那行「我的 · 设置」）。
