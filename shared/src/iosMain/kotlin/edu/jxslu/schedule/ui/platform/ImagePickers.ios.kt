@@ -73,7 +73,9 @@ import platform.darwin.NSObject
  */
 internal actual class PickedImage internal constructor(internal val url: NSURL) {
 
-    actual val id: String get() = url.absoluteString ?: url.description
+    // `absoluteString` 与 `description` 在 K/N 绑定里都是 `String?`（CI 实测：
+    // 不兜空会报 "Return type mismatch: expected 'String', actual 'String?'"）
+    actual val id: String get() = url.absoluteString ?: url.description.orEmpty()
 
     actual suspend fun bounds(): Pair<Int, Int>? = withContext(Dispatchers.Default) {
         val bytes = readBytes() ?: return@withContext null
