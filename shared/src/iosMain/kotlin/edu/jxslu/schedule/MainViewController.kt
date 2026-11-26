@@ -71,6 +71,7 @@ import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.platform.installCrashHook
+import edu.jxslu.schedule.ui.campus.CampusCardViewModel
 import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.drawerCardTransform
@@ -79,6 +80,11 @@ import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jw.JwHubScreen
 import edu.jxslu.schedule.ui.jwvw.JwWebFit
 import edu.jxslu.schedule.ui.jwvw.TeachingEvalScreen
+import edu.jxslu.schedule.ui.life.IosRechargePlatform
+import edu.jxslu.schedule.ui.life.LifeViewModel
+import edu.jxslu.schedule.ui.life.PowerRoomPickerViewModel
+import edu.jxslu.schedule.ui.life.RechargeRequests
+import edu.jxslu.schedule.ui.life.SharedRechargeHost
 import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.SettingsScreen
@@ -219,6 +225,44 @@ private fun IosRoot(services: IosServices) {
                 onboardingSeen = runCatching { prefs.onboardingSeen.first() }.getOrDefault(true)
             }
 
+            // ---- 充值宿主的三件套（2026-11-26 晚，随充值流的合并接线）----
+            //
+            // 为什么在壳层建：抽屉钱包卡与充值宿主必须读**同一份** `CampusCardViewModel` /
+            // `LifeViewModel`。Android 靠两处 `viewModel()` 同一个 key 天然共用；iOS 是
+            // `remember`，两处各建一份就会出现「抽屉里余额已刷新、宿主里还是旧值」，
+            // 到账判定永远慢一拍。
+            //
+            // 没有加密凭证存储（`yktCredentialStore()` 为 null）时一卡通整条链开不起来：
+            // `campusVm` 为 null → 钱包卡的充值按钮与整个宿主一起不渲染，而不是留一个点了没反应的入口。
+            val yktCredentials = remember { services.yktCredentialStore() }
+            val campusVm = remember(yktCredentials) {
+                yktCredentials?.let { store ->
+                    CampusCardViewModel(
+                        repo = services.yktRepository(),
+                        credentialStore = store,
+                        prefs = services.displayPrefs(),
+                        db = services.database(),
+                        // 与 Android 侧栏同一档：构造期不取数（抽屉自己那条 LaunchedEffect 才是取数点）
+                        autoFetch = false,
+                    )
+                }
+            }
+            val lifeVm = remember {
+                LifeViewModel(
+                    powerRepo = services.powerRepository(),
+                    credentialStore = yktCredentials,
+                    readingStore = services.powerReadingStore(),
+                )
+            }
+            // 三个充值入口（钱包卡 / 电费账单页 / 校园卡设置页）共用的投递口
+            val rechargeRequests = remember { RechargeRequests() }
+            // 「未绑定寝室」时宿主弹层里的选房器：不给就在弹层里只报平台原话
+            val powerRoomPicker = remember(yktCredentials) {
+                yktCredentials?.let { store ->
+                    PowerRoomPickerViewModel(services.powerRepository(), store)
+                }
+            }
+
             // 二级页入栈（2026-11-26 晚：原「精简版下线闸门」`IOS_REMOVED_SCREENS` 已删，
             // 五个模块全部恢复，见 `IosNavigation.kt` 里那段说明）。
             val pushRoute: (IosRoute) -> Unit = { route -> stack.add(route) }
@@ -272,6 +316,8 @@ private fun IosRoot(services: IosServices) {
                         meViewModel = meViewModel,
                         push = pushRoute,
                         pop = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) },
+                        // 覆盖层里的校园卡设置页也要能开充值收银台页
+                        recharge = rechargeRequests,
                         root = {
                             if (showAllFeatures) {
                                 IosAllFeaturesScreen(
@@ -333,6 +379,10 @@ private fun IosRoot(services: IosServices) {
                             // 只在真的展开时打平台请求。`isOpen` 读的是当前值（动画结束后的状态），
                             // 拖动中途不会提前发请求——与 Android「完全展开才拉」同口径。
                             drawerVisible = drawerState.isOpen,
+                            // 钱包卡与充值宿主共用同一对 ViewModel + 同一个投递口（见上方「三件套」）
+                            campusViewModel = campusVm,
+                            lifeViewModel = lifeVm,
+                            requests = rechargeRequests,
                         )
                     },
                 ) {
@@ -422,6 +472,8 @@ private fun IosRoot(services: IosServices) {
                                     push = pushRoute,
                                     // 退栈走 `stack`：与 `AppBackHandler` 同一条路径
                                     pop = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) },
+                                    // 电费账单页 / 校园卡设置页的充值入口共用这一个投递口
+                                    recharge = rechargeRequests,
                                 )
                             } else {
                                 AnimatedContent(
@@ -730,6 +782,19 @@ private fun IosRoot(services: IosServices) {
                 } // 关闭 Box（内容 + 悬浮底栏）
             } // 关闭 Column（主卡）
         } // 关闭 ModalNavigationDrawer 的 content
+            // 充值宿主（2026-11-26 晚，随充值流合并接线）：挂在根组合的**最后一个子节点**——
+            // 它的免责声明、充值弹层与内嵌收银台页必须盖住抽屉、悬浮底栏与设置覆盖层。
+            // 多个根子节点由 Compose 的 root measure policy 叠放（后组合的在上），所以不必再套
+            // 一层 Box；套了反而会让 `ModalNavigationDrawer` 的 `fillMaxSize` 多测一次。
+            if (campusVm != null) {
+                SharedRechargeHost(
+                    requests = rechargeRequests,
+                    platform = IosRechargePlatform,
+                    lifeViewModel = lifeVm,
+                    campusViewModel = campusVm,
+                    roomPickerViewModel = powerRoomPicker,
+                )
+            }
     } // 关闭 ProvideFixedFontScale
 } // 关闭 JuwTheme
 } // 关闭 IosRoot
@@ -750,6 +815,8 @@ private fun IosOverlayStack(
     meViewModel: MeViewModel,
     push: (IosRoute) -> Unit,
     pop: () -> Unit,
+    /** 充值投递口：覆盖层里的校园卡设置页也要能开收银台页（与主分支同一个实例）。 */
+    recharge: RechargeRequests? = null,
     root: @Composable () -> Unit,
 ) {
     val shape = stack.size to stack.lastOrNull()
@@ -779,6 +846,7 @@ private fun IosOverlayStack(
                 meViewModel = meViewModel,
                 push = push,
                 pop = pop,
+                recharge = recharge,
             )
         } else {
             root()

@@ -112,6 +112,9 @@ import edu.jxslu.schedule.ui.jw.TextbookScreen
 import edu.jxslu.schedule.ui.life.PowerBillScreen
 import edu.jxslu.schedule.ui.life.PowerBillViewModel
 import edu.jxslu.schedule.ui.life.PowerRoomPickerViewModel
+import edu.jxslu.schedule.ui.life.RechargeKind
+import edu.jxslu.schedule.ui.life.RechargeRequests
+import edu.jxslu.schedule.ui.life.iosQiekjRecharge
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.notes.NoteCourseScreen
@@ -280,6 +283,14 @@ internal fun IosRouteContent(
     meViewModel: MeViewModel,
     push: (IosRoute) -> Unit,
     pop: () -> Unit,
+    /**
+     * 充值投递口（2026-11-26 晚，随充值流合并接线）。
+     *
+     * 由壳层持有的**同一份** `RechargeRequests` 传进来：电费账单页与校园卡设置页的充值入口
+     * 都往这里丢请求，宿主（`SharedRechargeHost`）挂在根组合最后一个子节点上开弹层。
+     * null = 本机没有加密凭证存储（宿主不渲染），两处充值入口因此整颗不渲染。
+     */
+    recharge: RechargeRequests? = null,
 ) {
     when (route.screen) {
         // ---------------------------------------------------------------- 学习
@@ -482,7 +493,15 @@ internal fun IosRouteContent(
                     readingStore = services.powerReadingStore(),
                 )
             }
-            PowerBillScreen(viewModel = vm, onBack = pop)
+            PowerBillScreen(
+                viewModel = vm,
+                onBack = pop,
+                // 「充值」走共享充值宿主（2026-11-26 晚）：投递口在壳层，宿主挂在根组合最上层。
+                // null = 本机没有加密凭证存储（宿主不渲染），那一行整颗不渲染。
+                onRecharge = recharge?.let { requests ->
+                    { requests.request(RechargeKind.Power) }
+                },
+            )
         }
 
         SubpageScreen.CAMPUS_STATEMENT -> {
@@ -531,9 +550,17 @@ internal fun IosRouteContent(
                     viewModel = vm,
                     onBack = pop,
                     onOpenStatement = { push(IosRoute(SubpageScreen.CAMPUS_STATEMENT)) },
-                    onOpenPaymentUrl = null,
+                    // 内嵌收银台页（2026-11-26 晚）：一卡通充值到账前的那一页交回宿主开，
+                    // 页面自己只负责下单；返回 true = 已接住（宿主渲染），false = 走平台浏览器。
+                    onOpenPaymentUrl = recharge?.let { requests ->
+                        { url -> requests.openPaymentPage(url, "校园卡充值"); true }
+                    },
                     notificationPermission = null,
                     powerRoomPicker = roomPicker,
+                    // iOS 上**必须**走收银台页而不是 `weixin://` 直拉：微信 H5 支付那条
+                    // 深链要求商户域与 referer 匹配，从原生 App 直接 openURL 会被拒
+                    //（`design/ios-port.md` §10.4）。
+                    preferCashierPage = true,
                 )
             }
         }
@@ -922,8 +949,9 @@ internal fun IosRouteContent(
         // 2026-11-25 全部到位（Keychain 凭证 + 订单快照 JSON + 过期留痕），
         // 所以 `qiekjRepository()` 不再是 null。
         //
-        // 两个平台动作传 null：品牌位图（Android 的 `ic_brand_pangguai`）与「充值」按钮
-        // （要拉起支付宝深链，`Info.plist` 还没声明 `LSApplicationQueriesSchemes`）。
+        // 品牌位图仍传 null（Android 的 `ic_brand_pangguai` 只有 Android 有）；
+        // 「充值」按钮 2026-11-26 晚接上了：`alipays://` 深链交给系统，
+        // `LSApplicationQueriesSchemes` 已声明 `alipays`（见 `RechargePlatform.ios.kt`）。
         SubpageScreen.WATER -> {
             val repo = services.qiekjRepository()
             if (repo == null) {
@@ -939,6 +967,9 @@ internal fun IosRouteContent(
                     viewModel = vm,
                     prefsViewModel = meViewModel,
                     onBack = pop,
+                    // 充值（2026-11-26 晚）：`alipays://` 深链交给系统。
+                    // 返回 false = 没装支付宝，页面据此提示而不是静默无反应。
+                    onOpenRecharge = { iosQiekjRecharge() },
                 )
             }
         }

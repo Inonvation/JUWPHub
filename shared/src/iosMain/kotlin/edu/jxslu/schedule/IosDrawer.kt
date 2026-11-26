@@ -29,7 +29,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +47,9 @@ import edu.jxslu.schedule.ui.life.DrawerRow
 import edu.jxslu.schedule.ui.life.DrawerSectionHeader
 import edu.jxslu.schedule.ui.life.LifeViewModel
 import edu.jxslu.schedule.ui.life.PaymentCodeEntry
+import edu.jxslu.schedule.ui.life.RechargeChoiceSheet
+import edu.jxslu.schedule.ui.life.RechargeKind
+import edu.jxslu.schedule.ui.life.RechargeRequests
 import edu.jxslu.schedule.ui.life.SettingsEntry
 import edu.jxslu.schedule.ui.life.WalletHero
 import edu.jxslu.schedule.ui.life.lifeServiceRows
@@ -178,6 +183,18 @@ internal fun IosDrawer(
      */
     onOpenMe: () -> Unit,
     /**
+     * 钱包卡用的两个 ViewModel（2026-11-26 晚从本文件上移到壳层）。
+     *
+     * 为什么上移：充值宿主 `SharedRechargeHost` 与钱包卡必须读**同一份**实例——Android 靠
+     * 同一个 `viewModel()` key 天然共用，而 iOS 是 `remember` 各持一份：两处各建一个的话，
+     * 抽屉里余额刷新了、宿主里还是旧值，到账判定永远差一拍。null = 本机没有加密凭证存储
+     * （`yktCredentialStore()` 为 null），钱包卡按「未开启」渲染，充值入口整颗不渲染。
+     */
+    campusViewModel: CampusCardViewModel?,
+    lifeViewModel: LifeViewModel,
+    /** 三个充值入口（钱包卡 / 电费账单页 / 校园卡设置页）共用的投递口。 */
+    requests: RechargeRequests,
+    /**
      * 抽屉当前是否展开（2026-11-26 晚）。
      *
      * 服务行右侧那三格状态（胖乖余额 / U净空闲数 / 问渠工时）按它开闸：抽屉是常驻组合，
@@ -187,6 +204,8 @@ internal fun IosDrawer(
     drawerVisible: Boolean = true,
 ) {
     val entries = remember { iosDrawerEntries() }
+    // 钱包卡「充值」先开选择弹层（一卡通 / 电费两个系统各充各的），见文件末尾那一块
+    var rechargeChoiceOpen by remember { mutableStateOf(false) }
     // 「江水生活」是**唯一分成两半**的段：服务行（共享层的 `lifeServiceRows`）在钱包卡下面渲染，
     // 白名单里同段剩下的二级页（洗衣账单）接在同一段里。**不能交给下面的段循环**：
     // 那会再起一个同名段头，抽屉里看上去就是两段「江水生活」——Android 侧栏这一段只有
@@ -208,28 +227,9 @@ internal fun IosDrawer(
     val profileClass by prefs.profileClass.collectAsStateWithLifecycle(initialValue = "")
     val profileStudentId by prefs.profileStudentId.collectAsStateWithLifecycle(initialValue = "")
 
-    // ---- 钱包卡：与 Android 侧栏同一对 ViewModel ----
-    val yktCredentials = remember { services.yktCredentialStore() }
-    val campusVm = remember(yktCredentials) {
-        yktCredentials?.let { store ->
-            CampusCardViewModel(
-                repo = services.yktRepository(),
-                credentialStore = store,
-                prefs = services.displayPrefs(),
-                db = services.database(),
-                // 与 Android 侧栏同一档：构造期不取数（下面那条 LaunchedEffect 才是取数点）
-                autoFetch = false,
-            )
-        }
-    }
-    val lifeVm = remember {
-        LifeViewModel(
-            powerRepo = services.powerRepository(),
-            // null = 本平台没有加密凭证存储 → 电费格落「—」（`PowerCardState.noCredentials`）
-            credentialStore = yktCredentials,
-            readingStore = services.powerReadingStore(),
-        )
-    }
+    // ---- 钱包卡：与 Android 侧栏同一对 ViewModel（实例由壳层持有，见参数注释）----
+    val campusVm = campusViewModel
+    val lifeVm = lifeViewModel
     val power = lifeVm.uiState.collectAsStateWithLifecycle().value.power
     // 没有加密凭证存储（`yktCredentialStore()` 为 null）时一卡通整条链开不起来，
     // 三格按「未开启 / — / 电费照旧」渲染——与 Android 关掉开关时同一档，不另写一套。
@@ -313,16 +313,21 @@ internal fun IosDrawer(
                 }
                 item(key = "wallet") {
                     // 钱包卡：三格文案走共享层的 `walletCardTexts`，视觉与 Android 逐像素同源。
-                    // `onRecharge = null`：充值宿主还在 `:app`，本平台没有这条路径 →
-                    // 充值按钮整颗不渲染（§11.2 ④）。
+                    // `onRecharge`（2026-11-26 晚接上）：把请求丢给壳层的充值宿主，弹层由它开。
+                    // 落到 `RechargeKind.Campus`（一卡通）——电费那一档从电费账单页进。
                     WalletHero(
                         balanceText = walletTexts.balance,
                         accountValue = walletTexts.account,
                         powerText = walletTexts.power,
+                        // 到账监听中不要在钱包卡上再显示一次：宿主的到账弹窗就盖在抽屉之上，
+                        // 两处同时说「正在确认到账」会读成两笔单。
                         arrivalWatching = false,
                         onCampusDetail = { onPick(IosRoute(SubpageScreen.CAMPUS_STATEMENT)) },
                         onPowerDetail = { onPick(IosRoute(SubpageScreen.POWER_BILL)) },
-                        onRecharge = null,
+                        // 与 Android 同一档：先开「选择充值项目」弹层（共享件
+                        // `RechargeChoiceSheet`），不是直接进一卡通。两笔钱进两个系统，
+                        // 直接猜一个会让用户以为充错了地方。
+                        onRecharge = campusVm?.let { { rechargeChoiceOpen = true } },
                     )
                 }
                 // 生活服务区：段头与行都是共享部件，与 Android 同一个段名、同一种行
@@ -360,6 +365,23 @@ internal fun IosDrawer(
                 SettingsEntry(onClick = onOpenMe)
                 PaymentCodeEntry(onClick = { onPick(IosRoute(SubpageScreen.PAY_CODE)) })
             }
+        }
+        // 充值选择弹层（2026-11-26 晚）：与 Android 同一个共享件 `RechargeChoiceSheet`。
+        // 放在 `ModalDrawerSheet` 的 content 里而不是外面：抽屉是它唯一的触发点，
+        // 放到抽屉外要多抬一层状态，而这一页本身就常驻组合。
+        if (rechargeChoiceOpen) {
+            RechargeChoiceSheet(
+                // 先收起弹层再开宿主那张，两张弹层不叠在同一帧（与 `:app` 的 dismissThen 同义）
+                onDismiss = { rechargeChoiceOpen = false },
+                onPickCampus = {
+                    rechargeChoiceOpen = false
+                    requests.request(RechargeKind.Campus)
+                },
+                onPickPower = {
+                    rechargeChoiceOpen = false
+                    requests.request(RechargeKind.Power)
+                },
+            )
         }
     }
 }
