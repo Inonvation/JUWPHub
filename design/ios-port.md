@@ -1960,6 +1960,20 @@ EAN13 / EAN8 / ITF14），第一枚码即停；权限三态（未决定请求一
 「车号 / 出码」面板里的扫码行从此渲染。`Info.plist` 加了 `NSCameraUsageDescription`，
 `project.yml` 加 `-framework AVFoundation`。
 
+**CI 已钉住的三条 K/N 写法**（第一次编译报错后改的，下次别再踩）：
+
+1. `AVCaptureDevice.authorizationStatusForMediaType` / `requestAccessForMediaType` 是**顶层扩展**，
+   必须 `import platform.AVFoundation.authorizationStatusForMediaType` / `…requestAccessForMediaType`
+   （和 `NSData.dataWithContentsOfURL` 同一类）。
+2. `UIView.frame` 在 K/N 里是**只读属性**，赋值走 `setFrame(CGRectMake(…))`；
+   `CALayer.frame`（`AVCaptureVideoPreviewLayer`）反而可以 `=`，两者别一概而论。
+3. `AVMetadataObjectTypeCode128Code` 等码型常量带 `Code` 后缀（不是 `Code128`）。
+
+`IosBottomBar` / 根布局也各踩了一个：`LocalIndication` 在 `androidx.compose.foundation`
+（不是 material3）；`kvcxSlot` 不能声明在 `TodayScreen(...)` 的实参表里；`AnimatedVisibility`
+写在根 `Column` 里、又在 `BoxScope` 内给 `align` 会被解析成 `ColumnScope` 的扩展而报错，
+所以单独抽了一层 `IosFloatingTabBarHost`。
+
 #### 12.17.5 今日页快趣骑行卡（进程级控制器）
 
 `IosServices.kvcxRideController()` 是进程级单例（与 Android `Graph.kvcxRide` 同口径），
