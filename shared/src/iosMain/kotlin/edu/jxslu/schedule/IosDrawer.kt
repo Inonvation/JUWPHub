@@ -248,8 +248,8 @@ internal fun IosDrawer(
         campusVm?.refreshBalance(force = false)
     }
 
-    // 生活服务区：与 Android「江水生活」段**同一个构造器**。快趣（底图是高德 Android SDK）、
-    // 趣智（蓝牙传输层）、问渠（精简版下线）在本平台没有服务 → 传 null，三行整行不渲染。
+    // 生活服务区：与 Android「江水生活」段**同一个构造器**。趣智（蓝牙传输层没搬）在本平台
+    // 没有服务 → 传 null，那一行整行不渲染。问渠 2026-11-26 晚随精简版恢复一起接上。
     // 右侧状态（开水余额 / U净 空闲数）也没有接：那两个数的聚合逻辑还在 `:app` 的
     // `SideDrawerContent` 里（`loadUjingFreeText` 等），本轮不搬——行照常可点，只是不带状态。
     val serviceRows = lifeServiceRows(
@@ -260,6 +260,8 @@ internal fun IosDrawer(
         // `lifeServiceRows` 按「本平台没有这一项」整行不渲染——与 Android 侧栏的
         // 「快趣出行」行同位同序（`SideDrawerGroups.kt` 的 `onOpenRide?.let { … }`）。
         onOpenRide = { onPick(IosRoute(SubpageScreen.RIDE)) },
+        // 问渠 · 志愿服务（2026-11-26 晚恢复）：仓库与五页都在共享层，`wenquRepository()` 非空。
+        onOpenWenqu = { onPick(IosRoute(SubpageScreen.WENQU)) },
     )
 
     // 面板铺满整屏高度（窗口已 ignoresSafeArea）：合上时看不见，展开时状态栏那一条

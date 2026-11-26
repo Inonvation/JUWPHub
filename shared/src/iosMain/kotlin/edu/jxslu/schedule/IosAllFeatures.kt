@@ -1,24 +1,24 @@
 package edu.jxslu.schedule
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import edu.jxslu.schedule.ui.life.DrawerSectionHeader
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.icon.AppIcons
+import edu.jxslu.schedule.ui.life.DrawerSectionHeader
 
 /**
  * 「全部功能」页（2026-11-26，用户要求抽屉对齐 Android 之后新增）。
@@ -36,14 +36,22 @@ import androidx.compose.ui.unit.dp
  * ## 与抽屉的关系
  *
  * 条目数据仍是唯一的 [iosDrawerEntries]，分组仍是那个 `section` 字段——**不新增第二份清单**。
- * 抽屉那一侧现在只渲染「江水生活」段里的二级页（洗衣账单），其余段全在这里。
+ * 抽屉那一侧只渲染「江水生活」段的二级页（洗衣账单 / 问渠），其余段全在这里。
  *
  * ## 为什么不新增 `SubpageScreen` 枚举值
  *
  * 这一页是 iOS 专属的容器，Android 没有对应页面。加一个枚举值会让 `:app` 的
  * `SubpageActivity` 也要跟着多一个分支（那是纯噪音）。所以它走**本地覆盖层**：
  * `IosRoot` 里一个 `showAllFeatures` 布尔，与首启登录页（`jwOpen`）同一做法。
+ *
+ * ## 顶栏（2026-11-26 晚改）
+ *
+ * 原来是页内一行 `TextButton("返回") + Text("全部功能")`，而且**没有任何安全区**：
+ * 这一页的父容器只补了底部安全区，标题会压在灵动岛 / 状态栏下面。现在换成与其余二级页
+ * 同构的 `Scaffold` + `TopAppBar`（`TopAppBarDefaults.windowInsets` 自带状态栏让位，
+ * 返回键用 `AppIcons.ArrowLeft01`，与 `IosNotPortedScreen` 逐像素同源）。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun IosAllFeaturesScreen(
     onBack: () -> Unit,
@@ -55,13 +63,28 @@ internal fun IosAllFeaturesScreen(
             .filterNot { it.route.screen in IOS_DRAWER_QUICK_SCREENS }
             .groupBy { it.section }
     }
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-    ) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "全部功能",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
+                    }
+                },
+            )
+        },
+    ) { innerPadding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
             contentPadding = PaddingValues(
                 start = 8.dp,
                 end = 8.dp,
@@ -69,22 +92,6 @@ internal fun IosAllFeaturesScreen(
                 bottom = 24.dp,
             ),
         ) {
-            item(key = "title") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(onClick = onBack) { Text("返回") }
-                    Text(
-                        text = "全部功能",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
-                }
-            }
             sections.forEach { (section, rows) ->
                 item(key = "h-$section") { DrawerSectionHeader(section) }
                 items(rows, key = { it.route.screen.name }) { entry ->

@@ -1,6 +1,7 @@
 package edu.jxslu.schedule
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.LocalIndication
@@ -27,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,9 +36,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.theme.Motion
 
 /**
@@ -95,13 +99,18 @@ internal fun IosFloatingTabBar(
                     spotColor = Color.Black.copy(alpha = 0.22f),
                 )
                 .clip(capsule)
-                .background(scheme.surfaceContainer.copy(alpha = 0.86f))
-                .border(0.8.dp, scheme.onSurface.copy(alpha = 0.06f), capsule)
-                // 顶部高光：玻璃的「受光面」。不加它，半透明只是「变淡的灰」。
+                .background(scheme.surfaceContainer.copy(alpha = 0.82f))
+                // 玻璃的三层：**受光边**（白 30% 发丝线）→ **外轮廓线**（onSurface 6%，
+                // 让胶囊在半透明背景上也有边界）→ **受光面**（上高光 + 下反光）。
+                // 只留一层的话，深色壁纸下会读成「一块脏灰」，浅色下会完全消失。
+                .border(0.7.dp, Color.White.copy(alpha = if (scheme.surface.luminance() > 0.5f) 0.55f else 0.28f), capsule)
+                .border(0.6.dp, scheme.onSurface.copy(alpha = 0.06f), capsule)
                 .background(
                     Brush.verticalGradient(
-                        0f to Color.White.copy(alpha = 0.22f),
-                        0.45f to Color.Transparent,
+                        0f to Color.White.copy(alpha = 0.26f),
+                        0.42f to Color.Transparent,
+                        // 底部一条极淡的反光：玻璃压在内容上时，下缘会吃到一点环境光
+                        0.94f to Color.White.copy(alpha = 0.03f),
                         1f to Color.Transparent,
                     ),
                 )
@@ -129,8 +138,16 @@ private fun IosBarItemView(
 ) {
     val scheme = MaterialTheme.colorScheme
     val tint = if (selected) scheme.primary else scheme.onSurface.copy(alpha = 0.62f)
-    val pill = if (selected) scheme.primary.copy(alpha = 0.14f) else Color.Transparent
+    // 选中胶囊淡入淡出：直接换色会「跳」，动画化后与 iOS 的 tab 选中同一手感
+    val pill by animateColorAsState(
+        targetValue = if (selected) scheme.primary.copy(alpha = 0.14f) else Color.Transparent,
+        animationSpec = Motion.state(),
+        label = "IosBarPill",
+    )
     val interaction = remember { MutableInteractionSource() }
+    // 底栏切换触感（2026-11-26 晚）：iOS 用户对 tab 点击的触感有预期；
+    // 开关在设置 → 触感里（`HapticsSettings`），关掉时 `tap()` 自己返回。
+    val haptics = rememberAppHaptics()
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(percent = 50))
@@ -139,7 +156,10 @@ private fun IosBarItemView(
                 interactionSource = interaction,
                 indication = LocalIndication.current,
                 onClickLabel = item.label,
-                onClick = onClick,
+                onClick = {
+                    haptics.tap()
+                    onClick()
+                },
             )
             .padding(horizontal = 18.dp, vertical = 7.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

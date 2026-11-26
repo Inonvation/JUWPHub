@@ -171,7 +171,8 @@ internal data class IosRoute(
 /**
  * 抽屉分组，顺序与 Android 左侧栏一致（身份 / 钱包 / 生活 / 江水生活 / 学习 / 设置）。
  *
- * 「江水生活」只剩开水房与 U净（问渠与 AI 调课在精简版里下线，见 [IOS_REMOVED_SCREENS]）；
+ * 2026-11-26 晚起「学习」段有笔记·课件与作业、「生活」段有百宝箱、「江水生活」段有问渠：
+ * 精简版下线过的那几块全部恢复（见下方 `iosDrawerEntries` 的注释）。
  * 空组不渲染，所以哪一组一条都没有时整组不出现。
  */
 internal data class IosDrawerEntry(
@@ -188,6 +189,11 @@ internal data class IosDrawerEntry(
  */
 internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     // 学习
+    // 笔记 / 作业（2026-11-26 晚恢复）：精简版下线的四块里这两块的数据层与页面
+    // （含 `NoteDetailScreen` / `HomeworkDetailScreen`）本来就在共享层，恢复代价只是入口。
+    // 位置照 Android 侧栏的「学习」段：笔记·课件、作业在课表类目之前。
+    IosDrawerEntry("学习", IosRoute(SubpageScreen.NOTES), "笔记 · 课件"),
+    IosDrawerEntry("学习", IosRoute(SubpageScreen.HOMEWORK), "作业"),
     IosDrawerEntry("学习", IosRoute(SubpageScreen.THEORY_SCHEDULE), "理论课表"),
     IosDrawerEntry("学习", IosRoute(SubpageScreen.LAB_SCHEDULE), "实验课表"),
     IosDrawerEntry("学习", IosRoute(SubpageScreen.TEXTBOOKS), "教材"),
@@ -220,6 +226,9 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     IosDrawerEntry("生活", IosRoute(SubpageScreen.DORM_REPAIR), "宿舍报修"),
     IosDrawerEntry("生活", IosRoute(SubpageScreen.WEATHER), "天气"),
     IosDrawerEntry("生活", IosRoute(SubpageScreen.WEATHER_SETTINGS), "天气设置"),
+    // 百宝箱（2026-11-26 晚恢复）：与 Android 侧栏「生活」段同组。水印 / 拼接的渲染管线
+    // 仍只在 Android 侧，那两张工具卡传 null 不渲染；菜鸟批量查在 iOS 上可用。
+    IosDrawerEntry("生活", IosRoute(SubpageScreen.TOOLBOX), "百宝箱"),
     // 设置
     // 课表三页（iOS 移植 X1，2026-11-25）：Android 侧在「设置 → 课表」与「设置 → 数据与权限」，
     // 这里同组相邻，顺序照 Android 的设置页
@@ -237,52 +246,25 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
     IosDrawerEntry("设置", IosRoute(SubpageScreen.SUPPORT_DEV), "支持开发"),
     // 账号
     IosDrawerEntry("账号", IosRoute(SubpageScreen.ACCOUNTS), "账号中心"),
-    // 江水生活（已搬的三块）
+    // 江水生活（已搬的几块）
+    // 问渠（2026-11-26 晚恢复）：仓库与五页都在共享层，缺的只是「蹲点时的屏幕常亮」与
+    // 命中通知的体验细节。位置照 Android 侧栏「江水生活」段末位。
+    IosDrawerEntry("江水生活", IosRoute(SubpageScreen.WENQU), "问渠 · 志愿服务"),
     IosDrawerEntry("江水生活", IosRoute(SubpageScreen.WATER), "开水房"),
     IosDrawerEntry("江水生活", IosRoute(SubpageScreen.UJING), "U净洗衣房"),
     IosDrawerEntry("江水生活", IosRoute(SubpageScreen.UJING_HISTORY), "洗衣账单"),
 )
 
-/**
- * iOS 精简版**下线**的二级页（2026-11-25，用户指定）。
- *
- * 白名单（[iosDrawerEntries]）只挡抽屉这一条路；页面内部还有别的入口能推到同一页
- * （「我的」里的 AI 调课行、账号中心的问渠行、课程详情弹窗的笔记/作业）。逐个改那些页面
- * 等于把共享层的入口全拆一遍，所以再加一道**统一闸门**：宿主 push 前问一次这里，
- * 命中就不进栈。
- *
- * 命中的页面在界面上仍然可能是「能点但没反应」——所以凡是能从共享层点到的入口，
- * 都已同时改成可空回调（null = 不渲染）：
- *
- * | 页面 | 共享层入口的处理 |
- * |---|---|
- * | 笔记 / 作业 | `WeekScreen` / `TodayScreen` 的 `onOpenCourseNotes` / `onOpenCourseHomework` 传 null |
- * | 百宝箱 | `SettingsScreen(showToolbox = false)` |
- * | AI 调课 | `SettingsScreen(showAiSchedule = false)` + `AccountsHubScreen(onOpenAiSettings = null)` |
- * | 问渠 | `AccountsHubScreen(onOpenWenqu = null)` + `TodayViewModel(blockedGuessTargets)` |
- * | 调课记录 | `ScheduleChangesScreen(onOpenHistory = null)` |
- *
- * 这一层留着的意义：以后新加的页面如果忘了摘入口，用户点进去落在「已下线」这一句上，
- * 而不是静默无反应。**别把它当唯一手段**——真正的下线要连入口一起摘。
- */
-internal val IOS_REMOVED_SCREENS: Set<SubpageScreen> = setOf(
-    SubpageScreen.NOTES,
-    SubpageScreen.NOTES_COURSE,
-    SubpageScreen.NOTE_DETAIL,
-    SubpageScreen.HOMEWORK,
-    SubpageScreen.HOMEWORK_TODO,
-    SubpageScreen.HOMEWORK_COURSE,
-    SubpageScreen.HOMEWORK_DETAIL,
-    SubpageScreen.TOOLBOX,
-    SubpageScreen.TOOLBOX_CAINIAO,
-    SubpageScreen.WENQU,
-    SubpageScreen.WENQU_SETTINGS,
-    SubpageScreen.WENQU_RECORDS,
-    SubpageScreen.WENQU_GRAB,
-    SubpageScreen.AI_SCHEDULE,
-    SubpageScreen.AI_SETTINGS,
-    SubpageScreen.AI_HISTORY,
-)
+// 2026-11-25 那份「精简版下线闸门」（`IOS_REMOVED_SCREENS`）已于 2026-11-26 晚整块删除。
+//
+// 为什么删而不是留空集合：它是精简版的临时产物，四个模块（笔记 / 作业 / 问渠 / AI 调课）
+// 加上百宝箱全部恢复后，这份清单没有任何还在挡的页面；留一个空 `setOf()` 只会让下一个
+// 加页面的人误以为「还有一道闸门要维护」，而真正的下线手段始终是「入口一起摘」。
+//
+// 每个模块恢复时补的是什么，写在各入口旁边：笔记/作业在 [iosDrawerEntries] 的「学习」段、
+// 百宝箱在「生活」段、问渠在「江水生活」段；AI 调课在设置页那一行（`showAiSchedule`）。
+// 页面内入口（课程详情弹窗的笔记/作业、账号中心的问渠与 AI 设置、今日页作业卡与推荐卡）
+// 由宿主传真回调，见 `MainViewController.kt`。
 
 /**
  * 渲染一个二级页。
@@ -622,9 +604,9 @@ internal fun IosRouteContent(
 
         // ---------------------------------------------------------------- 账号中心
         //
-        // 十个入口里两个在精简版下线（问渠 / AI 设置）→ 传 null，那两行不渲染。
-        // 账号中心自己会按 `accountCredentials()` / 各仓库是否为 null 决定显示什么，
-        // 所以 iOS 上它表现为「全部未配置」——那是真实结论（凭证存储还没接全）。
+        // 十个入口全部给真回调（2026-11-26 晚：问渠与 AI 设置从精简版恢复）。
+        // 账号中心自己会按 `accountCredentials()` / 各仓库是否为 null 决定显示什么：
+        // iOS 上除趣智（蓝牙传输层没搬）外都有实现，所以只有趣智那一行按「本平台没有」不渲染。
         SubpageScreen.ACCOUNTS -> AccountsHubScreen(
             onBack = pop,
             onOpenJw = { push(IosRoute(SubpageScreen.JW_ACCOUNT)) },
@@ -634,6 +616,10 @@ internal fun IosRouteContent(
             onOpenUjing = { push(IosRoute(SubpageScreen.UJING)) },
             onOpenKvcx = { push(IosRoute(SubpageScreen.KVCX)) },
             onOpenRide = { push(IosRoute(SubpageScreen.RIDE)) },
+            // 问渠与 AI 调课（2026-11-26 晚恢复）：两页都在共享层，仓库在 iOS 侧也非空
+            // （`wenquRepository()` / `aiScheduleClient()`），此前只是把入口传成 null。
+            onOpenWenqu = { push(IosRoute(SubpageScreen.WENQU)) },
+            onOpenAiSettings = { push(IosRoute(SubpageScreen.AI_SETTINGS)) },
         )
 
         // ---------------------------------------------------------------- 快趣 · 账号页与订单页
@@ -821,9 +807,10 @@ internal fun IosRouteContent(
             CourseTweakScreen(onBack = pop, viewModel = vm)
         }
 
-        // 顶栏「调课记录」不传：那页属于 AI 调课，精简版已下线（IOS_REMOVED_SCREENS）。
+        // 顶栏「调课记录」（2026-11-26 晚恢复）：AI 调课回来了，历史页跟着有入口。
         SubpageScreen.SCHEDULE_CHANGES -> ScheduleChangesScreen(
             onBack = pop,
+            onOpenHistory = { push(IosRoute(SubpageScreen.AI_HISTORY)) },
         )
 
         // ---------------------------------------------------------------- 我的 · 设置子页

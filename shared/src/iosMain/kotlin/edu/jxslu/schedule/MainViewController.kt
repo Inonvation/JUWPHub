@@ -2,6 +2,9 @@ package edu.jxslu.schedule
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -51,6 +54,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.ComposeUIViewController
@@ -60,7 +64,6 @@ import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.data.session.IosJwSessionFlag
 import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
 import edu.jxslu.schedule.domain.AppClock
-import edu.jxslu.schedule.domain.GuessTarget
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.ThemeMode
 import edu.jxslu.schedule.domain.ThemePalette
@@ -216,11 +219,9 @@ private fun IosRoot(services: IosServices) {
                 onboardingSeen = runCatching { prefs.onboardingSeen.first() }.getOrDefault(true)
             }
 
-            // 已下线的页面不进栈（`IosNavigation.IOS_REMOVED_SCREENS`）。这是最后一道闸门：
-            // 白名单只挡抽屉，页面内部（账号中心 / 设置 / 收件箱）还有别的入口能推到同一页。
-            val pushRoute: (IosRoute) -> Unit = { route ->
-                if (route.screen !in IOS_REMOVED_SCREENS) stack.add(route)
-            }
+            // 二级页入栈（2026-11-26 晚：原「精简版下线闸门」`IOS_REMOVED_SCREENS` 已删，
+            // 五个模块全部恢复，见 `IosNavigation.kt` 里那段说明）。
+            val pushRoute: (IosRoute) -> Unit = { route -> stack.add(route) }
 
             // iOS 没有系统返回手势：二级页栈非空时把「返回」接到这个缝上（Android 是实体返回键）
             AppBackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
@@ -284,8 +285,8 @@ private fun IosRoot(services: IosServices) {
                                     onBack = { meOpen = false },
                                     // 侧栏那行「全部功能」删掉之后，目录挂到这里（唯一入口）
                                     onOpenAllFeatures = { showAllFeatures = true },
-                                    showAiSchedule = false,
-                                    showToolbox = false,
+                                    // AI 调课 / 百宝箱 2026-11-26 晚恢复（默认 true，不再显式传 false）。
+                                    // 桌面小组件在 iOS 上没有 WidgetKit extension，那一行仍不渲染。
                                     showWidget = false,
                                 )
                             }
@@ -295,6 +296,9 @@ private fun IosRoot(services: IosServices) {
             } else {
                 ModalNavigationDrawer(
                     drawerState = drawerState,
+                    // 抽屉手势只在根层开（2026-11-26 晚）：二级页上左缘右滑的语义是「返回」，
+                    // 交给 `iosEdgeBackSwipe`；两个手势同时在场会互相抢事件。
+                    gesturesEnabled = stack.isEmpty(),
                     // 后层底色 = 侧栏底色（`ModalDrawerSheet` 的默认容器色也是它）：主卡缩小后
                     // 露出的上下留白读起来要是「同一层」，而不是两套颜色。Android 的根 Box 同理。
                     // 挂在 `ModalNavigationDrawer` 的 modifier 上而不是再套一层 Box：内容层与
@@ -381,20 +385,29 @@ private fun IosRoot(services: IosServices) {
                             targetState = stackShape,
                             // 铺满：滑入的位移量按容器宽度算（`{ it }` 就是整屏），不铺满会滑不到位。
                             // 二级页没有底栏：这里补上底部安全区，内容不进 home indicator。
-                            modifier = if (stack.isEmpty()) {
+                            modifier = (if (stack.isEmpty()) {
                                 Modifier.fillMaxSize()
                             } else {
                                 Modifier.fillMaxSize().windowInsetsPadding(bottomInset)
-                            },
+                            })
+                                // 左缘右滑返回（2026-11-26 晚）：只在二级页上生效，
+                                // 与抽屉手势互斥（见 `ModalNavigationDrawer.gesturesEnabled`）。
+                                .iosEdgeBackSwipe(enabled = stack.isNotEmpty()) {
+                                    if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex)
+                                },
                             transitionSpec = {
                                 // 浅了是 pop、深了是 push。同一深度换页（不经过根层）也算 push。
+                                // 曲线是 iOS 的 push/pop（2026-11-26 晚，见文件末尾的 IosPageIn/Out）：
+                                // 进场 340ms 起步快收尾极缓，退场 300ms 反向走。原来的 `Motion.page()`
+                                // 是 M3 emphasized（两头都缓），推入读起来偏"肉"。
                                 if (targetState.first > initialState.first) {
-                                    (slideInHorizontally(Motion.page()) { it } + fadeIn(Motion.page()))
+                                    (slideInHorizontally(IosPageIn) { it } +
+                                        fadeIn(tween(IOS_PAGE_FADE_MS, easing = IosPageIn)))
                                         .togetherWith(fadeOut(Motion.exit()))
                                 } else {
                                     fadeIn(Motion.exit()).togetherWith(
-                                        slideOutHorizontally(Motion.pageExit()) { it } +
-                                            fadeOut(Motion.pageExit()),
+                                        slideOutHorizontally(IosPageOut) { it } +
+                                            fadeOut(Motion.exit()),
                                     )
                                 }
                             },
@@ -416,11 +429,14 @@ private fun IosRoot(services: IosServices) {
                                     // 同上：上浮量按容器高度算（`it / 32`），不铺满会偏
                                     modifier = Modifier.fillMaxSize(),
                                     transitionSpec = {
-                                        // 淡入 + 轻微上浮（屏高的 1/32，约 26pt）：Android 那边是纯
-                                        // 交叉淡入（`MainActivity.tabEnter()`），这里多给一点方向感。
-                                        // 退场只淡出、不再位移——两段都动会被读成"页面在滑动"。
-                                        (fadeIn(Motion.state()) +
-                                            slideInVertically(Motion.state()) { it / 32 }).togetherWith(
+                                        // 淡入 + 轻微上浮 + 弹簧收尾（2026-11-26 晚）：iOS 的 tab 切换是
+                                        // 「立刻到位的上浮」，不是匀速位移。spring 的 dampingRatio 取 1
+                                        // （临界阻尼，不过冲），stiffness 420 让 200ms 内落定；
+                                        // 退场只淡出、不位移——两段都动会被读成"页面在滑动"。
+                                        (fadeIn(tween(IOS_TAB_FADE_MS, easing = IosPageIn)) +
+                                            slideInVertically(
+                                                spring(dampingRatio = 1f, stiffness = 420f),
+                                            ) { it / 32 }).togetherWith(
                                             fadeOut(Motion.exit()),
                                         )
                                     },
@@ -438,8 +454,6 @@ private fun IosRoot(services: IosServices) {
                                                     repo = services.scheduleRepository(),
                                                     homeworkRepo = services.homeworkRepository(),
                                                     weatherRepo = services.weatherRepository(),
-                                                    // 精简版去掉了问渠：推荐卡不能推一个点不动的入口
-                                                    blockedGuessTargets = setOf(GuessTarget.WENQU),
                                                 )
                                             }
                                             // 进行中服务卡（V2，2026-11-25 晚）：卡片本体已在共享层，
@@ -489,8 +503,23 @@ private fun IosRoot(services: IosServices) {
                                                 onOpenDormRepair = { stack.add(IosRoute(SubpageScreen.DORM_REPAIR)) },
                                                 onOpenInbox = { stack.add(IosRoute(SubpageScreen.INBOX)) },
                                                 onOpenWeather = { stack.add(IosRoute(SubpageScreen.WEATHER)) },
-                                                // 笔记 / 作业 / 问渠在精简版下线：可空回调传 null（= 入口不渲染），
-                                                // 不再像上一版那样传一个「推了也不进栈」的 lambda
+                                                // 笔记 / 作业 / 问渠（2026-11-26 晚恢复）：三个入口全部给真回调。
+                                                // 此前是可空回调传 null（= 整块不渲染），恢复后课程详情弹窗里的
+                                                // 「笔记 / 作业」两行、今日页作业卡、猜你想用的问渠卡都会渲染。
+                                                onOpenHomeworkTodo = {
+                                                    stack.add(IosRoute(SubpageScreen.HOMEWORK_TODO))
+                                                },
+                                                onOpenWenqu = { stack.add(IosRoute(SubpageScreen.WENQU)) },
+                                                onOpenCourseNotes = { course ->
+                                                    stack.add(
+                                                        IosRoute(SubpageScreen.NOTES_COURSE, course.name),
+                                                    )
+                                                },
+                                                onOpenCourseHomework = { course ->
+                                                    stack.add(
+                                                        IosRoute(SubpageScreen.HOMEWORK_COURSE, course.name),
+                                                    )
+                                                },
                                                 // 收件箱卡点消息行：iOS 有二级页栈，所以这个槽位填得上
                                                 onOpenSubpage = { screen, focus ->
                                                     pushRoute(IosRoute(screen, focus))
@@ -552,8 +581,16 @@ private fun IosRoot(services: IosServices) {
                                                 onOpenScheduleChanges = {
                                                     stack.add(IosRoute(SubpageScreen.SCHEDULE_CHANGES))
                                                 },
-                                                // 课程长按菜单里的「笔记 / 作业」在精简版下线：两个回调传 null，
-                                                // 弹窗里那两行不渲染（shared 侧 CourseDetailSheet 的可空槽位）
+                                                // 课程长按菜单与详情弹窗里的「笔记 / 作业」（2026-11-26 晚恢复）：
+                                                // 两页随课程名入栈，与 Android 的长按菜单同一语义。
+                                                onOpenCourseNotes = { course ->
+                                                    stack.add(IosRoute(SubpageScreen.NOTES_COURSE, course.name))
+                                                },
+                                                onOpenCourseHomework = { course ->
+                                                    stack.add(
+                                                        IosRoute(SubpageScreen.HOMEWORK_COURSE, course.name),
+                                                    )
+                                                },
                                                 // 显示设置面板（S17 搬进共享层）：顶栏那只眼睛从此在 iOS 上也有入口。
                                                 // 「背景」整组现在会渲染：选图（`onPickBackground`）与背景图层
                                                 // （`backgroundLayer`）都已接上，见下面两处。
@@ -718,14 +755,17 @@ private fun IosOverlayStack(
     val shape = stack.size to stack.lastOrNull()
     AnimatedContent(
         targetState = shape,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            // 覆盖层里的二级页同样支持左缘右滑返回
+            .iosEdgeBackSwipe(enabled = stack.isNotEmpty(), onBack = pop),
         transitionSpec = {
             if (targetState.first > initialState.first) {
-                (slideInHorizontally(Motion.page()) { it } + fadeIn(Motion.page()))
+                (slideInHorizontally(IosPageIn) { it } + fadeIn(tween(IOS_PAGE_FADE_MS, easing = IosPageIn)))
                     .togetherWith(fadeOut(Motion.exit()))
             } else {
                 fadeIn(Motion.exit()).togetherWith(
-                    slideOutHorizontally(Motion.pageExit()) { it } + fadeOut(Motion.pageExit()),
+                    slideOutHorizontally(IosPageOut) { it } + fadeOut(Motion.exit()),
                 )
             }
         },
@@ -1197,3 +1237,27 @@ private fun isStudentSide(url: String?): Boolean {
     if (!JwUrls.isJwHost(u)) return false
     return ":8080" in u || "xsMain" in u || "xskb" in u
 }
+
+// ---------------------------------------------------------------- iOS 转场口径（2026-11-26 晚）
+
+/**
+ * 二级页推入的位移曲线：`ease-out-quint`（起步快、收尾极缓）。
+ *
+ * 为什么不复用 `Motion.page()`：那是 M3 emphasized（两头都缓），用在「从右侧整屏推入」上
+ * 读起来偏肉。iOS 的 `UINavigationController` 推入是同一种加速形状，用户对它的手感更敏感。
+ * 340ms 也比 `Motion.pageMillis`(280) 长一点：整屏位移比弹层需要更多时间被眼睛跟上。
+ */
+private val IosPageIn =
+    tween<IntOffset>(IOS_PAGE_MS, easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f))
+
+/** 二级页退出的位移曲线：同一条曲线的反向（起步缓、收尾快），时长略短。 */
+private val IosPageOut = tween<IntOffset>(IOS_POP_MS, easing = CubicBezierEasing(0.4f, 0f, 1f, 1f))
+
+private const val IOS_PAGE_MS = 340
+private const val IOS_POP_MS = 300
+
+/** 推入时叠的淡入时长。位移负责方位，淡入只负责别让新页在边缘「硬切」进来。 */
+private const val IOS_PAGE_FADE_MS = 180
+
+/** Tab 切换的淡入时长。比位移短，让人先看到内容再看到位置。 */
+private const val IOS_TAB_FADE_MS = 160
