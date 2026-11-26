@@ -16,6 +16,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.BikeCluster
@@ -40,7 +42,9 @@ import edu.jxslu.schedule.domain.BikeStatus
 import edu.jxslu.schedule.domain.GcjPoint
 import edu.jxslu.schedule.domain.NearbyBike
 import kotlinx.coroutines.delay
+import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.roundToInt
 
 /**
  * 纯 Compose 的单车地图（2026-11-26，填 iOS 上那块「没有车标的地图」）。
@@ -53,8 +57,8 @@ import kotlin.math.floor
  * 所以改由 Compose 自己画：经纬度经 [BikeMapProjection] 落到画布坐标，车标 / 围栏 /
  * 还车点 / 蓝点全部是 `DrawScope` 的图形。**不碰 MapKit**，一个字符号都不引。
  *
- * 代价写在明处：**没有底图瓦片**。画布上是浅底 + 网格（一格 = `gridStepMeters` 米）+
- * 全部业务图层——能看出「哪片有车、离我多远、往哪走」，看不出「那是哪栋楼」。
+ * 代价写在明处：**没有原生地图的那套交互**（楼体拉伸、路名随缩放重排、导航箭头）。
+ * 画布上是底图瓦片（有 [tiles] 时）+ 业务图层——能看出「哪栋楼、哪片有车、离我多远」，
  * 车辆列表、开锁、还车、结算全部照常，地图只是找车的入口。
  *
  * ## 与 Android 那份的关系
@@ -66,16 +70,37 @@ import kotlin.math.floor
  * [BikeMapProjection]——所以 `onViewportMeasured` 的半对角线在两端是同一个量纲。
  *
  * 三处 iOS 契约允许的降级（`BikeMapContract.kt` 第四节）：版权标识位置、罗盘朝向箭头、
- * 底图降级回调。另外两处是**画布自己带来的**：
+ * 底图降级回调。另外一处是**画布自己带来的**：**没有相机动画**——[CameraRequest.animated]
+ * 收下但不做缓动，镜头直接落位。画布的「动画」只能靠 `Animatable` 逐帧改视野，而拖动与
+ * 动画同时改同一个 `viewport` 会互相打架；先做对位置，再谈手感。
  *
- * 1. **没有相机动画**：[CameraRequest.animated] 收下但不做缓动，镜头直接落位。
- *    画布的「动画」只能靠 `Animatable` 逐帧改视野，而拖动与动画同时改同一个 `viewport`
- *    会互相打架；先做对位置，再谈手感。
- * 2. **没有底图瓦片**：见上面「为什么是画布而不是原生地图」那段的代价说明。
+ * ## 底图瓦片：为什么画在画布里，而不是垫一个原生地图视图
+ *
+ * 用户装机第一句是「地图不显示」——只有网格与车标，看不出那是哪栋楼。补底图有两条路：
+ * 垫一个 `MKMapView`（原生瓦片）或把瓦片直接画进这块画布。选后者，因为**几何只有一份**：
+ * 车标、围栏、还车点、手柄全部走 [BikeMapProjection]，瓦片用同一个 `toScreen` 定位，
+ * 两者错位这种事在结构上不会发生；垫原生地图则要面对「MapKit 的 region 与我们自己的
+ * 投影怎么对齐」——那件事在本机（Windows）验不了，而错位比没有底图更糟。
+ *
+ * 代价写在明处：
+ *
+ * 1. **瓦片是 256 px 的栅格，而画布用设备像素投影**（与 Android 同尺度）。1:1 贴上去，
+ *    3x 屏上 11px 的楼名只有约 3.7pt，读不出来；所以 [BikeMapTiles.tileZoom] 比相机低一级，
+ *    按 2 倍放大贴（注记约 7pt）。高德另有 `scl=2` 的 512 px 瓦片，实测**不带任何注记**
+ *    （纯路网），所以宁可放大也不要「没有楼名」。
+ * 2. **瓦片到货前先画网格**：一帧空白会让人以为地图坏了；有一块瓦片就不画网格。
  */
 @Composable
-fun BikeMapCanvas(input: BikeMapInput, modifier: Modifier = Modifier) {
-    val density = LocalDensity.current
+fun BikeMapCanvas(
+    input: BikeMapInput,
+    modifier: Modifier = Modifier,
+    /**
+     * 底图瓦片来源。**`null` = 本平台不贴底图**（Android 的底图在高德 / osmdroid 视图里，
+     * 画布只负责车标那一层）；iOS 传 `IosBikeMapTiles`。
+     */
+    tiles: BikeMapTileSource? = null,
+) {
+    val density = LocalDensity.current.density
     val measurer = rememberTextMeasurer()
     val background = MaterialTheme.colorScheme.surfaceContainerLow
     val gridColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
@@ -98,7 +123,27 @@ fun BikeMapCanvas(input: BikeMapInput, modifier: Modifier = Modifier) {
     var gestureTick by remember { mutableStateOf(0) }
     // 回调每次重组都可能换新实例，pointerInput(Unit) 里的闭包必须读最新的那份
     val latest = rememberUpdatedState(input)
-    val hitRadiusPx = with(density) { HIT_RADIUS_DP.dp.toPx() }
+    /** 命中半径（设备像素）：24dp 是拇指点得中又不吞邻点的档位。 */
+    val hitRadiusPx = HIT_RADIUS_DP * density
+
+    // 可见瓦片：随视野与画布尺寸变（尺寸是设备像素，除以 density 换成 dp 尺度再算）。
+    // remember 的键不含 tiles 的 revision——到货不改变「该请求哪些」，只影响绘制。
+    val tileKeys = remember(tiles, viewport.lat, viewport.lng, viewport.zoom, canvasSize) {
+        if (tiles == null || canvasSize.width <= 0 || canvasSize.height <= 0) {
+            emptyList()
+        } else {
+            BikeMapTiles.visibleKeys(
+                centerLat = viewport.lat,
+                centerLng = viewport.lng,
+                zoom = viewport.zoom,
+                widthPx = canvasSize.width.toFloat(),
+                heightPx = canvasSize.height.toFloat(),
+            )
+        }
+    }
+    LaunchedEffect(tiles, tileKeys) {
+        if (tiles != null && tileKeys.isNotEmpty()) tiles.load(tileKeys)
+    }
 
     // 镜头请求：按 nonce 触发（同坐标连点两次也要动），执行完回报 onCameraApplied
     val camera = input.camera
@@ -230,37 +275,82 @@ fun BikeMapCanvas(input: BikeMapInput, modifier: Modifier = Modifier) {
             .then(gestures),
     ) {
         drawRect(color = background)
-        val width = size.width
-        val height = size.height
-        if (width <= 0f || height <= 0f) return@Canvas
+        val widthPx = size.width
+        val heightPx = size.height
+        if (widthPx <= 0f || heightPx <= 0f) return@Canvas
+        // 投影用**设备像素**：口径与 Android 高德一致（zoom 17 一屏约 1.2 km，正好装下校区），
+        // 不要改成 dp 尺度——那会让同一 zoom 级别在 3x 屏上放大三倍，和 Android 对不上。
         val zoom = viewport.zoom
         val metersPerPixel = BikeMapProjection.metersPerPixel(viewport.lat, zoom)
         val colors = input.colors
         val cullMargin = CULL_MARGIN_DP.dp.toPx()
 
-        fun screenOf(lat: Double, lng: Double): BikeMapPoint = BikeMapProjection.toScreen(
+        fun project(lat: Double, lng: Double): BikeMapPoint = BikeMapProjection.toScreen(
             centerLat = viewport.lat,
             centerLng = viewport.lng,
             zoom = zoom,
             lat = lat,
             lng = lng,
-            widthPx = width,
-            heightPx = height,
+            widthPx = widthPx,
+            heightPx = heightPx,
         )
 
-        fun onScreen(point: BikeMapPoint): Boolean =
-            point.x >= -cullMargin && point.x <= width + cullMargin &&
-                point.y >= -cullMargin && point.y <= height + cullMargin
+        fun screenOf(lat: Double, lng: Double): Offset {
+            val point = project(lat, lng)
+            return Offset(point.x, point.y)
+        }
 
-        // 1) 尺度网格：没有底图时唯一的「看得懂多大」的参照
-        drawScaleGrid(
-            viewport = viewport,
-            metersPerPixel = metersPerPixel,
-            widthPx = width,
-            heightPx = height,
-            color = gridColor,
-            project = ::screenOf,
-        )
+        fun onScreen(point: Offset): Boolean =
+            point.x >= -cullMargin && point.x <= widthPx + cullMargin &&
+                point.y >= -cullMargin && point.y <= heightPx + cullMargin
+
+        // 1) 底图：有瓦片就贴瓦片，一块都没有才画尺度网格（首帧 / 断网时的兜底）。
+        //    瓦片在绘制期读缓存：到货只失效这块绘制，不触发整页重组。
+        val tileSource = tiles
+        val readyTiles = if (tileSource == null) {
+            emptyList()
+        } else {
+            // 计数恒 ≥ 0；这一行只是让绘制订阅「瓦片到货」
+            val revision = tileSource.revision.value
+            if (revision < 0) {
+                emptyList()
+            } else {
+                tileKeys.mapNotNull { key -> tileSource.cached(key)?.let { key to it } }
+            }
+        }
+        if (readyTiles.isEmpty()) {
+            drawScaleGrid(
+                viewport = viewport,
+                metersPerPixel = metersPerPixel,
+                widthPx = widthPx,
+                heightPx = heightPx,
+                color = gridColor,
+                project = ::screenOf,
+            )
+        } else {
+            // 同一屏的瓦片级别相同；尺寸按「相机级别 - 瓦片级别」放大（见 BikeMapTiles 的 2x 说明），
+            // 边界向上取整盖住相邻瓦片之间的半像素缝
+            val span = BikeMapTiles.tileSpanPx(zoom, readyTiles.first().first.z)
+            val spanInt = ceil(span).toInt().coerceAtLeast(1)
+            readyTiles.forEach { (key, image) ->
+                val corner = BikeMapTiles.tileTopLeft(
+                    key = key,
+                    centerLat = viewport.lat,
+                    centerLng = viewport.lng,
+                    zoom = zoom,
+                    widthPx = widthPx,
+                    heightPx = heightPx,
+                )
+                drawImage(
+                    image = image,
+                    srcOffset = IntOffset.Zero,
+                    srcSize = IntSize(image.width, image.height),
+                    dstOffset = IntOffset(corner.x.roundToInt(), corner.y.roundToInt()),
+                    dstSize = IntSize(spanInt, spanInt),
+                    filterQuality = FilterQuality.Low,
+                )
+            }
+        }
 
         // 2) 校区围栏（关掉「只看本校」时连描边一起隐藏，与 Android 同口径）
         if (input.showCampusFence) {
@@ -450,13 +540,15 @@ fun BikeMapCanvas(input: BikeMapInput, modifier: Modifier = Modifier) {
         }
 
         // 9) 中心浮标：屏幕正中，与视野中心重合（拖动时它不动，地图在下面走）
-        drawCenterPin(center = Offset(width / 2f, height / 2f), colors = colors)
+        drawCenterPin(center = Offset(widthPx / 2f, heightPx / 2f), colors = colors)
     }
 }
 
 /**
  * 尺度网格。经 / 纬两条方向都画，间距取 [BikeMapProjection.gridStepMeters] 那一档，
  * 网格线按世界坐标对齐（拖动时线跟着地图走，不会像屏幕坐标网格那样原地闪烁）。
+ *
+ * 只在**一块瓦片都没有**时调用（首帧 / 断网）：它是「没有底图时唯一看得懂多大」的参照。
  */
 private fun DrawScope.drawScaleGrid(
     viewport: BikeMapViewport,
@@ -464,7 +556,7 @@ private fun DrawScope.drawScaleGrid(
     widthPx: Float,
     heightPx: Float,
     color: Color,
-    project: (lat: Double, lng: Double) -> BikeMapPoint,
+    project: (lat: Double, lng: Double) -> Offset,
 ) {
     val stepMeters = BikeMapProjection.gridStepMeters(metersPerPixel)
     if (stepMeters <= 0.0) return
@@ -512,8 +604,8 @@ private fun DrawScope.drawScaleGrid(
 /** 一条地理多边形：先填后描（[fill] 为 null 就只描边，如校区围栏）。屏幕外的点直接跳过。 */
 private fun DrawScope.drawGeoPolygon(
     points: List<GcjPoint>,
-    project: (lat: Double, lng: Double) -> BikeMapPoint,
-    onScreen: (BikeMapPoint) -> Boolean,
+    project: (lat: Double, lng: Double) -> Offset,
+    onScreen: (Offset) -> Boolean,
     fill: Color?,
     stroke: Color,
     strokeWidth: Float,

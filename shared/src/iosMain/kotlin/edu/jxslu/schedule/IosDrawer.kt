@@ -45,6 +45,7 @@ import edu.jxslu.schedule.ui.life.DrawerRow
 import edu.jxslu.schedule.ui.life.DrawerSectionHeader
 import edu.jxslu.schedule.ui.life.LifeViewModel
 import edu.jxslu.schedule.ui.life.PaymentCodeEntry
+import edu.jxslu.schedule.ui.life.SettingsEntry
 import edu.jxslu.schedule.ui.life.WalletHero
 import edu.jxslu.schedule.ui.life.lifeServiceRows
 import edu.jxslu.schedule.ui.life.walletCardTexts
@@ -101,16 +102,26 @@ internal val IOS_DRAWER_QUICK_SCREENS: Set<SubpageScreen> = setOf(
  * |---|---|---|
  * | 顶部 | 身份卡（头像 + 姓名 + 遮罩学号 + 班级，整块进学籍信息） | `DrawerHeader` |
  * | 其下 | 账号与登录 → 账号中心 | `AccountRow` |
- * | 其下 | 「我的 · 设置」（iOS 的 Tab 入口，Android 由底栏 / 左下齿轮承担） | `DrawerRow` |
+ * | 其下 | 「全部功能」（二级页清单） | `DrawerRow` |
  * | 钱包卡 | 校园卡余额 / 电子账户 / 寝室电费 | `WalletHero` + `walletCardTexts` |
  * | 江水生活 | 一卡通账号 / 胖乖生活（开水）/ U净 + 白名单里同段的其余行 —— 缺服务的行整行不渲染 | `lifeServiceRows` + [CompactDrawerRow] |
- * | 二级页 | 白名单按段分组（学习 / 教务 / 生活 / 设置） | `LazyColumn` |
- * | 底部 | 付款码 | `PaymentCodeEntry` |
+ * | 二级页 | 白名单里「江水生活」段剩下的页（洗衣账单），接在服务行后面 | `LazyColumn` |
+ * | 底部 | 左「设置」/ 右「付款码」，与 Android 两侧对称 | `SettingsEntry` + `PaymentCodeEntry` |
  *
  * 段头与行的字级、间距、描边全部来自共享层，和 Android 走同一份代码——这就是本轮要消灭的
  * 「iOS 专用仿制品」。**为什么单独一个文件**：`IosNavigation.kt` 里是路由白名单与
  * `IosRouteContent` 的渲染分支（那是另一条并行流的地盘），抽屉是纯排版组装，混在一起
  * 既超长又容易撞车。
+ *
+ * ## 2026-11-26 设置入口移到左下角（用户指定，与 Android 一致）
+ *
+ * 此前 iOS 把设置做成列表里的一行「我的 · 设置」（理由是「头像是我的」），Android 则是
+ * 底部一颗齿轮。同一件事两种排法，用户从 Android 换过来要重新找。现在对齐成 Android 那条：
+ * **设置只从底部左下角进**，列表里那一行删除——同一条落点只留一处入口，这也是 Android
+ * 侧栏的规矩（`SideDrawer.kt` 底部 `SettingsEntry` + `PaymentCodeEntry` 一行两侧）。
+ *
+ * iOS 的「我的」不在底栏（三格只有今日 / 课表 / 教务），所以这颗齿轮是**唯一**入口；
+ * 删行时必须同时把 `onOpenMe` 接到齿轮上，否则设置页在 iOS 上就不可达了。
  *
  * ## 2026-11-26 与 Android 侧栏逐项对齐（三处，都是「iOS 自己多出来的东西」）
  *
@@ -159,11 +170,11 @@ internal fun IosDrawer(
     services: IosServices,
     onPick: (IosRoute) -> Unit,
     /**
-     * 「我的 · 设置」那一行。
+     * 「我的 · 设置」= 底部左下角那颗齿轮（`SettingsEntry`）。
      *
-     * 2026-11-25 晚（用户指定）：底栏只剩 今日 / 课表 / 教务 三格，「我的」改从抽屉进 ——
-     * 与 Android 一致（那边设置首页也不在底栏）。放在身份卡正下方而不是列表底部：
-     * 身份卡点进去是学籍信息（只读），紧跟着一行「我的 · 设置」才符合「头像是我的」这个直觉。
+     * 2026-11-26 起这里与 Android 完全同构：底栏只剩 今日 / 课表 / 教务 三格，设置首页
+     * 从抽屉底部的左下角进（Android 那边也是这颗齿轮）。此前是列表里的一行「我的 · 设置」，
+     * 两端的入口位置不一致，用户换个设备就要重新找。
      */
     onOpenMe: () -> Unit,
     /**「全部功能」那一行：整份二级页清单搬到 [IosAllFeaturesScreen]（2026-11-26 抽屉瘦身）。*/
@@ -286,14 +297,6 @@ internal fun IosDrawer(
                     // 账号与登录：Android 身份卡正下方那一行（这里进账号中心，与 Android 同落点）
                     AccountRow(onClick = { onPick(IosRoute(SubpageScreen.ACCOUNTS)) })
                 }
-                item(key = "me") {
-                    // 「我的 · 设置」固定行（iOS 的 Tab 入口，不在底栏，只从这里进）
-                    DrawerRow(
-                        label = "我的 · 设置",
-                        icon = AppIcons.UserAccount,
-                        onClick = onOpenMe,
-                    )
-                }
                 item(key = "all-features") {
                     // 「全部功能」：Android 的侧栏里没有这一行，但 iOS 需要它来承接原来那六段
                     // 站点地图（学习 / 教务 / 钱包 / 生活 / 设置 / 账号），见 IosAllFeatures.kt。
@@ -339,15 +342,17 @@ internal fun IosDrawer(
                 }
 
             }
-            // 底部付款码：与 Android 底栏同一个部件、同一处位置（右下），
-            // 只少了左下那颗设置齿轮（iOS 的设置是上面那行「我的 · 设置」）。
+            // 底部一行：左「设置」右「付款码」，与 Android `SideDrawer.kt` 底部那一行
+            // （`Arrangement.SpaceBetween` + 同一对部件）逐项同构。设置是 iOS 唯一的设置入口
+            // （「我的」不在底栏），删掉列表里那一行之后必须接在这颗齿轮上。
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                SettingsEntry(onClick = onOpenMe)
                 PaymentCodeEntry(onClick = { onPick(IosRoute(SubpageScreen.PAY_CODE)) })
             }
         }
