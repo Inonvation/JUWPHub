@@ -310,6 +310,12 @@ fun RideActionArea(
     onReuseCar: (String) -> Unit,
     /** 当前形态的 key（唯一出处 [rideBarKey]）：它一变，上面的上区就升/沉一次。 */
     barKey: String,
+    /**
+     * 自动还车**在 App 不在前台时**会不会真的执行（[EbikeReminderPort.autoReturnRunsInBackground]，
+     * 由页面对 `EbikeViewModel.autoReturnInBackground` 取值）。默认 true = Android 的现状；
+     * iOS 为 false 时倒计时下那行触发时刻要追加「需 App 打开」（2026-11-26 E3）。
+     */
+    autoReturnInBackground: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     // 动作条换内容时**走交叉淡入 + 高度过渡**：旧版是"啪"地换一块，
@@ -375,6 +381,7 @@ fun RideActionArea(
                 timerActive = if (isCurrent) timerActive else stash.timerActive,
                 timerStartAt = if (isCurrent) timerStartAt else stash.timerStartAt,
                 summary = if (isCurrent) summary else stash.summary,
+                autoReturnInBackground = autoReturnInBackground,
                 onDismissPicked = onDismissPicked,
                 onGenerateForCar = onGenerateForCar,
                 onFocusCar = onFocusCar,
@@ -519,6 +526,8 @@ private fun RideActionUpper(
     timerActive: Boolean,
     timerStartAt: Long,
     summary: KvcxReturnSummary?,
+    /** 自动还车在后台是否可靠（false = 只在 App 打开时补做，见 [RideActionArea] 同名参数）。 */
+    autoReturnInBackground: Boolean,
     onDismissPicked: () -> Unit,
     onGenerateForCar: (String) -> Unit,
     onFocusCar: (String) -> Unit,
@@ -538,6 +547,7 @@ private fun RideActionUpper(
             timerActive = timerActive,
             timerStartAt = timerStartAt,
             showEstimateNote = caps.wechatScan,
+            autoReturnInBackground = autoReturnInBackground,
             onRefresh = onRefreshRide,
             onRingFind = onRingFind,
             onQueryLock = onQueryLock,
@@ -1022,6 +1032,8 @@ private fun RideRidingUpper(
     timerStartAt: Long,
     /** 小程序方式（`caps.wechatScan`）：倒计时是预估的，进度线下写明以小程序为准。 */
     showEstimateNote: Boolean,
+    /** 自动还车在后台是否可靠（false = 只在 App 打开时补做，见 [RideActionArea] 同名参数）。 */
+    autoReturnInBackground: Boolean = true,
     onRefresh: () -> Unit,
     onRingFind: () -> Unit,
     onQueryLock: () -> Unit,
@@ -1119,6 +1131,7 @@ private fun RideRidingUpper(
                     startAt = timerStartAt,
                     onExpired = onTimerExpired,
                     showEstimateNote = showEstimateNote,
+                    autoReturnInBackground = autoReturnInBackground,
                 )
             }
             if (ride != null) {
@@ -2794,12 +2807,16 @@ private fun IconButtonSmall(
  * ——账号方式的起点是服务端确认的开锁时刻，不需要这句。
  * 进度线下还常驻一句套餐前提（[EbikeFreeRide.TICKET_NOTE]，2026-10-07 用户要求）：
  * 前 15 分钟免费是骑行套餐卡的权益，两档都要看到。
+ *
+ * [autoReturnInBackground] = false（iOS）时，自动还车那行触发时刻追加「需 App 打开」：
+ * 那一端到点只弹通知，还车要等下次进页补做（2026-11-26 E3）。
  */
 @Composable
 private fun RideCountdown(
     startAt: Long,
     onExpired: () -> Unit,
     showEstimateNote: Boolean = false,
+    autoReturnInBackground: Boolean = true,
 ) {
     val now by produceState(
         initialValue = AppClock.nowMillis(),
@@ -2819,7 +2836,11 @@ private fun RideCountdown(
     val progress = EbikeFreeRide.progressFraction(startAt, now)
     // 开了「自动还车」就把触发时刻写在倒计时下面（2026-11-19）：用户开了这个开关，
     // 界面上却一句提示都没有，到点系统替他点了还车时会很意外（尤其账单上跟着一条结算）。
-    val autoReturnHint = rememberAutoReturnHint(startAt, wechatMode = showEstimateNote)
+    val autoReturnHint = rememberAutoReturnHint(
+        startAt,
+        wechatMode = showEstimateNote,
+        runsInBackground = autoReturnInBackground,
+    )
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
@@ -2870,9 +2891,16 @@ private fun RideCountdown(
  * 本来就不存在（`caps.wechatScan` 即小程序方式，见 [RideCountdown] 的 `showEstimateNote`）。
  * 触发时刻与调度层同源（[EbikeAutoReturn.triggerAtMillis]），别在 UI 里另算一份。
  * 开关 / 提前量读一次即可：这一行按计时起点定住，不需要每秒刷新，也不参与走秒。
+ *
+ * [runsInBackground] = false（iOS）时追加「需 App 打开」：那一端到点只排通知，
+ * 还车要等下次进骑行页补做，把同一句触发时刻说成"到时候会还车"就是骗人。
  */
 @Composable
-private fun rememberAutoReturnHint(startAt: Long, wechatMode: Boolean): String? {
+private fun rememberAutoReturnHint(
+    startAt: Long,
+    wechatMode: Boolean,
+    runsInBackground: Boolean = true,
+): String? {
     if (wechatMode || startAt <= 0L) return null
     // 偏好从装配根取（原先 LocalContext + Graph.displayPrefs；共享层没有 Context）
     val prefs = remember { Services.current.displayPrefs() }
@@ -2886,7 +2914,11 @@ private fun rememberAutoReturnHint(startAt: Long, wechatMode: Boolean): String? 
             .getOrDefault(EbikeAutoReturn.DEFAULT_LEAD_SECONDS)
         val triggerAt = EbikeAutoReturn.triggerAtMillis(startAt, lead)
         // 时刻文案走共享层的 rideClockText（原先 java.time + DateTimeFormatter）
-        value = "${rideClockText(triggerAt)} 自动还车（提前 $lead 秒）"
+        value = if (runsInBackground) {
+            "${rideClockText(triggerAt)} 自动还车（提前 $lead 秒）"
+        } else {
+            "${rideClockText(triggerAt)} 自动还车（提前 $lead 秒，需 App 打开）"
+        }
     }
     return hint
 }

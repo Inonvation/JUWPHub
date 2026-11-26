@@ -920,6 +920,11 @@
   所以不存在"结束计时但订单还在、自动还车继续排"的组合。
 - **与免费时长提醒两套独立开关**：自动还车开着、免费提醒关着也照排（反之亦然）——
   别把它的排程塞进 `EbikeFreeRideReminder.check` 的开关分支里。
+- **iOS 是降级形态**（2026-11-26 E3）：到点只排一条本地通知，真正的还车在**下一次打开 App**
+  时补做（`IosEbikeReminder.reconcileAutoReturn` → 共享层 `runAutoReturn`）。执行器本身
+  （`ui/ebike/KvcxAutoReturnRunner.kt`）已搬进 `commonMain`，两端共用；差异只在「谁叫醒它」。
+  两个能力位 `EbikeReminderPort.supportsAutoReturn` / `autoReturnRunsInBackground` 决定
+  设置区与倒计时那行的文案，**别说成"不管你在不在都会还"**。详见 `design/ios-port.md` §12.18。
 - 通知：channel `ebike_auto_return`（HIGH + 震动；新 id 的理由同 `_v2` 踩坑）、
   通知 id **1014**、落点 requestCode **2007**（与免费提醒 2000/2005/2006、余额 3005/3006
   错开）；「通知强提醒」开着时补一次直接震动。同 id 覆盖——第 1 次失败会被第 2 次的

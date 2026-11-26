@@ -1,6 +1,7 @@
 package edu.jxslu.schedule.ui.ebike
 
 import edu.jxslu.schedule.data.kqcx.KvcxRideSession
+import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.EbikeAutoReturn
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KvcBusinessError
@@ -10,19 +11,29 @@ import kotlinx.coroutines.delay
 /**
  * 自动还车的尝试循环与还车结算口径（DESIGN §3.9，2026-10-10）。
  *
- * **为什么单独一层**：`CoroutineWorker` 带着 Android 依赖，JVM 单测跑不了；而「试几次、
- * 隔几秒、哪些失败不重试、每次结果都上报」恰恰是这条链路的责任边界。这里只依赖
+ * **为什么单独一层**：调度层（Android 的 `AlarmManager` / `WorkManager`）带着平台依赖，JVM 单测跑不了；
+ * 而「试几次、隔几秒、哪些失败不重试、每次结果都上报」恰恰是这条链路的责任边界。这里只依赖
  * [KvcxRideSession] 接口与回调，于是可以在单测里用假会话把整条时序钉住
- * （口径同 `KvcxRideController` 的依赖收窄）。
+ * （口径同 [KvcxRideController] 的依赖收窄）。
  *
  * **与「写操作零自动重试」的关系**：仓库层的零重试红线（用户手动动作只发一次）不变；
  * 这里的重试是**用户显式开启的自动还车**自己的行为——次数由设置封顶
  * （[EbikeAutoReturn.RETRY_MIN]~[EbikeAutoReturn.RETRY_MAX]），且只在免费时段内跑。
  * 别把它当成"顺手给手动还车也加上重试"的依据。
+ *
+ * ## iOS 移植 E3（2026-11-26）：从 `:app` 搬进共享层
+ *
+ * 与 [performReturnBike] 同一个理由：iOS 侧要在「App 被唤起」时补做一次自动还车，而执行器
+ * 原来住在 `:app`（`ui/ebike/EbikeAutoReturnRunner.kt`），共享层与 iOS 都够不着。搬过来之后
+ * 两端共用同一份重试时序与坐标选择；**调度那一层仍各在各家**（Android 是闹钟 + WorkManager，
+ * iOS 只有「到点排一条通知 + 回 App 时补做」，见 `platform/IosEbikeReminder`）。
+ *
+ * 搬迁只换了一个符号：`System.currentTimeMillis()` → [AppClock.nowMillis]（两端同值，
+ * 共享层不能碰 JDK）。单测 `EbikeAutoReturnTest` 的 import 与断言一字未改。
  */
 
 /** 一次自动还车过程的最终结果。 */
-internal sealed interface AutoReturnResult {
+sealed interface AutoReturnResult {
 
     /** 还车成功（订单结束）。[summary] 与手动还车共用同一份结算口径。 */
     data class Returned(val summary: KvcxReturnSummary) : AutoReturnResult
@@ -51,7 +62,7 @@ internal sealed interface AutoReturnResult {
  *
  * **取消穿透**：工作被取消时原样抛出，绝不把取消报成"还车失败"并继续重试。
  */
-internal suspend fun runAutoReturn(
+suspend fun runAutoReturn(
     session: KvcxRideSession,
     retries: Int,
     onOrderEnded: suspend () -> Unit,
@@ -96,14 +107,14 @@ internal suspend fun runAutoReturn(
                 userLat = userFix?.lat,
                 userLng = userFix?.lng,
                 userFixAtMillis = userFix?.atMillis,
-                nowMillis = System.currentTimeMillis(),
+                nowMillis = AppClock.nowMillis(),
                 vehicleLocked = ride.locked,
                 preferUser = preferUser,
             )
             val summary = performReturnBike(
                 session = session,
                 before = ride,
-                fetchedAt = System.currentTimeMillis(),
+                fetchedAt = AppClock.nowMillis(),
                 gcjLat = point.lat,
                 gcjLng = point.lng,
                 locationSource = point.source,

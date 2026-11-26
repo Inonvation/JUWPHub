@@ -6,6 +6,8 @@ import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.KvcBusinessError
 import edu.jxslu.schedule.ui.ebike.AutoReturnResult
+import edu.jxslu.schedule.ui.ebike.EbikeReminderOutcome
+import edu.jxslu.schedule.ui.ebike.EbikeReminderPort
 import edu.jxslu.schedule.ui.ebike.EbikeUserLocation
 import edu.jxslu.schedule.ui.ebike.runAutoReturn
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -533,6 +535,37 @@ class EbikeAutoReturnTest {
 
         assertEquals(2, session.queryCalls)
         assertEquals(2, session.returnCalls)
+    }
+
+    // ---------- 平台能力位（iOS 自动还车降级用） ----------
+
+    /**
+     * `EbikeReminderPort` 的三个能力位**默认值 = Android 的现状**（2026-11-26 E3 加
+     * `autoReturnRunsInBackground` 时立的规矩）：谁把它改成 false，Android 的「自动还车」
+     * 设置会整块消失 / 多出一句「只在 App 打开时执行」，而那是 iOS 的降级口径。
+     */
+    @Test
+    fun `能力位默认是 Android 现状`() {
+        val port = object : EbikeReminderPort {
+            override suspend fun startFreeRide(startAtMillis: Long) = EbikeReminderOutcome.Started
+            override suspend fun checkFreeRide() = EbikeReminderOutcome.Nothing
+            override suspend fun endFreeRide() = EbikeReminderOutcome.Ended
+            override suspend fun reconcileAutoReturn(catchUp: Boolean) = Unit
+            override suspend fun cancelAutoReturn() = Unit
+        }
+
+        assertTrue(port.hasCountdownNotification)
+        assertTrue(port.supportsAutoReturn)
+        assertTrue(port.autoReturnRunsInBackground)
+    }
+
+    /** 到点提醒（iOS 专用）的文案要同时说清「打开 App 会自动还车」与「只在 App 打开时执行」。 */
+    @Test
+    fun `到点提醒文案写明只在打开 App 时执行`() {
+        assertTrue(EbikeAutoReturn.TITLE_DUE.isNotBlank())
+        val text = EbikeAutoReturn.dueText()
+        assertTrue(text, text.contains("自动还车"))
+        assertTrue(text, text.contains("App"))
     }
 }
 

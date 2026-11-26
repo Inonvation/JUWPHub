@@ -16,14 +16,12 @@ import androidx.compose.runtime.Composable
  *
  * | | Android | iOS |
  * |---|---|---|
- * | 实现 | `View.keepScreenOn = enabled` | 空实现（`UIApplication.isIdleTimerDisabled` 待接） |
- * | 离开组合 | 复位成 `false` | 无事发生 |
- * | 用户可见差异 | 无（与搬移前逐字一致） | 长时间盯着蹲点页时可能自动锁屏 |
+ * | 实现 | `View.keepScreenOn = enabled` | `UIApplication.sharedApplication.idleTimerDisabled`（2026-11-26 接上） |
+ * | 离开组合 | 复位成 `false` | 复位：持有者计数归零时把 `idleTimerDisabled` 放回 `false` |
+ * | 用户可见差异 | 无（与搬移前逐字一致） | 无 |
  *
- * iOS 侧留空不是「以后补」的占位：那条路要拿 `UIApplication.sharedApplication` 并保证
- * 复位（漏复位 = 永久不灭屏，比不实现更糟），而本机没有 macOS 验不了。升级条件 =
- * iOS 壳（`design/ios-port.md` §4 P3）起来之后，在那边的 actual 里置
- * `isIdleTimerDisabled` 并在 `onDispose` 里复位。
+ * iOS 那条**必须成对复位**：`idleTimerDisabled` 是进程级全局开关，漏复位 = 退出蹲点页后
+ * 设备再也不自动锁屏。实现里按「持有者个数」增减，归零才放开（`KeepScreenOn.ios.kt`）。
  *
  * 调用方只需按「当前要不要常亮」传布尔，**不要**自己记状态：`DisposableEffect` 的
  * 键变化与离开组合都归这条缝处理。

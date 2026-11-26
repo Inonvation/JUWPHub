@@ -1294,6 +1294,9 @@ fun RideScreen(
                             },
                             onEndTimer = { showEndTimerConfirm = true },
                             onTimerExpired = { timerExpired = true },
+                            // 自动还车在后台可靠吗（iOS = false）：倒计时下那行触发时刻据此
+                            // 追加「需 App 打开」，别把"到时还车"说成无条件
+                            autoReturnInBackground = ebikeViewModel.autoReturnInBackground,
                             onSettle = {
                                 // 用户已经在付款路径上：取消 8 秒自动收尾，别把结算卡抽走
                                 settleAutoCancelled = true

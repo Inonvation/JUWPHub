@@ -88,10 +88,13 @@ fun WenquGrabScreen(
      */
     viewModel: WenquGrabViewModel,
     /**
-     * 命中那一刻的提醒（Android = 震动 + 提示音）：用户可能没盯着屏幕。
+     * 命中那一刻的提醒：Android = 震动 + 提示音，iOS = 一条本地通知（用户可能没盯着屏幕）。
      * `null` = 本平台没有那条提醒链 → 命中只弹确认框。
+     *
+     * 参数是命中的那条活动：声音与震动用不上它，**通知要用**（标题写活动名、正文写能做什么）。
+     * 两端共用一个回调而不是各加一个——「命中时喊一声」只有一件事，两份回调迟早有一份忘了调。
      */
-    onHitAlert: (() -> Unit)? = null,
+    onHitAlert: ((WenquActivity) -> Unit)? = null,
     /** 盯 / 取消盯之后的重排动作（Android = `WenquActivityAlertReminder.onPinChanged`）。 */
     onPinChanged: (suspend () -> Unit)? = null,
     /** **预报名**：`(活动, 报名开始时刻)` → 排闹钟 + 前台服务；`null` = 本平台没有那条链。 */
@@ -115,10 +118,11 @@ fun WenquGrabScreen(
         vm.consumeMessage()
     }
 
-    // 命中那一刻震一下 + 响一声：用户可能没盯着屏幕（同提醒的直接震动口径）。
-    // 震动与提示音是平台能力，收成回调；null = 本平台没有，静默。
+    // 命中那一刻喊一声（Android 震动 + 提示音、iOS 一条本地通知）：用户可能没盯着屏幕。
+    // 提醒本身是平台能力，收成回调；null = 本平台没有，静默。
     LaunchedEffect(state.hit?.id) {
-        if (state.hit != null) onHitAlert?.invoke()
+        val hit = state.hit ?: return@LaunchedEffect
+        onHitAlert?.invoke(hit)
     }
 
     // 蹲点期间保持屏幕常亮（用户口径）：息屏后系统可能把进程冻住，探测就断了。

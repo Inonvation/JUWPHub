@@ -177,13 +177,15 @@ fun EbikeSettingsSheet(
                 // 先让弹层滑走再进账号页，中间不留"弹层突然没了"的那一帧
                 KvcxAccountRow(loggedIn = loggedIn, onClick = { dismiss { onOpenKvcxAccount() } })
                 RideConfirmSettingsSection(prefs = prefs)
-                // 自动还车是「排闹钟 + 到点执行代码」：iOS 到点不执行代码，那一端
-                // `supportsAutoReturn` 为 false，整块不摆（免费提醒那一半照常）
+                // 自动还车是「排闹钟 + 到点执行代码」：Android 后台就能跑；iOS 到点只发一条
+                // 通知、真正的还车要等 App 被唤起（`autoReturnRunsInBackground` = false）。
+                // 两端都摆这一组，差别在 [AutoReturnSettingsSection] 里那句前提。
                 if (viewModel.hasAutoReturn) {
                     AutoReturnSettingsSection(
                         prefs = prefs,
                         onAutoReturnChanged = viewModel::onAutoReturnChanged,
                         withNotificationPermission = withNotificationPermission,
+                        runsInBackground = viewModel.autoReturnInBackground,
                     )
                 }
             }
@@ -355,12 +357,16 @@ private fun RideConfirmSettingsSection(prefs: EbikePrefsSnapshot) {
  * 「重试次数」自动重试；时刻 / 重试 / 文案口径见 `.agents/rules/ebike.md`。
  *
  * 只在 `caps.inAppRide`（账号方式）里出现：小程序方式没有 App 内还车这回事。
+ *
+ * [runsInBackground] = false（iOS）时**把承诺降一档写清**：到点只发一条通知，真正的还车要等
+ * 下次打开 App。不说这句就是「开关拨了、账单上才发现没还」——比不提供这个功能更糟。
  */
 @Composable
 private fun AutoReturnSettingsSection(
     prefs: EbikePrefsSnapshot,
     onAutoReturnChanged: () -> Unit,
     withNotificationPermission: (() -> Unit) -> Unit,
+    runsInBackground: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
     var enabled by remember(prefs.autoReturnEnabled) { mutableStateOf(prefs.autoReturnEnabled) }
@@ -370,7 +376,11 @@ private fun AutoReturnSettingsSection(
     SettingsSection(title = "自动还车") {
         SettingSwitchRow(
             title = "用车满 ${EbikeFreeRide.FREE_MINUTES} 分钟自动还车",
-            subtitle = "免费时段内自动还车，需已登录快趣账号",
+            subtitle = if (runsInBackground) {
+                "免费时段内自动还车，需已登录快趣账号"
+            } else {
+                "免费时段内自动还车，需已登录快趣账号；iOS 只在 App 打开时执行"
+            },
             checked = enabled,
             onCheckedChange = { checked ->
                 enabled = checked
@@ -408,6 +418,11 @@ private fun AutoReturnSettingsSection(
             )
         }
         SettingsNote("还车判定以车辆上传的位置为准。")
+        if (!runsInBackground) {
+            // 这句是这一档唯一的出路：到点只有通知，还车要等 App 打开 —— 说清楚，
+            // 用户才知道那一刻该进 App 一趟（进骑行页就会补做）
+            SettingsNote("到点只会先发一条通知；真正的还车在下一次打开 App（进「骑行」页）时补做。")
+        }
     }
 }
 
