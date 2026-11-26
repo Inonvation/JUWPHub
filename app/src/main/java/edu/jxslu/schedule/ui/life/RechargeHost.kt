@@ -35,9 +35,6 @@ import edu.jxslu.schedule.ui.common.showNotice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
-/** 充值入口的种类（免责声明放行后决定打开哪个弹层）。 */
-enum class RechargeKind { Campus, Power }
-
 /**
  * 充值宿主（2026-10-22 第二版）：挂在 MainActivity 壳层，侧栏点「充值」后**不跳页面**，
  * 直接在这里弹对应的一卡通 / 电费充值弹层。旧「生活」页与它上面的钱包、校园服务、
@@ -45,6 +42,10 @@ enum class RechargeKind { Campus, Power }
  *
  * 宿主常驻组合，但只有 [pending] 非空时才开流程；弹层打开后由本宿主持有，
  * 用户关掉弹层就结束，壳层/侧栏都不动。
+ *
+ * 2026-11-26：`RechargeKind` 挪进共享层（`shared/.../ui/life/RechargePlatform.kt`）——
+ * iOS 的充值宿主 `SharedRechargeHost` 要同一个枚举。本文件只删了那份声明：同包同名，
+ * 用法与 `MainActivity` 的 import 一字未动。
  */
 @Composable
 fun RechargeHost(

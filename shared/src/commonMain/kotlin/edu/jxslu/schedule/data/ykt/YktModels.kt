@@ -99,10 +99,17 @@ sealed interface YktRechargeOrder {
     /**
      * 直拉微信：`weixin://wap/pay?prepay_id=…`（微信 H5 支付，实测免密渠道）。
      * `ACTION_VIEW` 即可拉起微信支付界面；prepay_id 约 5 分钟有效。
+     *
+     * [cashierUrl] 是同一笔单的**官方收银台地址**（`yktwx.juwp.edu.cn/payment/?…`），
+     * 2026-11-26 加：iOS 不能直拉 `weixin://`（商户域名与 referer 对不上，微信会拒，
+     * 见 `design/ios-port.md` §10.4），要把这一条交给 `WKWebView`，让页面自己跳微信。
+     * 两条 URL 指向同一笔订单，选哪条看 [paymentUrl]。
      */
     data class WechatPay(
         override val orderId: String,
         val wechatUrl: String,
+        /** 同一笔单的官方收银台地址（iOS 走它，不直拉微信）。 */
+        val cashierUrl: String,
     ) : YktRechargeOrder
 
     /** 兜底：官方收银台 URL（服务端 302 Location 下发；直拉链路失败时浏览器打开）。 */
@@ -110,6 +117,21 @@ sealed interface YktRechargeOrder {
         override val orderId: String,
         val cashierUrl: String,
     ) : YktRechargeOrder
+}
+
+/**
+ * 本次充值该交给平台打开哪一个 URL。
+ *
+ * 单一实现，两个调用点（`CampusCardViewModel.recharge`）与测试共用：
+ * - [preferCashierPage] = false（Android）：直拉微信那条最快——`weixin://wap/pay` 由
+ *   微信客户端接手，不经过中间页；
+ * - [preferCashierPage] = true（iOS）：即使平台给了 `weixin://` 也不直拉，改用收银台地址，
+ *   由 `WKWebView` 里的页面自己跳（原因见 [YktRechargeOrder.WechatPay.cashierUrl]）。
+ *   `[YktRechargeOrder.Cashier]` 本来就只有收银台地址，两种取值返回同一条。
+ */
+fun YktRechargeOrder.paymentUrl(preferCashierPage: Boolean): String = when (this) {
+    is YktRechargeOrder.WechatPay -> if (preferCashierPage) cashierUrl else wechatUrl
+    is YktRechargeOrder.Cashier -> cashierUrl
 }
 
 /**

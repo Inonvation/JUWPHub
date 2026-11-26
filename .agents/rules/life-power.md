@@ -221,6 +221,14 @@
 - **入口与宿主**：`SideDrawer` 的充值选择弹层选完 → `pendingRecharge` → `RechargeHost`
   弹 `RechargeSheet`（一卡通）或 `PowerRechargeSheet`（电费）；关掉弹层回当前 Tab。
   没有 `lifeTabEnabled` 开关，也没有底栏「生活」项。
+- **iOS 的充值宿主在共享层（2026-11-26）**：`:app` 的 `RechargeHost` / `PowerBankPayScreen`
+  只服务 Android，行为一字未改；iOS 走 `shared/.../ui/life/SharedRechargeHost.kt`（同一套流程，
+  平台动作收在 `RechargePlatform` 两个方法里，iOS 实现在 `RechargePlatform.ios.kt`）。
+  三条别改坏：① 一卡通在 iOS 上**必须** `preferCashierPage = true`（收银台 URL 进 `WKWebView`，
+  不直拉 `weixin://`，选哪条 URL 的唯一实现是 `YktRechargeOrder.paymentUrl`）；
+  ② 收银台页 `BankPayPage` 只当容器，不注入脚本、不读输入（与 Android 那页同一条身份边界）；
+  ③ 四类充值共用一个 `RechargeRequests`，别为某一类再开一条缝。口径与剩余接线见
+  `design/ios-port.md` §10.4a。
 - **样式（历史，2026-10-13 / 2026-10-19）**：钱包 hero 卡 → 校园服务四格 → 问渠整行卡 →
   最近流水。相关组件 `WalletHeroCard` / `CampusServicesCard` / `FeedSectionsCard` 已随
   页面删除；这些入口现在分别在侧栏、教务 Tab、流水二级页。
