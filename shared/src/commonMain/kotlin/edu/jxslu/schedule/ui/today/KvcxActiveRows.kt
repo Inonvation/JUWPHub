@@ -9,7 +9,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import edu.jxslu.schedule.R
 import edu.jxslu.schedule.domain.EbikeFreeRide
 import edu.jxslu.schedule.domain.KqcxAuth
 import edu.jxslu.schedule.domain.MoneyFormat
@@ -18,27 +17,36 @@ import edu.jxslu.schedule.ui.common.rememberResumedNow
 import edu.jxslu.schedule.ui.ebike.KvcxAction
 import edu.jxslu.schedule.ui.ebike.KvcxReturnSummary
 import edu.jxslu.schedule.ui.ebike.KvcxRideState
+import edu.jxslu.schedule.ui.ebike.rideElapsedSeconds
 import edu.jxslu.schedule.ui.ebike.unlockCooldownSecondsLeft
 import edu.jxslu.schedule.ui.theme.semanticColors
 
 /**
- * 今日页服务卡里**快趣骑行**的两行（iOS 移植 V2，2026-11-25）。
+ * 今日页服务卡里**快趣骑行**的两行：进行中（[KvcxActiveRow]）与已还车完成态（[KvcxDoneRow]）。
  *
- * ## 为什么只有这一行留在 `:app`
+ * ## 为什么现在能上移（2026-11-26）
  *
- * 服务卡本体（外壳、四行排布、分隔线、完成态停留、卡边高亮）已搬进
- * `shared/commonMain` 的 `ui/today/ActiveServiceCard.kt`；开水 / 趣智 / U净 三行也一起搬了。
- * 快趣那行搬不动——它吃的 `KvcxRideState` / `KvcxAction` / `KvcxReturnSummary` 都在
- * `ui/ebike`（高德 SDK 那一包，iOS 结构性做不到，`design/ios-port.md` §12.1）。
+ * 这两行原在 `:app` 的 `ui/today/ActiveServiceRows.kt`，搬不动的原因只有一个：
+ * 它吃的 `KvcxRideState` / `KvcxAction` / `KvcxReturnSummary` / `unlockCooldownSecondsLeft`
+ * 都在 `:app` 的 `ui/ebike`（高德 SDK 那一包，iOS 结构性做不到）。
+ * 快趣页面与状态类型整体搬进 `shared/commonMain` 之后，跨模块的那层阻碍消失，
+ * 只剩品牌位图 `R.drawable.ic_brand_kqcx` 一处平台耦合——而它可以用参数走掉，见下。
  *
- * 所以卡片把这一行收成 [ActiveServiceSlot]（`null` = 本平台没有快趣骑行），内容由这里给。
- * 行内按钮文案由 `KvcxAction` 决定（「开锁中… / 还车中…」），冷却秒数由
- * `unlockCooldownSecondsLeft` 算——把它们搬进共享层等于再造一份平行模型，**不要**这么做。
+ * ## 品牌位图为什么走参数
  *
- * ## 与搬走前逐字一致的部分
+ * `R` 只存在于 Android 的 `:app`（`app/src/main/res`），commonMain 看不见它。
+ * 所以两个函数各带 `brandId: Int? = null`，原样交给 [ActiveRow] 的 `brand`。
+ * `null` = 本平台没有这张品牌位图（iOS）：`BrandMark` 的 actual 在 iOS 上本来就渲染为空，
+ * 行照旧渲染、只是不画图标位，与「平台动作可空回调」同一语义，不画一个假图标占位。
+ * 默认 `null` 让 iOS 侧连这个参数都不用写；Android 在 `TodayHost` 传 `R.drawable.ic_brand_kqcx`。
  *
- * 行骨架（`ActiveRow`）、动作钮（`ActionChip`）、完成态的勾（`DoneCheck`）都来自共享层，
- * 行高 / 按下手感 / 进度条口径因此与另外三行仍然同一份实现。这里只保留判据与文案。
+ * ## 与 ActiveServiceCard.kt 的关系
+ *
+ * 行骨架 [ActiveRow]、动作钮 [ActionChip]、完成态的勾 [DoneCheck] 都在同包同模块的
+ * `ActiveServiceCard.kt` 里，直接调用即可（原先为跨模块而放开的 `public` 现在连跨模块都省了）。
+ * 行高 / 按下手感 / 进度条口径因此与开水、趣智、U净 三行仍**同一份实现**，本文件只保留
+ * 快趣特有的判据与文案。卡片把这一行收成 [ActiveServiceSlot]（`null` = 本平台没有快趣骑行），
+ * 内容由这里给。
  */
 
 /**
@@ -49,9 +57,11 @@ import edu.jxslu.schedule.ui.theme.semanticColors
  * 显「开锁」；悬置态（开锁未确认 / 锁车确认中）显「确认中…」置灰。开锁后 3 秒冷却内
  * **「开锁 / 锁车 / 还车」一起置灰并显示剩余秒**（2026-10-29 用户口径「都置灰」，
  * 与骑行页同口径）。还车与骑行页共用同一确认闸（调用方接 `kvcxConfirmDialog`）。
+ *
+ * @param brandId 品牌位图资源 id；`null` = 本平台没有这张位图（iOS），不画图标位。
  */
 @Composable
-internal fun KvcxActiveRow(
+public fun KvcxActiveRow(
     ride: KqcxAuth.Ride,
     state: KvcxRideState,
     /** 免费窗口起点（`ebikeRideStartAt`）；null / ≤0 = 没有计时，不画进度条。 */
@@ -60,12 +70,13 @@ internal fun KvcxActiveRow(
     onLock: () -> Unit,
     onReturn: () -> Unit,
     onOpen: () -> Unit,
+    brandId: Int? = null,
 ) {
     val haptics = rememberAppHaptics()
     // 骑行行没有「到点停表」的语义：只要这行在组合里就要逐秒刷新（免费窗口倒计时 / 超时分钟数 /
     // 动作已等秒数 / 开锁冷却），故直接走公共件 `rememberResumedNow`（RESUMED 才走）。
     val now by rememberResumedNow(1_000L, key = ride.carNum to state.fetchedAt)
-    val elapsed = rideElapsedSecondsShared(ride, state.fetchedAt, now)
+    val elapsed = rideElapsedSeconds(ride, state.fetchedAt, now)
     val locked = ride.locked == true
     val pending = state.unlockPending || state.lockPending
     val busy = state.busy
@@ -105,7 +116,7 @@ internal fun KvcxActiveRow(
     val statusColor = if (overtime) MaterialTheme.colorScheme.error else null
 
     ActiveRow(
-        brand = R.drawable.ic_brand_kqcx,
+        brand = brandId,
         title = "快趣骑行",
         status = status,
         statusColor = statusColor,
@@ -187,11 +198,17 @@ private fun KvcxAction.label(): String = when (this) {
  *
  * 品牌位图与勾都走共享层（`BrandMark` / `DoneCheck`）：完成态与进行中行的行高、字号、
  * 左右留白必须是同一份实现，各画一份必然差几个 dp。
+ *
+ * @param brandId 品牌位图资源 id；`null` = 本平台没有这张位图（iOS），不画图标位。
  */
 @Composable
-internal fun KvcxDoneRow(summary: KvcxReturnSummary?, onOpen: () -> Unit) {
+public fun KvcxDoneRow(
+    summary: KvcxReturnSummary?,
+    onOpen: () -> Unit,
+    brandId: Int? = null,
+) {
     ActiveRow(
-        brand = R.drawable.ic_brand_kqcx,
+        brand = brandId,
         title = "快趣骑行",
         status = "已还车",
         pulsing = false,
@@ -212,11 +229,4 @@ internal fun KvcxDoneRow(summary: KvcxReturnSummary?, onOpen: () -> Unit) {
         }.ifBlank { "订单已结束" },
         trailing = { DoneCheck() },
     )
-}
-
-/** 骑行时长本地走时：与 `KvcxRideController.rideElapsedSeconds` 同一口径（不跨包引 internal）。 */
-private fun rideElapsedSecondsShared(ride: KqcxAuth.Ride, fetchedAt: Long, now: Long): Long? {
-    val base = ride.totalDateSeconds ?: return null
-    if (fetchedAt <= 0L) return base
-    return base + (now - fetchedAt).coerceAtLeast(0L) / 1_000L
 }

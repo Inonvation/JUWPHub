@@ -249,6 +249,7 @@ internal fun rememberTodayHostSlots(
                         onLock = { dispatchKvcxAction(KvcxAction.LOCK) },
                         onReturn = { dispatchKvcxAction(KvcxAction.RETURN) },
                         onOpen = onOpenEbike,
+                        brandId = R.drawable.ic_brand_kqcx,
                     )
                 }
             },
@@ -256,6 +257,7 @@ internal fun rememberTodayHostSlots(
                 KvcxDoneRow(
                     summary = kvcxRideState?.returnSummary ?: lastKvcxSummary,
                     onOpen = onOpenEbike,
+                    brandId = R.drawable.ic_brand_kqcx,
                 )
             },
         )
