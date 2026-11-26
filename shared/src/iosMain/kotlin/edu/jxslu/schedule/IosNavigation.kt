@@ -84,8 +84,12 @@ import edu.jxslu.schedule.ui.tweak.CourseTweakViewModel
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
+import edu.jxslu.schedule.platform.IosEbikeReminder
 import edu.jxslu.schedule.ui.ebike.BikeMapViewModel
 import edu.jxslu.schedule.ui.ebike.EbikeViewModel
+import edu.jxslu.schedule.ui.ebike.IosEbikeQrGallery
+import edu.jxslu.schedule.ui.ebike.iosCanvasBikeMapSlot
+import edu.jxslu.schedule.ui.ebike.iosOpenWechat
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersViewModel
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
@@ -709,15 +713,29 @@ internal fun IosRouteContent(
                 )
             }
             val ebikeViewModel = remember {
-                EbikeViewModel(services.displayPrefs())
+                // 相册与提醒两个缝在 iOS 上是真实现（2026-11-26，T1 轨道）：
+                // 存相册走 `UIImageWriteToSavedPhotosAlbum`，免费时长提醒走本机通知。
+                // 「自动还车」与「扫完即焚」两项能力在 iOS 上关着（前者要 BGTaskScheduler，
+                // 后者要能删相册里的图），对应设置整块不渲染——见两个实现类的 KDoc。
+                EbikeViewModel(
+                    prefs = services.displayPrefs(),
+                    gallery = IosEbikeQrGallery(),
+                    reminders = IosEbikeReminder(services.displayPrefs()),
+                )
             }
+            val bikeMapSlot = remember { iosCanvasBikeMapSlot() }
             RideScreen(
                 viewModel = mapViewModel,
                 ebikeViewModel = ebikeViewModel,
                 onBack = pop,
                 initialFocusCarNum = route.arg,
-                bikeMap = null,
+                // 车标：纯 Compose 画布自绘（Web 墨卡托投影 + 手势），绕开 MapKit 的标注绑定
+                // ——那套在本仓 Kotlin 2.1.21 的绑定里用不了（见 design/ios-port.md §12.13）。
+                bikeMap = bikeMapSlot,
                 onOpenKvcxAccount = { push(IosRoute(SubpageScreen.KVCX)) },
+                // 拉起微信：`Info.plist` 已补 `LSApplicationQueriesSchemes`（weixin / weixinULAPI）
+                onOpenWechatScan = { iosOpenWechat() },
+                onOpenWechatForSettle = { iosOpenWechat() },
             )
         }
 
