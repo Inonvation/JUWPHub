@@ -2186,3 +2186,105 @@ token 刷新会互相覆盖）。`IosNavigation` 里现有的 `IosEbikeReminder(
 - **通知权限**：四族 + 三族共用一个授权请求；被拒时自动还车照样执行（执行不依赖通知），
   只是没有横幅可看——`IosNotificationPermission.hint` 是页面上唯一能提醒用户的地方。
 
+
+### 12.19 第四批：五个模块恢复 / 左缘返回 / 充值宿主 / 百宝箱 Skia（2026-11-26 晚）
+
+用户口径：「第一波除了桌面小组件其余都做，第二波第三波都做」。这一批是三条并行流
+（充值宿主 / 百宝箱 Skia 化 / 三类提醒）+ 壳层自己的工作合并后的状态。
+
+#### ① 精简版下线的五个模块全部恢复
+
+2026-11-25 那次下线（§12.4）是为了先出一个能装的阉割版。现在恢复的代价比当时预计的小得多：
+**数据层与页面本来都在共享层**，缺的只是入口与闸门。
+
+| 模块 | 恢复后 iOS 能做什么 | 仍缺 |
+|---|---|---|
+| 笔记 · 课件 | 列表 / 课程分组 / 详情读写，纯文本排版 | 正文里的图片、公式、外链（`images` / `markdown` 槽位仍为 null） |
+| 作业 | 列表 / 待办 / 课程分组 / 详情读写、截止提醒重排 | 同上（附件图、公式） |
+| 问渠 | 登录 / 活动 / 报名 / 工时 / 蹲点（前台） | 蹲点只在 App 前厅跑；命中已接本地通知 |
+| AI 调课 | 对话 / 设置 / 历史 / 提议卡 / 预览网格 | 输入区图片入口（`imageUi = null`） |
+| 百宝箱 | 水印 / 拼接 / 智能拼接 / 菜鸟批量查 **四件全可用** | —（§12.19 ③ 把渲染管线搬进共享层） |
+
+实现：删掉 `IosNavigation.IOS_REMOVED_SCREENS` 与宿主 `pushRoute` 里那道闸门（留一个空集合
+只会让下一个人以为还有闸门要维护，真正的下线手段始终是「入口一起摘」），
+抽屉补 4 个条目（学习段：笔记·课件 / 作业；生活段：百宝箱；江水生活段：问渠），
+主壳把 `onOpenCourseNotes` / `onOpenCourseHomework` / `onOpenHomeworkTodo` / `onOpenWenqu`
+从 null 换成真入栈，`SettingsScreen` 的 `showAiSchedule` / `showToolbox` 恢复默认 true，
+`TodayViewModel.blockedGuessTargets` 去掉。
+
+#### ② 左缘右滑返回（iOS 第一个会骂的点）
+
+`AppBackHandler` 在 iOS 一直是空实现（没有系统返回键这个事件源），二级页只能点顶栏箭头。
+新增 `IosEdgeBack.kt`：**手势修饰符**，不塞进 `AppBackHandler` 的 actual。
+
+- 只有按下点落在左缘 28dp 以内才算；越过 touch slop 时已在往右才接管（左滑留给页面自己）
+- 跟手 1:1，上限屏宽 42%，松手超过 26% 返回；阈值按容器宽度算（SE 与 Pro Max 差 1.4 倍）
+- 与抽屉手势**互斥**：二级页打开时 `ModalNavigationDrawer.gesturesEnabled = stack.isEmpty()`，
+  否则同一个左缘手势会两边抢
+- 跟手阶段写 float 状态、回弹动画交给组合作用域的 `launch`：`awaitEachGesture` 是受限挂起
+  作用域，在里面调 `Animatable.snapTo/animateTo` 编不过（CI 实测）
+
+#### ③ 百宝箱：渲染管线搬进共享层，`:app` 五个文件整块删除
+
+水印 / 拼接 / 智能拼接全部走 `commonMain` 的 `ui/toolbox/ToolboxRenderer.kt`（ImageBitmap +
+CanvasDrawScope + TextMeasurer），选图 / 解码 / 保存相册 / 分享收成三条平台缝
+（`ImagePickers` / `ToolboxExport` / `ToolboxBitmaps`）。`:app` 那 1,249 行
+`android.graphics.Bitmap` 管线删除，`SubpageActivity` 两行调用零改动。
+
+已知差异：智能拼接的 RGB_565 降档只在 Android 生效（skiko 没有可靠的 565 绘制目标），
+iOS 超长拼接内存峰值约为 Android 2 倍；24M 像素硬上限仍在。
+
+#### ④ 充值：四处入口接上共享宿主
+
+形状见 §10.4a。这一批补的是壳层接线，以及**两个 ViewModel 上移**：
+
+- `CampusCardViewModel` / `LifeViewModel` / `RechargeRequests` / 电费选房器在根组合建一次，
+  抽屉与宿主共用。Android 靠同一个 `viewModel()` key 天然共用，iOS 各持一份就会出现
+  「抽屉余额已刷新、宿主还是旧值」，到账判定永远慢一拍
+- 钱包卡 `onRecharge` 先开共享件 `RechargeChoiceSheet`（一卡通 / 电费两个系统各充各的）
+- `SharedRechargeHost` 挂在根组合**最后一个子节点**：弹层要盖住抽屉、悬浮底栏与设置覆盖层；
+  多个根子节点由 Compose 的 root measure policy 叠放，不必再套 Box
+- `IosRouteContent` / `IosOverlayStack` 多一个可空 `recharge` 参数：覆盖层里的校园卡页
+  （从设置进）同样能开收银台页
+
+#### ⑤ 快趣副作用必须接，否则「自动还车」是死开关
+
+`IosServices.kvcxRideImpl` 的 `effects` 从 null 换成 `IosKvcxSideEffects`。给 null 时
+账号方式开锁没人写 `ebikeRideStartAt`，`reconcileAutoReturn` 每次判 `startAt <= 0` 直接撤排程：
+自动还车开关渲染出来却永不触发，免费计时也起不来。这一条是 §12.18 那批的唯一硬依赖。
+
+#### ⑥ 一个编译器坑（`:app` 全量编译才暴露）
+
+`const val REWARD_QR_RES: Int = R.drawable.ic_reward_qr` 的初始值来自 Android `R`
+（Java 静态字段），Kotlin 2.1.21 的 IR 常量求值器会去解释这个 getter：
+
+```
+AssertionError: Error occurred while optimizing an expression:
+  CALL 'public final fun <get-REWARD_QR_RES> ()' origin=GET_PROPERTY
+InterpreterError: Unsupported number of arguments for invocation as builtin function: REWARD_QR_RES
+```
+
+增量编译命不中，删文件后全量编译必炸。改成普通 `val` 即解（没有调用点需要编译期常量）。
+以后再遇到「某个 `const val` 初始值来自 `R` 或别的 Java 静态字段」，先怀疑这条。
+
+#### 装机请点验（本批新增）
+
+| # | 点哪里 | 期望 |
+|---|---|---|
+| 1 | 任意二级页从屏幕左缘往右滑 | 页面跟手右移，松手返回上一页；抽屉不会同时打开 |
+| 2 | 侧栏「学习」段 | 有「笔记 · 课件」「作业」两行，能进列表、能写、能保存 |
+| 3 | 侧栏「生活」段 → 百宝箱 | 水印 / 拼接 / 智能拼接 / 菜鸟查四张卡都在；水印能出图并存进相册 |
+| 4 | 侧栏钱包卡 → 充值 | 先弹「选择充值项目」，选一卡通进收银台页（`WKWebView`），选电费进电费充值 |
+| 5 | 快趣设置里的「自动还车」 | 开关能开；文案写明「到点先发通知，App 打开时补做」 |
+| 6 | 问渠蹲点页命中 | 页面弹确认框，同时来一条系统横幅 |
+| 7 | 底栏切换 / 二级页推入 | 位移带 iOS 的收尾曲线，底栏点击有轻触感 |
+
+#### 本批未验
+
+- iosMain 全部只有 CI 能编译（Windows 无 K/N）：`IosEdgeBack`、`IosKvcxSideEffects`、
+  `IosWenquGrabAlert`、`KeepScreenOn.ios`、`ImagePickers.ios`、`ToolboxExport.ios`
+- 真机观感：玻璃底栏三层描边在深色壁纸下的强度、左缘返回的跟手跟手阈值、水印/拼接的实际像素
+- 充值全链路：一卡通收银台页在 `WKWebView` 里的排版、支付宝 / 微信能否拉起、从外部 App
+  返回后余额要等轮询或下拉刷新（iOS 没有 `LocalLifecycleOwner`，没有回前台回调）
+- 电费「农行缴电费专用」一档可能卡在加载中（收银台调 `window.AndroidFunc.SynObject`，
+  iOS 不做 JS 桥）；校园卡 / 电子帐户两档不受影响，兜底是顶栏「用浏览器打开」

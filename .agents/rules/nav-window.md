@@ -195,3 +195,21 @@
   （`UjingScanHandoff` 的交接本身没问题，见 `ujing.md`）。2026-10-22 引入全局时刻，
   2026-11-05 按目标分槽。
 - 页面内的业务按钮仍走各自的 busy / 防抖状态，**不要**拿 LaunchGate 替代。
+
+## iOS 的左缘右滑返回（2026-11-26）
+
+iOS 没有系统返回键，`AppBackHandler` 在那边是**空实现**（没有事件源）。二级页的返回手势是
+壳层的一个修饰符 `shared/iosMain/.../IosEdgeBack.kt` 的 `iosEdgeBackSwipe(enabled, onBack)`，
+**不要**去实现 `AppBackHandler` 的 iOS actual——那会把「拦截返回键」和「手势区域」混成一件事。
+
+三条不许改坏的口径：
+
+1. **与抽屉手势互斥**：二级页打开时 `ModalNavigationDrawer.gesturesEnabled = stack.isEmpty()`。
+   两个都监听左缘右滑，同时在场会互相抢事件。
+2. **只在按下点落于左缘 28dp 内接管**，且越过 touch slop 时已经在往右才 consume；左滑留给页面
+   自己（课表周切换、分页器都在左滑那条路径上）。
+3. **跟手阶段不许用 `Animatable`**：`awaitEachGesture` 的 `AwaitPointerEventScope` 是受限挂起
+   作用域，在里面调 `snapTo` / `animateTo` 编不过（CI 实测）。写 float 状态，回弹动画交给组合
+   作用域的 `launch`。
+
+覆盖层（设置 / 全部功能）里那一份 `IosOverlayStack` 也挂同一个修饰符，`enabled = stack.isNotEmpty()`。
