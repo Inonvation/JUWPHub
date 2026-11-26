@@ -1798,3 +1798,17 @@ iOS 根在 2026-11-26 之前是裸的 `JuwTheme { }`，后果是三条**看得�
   上面的结论不依赖它（安全区由 SwiftUI 让出），但**如果真机上顶栏出现「多空一截」**，
   那就是 CMP 也返回了真实值，处置是让 `IosRoot` 里那几个页面的顶栏不再吃 insets。
 
+
+### 12.15 2026-11-26 下午这批：抽屉瘦身 / 白边 / 付款码提亮 / 快趣补齐
+
+**取代 §12.13 表里「地图车标」「免费时长提醒」「存相册」「拉起微信」四行**（那四行写的是「缺」，现在都接了）。
+
+| 项 | 结论 |
+|---|---|
+| 抽屉 | iOS 原先是「把 SubpageScreen 白名单全列一遍」的站点地图（六级 36 行），Android 只是短面板。现在抽屉回到 9 行（身份卡 / 账号与登录 / 我的·设置 / 全部功能 / 钱包卡 / 江水生活 / 付款码），二级页清单搬到新页 `IosAllFeaturesScreen`。**不新增 SubpageScreen 枚举值**——Android 没有这一页，走 `showAllFeatures` 本地覆盖层（与首屏登录页 `jwOpen` 同一做法）。条目仍只有 `iosDrawerEntries()` 一份 |
+| 上下白边 | 两层原因叠加：SwiftUI 那层只声明了 `.ignoresSafeArea(.keyboard)`，整个 Compose 被塞在安全区里，外面露窗口白底；`UIViewControllerRepresentable` 还可能先收成固有尺寸，此时 `ignoresSafeArea` 等于没写。现在 `iOSApp.swift` 同时给 `.frame(maxWidth: .infinity, maxHeight: .infinity)` 与 `.ignoresSafeArea()`，`IosRoot` 的主卡再 `windowInsetsPadding(WindowInsets.safeDrawing)`（让位放在 `background` 之后，底色仍铺满），`IosDrawer` 的 `ModalDrawerSheet` 补 `fillMaxHeight` + `windowInsets = 0` |
+| 付款码 | 进页把屏幕提到最亮、离开写回进页前的值（`ui/campus/IosScreenBrightness.kt`）。iOS 没有窗口级亮度，只能改 `UIScreen.mainScreen.brightness`——那是**全系统设置**，所以还原走 `DisposableEffect` 的 `onDispose`，不依赖任何异步回调 |
+| 快趣 | 车标改成**纯 Compose 画布**（`BikeMapProjection` 墨卡托投影 + 拖拽/捏合/点按命中），绕开 MapKit 标注绑定；免费时长提醒走本机通知（前缀 `freeride.`）；存相册走 `UIImageWriteToSavedPhotosAlbum`；拉起微信靠 `LSApplicationQueriesSchemes`。**自动还车**（要 BGTaskScheduler）与**扫完即焚**（要能删相册图）在 iOS 关闭，对应设置整块不渲染 |
+| 快趣登录「网络不可用」 | **未解决**。`KvcxViewModel` 原本把 `IOException` 的 message 吞了，真机上只剩一句「网络不可用」。现在错误条带上底层原因（与 `CasSession` 的教务登录同一口径），下一次截图就能区分 TLS / 超时 / 域名。**问题仍在，只换成了可诊断** |
+
+这批的教训记一条：**iosMain 在 Windows 上编不了，符号可见性、跨文件引用一律要等 CI**。「复用别的文件里的内部符号」这种动作必须先 `grep` 声明处看它是 `public` / `internal` / `private` 再写——`569604f2` 就是这么白跑了一次构建（`IOS_DRAWER_QUICK_SCREENS` 与 `CompactDrawerRow` 是 `private in file`，`DrawerSectionHeader` 在 `ui/life` 里要 import）。
