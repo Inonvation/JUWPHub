@@ -6,11 +6,10 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -41,7 +40,13 @@ import edu.jxslu.schedule.domain.BikeNearby
 import edu.jxslu.schedule.domain.BikeStatus
 import edu.jxslu.schedule.domain.GcjPoint
 import edu.jxslu.schedule.domain.NearbyBike
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -89,7 +94,29 @@ import kotlin.math.roundToInt
  *    按 2 倍放大贴（注记约 7pt）。高德另有 `scl=2` 的 512 px 瓦片，实测**不带任何注记**
  *    （纯路网），所以宁可放大也不要「没有楼名」。
  * 2. **瓦片到货前先画网格**：一帧空白会让人以为地图坏了；有一块瓦片就不画网格。
+ *
+ * ## 手势帧不进组合期（2026-11-26 真机反馈：拖动 / 捏合不跟手）
+ *
+ * 根因是同一个 `viewport` 被**组合期**读了三次：`remember(...)` 的键、`LaunchedEffect(gestureTick)`
+ * （每帧 +1）、以及 `LaunchedEffect(canvasSize)` 的键。组合期读 `mutableStateOf` = 订阅，
+ * 于是拖动时每帧都重组一次整段 + 重算瓦片清单 + 重启两个 effect。
+ *
+ * 现在这条链路上**组合期一次都不读视野**：
+ *
+ * 1. `viewport` 存的是**State 对象本身**（不是 `by` 委托——委托的 `get` 就是组合期读），
+ *    手势与镜头请求只写 `viewport.value`，`Canvas` 的 draw lambda 只读 `.value`。
+ *    绘制期读状态只失效绘制，不重组，于是拖动 = 一帧一次 draw。
+ * 2. 瓦片清单由 `LaunchedEffect(tiles) { snapshotFlow { … } }` 在协程里算（`snapshotFlow` 的读取
+ *    登记的是快照依赖，不是组合依赖），`distinctUntilChanged` 挡掉「同视野重复算」，
+ *    `debounce` 把拖动中的连续变化收成一次请求。
+ * 3. 「停手」不再靠组合期计数：`settleSignal`（`MutableSharedFlow`）由手势 / 镜头 `tryEmit`，
+ *    收集侧 `debounce(SETTLE_DELAY_MS)` 后回报——语义与旧的「effect 被计数重启、静默 450ms 才跑完」
+ *    一致，但一次重组都不需要。
+ *
+ * 回调时机刻意保持不变：`onCameraApplied` 仍在镜头写入后**立即**回报；`onViewportMeasured`
+ * 仍在量到尺寸 / 停手时各报一次；`onCenterSettled` 读的仍是**收尾那一刻**的视野。
  */
+@OptIn(FlowPreview::class) // debounce：瓦片请求与停手判定都用它（FlowPreview API）
 @Composable
 fun BikeMapCanvas(
     input: BikeMapInput,
@@ -106,8 +133,11 @@ fun BikeMapCanvas(
     val gridColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
 
     // 视野只在建图时读一次 initialCenter / initialZoom（契约：它们「只在建图时读一次」）。
-    // 存着的级别 ≤ 0 按「没存过」处理：钳到下限会得到一张整个中国的地图，车在几百公里外
-    var viewport by remember {
+    // 存着的级别 ≤ 0 按「没存过」处理：钳到下限会得到一张整个中国的地图，车在几百公里外。
+    //
+    // **存 State 对象，不用 `by` 委托**：委托的 `get` 是组合期读，拖动时每帧都会让这段组合
+    // 失效一次（见类头 KDoc）。这里的约定是手势帧只写，绘制与 effect 体内才读 `.value`。
+    val viewport = remember {
         mutableStateOf(
             BikeMapViewport(
                 lat = input.initialCenter?.lat ?: BikeNearby.DEFAULT_CENTER_LAT,
@@ -118,95 +148,101 @@ fun BikeMapCanvas(
             ),
         )
     }
-    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
-    /** 每次用户拖 / 捏 / 镜头移动都 +1：`LaunchedEffect` 靠它重新起「停手」计时。 */
-    var gestureTick by remember { mutableStateOf(0) }
+    /** 画布尺寸（设备像素）：只由 `onSizeChanged` 写，只在 effect / 手势回调里读。 */
+    val canvasSize = remember { mutableStateOf(IntSize.Zero) }
+    /**
+     * 「停手」信号：用户拖 / 捏、镜头落位各 `tryEmit` 一次。
+     *
+     * 不用组合期计数（旧的 `gestureTick++`）：那意味着每帧重组一次、每帧重启一个 `LaunchedEffect`。
+     * `extraBufferCapacity = 1` + 丢最旧，连发时只留一次——收集侧只关心「还在不在动」。
+     * 无 replay：建图那一下不该凭空报一次「已停手」（旧实现在我 `gestureTick == 0` 时跳过）。
+     */
+    val settleSignal = remember {
+        MutableSharedFlow<Unit>(
+            extraBufferCapacity = 1,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+    }
     // 回调每次重组都可能换新实例，pointerInput(Unit) 里的闭包必须读最新的那份
     val latest = rememberUpdatedState(input)
     /** 命中半径（设备像素）：24dp 是拇指点得中又不吞邻点的档位。 */
     val hitRadiusPx = HIT_RADIUS_DP * density
 
-    // 可见瓦片：随视野与画布尺寸变（尺寸是设备像素，除以 density 换成 dp 尺度再算）。
-    // remember 的键不含 tiles 的 revision——到货不改变「该请求哪些」，只影响绘制。
-    val tileKeys = remember(tiles, viewport.lat, viewport.lng, viewport.zoom, canvasSize) {
-        if (tiles == null || canvasSize.width <= 0 || canvasSize.height <= 0) {
-            emptyList()
-        } else {
-            BikeMapTiles.visibleKeys(
-                centerLat = viewport.lat,
-                centerLng = viewport.lng,
-                zoom = viewport.zoom,
-                widthPx = canvasSize.width.toFloat(),
-                heightPx = canvasSize.height.toFloat(),
+    // 可见瓦片：**在协程里读视野**（`snapshotFlow` 的读取只登记快照依赖，不触发重组），
+    // 静默 TILE_DEBOUNCE_MS 才发一次请求——拖动中每帧都会重算，但连续变化被 debounce 收成一次。
+    // 首帧与尺寸变化都走同一条 flow：画布尺寸就是它的输入之一。
+    LaunchedEffect(tiles) {
+        val source = tiles ?: return@LaunchedEffect
+        snapshotFlow {
+            visibleKeysFor(
+                viewport = viewport.value,
+                widthPx = canvasSize.value.width.toFloat(),
+                heightPx = canvasSize.value.height.toFloat(),
             )
         }
+            .distinctUntilChanged()
+            .debounce(TILE_DEBOUNCE_MS)
+            .collectLatest { keys -> if (keys.isNotEmpty()) source.load(keys) }
     }
-    LaunchedEffect(tiles, tileKeys) {
-        if (tiles != null && tileKeys.isNotEmpty()) tiles.load(tileKeys)
+
+    // 视口尺寸是几何量，与「是不是用户动作」无关：量到布局就报一次（尺寸变了再报）。
+    // 尺寸仍然只在 `onSizeChanged` 里写；用 flow 读它，组合期不订阅。
+    LaunchedEffect(Unit) {
+        snapshotFlow { canvasSize.value }
+            .filter { it.width > 0 && it.height > 0 }
+            .collect {
+                latest.value.onViewportMeasured(halfDiagonalMetersFor(viewport.value, it))
+            }
+    }
+
+    // 「停手」回报：SETTLE_DELAY_MS 内没有新动作才算停（与 Android 的静默区同一意图）。
+    // 缩放变了半对角线也变，所以顺手再报一次视口——拖动过程中不必逐帧汇报。
+    // 声明在镜头 effect 之前：`settleSignal` 无 replay，先订上才不会漏掉建图那次的镜头落位。
+    LaunchedEffect(Unit) {
+        settleSignal
+            .debounce(SETTLE_DELAY_MS)
+            .collect {
+                val size = canvasSize.value
+                val settled = viewport.value
+                if (size.width > 0 && size.height > 0) {
+                    latest.value.onViewportMeasured(halfDiagonalMetersFor(settled, size))
+                }
+                latest.value.onCenterSettled(settled.lat, settled.lng, settled.zoom)
+            }
     }
 
     // 镜头请求：按 nonce 触发（同坐标连点两次也要动），执行完回报 onCameraApplied
     val camera = input.camera
     LaunchedEffect(camera?.nonce) {
         if (camera == null) return@LaunchedEffect
-        viewport = viewport.copy(
+        val current = viewport.value
+        viewport.value = current.copy(
             lat = camera.lat,
             lng = camera.lng,
-            zoom = camera.zoom?.takeIf { it > 0.0 }?.let(BikeMapProjection::clampZoom) ?: viewport.zoom,
+            zoom = camera.zoom?.takeIf { it > 0.0 }?.let(BikeMapProjection::clampZoom)
+                ?: current.zoom,
         )
-        gestureTick++
+        settleSignal.tryEmit(Unit)
         latest.value.onCameraApplied(camera.nonce)
     }
 
-    // 视口尺寸是几何量，与「是不是用户动作」无关：量到布局就报一次（尺寸变了再报）
-    LaunchedEffect(canvasSize) {
-        val width = canvasSize.width
-        val height = canvasSize.height
-        if (width <= 0 || height <= 0) return@LaunchedEffect
-        latest.value.onViewportMeasured(
-            BikeMapProjection.halfDiagonalMeters(
-                lat = viewport.lat,
-                zoom = viewport.zoom,
-                widthPx = width.toFloat(),
-                heightPx = height.toFloat(),
-            ),
-        )
-    }
-
-    // 「停手」回报：文档等 SETTLE_DELAY_MS 没有新动作才算停（与 Android 的静默区同一意图）。
-    // 缩放变了半对角线也变，所以顺手再报一次视口——拖动过程中不必逐帧汇报。
-    LaunchedEffect(gestureTick) {
-        if (gestureTick == 0) return@LaunchedEffect
-        delay(SETTLE_DELAY_MS)
-        val width = canvasSize.width
-        val height = canvasSize.height
-        if (width > 0 && height > 0) {
-            latest.value.onViewportMeasured(
-                BikeMapProjection.halfDiagonalMeters(
-                    lat = viewport.lat,
-                    zoom = viewport.zoom,
-                    widthPx = width.toFloat(),
-                    heightPx = height.toFloat(),
-                ),
-            )
-        }
-        latest.value.onCenterSettled(viewport.lat, viewport.lng, viewport.zoom)
-    }
-
     val gestures = Modifier
-        .onSizeChanged { canvasSize = it }
+        .onSizeChanged { canvasSize.value = it }
         .pointerInput(Unit) {
             detectTapGestures { offset ->
-                val width = canvasSize.width.toFloat()
-                val height = canvasSize.height.toFloat()
+                val size = canvasSize.value
+                val width = size.width.toFloat()
+                val height = size.height.toFloat()
                 if (width <= 0f || height <= 0f) return@detectTapGestures
                 val data = latest.value
                 val tapped = BikeMapPoint(offset.x, offset.y)
+                // 一次点击内视野不会变（这一笔手势里没有写视野的代码），读一次与逐次读等价
+                val current = viewport.value
                 fun screenOf(lat: Double, lng: Double): BikeMapPoint =
                     BikeMapProjection.toScreen(
-                        centerLat = viewport.lat,
-                        centerLng = viewport.lng,
-                        zoom = viewport.zoom,
+                        centerLat = current.lat,
+                        centerLng = current.lng,
+                        zoom = current.zoom,
                         lat = lat,
                         lng = lng,
                         widthPx = width,
@@ -247,23 +283,24 @@ fun BikeMapCanvas(
                 val panned = pan != Offset.Zero
                 val pinched = zoom != 1f
                 if (!panned && !pinched) return@detectTransformGestures
+                val current = viewport.value
                 val shifted = if (panned) {
                     BikeMapProjection.shiftCenter(
-                        centerLat = viewport.lat,
-                        centerLng = viewport.lng,
+                        centerLat = current.lat,
+                        centerLng = current.lng,
                         dxPx = pan.x.toDouble(),
                         dyPx = pan.y.toDouble(),
-                        zoom = viewport.zoom,
+                        zoom = current.zoom,
                     )
                 } else {
                     null
                 }
-                viewport = viewport.copy(
-                    lat = shifted?.lat ?: viewport.lat,
-                    lng = shifted?.lng ?: viewport.lng,
-                    zoom = BikeMapProjection.zoomAfterPinch(viewport.zoom, zoom),
+                viewport.value = current.copy(
+                    lat = shifted?.lat ?: current.lat,
+                    lng = shifted?.lng ?: current.lng,
+                    zoom = BikeMapProjection.zoomAfterPinch(current.zoom, zoom),
                 )
-                gestureTick++
+                settleSignal.tryEmit(Unit)
                 // 单指拖图 = 用户接管镜头（页面据此退出「跟着用户走」）
                 if (panned) latest.value.onUserPan()
             }
@@ -280,14 +317,17 @@ fun BikeMapCanvas(
         if (widthPx <= 0f || heightPx <= 0f) return@Canvas
         // 投影用**设备像素**：口径与 Android 高德一致（zoom 17 一屏约 1.2 km，正好装下校区），
         // 不要改成 dp 尺度——那会让同一 zoom 级别在 3x 屏上放大三倍，和 Android 对不上。
-        val zoom = viewport.zoom
-        val metersPerPixel = BikeMapProjection.metersPerPixel(viewport.lat, zoom)
+        //
+        // `viewport.value` 在**绘制期**读：手势帧只让这块绘制失效，不重建这段组合（见类头 KDoc）。
+        val vp = viewport.value
+        val zoom = vp.zoom
+        val metersPerPixel = BikeMapProjection.metersPerPixel(vp.lat, zoom)
         val colors = input.colors
         val cullMargin = CULL_MARGIN_DP.dp.toPx()
 
         fun project(lat: Double, lng: Double): BikeMapPoint = BikeMapProjection.toScreen(
-            centerLat = viewport.lat,
-            centerLng = viewport.lng,
+            centerLat = vp.lat,
+            centerLng = vp.lng,
             zoom = zoom,
             lat = lat,
             lng = lng,
@@ -315,12 +355,14 @@ fun BikeMapCanvas(
             if (revision < 0) {
                 emptyList()
             } else {
-                tileKeys.mapNotNull { key -> tileSource.cached(key)?.let { key to it } }
+                // 「画哪些」与「拉哪些」共用同一个纯函数：请求到的就是画得到的
+                visibleKeysFor(vp, widthPx, heightPx)
+                    .mapNotNull { key -> tileSource.cached(key)?.let { key to it } }
             }
         }
         if (readyTiles.isEmpty()) {
             drawScaleGrid(
-                viewport = viewport,
+                viewport = vp,
                 metersPerPixel = metersPerPixel,
                 widthPx = widthPx,
                 heightPx = heightPx,
@@ -335,8 +377,8 @@ fun BikeMapCanvas(
             readyTiles.forEach { (key, image) ->
                 val corner = BikeMapTiles.tileTopLeft(
                     key = key,
-                    centerLat = viewport.lat,
-                    centerLng = viewport.lng,
+                    centerLat = vp.lat,
+                    centerLng = vp.lng,
                     zoom = zoom,
                     widthPx = widthPx,
                     heightPx = heightPx,
@@ -545,6 +587,38 @@ fun BikeMapCanvas(
 }
 
 /**
+ * 「这个视野 + 这个画布尺寸要哪些瓦片」的唯一算法。
+ *
+ * 两处共用：绘制期算**要画哪些**（`Canvas` 的 draw lambda）、瓦片请求 flow 算**要拉哪些**。
+ * 也是 `distinctUntilChanged` 的前提——它必须是**纯函数**：同输入同输出、结果可比。
+ * 掺进时间 / 随机数 / 可变状态，拖动时就会每帧都判定「视野变了」，把去重和节流全废掉
+ * （`app/src/test/.../BikeMapTilesTest.kt` 有一条用例钉这一点）。
+ */
+private fun visibleKeysFor(
+    viewport: BikeMapViewport,
+    widthPx: Float,
+    heightPx: Float,
+): List<BikeTileKey> {
+    if (widthPx <= 0f || heightPx <= 0f) return emptyList()
+    return BikeMapTiles.visibleKeys(
+        centerLat = viewport.lat,
+        centerLng = viewport.lng,
+        zoom = viewport.zoom,
+        widthPx = widthPx,
+        heightPx = heightPx,
+    )
+}
+
+/** 半对角线（米）：`onViewportMeasured` 报的就是这个量，两处回报共用一个算式。 */
+private fun halfDiagonalMetersFor(viewport: BikeMapViewport, size: IntSize): Double =
+    BikeMapProjection.halfDiagonalMeters(
+        lat = viewport.lat,
+        zoom = viewport.zoom,
+        widthPx = size.width.toFloat(),
+        heightPx = size.height.toFloat(),
+    )
+
+/**
  * 尺度网格。经 / 纬两条方向都画，间距取 [BikeMapProjection.gridStepMeters] 那一档，
  * 网格线按世界坐标对齐（拖动时线跟着地图走，不会像屏幕坐标网格那样原地闪烁）。
  *
@@ -735,6 +809,16 @@ private const val CULL_MARGIN_DP = 48f
 
 /** 「停手」判定的静默时长（毫秒）：比 Android 的 400ms 稍长，给捏合留下一口气。 */
 private const val SETTLE_DELAY_MS = 450L
+
+/**
+ * 瓦片请求的静默时长（毫秒）：拖动中每帧都会重算视野，连续变化靠它收成一次请求。
+ * 取 120ms 是「手指换向 / 短暂停顿」与「一屏十几块瓦片别被反复取消」之间的折中——
+ * 比 [SETTLE_DELAY_MS] 短，所以先补瓦片、再报停手。
+ *
+ * 代价：**首次请求也晚 120ms**（`debounce` 对第一次发射一视同仁），首屏多一帧网格。
+ * 换来的是拖动期间不再每帧重启一次取图（旧实现是 `LaunchedEffect(tiles, tileKeys)` 被重启）。
+ */
+private const val TILE_DEBOUNCE_MS = 120L
 
 private const val CLUSTER_RADIUS_DP = 12f
 private const val CLUSTER_SELECTED_RADIUS_DP = 15f
