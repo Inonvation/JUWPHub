@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
@@ -290,6 +293,10 @@ private fun IosRoot(services: IosServices) {
                             //
                             // **读在绘制期**：`drawerCardTransform` 内部把它放在 `graphicsLayer` 的
                             // lambda 里求值，侧栏拖动时不会让整棵页面树重组。
+                            // 安全区：整块窗口已经 ignoresSafeArea，这里把内容让进状态栏 / home
+                            // indicator 之间；ackground 在上面先画，所以底色仍然铺满整屏，
+                            // 露不出窗口白底（2026-11-26 真机「上下白边」的修法）。
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
                             .drawerCardTransform(cardTransform) {
                                 if (drawerWidthPx > 0f) {
                                     1f + drawerState.currentOffset / drawerWidthPx

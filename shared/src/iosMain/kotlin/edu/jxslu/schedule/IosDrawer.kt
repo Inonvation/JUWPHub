@@ -6,15 +6,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -245,8 +249,13 @@ internal fun IosDrawer(
         onOpenRide = { onPick(IosRoute(SubpageScreen.RIDE)) },
     )
 
-    ModalDrawerSheet(modifier = Modifier.width(IosDrawerWidth)) {
-        Column(Modifier.fillMaxSize()) {
+    // 面板铺满整屏高度（窗口已 ignoresSafeArea）：合上时看不见，展开时状态栏那一条
+    // 也是面板底色，不会露出窗口白底。内容自己再让出安全区（下面那个 Column）。
+    ModalDrawerSheet(
+        modifier = Modifier.width(IosDrawerWidth).fillMaxHeight(),
+        windowInsets = WindowInsets(0, 0, 0, 0),
+    ) {
+        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
             // 上半区（身份卡 / 账号与登录 / 我的·设置 / 钱包卡）也放进 `LazyColumn`：
             // Android 的侧栏是「整列滚动、底部付款码钉住」，段头与钱包区跟着内容一起滚。
             // 把它们钉在列表外面会让小屏上的列表只剩半屏——那是排版差异，不是平台差异。

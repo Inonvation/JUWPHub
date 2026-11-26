@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -571,6 +572,13 @@ internal fun IosRouteContent(
                         prefs = services.displayPrefs(),
                         db = services.database(),
                     )
+                }
+                // 付款码页把屏幕提到最亮（扫码枪对亮度敏感），离开时写回进页前的值。
+                // iOS 没有窗口级亮度，只能改系统亮度，所以**必须**自己还原，见 IosScreenBrightness.kt。
+                // 这里用全限定名，省掉两条 import：本文件已经很长，导入块按包名分组排得很紧。
+                DisposableEffect(Unit) {
+                    val previous = edu.jxslu.schedule.ui.campus.raiseScreenBrightnessForPayCode()
+                    onDispose { edu.jxslu.schedule.ui.campus.restoreScreenBrightness(previous) }
                 }
                 PayCodeScreen(
                     viewModel = vm,

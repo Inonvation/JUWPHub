@@ -10,7 +10,13 @@ struct iOSApp: App {
     var body: some Scene {
         WindowGroup {
             ComposeContainer()
-                .ignoresSafeArea(.keyboard) // Compose 自己处理键盘避让，交给它
+                // Compose 独占整块窗口（含状态栏与 home indicator 两条安全区）：
+                // 不忽略安全区的话，SwiftUI 会把 VC 塞进安全区里，外面露出窗口白底——
+                // 真机上就是「最上方和最下方各一条白边」，抽屉面板也因此够不到顶。
+                // 安全区改由 Compose 自己消费（`IosRoot` 的 windowInsetsPadding）。
+                .ignoresSafeArea()
+                // 键盘避让仍然交给 Compose（它有 IME insets）
+                .ignoresSafeArea(.keyboard)
         }
     }
 }
