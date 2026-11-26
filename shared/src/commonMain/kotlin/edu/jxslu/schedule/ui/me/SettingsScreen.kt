@@ -98,6 +98,14 @@ fun SettingsScreen(
      * 可空回调（`onOpen` 恒非空，挡不住清单里的一行）。
      */
     showWidget: Boolean = true,
+    /**
+     * 「全部功能」入口（iOS 专用，2026-11-26 晚）：null = 本平台没有这一页。
+     *
+     * iOS 此前把整份二级页清单放在侧栏一行「全部功能」里，用户反馈侧栏多了这一行。
+     * 清单本身仍然有用（它是唯一一份「所有二级页在哪」的目录），所以入口搬到这里，
+     * 不再占侧栏。Android 侧栏本来就没有这一页（它靠分组站点地图），传默认 null 即可。
+     */
+    onOpenAllFeatures: (() -> Unit)? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -271,6 +279,14 @@ fun SettingsScreen(
             }
 
             SettingsSection(title = "关于") {
+                if (onOpenAllFeatures != null) {
+                    SettingItem(
+                        title = "全部功能",
+                        subtitle = "所有二级页的完整清单（课表 / 教务 / 钱包 / 生活 / 设置）",
+                        icon = AppIcons.Menu01,
+                        onClick = onOpenAllFeatures,
+                    )
+                }
                 SettingItem(
                     title = "关于与更新",
                     subtitle = "版本 v${Services.current.appVersion()} · 检查更新 · 自动检查",

@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -28,15 +30,12 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarDefaults
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -70,6 +69,7 @@ import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.platform.installCrashHook
 import edu.jxslu.schedule.ui.common.AppBackHandler
+import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.drawerCardTransform
 import edu.jxslu.schedule.ui.common.rememberDrawerCardTransform
 import edu.jxslu.schedule.ui.icon.AppIcons
@@ -173,9 +173,17 @@ private fun IosRoot(services: IosServices) {
         // 全 App 唯一的字形缩放覆盖点。
         ProvideFixedFontScale(locked = fontScaleLocked) {
             var jwOpen by remember { mutableStateOf(false) }
-            // 「全部功能」页（2026-11-26 抽屉瘦身）：本地覆盖层，与 jwOpen 同一做法，不新增路由枚举。
+            // 「全部功能」页：iOS 独有，入口挂在设置首页（2026-11-26 晚，侧栏不再有那一行）。
             var showAllFeatures by remember { mutableStateOf(false) }
+            // 「我的 · 设置」覆盖层（2026-11-26 晚，用户报「进设置页后没办法返回」）：
+            // 它原来是一个不在底栏的 Tab，切过去就退不回来。现在叠在当前 Tab 之上、带返回键；
+            // 设置里再进二级页时，页面压在设置之上（`IosOverlayStack`），返回逐层退出。
+            var meOpen by remember { mutableStateOf(false) }
             var tab by remember { mutableStateOf(IosTab.Today) }
+            // 悬浮底栏的展示数据：三格与枚举同序，选中项按索引映射回枚举
+            val barItems = remember { IosTab.entries.map { IosBarItem(it.label, it.icon) } }
+            // 底部安全区（home indicator）：主分支由悬浮底栏自己吃，覆盖层分支自己让位
+            val bottomInset = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)
             // 二级页栈：Android 是 SubpageActivity 的任务栈，iOS 用一份列表顶上（见 IosNavigation.kt）
             val stack = remember { mutableStateListOf<IosRoute>() }
             // 左侧抽屉（2026-11-25 晚改版）：交给 Material3 的 `ModalNavigationDrawer`，
@@ -244,16 +252,45 @@ private fun IosRoot(services: IosServices) {
                     jwLogin = onboardingJwLogin,
                     onOpenJwLogin = { jwOpen = true },
                 )
-            } else if (showAllFeatures) {
-                // 「全部功能」覆盖层：原来抽屉里那六段站点地图整份搬到这里，
-                // 抽屉回到 Android 那条短面板（见 IosAllFeatures.kt）。
-                IosAllFeaturesScreen(
-                    onBack = { showAllFeatures = false },
-                    onPick = { route ->
-                        showAllFeatures = false
-                        pushRoute(route)
-                    },
-                )
+            } else if (meOpen) {
+                // 设置覆盖层（2026-11-26 晚）：根是设置首页（或「全部功能」目录），二级页压在它
+                // 上面。返回逐层退：二级页 → 设置 / 全部功能 → 原来的 Tab。
+                //
+                // 为什么不是「新增一个 Tab」：用户报的就是「进设置后没办法返回」——Tab 切换没有
+                // 返回语义。为什么不是 `SubpageScreen` 路由：那是两端共用的枚举，Android 没有
+                // 「设置」这一页（它是独立窗口），往枚举里塞 iOS 专属值会污染 Android 的 when。
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(bottomInset),
+                ) {
+                    IosOverlayStack(
+                        stack = stack,
+                        services = services,
+                        meViewModel = meViewModel,
+                        push = pushRoute,
+                        pop = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) },
+                        root = {
+                            if (showAllFeatures) {
+                                IosAllFeaturesScreen(
+                                    onBack = { showAllFeatures = false },
+                                    onPick = { route -> pushRoute(route) },
+                                )
+                            } else {
+                                SettingsScreen(
+                                    onOpen = { screen -> pushRoute(IosRoute(screen)) },
+                                    viewModel = meViewModel,
+                                    onBack = { meOpen = false },
+                                    // 侧栏那行「全部功能」删掉之后，目录挂到这里（唯一入口）
+                                    onOpenAllFeatures = { showAllFeatures = true },
+                                    showAiSchedule = false,
+                                    showToolbox = false,
+                                    showWidget = false,
+                                )
+                            }
+                        },
+                    )
+                }
             } else {
                 ModalNavigationDrawer(
                     drawerState = drawerState,
@@ -282,15 +319,14 @@ private fun IosRoot(services: IosServices) {
                                 shellScope.launch { drawerState.close() }
                                 pushRoute(route)
                             },
-                            // 「我的 / 设置」那一行：Android 的侧栏里也是这一行进设置首页，
-                            // 不是底栏。切换完顺手关抽屉。
-                            onOpenAllFeatures = {
-                                shellScope.launch { drawerState.close() }
-                                showAllFeatures = true
-                            },
+                            // 「我的 · 设置」：底部左下角那颗齿轮（与 Android 侧栏同一处）。
+                            // 2026-11-26 晚起是**覆盖层**而不是 Tab：切完关抽屉，返回键回原 Tab。
+                            // 进设置前把「全部功能 / 二级页」状态清干净，覆盖层永远从设置首页开始。
                             onOpenMe = {
                                 shellScope.launch { drawerState.close() }
-                                tab = IosTab.Me
+                                stack.clear()
+                                showAllFeatures = false
+                                meOpen = true
                             },
                         )
                     },
@@ -310,10 +346,16 @@ private fun IosRoot(services: IosServices) {
                             //
                             // **读在绘制期**：`drawerCardTransform` 内部把它放在 `graphicsLayer` 的
                             // lambda 里求值，侧栏拖动时不会让整棵页面树重组。
-                            // 安全区：整块窗口已经 ignoresSafeArea，这里把内容让进状态栏 / home
-                            // indicator 之间；ackground 在上面先画，所以底色仍然铺满整屏，
-                            // 露不出窗口白底（2026-11-26 真机「上下白边」的修法）。
-                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            //
+                            // 安全区（2026-11-26 晚改）：只让**顶部与左右**（状态栏 / 刘海），
+                            // 底部留给悬浮底栏自己吃。此前整块 `safeDrawing` 让位把 home indicator
+                            // 那条留给了「页面背景」，底栏是实心 M3 条，两者之间露出一条白边
+                            //（用户截图报的「下方还有白边」）。现在内容铺到屏幕底、底栏浮在上面。
+                            .windowInsetsPadding(
+                                WindowInsets.safeDrawing.only(
+                                    WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
+                                ),
+                            )
                             .drawerCardTransform(cardTransform) {
                                 if (drawerWidthPx > 0f) {
                                     1f + drawerState.currentOffset / drawerWidthPx
@@ -323,18 +365,26 @@ private fun IosRoot(services: IosServices) {
                                 }
                             },
                     ) {
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                    ) {
+                    Box(Modifier.fillMaxSize()) {
                         // 二级页栈与根层 Tab 合成**一个** AnimatedContent：`null` 就是根层。
                         // 键取「深度 + 栈顶」而不是 `stack` 本身——`mutableStateListOf` 没有结构相等，
                         // 拿它当键永远判成"没变"。
+                        //
+                        // 悬浮底栏的净空：根层给 `IosBottomBarClearance`（页面把最后一屏内容顶出
+                        // 胶囊），二级页没有底栏、给 0（改成底部安全区让位，见下面的 modifier）。
+                        CompositionLocalProvider(
+                            LocalBottomBarClearance provides
+                                if (stack.isEmpty()) IosBottomBarClearance else 0.dp,
+                        ) {
                         AnimatedContent(
                             targetState = stackShape,
-                            // 铺满：滑入的位移量按容器宽度算（`{ it }` 就是整屏），不铺满会滑不到位
-                            modifier = Modifier.fillMaxSize(),
+                            // 铺满：滑入的位移量按容器宽度算（`{ it }` 就是整屏），不铺满会滑不到位。
+                            // 二级页没有底栏：这里补上底部安全区，内容不进 home indicator。
+                            modifier = if (stack.isEmpty()) {
+                                Modifier.fillMaxSize()
+                            } else {
+                                Modifier.fillMaxSize().windowInsetsPadding(bottomInset)
+                            },
                             transitionSpec = {
                                 // 浅了是 pop、深了是 push。同一深度换页（不经过根层）也算 push。
                                 if (targetState.first > initialState.first) {
@@ -603,100 +653,102 @@ private fun IosRoot(services: IosServices) {
                                             TeachingEvalScreen(onBack = { evalOpen = false })
                                         }
                                         }
-
-                                        // 「我的」= 设置首页（S17 搬进共享层）。**不在底栏**，从抽屉进。
-                                        // 每个入口都 push 一个路由，没搬的页面落在 IosNotPortedScreen。
-                                        IosTab.Me -> SettingsScreen(
-                                            onOpen = { screen -> pushRoute(IosRoute(screen)) },
-                                            viewModel = meViewModel,
-                                            // 顶栏左侧汉堡 → 左侧抽屉。这一页在 iOS 上是根 Tab（没有返回键），
-                                            // 所以 navigationIcon 位归汉堡；`onBack` 不传 = null
-                                            onOpenDrawer = openDrawer,
-                                            // 精简版：AI 调课与百宝箱整块下线，两行不渲染；
-                                            // 桌面小组件是 Glance（Android 的 Compose-for-appwidget），
-                                            // iOS 要 Swift 扩展 target + App Group，本轮不做 → 整行不渲染
-                                            showAiSchedule = false,
-                                            showToolbox = false,
-                                            showWidget = false,
-                                        )
                                     }
                                 }
                             }
                         }
                     }
-                    // 底栏只在根层出现：二级页有自己的返回键，再压一条底栏会把返回路径搞混。
-                    // 三格 = 今日 / 课表 / 教务，与 Android `AppBottomBar` 逐格对齐；
-                    // 「我的」不在底栏（`inBottomBar = false`），从左侧抽屉进，与 Android 一致。
-                    // 显隐走淡入淡出（`Motion.state()`，与 Android 壳层收底栏那一处同一档）：
-                    // 硬切的话，退栈时底栏会在页面滑走之前先蹦出来。
+                    // 悬浮底栏（2026-11-26 晚，用户要求液态玻璃 + 修白边）：
+                    // 只在根层出现（二级页有自己的返回键），**盖在内容之上**而不是把内容挤上去——
+                    // 这样 home indicator 那条不再露出一块与底栏不同的底色，内容也能从胶囊边缘透出来。
+                    // 内容让位靠 `LocalBottomBarClearance`（上面那层 CompositionLocalProvider）。
+                    // 显隐走淡入淡出（`Motion.state()`）：硬切的话退栈时底栏会先蹦出来。
                     AnimatedVisibility(
                         visible = stack.isEmpty(),
                         enter = fadeIn(Motion.state()),
                         exit = fadeOut(Motion.state()),
+                        modifier = Modifier.align(Alignment.BottomCenter),
                     ) {
-                        // 选中主色 / 未选中 `onSurface` 0.6（用户口径）；指示块仍是 M3 默认的
-                        // `secondaryContainer` 胶囊，与 Android 的选中块同一族。
-                        val selectedTint = MaterialTheme.colorScheme.primary
-                        val unselectedTint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                        NavigationBar(
-                            // 底色与高度跟 Android 的 `AppBottomBar` 走同一套 token
-                            // （`NavigationBarDefaults.containerColor` / `.Elevation`）：
-                            // 上一版写死 `colorScheme.surface`，浅色下底栏和页面连成一片，
-                            // 看起来像「没有底栏」——这正是「外形粗糙」里最明显的一条。
-                            containerColor = NavigationBarDefaults.containerColor,
-                            tonalElevation = NavigationBarDefaults.Elevation,
-                        ) {
-                            IosTab.entries.filter { it.inBottomBar }.forEach { entry ->
-                                NavigationBarItem(
-                                    selected = tab == entry,
-                                    onClick = { tab = entry },
-                                    icon = {
-                                        Icon(
-                                            imageVector = entry.icon,
-                                            contentDescription = entry.label,
-                                        )
-                                    },
-                                    label = { Text(entry.label) },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = selectedTint,
-                                        selectedTextColor = selectedTint,
-                                        unselectedIconColor = unselectedTint,
-                                        unselectedTextColor = unselectedTint,
-                                    ),
-                                )
-                            }
-                        }
+                        IosFloatingTabBar(
+                            items = barItems,
+                            selectedIndex = IosTab.entries.indexOf(tab),
+                            onSelect = { index -> tab = IosTab.entries[index] },
+                        )
                     }
-                    }
-                }
+                    } // 关闭 CompositionLocalProvider（底栏净空）
+                } // 关闭 Box（内容 + 悬浮底栏）
+            } // 关闭 Column（主卡）
+        } // 关闭 ModalNavigationDrawer 的 content
+    } // 关闭 ProvideFixedFontScale
+} // 关闭 JuwTheme
+} // 关闭 IosRoot
+
+/**
+ * 覆盖层里的二级页栈（2026-11-26 晚）：根是「设置首页」或「全部功能」，点进去的页面压在
+ * 根之上；返回逐层退到根，最后的返回由根自己的 `onBack` 关掉覆盖层。
+ *
+ * 为什么不复用主分支那一段：主分支的栈**包在抽屉里**（手势、卡片缩放、底栏都在外层），
+ * 覆盖层没有抽屉也没有底栏，硬塞进去会让「主卡变换」跟着覆盖层一起算。
+ *
+ * 键与转场和主分支同一份口径（深度 + 栈顶；深了 push、浅了 pop）。
+ */
+@Composable
+private fun IosOverlayStack(
+    stack: MutableList<IosRoute>,
+    services: IosServices,
+    meViewModel: MeViewModel,
+    push: (IosRoute) -> Unit,
+    pop: () -> Unit,
+    root: @Composable () -> Unit,
+) {
+    val shape = stack.size to stack.lastOrNull()
+    AnimatedContent(
+        targetState = shape,
+        modifier = Modifier.fillMaxSize(),
+        transitionSpec = {
+            if (targetState.first > initialState.first) {
+                (slideInHorizontally(Motion.page()) { it } + fadeIn(Motion.page()))
+                    .togetherWith(fadeOut(Motion.exit()))
+            } else {
+                fadeIn(Motion.exit()).togetherWith(
+                    slideOutHorizontally(Motion.pageExit()) { it } + fadeOut(Motion.pageExit()),
+                )
             }
+        },
+        label = "IosOverlayStack",
+    ) { state ->
+        val route = state.second
+        if (route != null) {
+            IosRouteContent(
+                route = route,
+                services = services,
+                meViewModel = meViewModel,
+                push = push,
+                pop = pop,
+            )
+        } else {
+            root()
         }
     }
 }
 
 /**
- * iOS 的 Tab 清单（2026-11-25 晚，用户指定）。
+ * iOS 的 Tab 清单（2026-11-25 晚，用户指定；2026-11-26 晚去掉了「我的」）。
  *
  * **底栏三格 = 今日 / 课表 / 教务**，与 Android `MainActivity.AppBottomBar` 逐格对齐
  * （`Calendar01` / `Book01` / `School01`，图标名在 `shared/.../ui/icon/AppIcons.kt` 里查得到）。
  *
- * 「我的」不在底栏：Android 那边它是**左侧抽屉里的一行**，iOS 现在也照这个走——
- * [inBottomBar] = false 让它只从抽屉进。这不是降级：设置首页在 Android 上本来也不是 Tab，
- * 上一版把它放进底栏是我自己的取舍，与用户要的「对齐 Android」不符。
- *
- * 抽屉里点「我的」→ `tab = IosTab.Me`；用户再点底栏任一格就离开。底栏那一排在「我的」页
- * 仍然渲染（三格都不高亮），因为 iOS 没有 Android 的独立 SettingsActivity 窗口可以退回去。
+ * 「我的」不再是 Tab：它是一个**从侧栏左下角齿轮进的覆盖层**（`meOpen`），带返回键。
+ * 之前把它做成 `inBottomBar = false` 的 Tab，切过去就退不回来——用户报的「进设置页后
+ * 没办法返回」就是这一条。设置里再进二级页时页面压在设置之上，返回逐层退。
  */
 private enum class IosTab(
     val label: String,
     val icon: ImageVector,
-    /** 是否出现在底部导航栏。false = 只能从左侧抽屉进。 */
-    val inBottomBar: Boolean = true,
 ) {
     Today("今日", AppIcons.Calendar01),
     Week("课表", AppIcons.Book01),
     Jw("教务", AppIcons.School01),
-    Me("我的", AppIcons.UserAccount, inBottomBar = false),
 }
 
 /**

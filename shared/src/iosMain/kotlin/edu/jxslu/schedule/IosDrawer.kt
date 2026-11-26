@@ -102,7 +102,6 @@ internal val IOS_DRAWER_QUICK_SCREENS: Set<SubpageScreen> = setOf(
  * |---|---|---|
  * | 顶部 | 身份卡（头像 + 姓名 + 遮罩学号 + 班级，整块进学籍信息） | `DrawerHeader` |
  * | 其下 | 账号与登录 → 账号中心 | `AccountRow` |
- * | 其下 | 「全部功能」（二级页清单） | `DrawerRow` |
  * | 钱包卡 | 校园卡余额 / 电子账户 / 寝室电费 | `WalletHero` + `walletCardTexts` |
  * | 江水生活 | 一卡通账号 / 胖乖生活（开水）/ U净 + 白名单里同段的其余行 —— 缺服务的行整行不渲染 | `lifeServiceRows` + [CompactDrawerRow] |
  * | 二级页 | 白名单里「江水生活」段剩下的页（洗衣账单），接在服务行后面 | `LazyColumn` |
@@ -113,16 +112,6 @@ internal val IOS_DRAWER_QUICK_SCREENS: Set<SubpageScreen> = setOf(
  * `IosRouteContent` 的渲染分支（那是另一条并行流的地盘），抽屉是纯排版组装，混在一起
  * 既超长又容易撞车。
  *
- * ## 2026-11-26 设置入口移到左下角（用户指定，与 Android 一致）
- *
- * 此前 iOS 把设置做成列表里的一行「我的 · 设置」（理由是「头像是我的」），Android 则是
- * 底部一颗齿轮。同一件事两种排法，用户从 Android 换过来要重新找。现在对齐成 Android 那条：
- * **设置只从底部左下角进**，列表里那一行删除——同一条落点只留一处入口，这也是 Android
- * 侧栏的规矩（`SideDrawer.kt` 底部 `SettingsEntry` + `PaymentCodeEntry` 一行两侧）。
- *
- * iOS 的「我的」不在底栏（三格只有今日 / 课表 / 教务），所以这颗齿轮是**唯一**入口；
- * 删行时必须同时把 `onOpenMe` 接到齿轮上，否则设置页在 iOS 上就不可达了。
- *
  * ## 2026-11-26 与 Android 侧栏逐项对齐（三处，都是「iOS 自己多出来的东西」）
  *
  * 1. **「江水生活」只起一次段头**。白名单里这一段的二级页（洗衣账单）原先在下面又开一段，
@@ -132,6 +121,17 @@ internal val IOS_DRAWER_QUICK_SCREENS: Set<SubpageScreen> = setOf(
  *    （Android 收尾是 `Spacer(Modifier.height(16.dp))`）。原先上下各 8dp，头上多 8、尾上少 8。
  * 3. **删掉 `DrawerDivider`**：Android 侧栏没有分隔线（靠段头与留白分段），那是 iOS 侧自己
  *    加的一条线；`ModalDrawerSheet` 底色与 Android 一样是 `surfaceContainerLow`，不缺层级。
+ *
+ * ## 2026-11-26 晚：设置入口归位 + 「全部功能」搬进设置
+ *
+ * 1. **设置只从底部左下角进**（用户指定，与 Android 同构）：此前 iOS 把设置做成列表里的
+ *    一行「我的 · 设置」，Android 是底部一颗齿轮；同一件事两种排法，换设备就要重新找。
+ *    现在列表里那一行删除，齿轮接 `onOpenMe`——iOS 的「我的」不在底栏（三格只有今日 /
+ *    课表 / 教务），所以这颗齿轮是**唯一**入口，删行与接齿轮必须同时改。
+ * 2. **「全部功能」这一行也删了**（用户口径「侧栏多余」）：二级页目录搬到设置首页的
+ *    「关于」节（`SettingsScreen(onOpenAllFeatures = …)`）。侧栏因此只剩：身份卡 /
+ *    账号与登录 / 钱包卡 / 江水生活 / 底栏「设置」+「付款码」。
+ * 3. 「江水生活」只起一次段头；列表首尾留白按 Android 的数；不画分隔线（见上）。
  *
  * ## 手势与遮罩
  *
@@ -177,8 +177,6 @@ internal fun IosDrawer(
      * 两端的入口位置不一致，用户换个设备就要重新找。
      */
     onOpenMe: () -> Unit,
-    /**「全部功能」那一行：整份二级页清单搬到 [IosAllFeaturesScreen]（2026-11-26 抽屉瘦身）。*/
-    onOpenAllFeatures: () -> Unit,
 ) {
     val entries = remember { iosDrawerEntries() }
     // 「江水生活」是**唯一分成两半**的段：服务行（共享层的 `lifeServiceRows`）在钱包卡下面渲染，
@@ -296,15 +294,6 @@ internal fun IosDrawer(
                 item(key = "account") {
                     // 账号与登录：Android 身份卡正下方那一行（这里进账号中心，与 Android 同落点）
                     AccountRow(onClick = { onPick(IosRoute(SubpageScreen.ACCOUNTS)) })
-                }
-                item(key = "all-features") {
-                    // 「全部功能」：Android 的侧栏里没有这一行，但 iOS 需要它来承接原来那六段
-                    // 站点地图（学习 / 教务 / 钱包 / 生活 / 设置 / 账号），见 IosAllFeatures.kt。
-                    DrawerRow(
-                        label = "全部功能",
-                        icon = AppIcons.Menu01,
-                        onClick = onOpenAllFeatures,
-                    )
                 }
                 item(key = "wallet") {
                     // 钱包卡：三格文案走共享层的 `walletCardTexts`，视觉与 Android 逐像素同源。
