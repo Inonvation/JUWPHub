@@ -1,11 +1,5 @@
 package edu.jxslu.schedule.ui.toolbox
 
-import android.graphics.Bitmap
-import android.net.Uri
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,23 +39,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.StitchScan
+import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppCardDivider
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.GallerySaveResult
+import edu.jxslu.schedule.ui.common.GallerySaveOutcome
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SettingChoiceRow
-import edu.jxslu.schedule.ui.common.decodeUriSampled
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.showNotice
 import edu.jxslu.schedule.ui.icon.AppIcons
+import edu.jxslu.schedule.ui.platform.PickedImage
+import edu.jxslu.schedule.ui.platform.rememberImagePicker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -78,21 +73,32 @@ private const val StitchSourceLongSide = 2600
 
 /**
  * 图片拼接（DESIGN §4.47，等宽归一的竖拼；原版「一个木函」会顺手裁掉上下边缘，
- * 那是给滚动接缝留的，本项目不做——上下裁边会裁掉真实内容）。
+ * 那是给滚动接缝留的，本项目不做——上下裁边会裁掉真实内容）。iOS 移植 V4 搬进共享层。
  *
- * 内存纪律：只先读各图尺寸（不占像素内存）→ 算目标宽与总高 → 逐张解码、画、回收
- * （[ToolboxRenderer.stitchStreaming]），任意时刻只有一张源图 + 一张成品在内存里。
+ * 内存纪律：只先读各图尺寸（`PickedImage.bounds()`，不占像素内存）→ 算目标宽与总高 →
+ * 逐张解码、画、丢（[ToolboxRenderer.stitchStreaming]），任意时刻只有一张源图 + 一张成品
+ * 在内存里。
+ *
+ * ## 三档都在（两端同一份实现）
+ *
+ * | 档 | 走哪条 |
+ * |---|---|
+ * | 直接拼接 | [ToolboxRenderer.stitchStreaming]（`keeps = null`） |
+ * | 智能拼接 | [StitchSmart.plan] → [ToolboxRenderer.stitchStreaming]（裁头尾 + 去重叠） |
+ * | 识别容差 | [StitchScan.Tolerance]（严格 / 标准 / 宽松） |
+ *
+ * 智能识别的算法在 `domain/StitchScan.kt`（纯逻辑），装配在 `ui/toolbox/StitchSmart.kt`，
+ * 两者都在 `commonMain`、都不碰平台 API——**iOS 上这套是完整可用的**，不是降级。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StitchScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
-    var uris by remember { mutableStateOf<List<Uri>>(emptyList()) }
-    var thumbnails by remember { mutableStateOf<List<Bitmap?>>(emptyList()) }
-    var result by remember { mutableStateOf<Bitmap?>(null) }
+    var sources by remember { mutableStateOf<List<PickedImage>>(emptyList()) }
+    var thumbnails by remember { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
+    var result by remember { mutableStateOf<ImageBitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
     // 拼接方式：**默认智能**（2026-10-12 用户口径：要 PPIICC 那套——裁掉每张重复的头尾 +
     // 按内容对齐去重叠，见 §4.47）。它**只适合同一页面连续滚动的一批截图**；
@@ -110,35 +116,32 @@ fun StitchScreen(onBack: () -> Unit) {
         scope.launch { snackbar.showNotice(AppNoticeVisuals(message, tone = tone)) }
     }
 
-    val pickImages = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickMultipleVisualMedia(maxItems = MaxStitchImages),
-    ) { picked ->
-        if (picked.isEmpty()) return@rememberLauncherForActivityResult
-        val merged = (uris + picked).distinct()
+    val pickImages = rememberImagePicker(maxItems = MaxStitchImages) { picked ->
+        if (picked.isEmpty()) return@rememberImagePicker
+        // 同一张选两次只留一份（`PickedImage.id` 是平台侧的稳定标识）
+        val merged = (sources + picked).distinctBy { it.id }
         if (merged.size > MaxStitchImages) {
             notice("一次最多拼 $MaxStitchImages 张，多出的没加进来", NoticeTone.Warning)
         }
-        uris = merged.take(MaxStitchImages)
+        sources = merged.take(MaxStitchImages)
     }
     // 选图入口：预览卡点击、空态的「添加图片」、列表标题行的「添加」都走这里
     val addImages: () -> Unit = {
-        if (uris.size >= MaxStitchImages) {
+        if (sources.size >= MaxStitchImages) {
             notice("最多 $MaxStitchImages 张", NoticeTone.Warning)
         } else {
-            pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            pickImages()
         }
     }
 
     // 列表一变：作废旧结果、重解码缩略图（缩略图很小，旧的一批交给 GC）
-    LaunchedEffect(uris) {
+    LaunchedEffect(sources) {
         result = null
-        if (uris.isEmpty()) {
+        if (sources.isEmpty()) {
             thumbnails = emptyList()
             return@LaunchedEffect
         }
-        val decoded = withContext(Dispatchers.IO) {
-            uris.map { decodeUriSampled(context, it, ThumbLongSide) }
-        }
+        val decoded = sources.map { it.decode(ThumbLongSide) }
         thumbnails = decoded
         // 解码失败不再静默（2026-10-12）：缩略图空白当场说，别让人对着空列表猜
         if (decoded.any { it == null }) {
@@ -153,25 +156,25 @@ fun StitchScreen(onBack: () -> Unit) {
 
     fun move(index: Int, delta: Int) {
         val target = index + delta
-        if (target !in uris.indices) return
-        uris = uris.toMutableList().also { it.add(target, it.removeAt(index)) }
+        if (target !in sources.indices) return
+        sources = sources.toMutableList().also { it.add(target, it.removeAt(index)) }
     }
 
     fun startStitch() {
-        if (uris.isEmpty()) {
+        if (sources.isEmpty()) {
             notice("先加几张图片", NoticeTone.Warning)
             return
         }
         busy = true
         scope.launch {
-            // busy 必须由 finally 兜底复位：解码/合成抛 OOM、SecurityException 时若逃逸出去，
+            // busy 必须由 finally 兜底复位：解码/合成抛 OOM、读文件抛异常时若逃逸出去，
             // busy 会永久停在 true —— 返回键此后只会提示「正在保存」，整页变死页
             try {
-                // 尺寸与 Uri 成对过滤：跳过读不出的一两张后，下标必须仍指向同一张图
-                val usable = withContext(Dispatchers.IO) {
-                    uris.mapNotNull { uri -> readImageBounds(context, uri)?.let { uri to it } }
+                // 尺寸与句柄成对过滤：跳过读不出的一两张后，下标必须仍指向同一张图
+                val usable = sources.mapNotNull { source ->
+                    source.bounds()?.let { source to it }
                 }
-                if (usable.size != uris.size) {
+                if (usable.size != sources.size) {
                     notice("有图片读不出来（已跳过）", NoticeTone.Warning)
                 }
                 if (usable.isEmpty()) {
@@ -189,17 +192,18 @@ fun StitchScreen(onBack: () -> Unit) {
                         notice("这些图宽度不一致（$widths），这次按直接拼接", NoticeTone.Warning)
                         null
                     } else {
-                        StitchSmart.plan(
-                            context = context,
-                            uris = usable.map { it.first },
-                            fullSizes = sizes,
-                            statusBarRowsFull = statusBarRows,
-                            tolerance = tolerance,
-                        ).also {
-                            if (it == null) {
-                                notice("没识别出可裁的重复内容，按直接拼接", NoticeTone.Info)
-                            }
+                        val planned = withContext(Dispatchers.Default) {
+                            StitchSmart.plan(
+                                fullSizes = sizes,
+                                statusBarRowsFull = statusBarRows,
+                                tolerance = tolerance,
+                                decode = { index, maxLongSide -> usable[index].first.decode(maxLongSide) },
+                            )
                         }
+                        if (planned == null) {
+                            notice("没识别出可裁的重复内容，按直接拼接", NoticeTone.Info)
+                        }
+                        planned
                     }
                 }
                 val rendered = withContext(Dispatchers.Default) {
@@ -208,9 +212,7 @@ fun StitchScreen(onBack: () -> Unit) {
                         spacingPx = 0,
                         keeps = keeps,
                     ) { index ->
-                        withContext(Dispatchers.IO) {
-                            decodeUriSampled(context, usable[index].first, StitchSourceLongSide)
-                        }
+                        usable[index].first.decode(StitchSourceLongSide)
                     }
                 }
                 if (keeps != null) {
@@ -227,11 +229,16 @@ fun StitchScreen(onBack: () -> Unit) {
                 scroll.animateScrollTo(0)
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: OutOfMemoryError) {
-                // 单独拦 OOM：它的 message 是一长串英文分配信息，直接透给用户等于没解释
-                notice("图片太大，内存不足：试试减少张数或先裁剪", NoticeTone.Error)
             } catch (e: Throwable) {
-                notice("拼接失败：${e.message ?: "未知错误"}", NoticeTone.Error)
+                // OOM 的 message 是一长串英文分配信息，直接透给用户等于没解释
+                notice(
+                    if (e.looksLikeOutOfMemory()) {
+                        "图片太大，内存不足：试试减少张数或先裁剪"
+                    } else {
+                        "拼接失败：${e.message ?: "未知错误"}"
+                    },
+                    NoticeTone.Error,
+                )
             } finally {
                 busy = false
             }
@@ -239,8 +246,8 @@ fun StitchScreen(onBack: () -> Unit) {
     }
 
     fun runExport(share: Boolean) {
-        val bitmap = result
-        if (bitmap == null) {
+        val image = result
+        if (image == null) {
             notice("先点「开始拼接」生成图片", NoticeTone.Warning)
             return
         }
@@ -250,13 +257,13 @@ fun StitchScreen(onBack: () -> Unit) {
             try {
                 val fileName = ToolboxExport.fileName("拼接")
                 if (share) {
-                    val error = ToolboxExport.share(context, bitmap, fileName)
+                    val error = shareToolboxImage(image, fileName)
                     if (error != null) notice(error, NoticeTone.Warning)
                 } else {
-                    when (val saved = ToolboxExport.save(context, bitmap, fileName)) {
-                        is GallerySaveResult.Saved ->
+                    when (val saved = saveToolboxImage(image, fileName)) {
+                        is GallerySaveOutcome.Saved ->
                             notice("已保存到相册", NoticeTone.Success)
-                        is GallerySaveResult.Failed -> notice(saved.message, NoticeTone.Error)
+                        is GallerySaveOutcome.Failed -> notice(saved.message, NoticeTone.Error)
                     }
                 }
             } catch (e: CancellationException) {
@@ -272,7 +279,7 @@ fun StitchScreen(onBack: () -> Unit) {
     val requestBack: () -> Unit = {
         if (busy) notice("正在保存，请稍候", NoticeTone.Warning) else onBack()
     }
-    BackHandler(enabled = busy) { requestBack() }
+    AppBackHandler(enabled = busy) { requestBack() }
 
     Scaffold(
         topBar = {
@@ -290,7 +297,7 @@ fun StitchScreen(onBack: () -> Unit) {
         bottomBar = {
             ToolboxActionBar(progress = busy) {
                 when {
-                    uris.isEmpty() -> Button(
+                    sources.isEmpty() -> Button(
                         onClick = addImages,
                         enabled = !busy,
                         modifier = Modifier.weight(1f),
@@ -326,8 +333,8 @@ fun StitchScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             ToolboxPreview(
-                bitmap = result,
-                placeholder = if (uris.isEmpty()) {
+                image = result,
+                placeholder = if (sources.isEmpty()) {
                     "选 2–9 张图片，竖着拼成一张长图"
                 } else {
                     "点「开始拼接」生成预览"
@@ -335,7 +342,7 @@ fun StitchScreen(onBack: () -> Unit) {
                 onPick = addImages,
             )
             // 已选图片列表（有图才出现）：标题行带张数与「添加 / 清空」，下面可上下移动 / 删除
-            if (uris.isNotEmpty()) {
+            if (sources.isNotEmpty()) {
                 AppCard {
                     Column {
                         Row(
@@ -345,7 +352,7 @@ fun StitchScreen(onBack: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "已选 ${uris.size} 张",
+                                "已选 ${sources.size} 张",
                                 style = MaterialTheme.typography.titleSmall,
                                 modifier = Modifier.weight(1f),
                             )
@@ -354,22 +361,22 @@ fun StitchScreen(onBack: () -> Unit) {
                                 enabled = !busy,
                             ) { Text("添加") }
                             TextButton(
-                                onClick = { uris = emptyList() },
+                                onClick = { sources = emptyList() },
                                 enabled = !busy,
                             ) { Text("清空") }
                         }
                         AppCardDivider()
-                        uris.forEachIndexed { index, _ ->
+                        sources.forEachIndexed { index, _ ->
                             StitchRow(
                                 index = index,
                                 thumbnail = thumbnails.getOrNull(index),
                                 canMoveUp = index > 0,
-                                canMoveDown = index < uris.lastIndex,
+                                canMoveDown = index < sources.lastIndex,
                                 onMoveUp = { move(index, -1) },
                                 onMoveDown = { move(index, +1) },
-                                onDelete = { uris = uris.toMutableList().also { it.removeAt(index) } },
+                                onDelete = { sources = sources.toMutableList().also { it.removeAt(index) } },
                             )
-                            if (index < uris.lastIndex) AppCardDivider()
+                            if (index < sources.lastIndex) AppCardDivider()
                         }
                     }
                 }
@@ -404,7 +411,7 @@ fun StitchScreen(onBack: () -> Unit) {
 @Composable
 private fun StitchRow(
     index: Int,
-    thumbnail: Bitmap?,
+    thumbnail: ImageBitmap?,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
     onMoveUp: () -> Unit,
@@ -428,7 +435,7 @@ private fun StitchRow(
                 Text("…", style = MaterialTheme.typography.bodySmall)
             } else {
                 Image(
-                    bitmap = thumbnail.asImageBitmap(),
+                    bitmap = thumbnail,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),

@@ -36,21 +36,21 @@ import edu.jxslu.schedule.ui.common.rememberAppHaptics
 /**
  * 百宝箱各工具页的**纯布局**公共件（DESIGN §4.47）：滑杆行、贴底动作条、颜色圆点行。
  *
- * ## 为什么本文件只剩这三件（iOS 移植 V3，2026-11-25）
+ * ## 本文件为什么只剩这三件（2026-11-26 复核）
  *
- * 这个文件原来还装着单图选择器、`inJustDecodeBounds` 量尺寸、预览区与
- * `ToolboxExport`（保存相册 / 分享）。那四件全是 `android.graphics.Bitmap` +
- * `ContentResolver` + `MediaStore` + `FileProvider` 的管线，`commonMain` 里拿不到，
- * 留在 `:app` 的 `ToolboxBitmap.kt`（同包，调用点不用改 import）。
+ * 这三件只是 Compose 布局与主题色，两端一字不差，所以一直留在共享层。
  *
- * 分界线的判据是「有没有位图」：滑杆、按钮条、色点只是 Compose 布局与主题色，
- * 两端一字不差；预览区一旦要 `asImageBitmap()` 就已经是 Android 类型了。
+ * 2026-11-25 那一版还把「选图 / 量尺寸 / 预览 / 保存 / 分享」整块留在 `:app` 的
+ * `ToolboxBitmap.kt`（当时它们全是 `android.graphics.Bitmap` + `ContentResolver` +
+ * `MediaStore` + `FileProvider`）。2026-11-26 的 V4 之后**那四件都已进共享层**：
  *
- * ## 出口口径（仍在 `:app`，见 `ToolboxBitmap.kt` 的 KDoc）
+ * | 能力 | 现在的位置 |
+ * |---|---|
+ * | 选图（相册 / 文件） | `ui/platform/ImagePickers.kt`（expect/actual） |
+ * | 预览区与全屏看图 | `ui/toolbox/ToolboxPreview.kt`（认 `ImageBitmap`） |
+ * | 保存到相册 / 分享 | `ui/toolbox/ToolboxExport.kt`（两端 actual 复用 `BitmapSave` 与 `shareFile`） |
  *
- * 保存到相册走 `ui/common/BitmapSave`（MediaStore `Pictures/JUWPHub`）；分享走
- * `ScheduleShareStore` 的机制（cacheDir 落盘 + FileProvider 临时授权 Uri），
- * 目录 `toolbox_share`。格式统一 JPEG q92。
+ * 所以 `:app` 里已没有 `ui/toolbox/` 目录，本文的「百宝箱」相关内容只剩下面这三件。
  */
 
 /**

@@ -1,8 +1,5 @@
 package edu.jxslu.schedule.ui.toolbox
 
-import android.graphics.Bitmap
-import android.net.Uri
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -36,18 +33,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.unit.dp
 import edu.jxslu.schedule.domain.ToolboxImage
+import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.common.AppCard
 import edu.jxslu.schedule.ui.common.AppNoticeVisuals
 import edu.jxslu.schedule.ui.common.AppSnackbarHost
-import edu.jxslu.schedule.ui.common.GallerySaveResult
+import edu.jxslu.schedule.ui.common.GallerySaveOutcome
 import edu.jxslu.schedule.ui.common.NoticeTone
 import edu.jxslu.schedule.ui.common.SettingChoiceRow
-import edu.jxslu.schedule.ui.common.decodeUriSampled
 import edu.jxslu.schedule.ui.common.pinnedStatusBars
 import edu.jxslu.schedule.ui.common.showNotice
+import edu.jxslu.schedule.ui.platform.PickedImage
+import edu.jxslu.schedule.ui.platform.rememberImagePicker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -72,22 +71,35 @@ private val WatermarkColors = listOf(
 )
 
 /**
- * 图片水印（DESIGN §4.47，实现思路借鉴「一个木函」的平铺水印）：
- * 文字先渲染成一小块平铺单元（多行用 StaticLayout），再经 BitmapShader 的
- * REPEAT 平铺满图；不透明度 / 旋转 / 字号 / 颜色 / 密度五档可调。
+ * 图片水印（DESIGN §4.47，实现思路借鉴「一个木函」的平铺水印；iOS 移植 V4 搬进共享层）：
+ * 文字先渲染成一小块平铺单元（多行、密度档位 = 尾部空行），旋转并扩边后铺满整幅；
+ * 不透明度 / 旋转 / 字号 / 颜色 / 密度五档可调。
  *
  * 预览（长边 ≤ [PreviewLongSide]）与成品（长边 ≤ [FullLongSide]）都走
- * [ToolboxRenderer.watermark]，尺寸只按图宽取比例，所以两边观感一致。
+ * [ToolboxRenderer.watermarkTile] + [ToolboxRenderer.watermark]，尺寸只按图宽取比例，
+ * 所以两边观感一致。
+ *
+ * ## 平台边界（两端同一份页面）
+ *
+ * | 动作 | 走哪条缝 |
+ * |---|---|
+ * | 选图 | `ui/platform/ImagePickers` 的 `rememberImagePicker`（Android Photo Picker / iOS 文件选择器） |
+ * | 解码 | `PickedImage.decode`（Android `BitmapFactory` 采样 / iOS skia） |
+ * | 出图 | [ToolboxRenderer]（Compose 离屏绘制，`commonMain`） |
+ * | 保存 / 分享 | `saveToolboxImage` / `shareToolboxImage`（`ui/toolbox/ToolboxExport.kt`） |
+ *
+ * 宿主只要 `WatermarkScreen(onBack = …)` 一行——与本页搬走之前 `:app` 的调用点逐字相同。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WatermarkScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    // 文本测量在组合线程：这个 measurer 是 Density(1f) 的，理由见 rememberToolboxTextMeasurer
+    val measurer = rememberToolboxTextMeasurer()
 
-    var sourceUri by remember { mutableStateOf<Uri?>(null) }
-    var previewSource by remember { mutableStateOf<Bitmap?>(null) }
+    var source by remember { mutableStateOf<PickedImage?>(null) }
+    var previewSource by remember { mutableStateOf<ImageBitmap?>(null) }
     var text by remember { mutableStateOf("JUWPHub") }
     var density by remember { mutableStateOf(ToolboxImage.Density.Normal) }
     var alphaPercent by remember { mutableStateOf(35f) }
@@ -98,22 +110,20 @@ fun WatermarkScreen(onBack: () -> Unit) {
     var colorIndex by remember { mutableStateOf(1) }
     var busy by remember { mutableStateOf(false) }
 
-    val pickImage = rememberSingleImagePicker { uri -> sourceUri = uri }
+    fun notice(message: String, tone: NoticeTone) {
+        scope.launch { snackbar.showNotice(AppNoticeVisuals(message, tone = tone)) }
+    }
 
-    LaunchedEffect(sourceUri) {
-        val uri = sourceUri ?: return@LaunchedEffect
-        val decoded = withContext(Dispatchers.IO) {
-            decodeUriSampled(context, uri, PreviewLongSide)
-        }
+    val pickImage = rememberImagePicker(maxItems = 1) { picked ->
+        picked.firstOrNull()?.let { source = it }
+    }
+
+    LaunchedEffect(source) {
+        val picked = source ?: return@LaunchedEffect
+        val decoded = picked.decode(PreviewLongSide)
         previewSource = decoded
         // 解码失败不再静默（2026-10-12）：读不出来当场说，预览区不空等
-        if (decoded == null) {
-            scope.launch {
-                snackbar.showNotice(
-                    AppNoticeVisuals("图片读不出来，换一张试试", tone = NoticeTone.Error),
-                )
-            }
-        }
+        if (decoded == null) notice("图片读不出来，换一张试试", NoticeTone.Error)
     }
 
     // 预览重算：参数一动就整幅重渲染。源是降采样图，几十毫秒级，不做防抖。
@@ -121,47 +131,30 @@ fun WatermarkScreen(onBack: () -> Unit) {
     val previewKeys = listOf(
         previewSource, text, density, alphaPercent, rotationDeg, scalePercent, colorIndex,
     )
-    val preview by produceState<Bitmap?>(initialValue = null, previewKeys) {
+    val preview by produceState<ImageBitmap?>(initialValue = null, previewKeys) {
         val src = previewSource
         if (src == null) {
             value = null
             return@produceState
         }
+        // 平铺块要摸 TextMeasurer，留在组合线程；铺满整幅是纯图形，丢到 Default
+        val tile = ToolboxRenderer.watermarkTile(
+            textMeasurer = measurer,
+            text = text,
+            color = WatermarkColors[colorIndex].second,
+            imageWidthPx = src.width,
+            scale = scalePercent / 100f,
+            density = density,
+            rotationDeg = rotationDeg,
+        )
         value = withContext(Dispatchers.Default) {
-            ToolboxRenderer.watermark(
-                src = src,
-                text = text,
-                color = WatermarkColors[colorIndex].second,
-                alphaPercent = alphaPercent,
-                rotationDeg = rotationDeg,
-                scale = scalePercent / 100f,
-                density = density,
-            )
+            ToolboxRenderer.watermark(src, tile, alphaPercent)
         }
     }
 
-    fun notice(message: String, tone: NoticeTone) {
-        scope.launch { snackbar.showNotice(AppNoticeVisuals(message, tone = tone)) }
-    }
-
-    fun renderFull(uri: Uri): Bitmap? {
-        val src = decodeUriSampled(context, uri, FullLongSide) ?: return null
-        val rendered = ToolboxRenderer.watermark(
-            src = src,
-            text = text,
-            color = WatermarkColors[colorIndex].second,
-            alphaPercent = alphaPercent,
-            rotationDeg = rotationDeg,
-            scale = scalePercent / 100f,
-            density = density,
-        )
-        src.recycle()
-        return rendered
-    }
-
     fun runExport(share: Boolean) {
-        val uri = sourceUri
-        if (uri == null) {
+        val picked = source
+        if (picked == null) {
             notice("先选一张图片", NoticeTone.Warning)
             return
         }
@@ -171,37 +164,50 @@ fun WatermarkScreen(onBack: () -> Unit) {
         }
         busy = true
         scope.launch {
-            // busy 必须由 finally 兜底复位：渲染 OOM / 写相册抛异常时若逃逸出去，
+            // busy 必须由 finally 兜底复位：解码 / 绘制 OOM、写相册抛异常时若逃逸出去，
             // busy 会永久停在 true —— 返回键此后只会提示「正在处理」，整页变死页
-            var bitmap: android.graphics.Bitmap? = null
             try {
-                bitmap = withContext(Dispatchers.Default) { renderFull(uri) }
-                if (bitmap == null) {
+                val fullSource = picked.decode(FullLongSide)
+                if (fullSource == null) {
                     notice("读取图片失败，请重试", NoticeTone.Error)
                     return@launch
                 }
+                val tile = ToolboxRenderer.watermarkTile(
+                    textMeasurer = measurer,
+                    text = text,
+                    color = WatermarkColors[colorIndex].second,
+                    imageWidthPx = fullSource.width,
+                    scale = scalePercent / 100f,
+                    density = density,
+                    rotationDeg = rotationDeg,
+                )
+                val rendered = withContext(Dispatchers.Default) {
+                    ToolboxRenderer.watermark(fullSource, tile, alphaPercent)
+                }
                 val fileName = ToolboxExport.fileName("水印")
                 if (share) {
-                    val error = ToolboxExport.share(context, bitmap, fileName)
+                    val error = shareToolboxImage(rendered, fileName)
                     if (error != null) notice(error, NoticeTone.Warning)
                 } else {
-                    when (val result = ToolboxExport.save(context, bitmap, fileName)) {
-                        is GallerySaveResult.Saved ->
+                    when (val result = saveToolboxImage(rendered, fileName)) {
+                        is GallerySaveOutcome.Saved ->
                             notice("已保存到相册", NoticeTone.Success)
-                        is GallerySaveResult.Failed -> notice(result.message, NoticeTone.Error)
+                        is GallerySaveOutcome.Failed -> notice(result.message, NoticeTone.Error)
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: OutOfMemoryError) {
-                // 单独拦 OOM：它的 message 是一长串英文分配信息，直接透给用户等于没解释
-                notice("图片太大，内存不足：试试先裁剪", NoticeTone.Error)
             } catch (e: Throwable) {
-                notice("保存失败：${e.message ?: "未知错误"}", NoticeTone.Error)
+                // OOM 的 message 是一长串英文分配信息，直接透给用户等于没解释
+                notice(
+                    if (e.looksLikeOutOfMemory()) {
+                        "图片太大，内存不足：试试先裁剪"
+                    } else {
+                        "保存失败：${e.message ?: "未知错误"}"
+                    },
+                    NoticeTone.Error,
+                )
             } finally {
-                // 回收放 finally（recycle 幂等）：分享 / 写相册抛异常时原来会漏掉这一张
-                // 全尺寸位图，连着试几张就把内存顶到 OOM（2026-11-06 复核）
-                bitmap?.recycle()
                 busy = false
             }
         }
@@ -211,7 +217,7 @@ fun WatermarkScreen(onBack: () -> Unit) {
     val requestBack: () -> Unit = {
         if (busy) notice("正在处理，请稍候", NoticeTone.Warning) else onBack()
     }
-    BackHandler(enabled = busy) { requestBack() }
+    AppBackHandler(enabled = busy) { requestBack() }
 
     Scaffold(
         topBar = {
@@ -228,7 +234,7 @@ fun WatermarkScreen(onBack: () -> Unit) {
         // 出口按钮冻结在底部（DESIGN §4.47）：还没选图时是「选图」，选好后是「分享 / 保存到相册」
         bottomBar = {
             ToolboxActionBar(progress = busy) {
-                if (sourceUri == null) {
+                if (source == null) {
                     Button(
                         onClick = pickImage,
                         enabled = !busy,
@@ -259,12 +265,12 @@ fun WatermarkScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             ToolboxPreview(
-                bitmap = preview,
+                image = preview,
                 placeholder = "选一张图片，水印会平铺满图",
                 onPick = pickImage,
             )
             // 换图是输入动作，留在内容里顶在预览下方；出口按钮在底部动作条
-            if (sourceUri != null) {
+            if (source != null) {
                 TextButton(
                     onClick = pickImage,
                     enabled = !busy,

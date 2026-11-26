@@ -298,8 +298,6 @@ object Graph {
     @Volatile
     private var scheduleShareStore: ScheduleShareStore? = null
 
-    @Volatile
-    private var toolboxShareStore: ScheduleShareStore? = null
 
     @Volatile
     private var campusCalendarStore: CampusCalendarStore? = null
@@ -660,16 +658,6 @@ object Graph {
             ).also { scheduleShareStore = it }
         }
 
-    /**
-     * 百宝箱图片的分享落盘单例（DESIGN §4.47）：cacheDir/toolbox_share，
-     * 与课表导出共用 [ScheduleShareStore] 的机制、各占一个目录。
-     */
-    fun toolboxShareStore(context: Context): ScheduleShareStore =
-        toolboxShareStore ?: synchronized(this) {
-            toolboxShareStore ?: ScheduleShareStore(
-                File(context.cacheDir, ScheduleShareStore.DIR_TOOLBOX).absolutePath,
-            ).also { toolboxShareStore = it }
-        }
 
     /**
      * 校历镜像缓存单例（DESIGN §4.34）：冷启动静默刷新与校历页共用一份。
