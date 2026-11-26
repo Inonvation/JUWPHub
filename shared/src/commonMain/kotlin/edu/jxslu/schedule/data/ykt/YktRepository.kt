@@ -237,7 +237,7 @@ class YktRepository(
                 ?: throw YktException.Protocol(
                     "下单重定向未带订单号（跳转至 ${location.substringBefore('?')}，平台可能已改版）",
                 )
-            payDirect(orderId, token)?.let { return started(it) }
+            payDirect(orderId, token, cashierUrl = location)?.let { return started(it) }
             return started(YktRechargeOrder.Cashier(orderId = orderId, cashierUrl = location))
         }
         val orderId = extractOrderId(raw.text, raw.httpCode)
@@ -252,7 +252,9 @@ class YktRepository(
         //
         // 支付一步被服务端业务拒绝（msg 非空）= 大概率是平台服务时间闸门（2026-09-23
         // 夜间实测）。此时**不降级跳浏览器**——服务时间外就在 App 内提示（用户拍板）。
-        val payDirectResult = runCatching { payDirect(orderId, token) }
+        val payDirectResult = runCatching {
+            payDirect(orderId, token, cashierUrl = buildCashierUrl(orderId, token))
+        }
         val payAttempt = payDirectResult.getOrNull()
         if (payAttempt != null) return started(payAttempt)
         // payDirect 失败分两类：
@@ -286,8 +288,17 @@ class YktRepository(
      *
      * 参数对齐官方收银台（chunk 6affa2d0）：CAMPUSCARD 渠道只发
      * `paytypeid/paytype/paystep/orderid/redirect_url`，**不带 yktcard / accountno**。
+     *
+     * [cashierUrl] 是**同一笔单**的官方收银台地址，随结果一起交给上层：iOS 不能直拉
+     * `weixin://`（微信硬校验商户域名与 referer，原生 App 直接 open 会被拒），它走的是这一条。
+     * 取服务端 302 下发的那个（`rechargeCreate` 的 Location）；平台改版走 JSON 分支时用
+     * [buildCashierUrl] 现拼，两者形状相同（`/payment/?synjones-auth=…&orderid=…`）。
      */
-    private suspend fun payDirect(orderId: String, token: String): YktRechargeOrder.WechatPay? {
+    private suspend fun payDirect(
+        orderId: String,
+        token: String,
+        cashierUrl: String,
+    ): YktRechargeOrder.WechatPay? {
         // [1] 发起支付（免密渠道；若平台日后开启密码，这一步会报错 → 走收银台兜底）。
         // **不带 yktcard**：CAMPUSCARD 渠道的账户字段带不带都会被拒（2026-09-24 实测矩阵）。
         val payForm = buildMap {
@@ -343,7 +354,7 @@ class YktRepository(
         return YktRechargeOrder.WechatPay(
             orderId = orderId,
             wechatUrl = wechatUrl,
-            cashierUrl = buildCashierUrl(orderId, token),
+            cashierUrl = cashierUrl,
         )
     }
 
