@@ -306,10 +306,6 @@ private fun IosRoot(services: IosServices) {
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                    // 手势开着：左缘右滑随时可用。三个 Tab 页的顶栏也都有汉堡
-                    //（`TodayScreen` / `WeekScreen` / `SettingsScreen` 的 `onOpenDrawer`），
-                    // 手势只是第二条路，不再是唯一的入口。
-                    gesturesEnabled = true,
                     // **遮罩透明**（2026-11-25）：Android 的侧栏展开时不压暗主卡，而是把主卡缩小
                     // 让位（`ui/common/DrawerCardTransform.kt`）。同一个效果在 iOS 上如果叠一层
                     // M3 默认的 32% 黑遮罩，主卡会一边缩小一边变暗，观感是「弹了个模态框」。
@@ -406,7 +402,7 @@ private fun IosRoot(services: IosServices) {
                                 // 是 M3 emphasized（两头都缓），推入读起来偏"肉"。
                                 if (targetState.first > initialState.first) {
                                     (slideInHorizontally(IosPageIn) { it } +
-                                        fadeIn(tween(IOS_PAGE_FADE_MS, easing = IosPageIn)))
+                                        fadeIn(IosFadeIn))
                                         .togetherWith(fadeOut(Motion.exit()))
                                 } else {
                                     fadeIn(Motion.exit()).togetherWith(
@@ -437,7 +433,7 @@ private fun IosRoot(services: IosServices) {
                                         // 「立刻到位的上浮」，不是匀速位移。spring 的 dampingRatio 取 1
                                         // （临界阻尼，不过冲），stiffness 420 让 200ms 内落定；
                                         // 退场只淡出、不位移——两段都动会被读成"页面在滑动"。
-                                        (fadeIn(tween(IOS_TAB_FADE_MS, easing = IosPageIn)) +
+                                        (fadeIn(IosTabFadeIn) +
                                             slideInVertically(
                                                 spring(dampingRatio = 1f, stiffness = 420f),
                                             ) { it / 32 }).togetherWith(
@@ -765,7 +761,7 @@ private fun IosOverlayStack(
             .iosEdgeBackSwipe(enabled = stack.isNotEmpty(), onBack = pop),
         transitionSpec = {
             if (targetState.first > initialState.first) {
-                (slideInHorizontally(IosPageIn) { it } + fadeIn(tween(IOS_PAGE_FADE_MS, easing = IosPageIn)))
+                (slideInHorizontally(IosPageIn) { it } + fadeIn(IosFadeIn))
                     .togetherWith(fadeOut(Motion.exit()))
             } else {
                 fadeIn(Motion.exit()).togetherWith(
@@ -1245,23 +1241,29 @@ private fun isStudentSide(url: String?): Boolean {
 // ---------------------------------------------------------------- iOS 转场口径（2026-11-26 晚）
 
 /**
- * 二级页推入的位移曲线：`ease-out-quint`（起步快、收尾极缓）。
+ * 二级页推入/退出的曲线：`ease-out-quint`（起步快、收尾极缓）。
  *
  * 为什么不复用 `Motion.page()`：那是 M3 emphasized（两头都缓），用在「从右侧整屏推入」上
  * 读起来偏肉。iOS 的 `UINavigationController` 推入是同一种加速形状，用户对它的手感更敏感。
- * 340ms 也比 `Motion.pageMillis`(280) 长一点：整屏位移比弹层需要更多时间被眼睛跟上。
+ *
+ * 位移与淡入共用同一条曲线，但**各要各的 spec**（位移是 `IntOffset`、淡入是 `Float`）：
+ * 拿位移的 `TweenSpec<IntOffset>` 去喂 `fadeIn` 是类型错，而曲线不一致会读成「先亮再停」。
  */
-private val IosPageIn =
-    tween<IntOffset>(IOS_PAGE_MS, easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f))
+private val IosEaseOutQuint = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
+
+/** 340ms 比 `Motion.pageMillis`(280) 长一点：整屏位移比弹层需要更多时间被眼睛跟上。 */
+private val IosPageIn = tween<IntOffset>(IOS_PAGE_MS, easing = IosEaseOutQuint)
 
 /** 二级页退出的位移曲线：同一条曲线的反向（起步缓、收尾快），时长略短。 */
 private val IosPageOut = tween<IntOffset>(IOS_POP_MS, easing = CubicBezierEasing(0.4f, 0f, 1f, 1f))
 
+/** 推入时叠的淡入。位移负责方位，淡入只负责别让新页在边缘「硬切」进来。 */
+private val IosFadeIn = tween<Float>(IOS_PAGE_FADE_MS, easing = IosEaseOutQuint)
+
+/** Tab 切换的淡入：比位移短，让人先看到内容再看到位置。 */
+private val IosTabFadeIn = tween<Float>(IOS_TAB_FADE_MS, easing = IosEaseOutQuint)
+
 private const val IOS_PAGE_MS = 340
 private const val IOS_POP_MS = 300
-
-/** 推入时叠的淡入时长。位移负责方位，淡入只负责别让新页在边缘「硬切」进来。 */
 private const val IOS_PAGE_FADE_MS = 180
-
-/** Tab 切换的淡入时长。比位移短，让人先看到内容再看到位置。 */
 private const val IOS_TAB_FADE_MS = 160

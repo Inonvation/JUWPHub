@@ -6,13 +6,18 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import edu.jxslu.schedule.ui.theme.Motion
 
 /**
@@ -46,6 +51,14 @@ import edu.jxslu.schedule.ui.theme.Motion
  *   还不返回」。
  * - 没超过阈值就动画回到 0（`Motion.state()`），不是硬吸附——硬吸附读起来像卡了一下。
  *
+ * ## 为什么位移用 `mutableFloatStateOf` 而不是 `Animatable`
+ *
+ * `awaitEachGesture` 的接收者是 `AwaitPointerEventScope`，那是一个**受限挂起作用域**：
+ * 在它里面只能调它自己的挂起函数，`Animatable.snapTo` / `animateTo` 一律编不过
+ * （CI 实测：`Restricted suspending functions can invoke member or extension suspending
+ * functions only on their restricted coroutine scope`）。所以跟手阶段只写一个 float 状态，
+ * 回弹动画交给组合作用域的 `launch` 去驱动。
+ *
  * 跟手位移读在 `graphicsLayer` 的 lambda 里（绘制期求值），拖动过程中不触发重组。
  */
 @Composable
@@ -53,11 +66,12 @@ internal fun Modifier.iosEdgeBackSwipe(
     enabled: Boolean,
     onBack: () -> Unit,
 ): Modifier {
-    val offset = remember { Animatable(0f) }
+    var dragX by remember { mutableFloatStateOf(0f) }
     val latestBack = rememberUpdatedState(onBack)
+    val scope = rememberCoroutineScope()
     val edgeZonePx = with(LocalDensity.current) { IOS_EDGE_BACK_ZONE.toPx() }
     return this
-        .graphicsLayer { translationX = offset.value }
+        .graphicsLayer { translationX = dragX }
         .pointerInput(enabled, edgeZonePx) {
             if (!enabled) return@pointerInput
             // 阈值与上限按节点尺寸现算（`size` 是 px，已含左右安全区）
@@ -74,24 +88,31 @@ internal fun Modifier.iosEdgeBackSwipe(
                         change.consume()
                     }
                 } ?: return@awaitEachGesture
-                // 左滑不接管：把这一段留给页面（消费者已经不再是它，但至少不再继续吃事件）
+                // 左滑不接管：把这一段留给页面
                 if (!rightward) return@awaitEachGesture
-                offset.snapTo(0f)
+                dragX = 0f
                 var dragged = 0f
                 while (true) {
                     val event = awaitPointerEvent()
                     val change = event.changes.firstOrNull { it.id == slop.id } ?: break
                     dragged = (change.position.x - down.position.x).coerceIn(0f, maxDrag)
-                    offset.snapTo(dragged)
+                    dragX = dragged
                     change.consume()
                     if (!change.pressed) break
                 }
                 if (dragged >= commitAt) {
                     latestBack.value()
                     // 栈已经退了一层：立刻归零，否则「上一页」会带着这段位移出现在屏外
-                    offset.snapTo(0f)
+                    dragX = 0f
                 } else {
-                    offset.animateTo(0f, tween(Motion.stateMillis, easing = Motion.decelerate))
+                    // 回弹：从松手位置滑回 0。协程在组合作用域里起，不在受限挂起作用域内。
+                    scope.launch {
+                        val from = dragX
+                        Animatable(from).animateTo(
+                            targetValue = 0f,
+                            animationSpec = tween(Motion.stateMillis, easing = Motion.decelerate),
+                        ) { dragX = value }
+                    }
                 }
             }
         }

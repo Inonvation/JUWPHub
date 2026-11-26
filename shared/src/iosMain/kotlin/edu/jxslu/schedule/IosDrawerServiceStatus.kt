@@ -7,8 +7,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import edu.jxslu.schedule.data.wenqu.WenquRules
 import edu.jxslu.schedule.data.wenqu.WenquSession
+import edu.jxslu.schedule.domain.AppClock
+import edu.jxslu.schedule.domain.WenquRules
 import edu.jxslu.schedule.ui.life.ujingFreeText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,7 +76,9 @@ internal fun rememberIosDrawerServiceStatus(
             ujingAt = 0L
             return@LaunchedEffect
         }
-        val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+        // 用共享层的 `AppClock`（唯一的时间入口）：它内部才是 `Clock.System`，
+        // iosMain 直接写 `kotlinx.datetime.Clock.System` 在这条依赖线上编不过（CI 实测）。
+        val now = AppClock.nowMillis()
         if (now - ujingAt < UJING_FREE_TTL_MILLIS) return@LaunchedEffect
         val text = withContext(Dispatchers.Default) { ujingFreeText(ujing, ujingHouses) }
         freeText = text
