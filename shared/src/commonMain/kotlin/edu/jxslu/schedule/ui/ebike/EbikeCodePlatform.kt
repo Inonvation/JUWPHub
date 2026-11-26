@@ -44,6 +44,25 @@ import kotlinx.coroutines.sync.withLock
 interface EbikeReminderPort {
 
     /**
+     * 本平台有没有「通知栏常驻倒计时」这一件（Android：前台服务通知 + Live Update 灵动岛）。
+     *
+     * **iOS 没有**：本地通知只在到点那一下弹一次，App 不在前台时没有任何代码能每秒刷新卡片。
+     * [startFreeRideNotice] 据此换提示语——不说「通知栏已显示倒计时」，用户在 iOS 上找不到。
+     * 默认 true 让 Android 侧零改动。
+     */
+    val hasCountdownNotification: Boolean get() = true
+
+    /**
+     * 本平台能不能「到点执行代码」（自动还车那一半）。
+     *
+     * Android 是 `AlarmManager` 闹钟 + 后台任务；**iOS 给不出**：本地通知到点由系统投递、
+     * 不执行任何代码，`BGTaskScheduler` 又不保证触发时刻（见 `design/ios-port.md` §12.13）。
+     * false 时页面把「自动还车」那一组设置整块不渲染——给一个拨了没反应的开关比没有更糟。
+     * 默认 true 让 Android 侧零改动。
+     */
+    val supportsAutoReturn: Boolean get() = true
+
+    /**
      * 起免费时长计时并把提醒排上（点「打开微信扫一扫」传 `now + SCAN_DELAY_MS`，
      * 本机开锁成功传当下）。结果的提示文案由 [startFreeRideNotice] 出。
      */
@@ -97,6 +116,17 @@ sealed interface EbikeReminderOutcome {
  * 用 Compose 画布直接画，根本不经过位图）。
  */
 interface EbikeQrGallery {
+
+    /**
+     * 本平台能不能按 key 把已存的码删掉（扫完即焚那一半）。
+     *
+     * Android 能（MediaStore 条目 / 自己写的公共目录文件）；**iOS 不能**：
+     * `UIImageWriteToSavedPhotosAlbum` 不回头给任何句柄，删相册资产要 PhotoKit
+     * （`PHPhotoLibrary.performChanges`，而且每次删除都会弹一次系统确认框），仓里没有先例。
+     * false 时「扫完即焚」开关整块不渲染、**也不记录待焚毁 key**——记了也删不掉，
+     * 只会让每次核对待着一串永远删不掉的目标空转。默认 true 让 Android 侧零改动。
+     */
+    val canDelete: Boolean get() = true
 
     /**
      * 存一张码进相册。[dark] 决定黑白（深色主题出「深底白码」，与屏幕上那张一致）。
@@ -159,9 +189,15 @@ suspend fun startFreeRideNotice(
     startAtMillis: Long = AppClock.nowMillis(),
 ): Pair<String, NoticeTone> {
     val outcome = port?.startFreeRide(startAtMillis) ?: EbikeReminderOutcome.Nothing
+    // 有常驻倒计时才敢说「通知栏已显示倒计时」；没有的那一端（iOS）只承诺到点提醒
+    val countdown = port?.hasCountdownNotification == true
     return when (outcome) {
         EbikeReminderOutcome.Started ->
-            "已开始计时，通知栏已显示倒计时" to NoticeTone.Success
+            if (countdown) {
+                "已开始计时，通知栏已显示倒计时" to NoticeTone.Success
+            } else {
+                "已开始计时，免费时长结束时会提醒你" to NoticeTone.Success
+            }
         EbikeReminderOutcome.StartedNoNotification ->
             "通知被关闭，提醒发不出来，请到系统设置打开" to NoticeTone.Warning
         EbikeReminderOutcome.StartedSilent ->

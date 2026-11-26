@@ -76,5 +76,15 @@
 	<string>用于把课表、成绩单等图片保存到你的相册。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>用于从相册选择图片，例如给图片加水印或拼接。</string>
+	<!-- 拉起微信（快趣出行「打开微信扫一扫」/「去微信结清」）。iOS 只开放 `weixin://`
+	     一个公有 scheme，落点是微信首页（扫一扫要用户自己点）；`weixinULAPI` 是微信
+	     OpenSDK 回跳用的，先声明着，将来接 SDK 就不用再改 plist。
+	     这两项只在 `canOpenURL` 时被系统检查——**打开**自定义 scheme 不查白名单，
+	     所以就算漏了也不会崩，只是 `canOpenURL` 永远返回 false、打开可能静默失败。 -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>weixin</string>
+		<string>weixinULAPI</string>
+	</array>
 </dict>
 </plist>

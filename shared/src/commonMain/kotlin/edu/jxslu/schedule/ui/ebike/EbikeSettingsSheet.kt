@@ -71,9 +71,11 @@ import kotlin.math.roundToInt
  * | `rememberNotificationPermissionGate()`（`POST_NOTIFICATIONS`） | [requestNotificationPermission]（null = 没有权限弹窗这一档，动作直接执行） |
  * | `AppPermissions.jumpNotificationSettings(context)` | [onOpenNotificationSettings]（null = 本平台没有这个系统页 → 那行入口不渲染） |
  *
- * 另外两组**整块**按能力出现：`viewModel.hasReminders` 为 false 时「自动还车」与
- * 「提醒」不渲染（提醒是 `AlarmManager` + 通知渠道，本平台没有就是没有）；
- * `viewModel.hasGallery` 为 false 时「乘车码」不渲染（保存 / 焚毁都依赖相册）。
+ * 另外两组**整块**按能力出现：`viewModel.hasReminders` 为 false 时「提醒」不渲染
+ * （提醒是本平台的闹钟 + 通知渠道，没有就是没有）、`viewModel.hasAutoReturn` 为 false 时
+ * 「自动还车」不渲染（iOS 到点不执行代码，见 `EbikeReminderPort.supportsAutoReturn`）；
+ * `viewModel.hasGallery` 为 false 时「乘车码」不渲染（保存 / 焚毁都依赖相册），
+ * 相册能存但删不掉时（`hasBurnAfterScan` = false，iOS）只藏「自动删除」那一行。
  * 底图选择（高德 / 栅格）在 iOS 上没有第二选项，所以整块挂在 [showMapSourceChoice] 上。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -175,8 +177,9 @@ fun EbikeSettingsSheet(
                 // 先让弹层滑走再进账号页，中间不留"弹层突然没了"的那一帧
                 KvcxAccountRow(loggedIn = loggedIn, onClick = { dismiss { onOpenKvcxAccount() } })
                 RideConfirmSettingsSection(prefs = prefs)
-                // 自动还车是「排闹钟 + 到点发通知」：本平台没有提醒能力就整块不摆
-                if (viewModel.hasReminders) {
+                // 自动还车是「排闹钟 + 到点执行代码」：iOS 到点不执行代码，那一端
+                // `supportsAutoReturn` 为 false，整块不摆（免费提醒那一半照常）
+                if (viewModel.hasAutoReturn) {
                     AutoReturnSettingsSection(
                         prefs = prefs,
                         onAutoReturnChanged = viewModel::onAutoReturnChanged,
@@ -186,7 +189,9 @@ fun EbikeSettingsSheet(
             }
 
             // 乘车码：保存与焚毁都依赖相册，没有相册能力的平台整组不摆
-            if (viewModel.hasGallery) CodeSettingsSection(prefs = prefs)
+            if (viewModel.hasGallery) {
+                CodeSettingsSection(prefs = prefs, canBurn = viewModel.hasBurnAfterScan)
+            }
 
             if (viewModel.hasReminders) {
                 ReminderSettingsSection(
@@ -462,7 +467,11 @@ private fun AutoReturnLeadSlider(
 
 /** 「乘车码」区：生成后自动保存、骑完车自动删除。只影响生成、保存与清除。 */
 @Composable
-private fun CodeSettingsSection(prefs: EbikePrefsSnapshot) {
+private fun CodeSettingsSection(
+    prefs: EbikePrefsSnapshot,
+    /** 本平台能不能删相册里的码（[EbikeQrGallery.canDelete]）；false 时「自动删除」那一行不渲染。 */
+    canBurn: Boolean,
+) {
     val scope = rememberCoroutineScope()
     var autoSaveChecked by remember(prefs.autoSave) { mutableStateOf(prefs.autoSave) }
     var burnChecked by remember(prefs.burnAfterScan) { mutableStateOf(prefs.burnAfterScan) }
@@ -476,15 +485,19 @@ private fun CodeSettingsSection(prefs: EbikePrefsSnapshot) {
                 scope.launch { Services.current.displayPrefs().setEbikeAutoSave(checked) }
             },
         )
-        SettingSwitchRow(
-            title = "骑完车自动删除",
-            subtitle = "免费时长结束或手动结束后，清除相册里的二维码",
-            checked = burnChecked,
-            onCheckedChange = { checked ->
-                burnChecked = checked
-                scope.launch { Services.current.displayPrefs().setEbikeBurnAfterScan(checked) }
-            },
-        )
+        // 删不掉的那一端（iOS：UIImageWriteToSavedPhotosAlbum 不回头给句柄）不给这个开关：
+        // 拨了也不会删，而且记录待删 key 只会让每次核对空转
+        if (canBurn) {
+            SettingSwitchRow(
+                title = "骑完车自动删除",
+                subtitle = "免费时长结束或手动结束后，清除相册里的二维码",
+                checked = burnChecked,
+                onCheckedChange = { checked ->
+                    burnChecked = checked
+                    scope.launch { Services.current.displayPrefs().setEbikeBurnAfterScan(checked) }
+                },
+            )
+        }
     }
 }
 
