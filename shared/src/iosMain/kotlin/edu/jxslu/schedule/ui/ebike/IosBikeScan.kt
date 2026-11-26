@@ -341,7 +341,8 @@ private class IosBikeScanViewController(
         )
         val preview = AVCaptureVideoPreviewLayer(session = session)
         preview.videoGravity = AVLayerVideoGravityResizeAspectFill
-        preview.frame = view.bounds
+        // CALayer / UIView 的 frame 在 K/N 里是只读属性，赋值走 setFrame(CGRect)（2026-11-26 CI 实测）
+        preview.setFrame(view.bounds)
         // 预览层先加：后加的 subview（取景框、取消键）盖在它上面
         view.layer.addSublayer(preview)
         previewLayer = preview
