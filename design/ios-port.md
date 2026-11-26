@@ -2088,9 +2088,19 @@ AVFoundation 的 17 处符号（KDoc 有清单，最可能卡在 `UIViewControll
 （5 分钟内）就撤掉了。**别把它们算成"临时多占几条"就往上课那 40 条里挪额度**——
 真按上限算也还差 1 条，超过就该按 §12.9.3 的顺序砍最远的那些。
 
-#### 壳层还要接的一行（本轮没改壳文件）
+#### 壳层还要接的两行（本轮没改壳文件）
 
-`WenquGrabScreen` 的 `onHitAlert` 在 iOS 那边现在还是不传（= 命中只弹确认框）。要接就一行：
+**① 快趣控制器的副作用**（这一行不接，上面那半自动还车与免费计时**根本不会开始**）：
+`IosServices.kvcxRideImpl` 现在传 `effects = null`，账号方式开锁时没人写 `ebikeRideStartAt`，
+`reconcileAutoReturn` 每次都判 `startAt <= 0` 直接撤排程。本轮补了 `platform/IosKvcxSideEffects`
+（逐条对齐 `AppKvcxSideEffects`），接上就只有一处：
+
+```kotlin
+// shared/src/iosMain/.../IosServices.kt，kvcxRideImpl 的构造参数
+effects = IosKvcxSideEffects,   // 原来是 null
+```
+
+**② 蹲点命中提醒**，`WenquGrabScreen` 的 `onHitAlert` 在 iOS 那边还是不传（= 命中只弹确认框）：
 
 ```kotlin
 // shared/src/iosMain/.../IosNavigation.kt，SubpageScreen.WENQU_GRAB 里
@@ -2104,7 +2114,7 @@ WenquGrabScreen(
 自动还车**不需要**壳层接任何东西：`IosEbikeReminder` 的 `session` 参数默认从
 `Services.current.kqcxSession()` 取（就是 `IosServices` 里那份进程级会话，不能各建一份——
 token 刷新会互相覆盖）。`IosNavigation` 里现有的 `IosEbikeReminder(services.displayPrefs())`
-一字不用改。
+一字不用改；想省一份实例也可以换成 `IosKvcxSideEffects.reminder`（同一个对象，共享前台计时器槽位）。
 
 #### 本轮未验 / 风险
 
