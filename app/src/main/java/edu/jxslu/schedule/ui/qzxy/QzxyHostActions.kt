@@ -16,7 +16,7 @@ import edu.jxslu.schedule.ui.common.AppPermissions
  * | 函数 | 为什么必须在 Android 侧 |
  * |---|---|
  * | [rememberQzxyScanPermission] | `rememberLauncherForActivityResult` + `AppPermissions`（`ContextCompat.checkSelfPermission`） |
- * | [rememberQzxyRecharge] | `QzxyRecharge.open(context)`：`Intent` + `alipays://` 深链 |
+ * | [rememberQzxyRecharge] | `openQzxyRecharge(context)`：`Intent` + `alipays://` 深链 |
  *
  * 两个都返回 `null` 语义明确的回调：宿主给不起能力时页面整行不渲染。
  */
@@ -65,5 +65,5 @@ private class PendingScanPermission {
 @Composable
 fun rememberQzxyRecharge(): () -> Boolean {
     val context = LocalContext.current
-    return { QzxyRecharge.open(context) }
+    return { openQzxyRecharge(context) }
 }
