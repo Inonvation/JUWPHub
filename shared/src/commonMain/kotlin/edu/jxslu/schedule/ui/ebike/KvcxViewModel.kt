@@ -453,7 +453,7 @@ class KvcxViewModel(
         is HttpRequestTimeoutException -> "登录超时，请检查网络后重试"
         is SocketTimeoutException -> "登录超时，请检查网络后重试"
         is ConnectTimeoutException -> "登录超时，请检查网络后重试"
-        is IOException -> "网络不可用，请检查网络后重试"
+        is IOException -> "网络不可用（${error.message?.takeIf { it.isNotBlank() } ?: "连接失败"}）"
         else -> "登录异常：${error.message ?: error::class.simpleName}"
     }
 
@@ -464,7 +464,7 @@ class KvcxViewModel(
         is HttpRequestTimeoutException -> "查询超时，请稍后重试"
         is SocketTimeoutException -> "查询超时，请稍后重试"
         is ConnectTimeoutException -> "查询超时，请稍后重试"
-        is IOException -> "网络不可用，请检查网络后重试"
+        is IOException -> "网络不可用（${error.message?.takeIf { it.isNotBlank() } ?: "连接失败"}）"
         else -> "查询异常：${error.message ?: error::class.simpleName}"
     }
 }
