@@ -1179,14 +1179,14 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 
 | 差什么 | 现状（2026-11-25 03:30） | 影响 |
 |---|---|---|
-| 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份）；底栏三格「今日 / 课表 / 教务」（M3 `NavigationBar` + 图标 + 文字，选中主色 / 未选中 `onSurface` 0.6）。**2026-11-25 晚（S1）抽屉排版整块对齐 Android**：身份卡 → 账号与登录 → 我的·设置 → 分隔线 → 钱包卡 → 生活服务区 → 二级页紧凑分组 → 付款码，段头 / 行 / 钱包卡 / 付款码**全部是 `shared/commonMain/ui/life/SideDrawerParts.kt` 的同一份 Composable**（钱包卡文案走 `walletCardTexts`，服务行走 `lifeServiceRows`，缺服务的平台传 null 即整行不渲染）。白名单 41 条仍在且全部可达，其中 8 条由卡片 / 行直接承担。今日页已接上（v1 搬完）。 | 还差 Android 左侧抽屉的**手势视差**（iOS 用 `ModalNavigationDrawer`，是另一套实现）；**主卡的缩放 / 圆角 / 阴影 2026-11-25 晚已对齐**，侧栏宽也统一成 300dp，Tab 与二级页的进出场补了过渡（§14）；服务行右侧的实时状态（开水余额 / U净 空闲数）未接——聚合逻辑还在 `:app` 的 `SideDrawerContent`；钱包卡的「充值」按钮不渲染（充值宿主 `RechargeHost` / `PowerBankPayScreen` 仍在 `:app`）；余额取数是「首次组合拉一次」而不是「抽屉展开时」（`IosDrawer` 签名固定三参数，拿不到 `DrawerState`） |
+| 导航与 Android 的一致度 | **已重写**：路由键直接用共享层 `SubpageScreen`（Android 的 `SubpageActivity` 消费同一份）；底栏三格「今日 / 课表 / 教务」。**2026-11-25 晚（S1）抽屉排版整块对齐 Android**：身份卡 → 账号与登录 → 钱包卡 → 生活服务区 → 二级页紧凑分组 → 付款码，段头 / 行 / 钱包卡 / 付款码**全部是 `shared/commonMain/ui/life/SideDrawerParts.kt` 的同一份 Composable**（钱包卡文案走 `walletCardTexts`，服务行走 `lifeServiceRows`，缺服务的平台传 null 即整行不渲染）。**2026-11-26 晚**：设置改成可返回的覆盖层、底栏换成悬浮胶囊、侧栏删掉「全部功能」行（入口搬到设置页），见 §12.17。 | 还差 Android 左侧抽屉的**手势视差**（iOS 用 `ModalNavigationDrawer`，是另一套实现）；侧栏宽统一 300dp、主卡缩放 / 圆角 / 阴影已对齐；服务行右侧的实时状态（开水余额 / U净 空闲数）未接——聚合逻辑还在 `:app` 的 `SideDrawerContent`；钱包卡的「充值」按钮不渲染（充值宿主仍在 `:app`）；余额取数是「首次组合拉一次」而不是「抽屉展开时」 |
 | 教务登录后的自动填表 | iOS 用 `WKWebView` 让用户手点登录，登录成功落地后自动 `archive` | Android 有自动填表；iOS 需要注入 JS，能做 |
 | 凭证存储 | `IosKeychain`（CoreFoundation）+ 八个存储（胖乖 / 快趣 / U净 / 问渠 / 趣智 / AI / **一卡通** / **教务**）已写，**iOS 编译验证卡在 runner 容量** | 教务（CAS）2026-11-25 晚起也是真的（`IosCredentialVault`，service `secure_jw`，见 §12.10）——此前恒为 `null`，因为 iOS 从不保存教务密码、登录只在 `WKWebView` 里；一卡通已接（`IosYktCredentialStore`，service `secure_ykt`，含落盘 token 与失效标记），账号中心 / 消费流水 / 电费读得到学号。**2026-11-25 晚起录入界面也搬完了**（校园卡设置页 + 付款码页进 `commonMain`，见 §12.8），四处入口不再停在「凭证未配置」 |
-| 第三方仓库 | **胖乖 / U净 / 问渠 / 快趣会话已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账）。快趣：**数据层与页面层两端现在都是同一份**（`KqcxSessionCore` + `IosKqcxCredentialStore`；页面 P4 2026-11-26 搬完）。iOS 上账号页 / 订单页 / 出行页**都能进**，侧栏也有「快趣出行」行；**底图与车标 2026-11-26 晚已接**（画布 + 高德栅格瓦片，见 §12.16），提醒也已接。仍缺的只有「扫车身码」（无相机页）与「自动还车」（要 `BGTaskScheduler`） |
+| 第三方仓库 | **胖乖 / U净 / 问渠 / 快趣会话已接**（2026-11-25）：凭证走 Keychain，订单快照 / 收藏 / 历史走 `appDataDir()` 的 JSON 或 `NSUserDefaults`（`IosKeyValuePrefs`）。`qzxyRepository()` 仍是 `null` | 开水房、U净 看板与洗衣账单、问渠（登录 / 活动 / 报名 / 工时 / 蹲点页）**在 iOS 上能真跑**。趣智仍缺 6 个平台件里的 5 个（蓝牙扫描 / 设备表 / prefs / 记账）。快趣：**数据层与页面层两端现在都是同一份**（`KqcxSessionCore` + `IosKqcxCredentialStore`；页面 P4 2026-11-26 搬完）。iOS 上账号页 / 订单页 / 出行页**都能进**，侧栏也有「快趣出行」行；**底图与车标 2026-11-26 晚已接**（画布 + 高德栅格瓦片，见 §12.16），提醒也已接。仍缺的只有「自动还车」（要 `BGTaskScheduler`）；**扫车身码 2026-11-26 晚已接**（AVFoundation，见 §12.17） |
 | 支付调起 | 一卡通走「收银台 URL 进 `WKWebView`」；胖乖 / 趣智走 `alipays://` 深链 | `Info.plist` 还没有 `LSApplicationQueriesSchemes`（`alipays` / `weixin`），深链会被系统拦 |
 | App 图标 | **已补**（2026-11-25）：`iosApp/JUWPHub/Assets.xcassets/AppIcon.appiconset`，1024 单尺寸 universal。用 `tools/app-icon/source.png` 的**前景层**重新合成满幅图——原图把圆角与投影烤进了像素，直接用会与 iOS 遮罩叠成双层圆角 | 启动屏 2026-11-25 晚补上（§14.4）：`UILaunchScreen` 指向命名色 `LaunchBackground`，两档色值 = 主题 `background` |
 
-**iOS 上现在能进的页面**（精简版：抽屉 9 行短面板 + 「全部功能」页 + 3 个底栏 Tab）：今日、课表、教务汇总、我的、
+**iOS 上现在能进的页面**（精简版：抽屉 8 行短面板 + 「全部功能」目录（在设置里）+ 3 个底栏 Tab）：今日、课表、教务汇总、我的、
 理论课表、实验课表、教材、教学日历、学籍信息、学业完成情况、培养方案、实习基地、成绩 / 成绩设置、
 考试 / 考试设置、选课 / 选课中心 / 已选课程 / 预选清单、请假、校历、收件箱、天气 / 天气设置、
 电费、消费流水、宿舍报修、开水房、U净洗衣房 / 洗衣账单、课表管理 / 调课 / 变动检测、数据与备份、
@@ -1229,14 +1229,14 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 |---|---|---|---|
 | 1 | 打开 App | 进「今日」页，不闪退 | `PlistSanityCheck` 缺键（`CADisableMinimumFrameDurationOnPhone`）或 Compose 初始化失败 |
 | 2 | 底栏「课表」 | 空态显示「去导入课表」；有数据时出网格 | Room 没起来（iOS 沙箱目录问题） |
-| 3 | 「更多」→ 抽屉 | 9 行短面板（身份卡 / 账号与登录 / 全部功能 / 钱包卡 / 江水生活 / 底栏左侧「设置」+ 右侧付款码），与 Android 侧栏同构；二级页清单在「全部功能」页；**没有**笔记 / 作业 / 百宝箱 / 问渠 / AI 调课 | 白名单没编进去，或抽屉没走 `IosDrawer` |
+| 3 | 「更多」→ 抽屉 | 8 行短面板（身份卡 / 账号与登录 / 钱包卡 / 江水生活 / 底栏左侧「设置」+ 右侧付款码），与 Android 侧栏同构；二级页目录在「设置 → 关于 → 全部功能」；**没有**笔记 / 作业 / 百宝箱 / 问渠 / AI 调课 | 白名单没编进去，或抽屉没走 `IosDrawer` |
 | 4 | 课表空态「去导入课表」 | 先落 `sso.jsp`（一闪），再跳统一身份认证；登录后顶栏开始报进度（`正在导入 2026-2027-1（1/12）…`），结束给一行结论 | 入口还是 CAS 直链（403 / 白屏的老毛病），或归档没走 WebView 同源取页 |
 | 4b | 导入页顶栏「刷新」 | 点一下重新加载当前页；403 / 白屏时刷一次通常就过去了 | 按钮没接上 `WebViewController.reload()` |
 | 4c | 导入结束那两行字 | `导入完成：库里 N 门 · 开学 2026-08-31 · 现第 13 周 · 教务 2026-2027-1 · 新建 …` + `示例：液压与气压传动A 周二 9-11节 1-16周` | 库里 N 门 = 0 说明没落地，第二行是定位用的样例课；「现第 13 周」应与教务页右上角的周次一致 |
 | 5 | 抽屉「江水生活」→「开水房」 | 登录（短信验证码）→ 能看到设备与余额 → 点开阀 | **胖乖是 HTTP 不是蓝牙**，这条链 iOS 上能真开出水；同时是 **Keychain 的首次真机验证**（凭证存进 `IosQiekjCredentialStore`，杀掉进程再进来仍在） |
 | 5b | 「江水生活」→「U净洗衣房」 | 看板能看附近洗衣机与在用订单；扫码与支付入口不渲染 | 三份本地存储已接（Keychain + NSUserDefaults） |
 | 6 | 抽屉「数据与备份」 | 能导出 JSON、能导入 Android 那边导出的备份 | Room 读写；**这也是 WebView 万一仍不通时的兜底路**：在 Android 上导好课表再导进来 |
-| 7 | 底栏「我的」 | 没有「AI 调课」行、没有「百宝箱」开关 | `showAiSchedule` / `showToolbox` 没传 |
+| 7 | 抽屉左下角「设置」 | 能进设置首页，**顶栏有返回键**，返回回到原 Tab；没有「AI 调课」行、没有「百宝箱」开关 | 设置还是旧 Tab（`IosTab.Me` 未删干净）或 `meOpen` 覆盖层没接 `onBack` |
 | 8 | 抽屉「账号中心」 | 没有问渠行、没有「可选 / AI 调课」那一节 | 两个可空回调没传 |
 | 9 | 抽屉「钱包」→「校园卡」 | 填学号 + 查询密码 → 「保存并开启」→ 回「消费流水」/「电费」看是否真拉到数据 | **这一页就是 Keychain 的真实录入点**（Y1 2026-11-25 晚搬进共享层）。页面上「充值」按钮与「余额提醒」整节**本来就不该出现**（两个平台槽位传 null，§12.8）；「寝室电费」的房间行能点、能改绑 |
 | 9b | 抽屉「钱包」→「付款码」 | 能出二维码与一维码、卡号行有数字、「下一个码」批内递增 | 码图由共享层 Compose 画布绘制（不再走 `android.graphics`）。**防截屏与亮度拉满都不会生效**（iOS 没有实现，§12.8）；扫码可读性要在真机上用另一部手机试 |
@@ -1602,7 +1602,7 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 | 缺的 | 为什么现在给不出 | 升级条件 |
 |---|---|---|
 | **地图车标**（`bikeMap`） | 本仓 Kotlin 2.1.21 的 MapKit 绑定里 `MKAnnotationProtocol.coordinate` 是 final、`MKPointAnnotation.coordinate` 是 `val`、`addOverlay(s)` 全 Unresolved——标注与覆盖物都放不上去 | **已解（2026-11-26 晚）**：不走 MapKit，改由共享层 `BikeMapCanvas` 自绘 + 高德栅格瓦片，见 §12.16 |
-| **扫车身码** | 没有相机取景页（Android 是 zxing `EbikeScanActivity`）。`onScanBodyCode` 为 null | 接 `AVCaptureSession` 或复用 `ui/web` 那条 `<input type=file>` 的路 |
+| **扫车身码** | 没有相机取景页（Android 是 zxing `EbikeScanActivity`）。`onScanBodyCode` 为 null | **已解（2026-11-26 晚）**：`IosBikeScan.kt`（AVFoundation）+ `onScanBodyCode` 接上，见 §12.17 |
 | **拉起微信**（扫码取车 / 去微信结清） | `Info.plist` 没有 `LSApplicationQueriesSchemes`，`weixin://` 打不开 | 补 plist + `UIApplication.openURL` |
 | **免费时长提醒 / 自动还车** | `EbikeReminderPort` 没有 iOS 实现。免费时长到点用 `UNTimeIntervalNotificationTrigger` 是够的（`IosLocalNotifications` 已有现成的排 / 撤），**自动还车不行**：它要「到点执行代码」，iOS 只有 `BGTaskScheduler`，系统不保证触发时刻 | 先只做免费时长提醒那一半（排一条到点通知），自动还车留 Android 独占 |
 | **存相册 / 扫完即焚** | `EbikeQrGallery` 没有 iOS 实现（要 `UIImageWriteToSavedPhotosAlbum`） | 接 PhotoKit 写入权限 |
@@ -1779,24 +1779,21 @@ iOS 根在 2026-11-26 之前是裸的 `JuwTheme { }`，后果是三条**看得�
 
 **首帧保真**：Android 有「进程快照 + 阻塞读」的先手，iOS 这边在组合期不能阻塞，所以选了深色的
 用户极端情况下会看到一帧浅色（DataStore 首个值通常在第一帧内到达）。拿这个换「不阻塞首帧」。
-### 14.5 状态栏与底部净空：这一轮**不改**，理由是它们本来就是对的
+### 14.5 状态栏与底部净空（2026-11-26 晚现状，取代表内旧结论）
 
-- **顶部**：Compose 树没有顶到刘海下面，靠的不是 Compose 的 insets，而是 **SwiftUI 宿主**。
-  `iOSApp.swift` 是 `WindowGroup { ComposeContainer().ignoresSafeArea(.keyboard) }`——只放开了
-  键盘，安全区（顶部 / 底部 / 容器）由 SwiftUI 布局让出，Compose 的 `UIViewController` 整个
-  落在安全区内。所以 `pinnedStatusBars()` / M3 `TopAppBar` 的默认 insets 在这个排布下取到 0
-  是**正确**的（再垫一层就是双重让位，顶栏会多空一截）。
-- **底部**：iOS 的底栏是 `Column` 流里的 M3 `NavigationBar`（不是 Android 那种悬浮胶囊），
-  内容本来就在它上方，所以 `LocalBottomBarClearance` 保持默认 `0.dp` 是对的——Android 那条
-  「普通底栏形态下净空是 0」的注释在这里同样成立。
-- **风险提示（写在这里，不是想象的问题）**：谁哪天给 Swift 视图加 `.ignoresSafeArea()`，
-  整棵 Compose 树会立刻顶到刘海与手势条下面，而共享层没有任何补偿。那时要么在
-  `IosRoot` 外层加 `windowInsetsPadding(WindowInsets.safeDrawing)`，要么把
-  `.ignoresSafeArea()` 去掉。
-- **未验**：CMP 1.7.3 在 iOS 上 `WindowInsets.statusBars` 到底返回 0 还是真实安全区高度，
-  本机（Windows）拿不到证据——gradle 缓存里没有 uikit 变体的 klib，本机也编不了 iOS。
-  上面的结论不依赖它（安全区由 SwiftUI 让出），但**如果真机上顶栏出现「多空一截」**，
-  那就是 CMP 也返回了真实值，处置是让 `IosRoot` 里那几个页面的顶栏不再吃 insets。
+- **顶部**：根 `IosRoot` 用 `windowInsetsPadding(WindowInsets.safeDrawing.only(Top + Horizontal))`
+  让出状态栏 / 刘海；`iOSApp.swift` 那一层已经是 `.ignoresSafeArea()`（§12.15），所以安全区由
+  Compose 这一侧吃，不再靠 SwiftUI。页面自己的 `TopAppBar(windowInsets = statusBars)` 在
+  这个排布下没有再叠一层（实测顶栏间距正确）。
+- **底部**：底栏是**悬浮胶囊**（§12.17），加在 `box` 的最上层、自己吃
+  `safeDrawing.only(Bottom)`；内容铺到屏幕底、靠 `LocalBottomBarClearance`（= `IosBottomBarClearance`
+  80dp）把最后一屏内容顶出胶囊。二级页没有底栏，改用 `safeDrawing.only(Bottom)` 让位。
+  Android 那条「普通底栏形态下净空是 0」在这里**不再成立**，别照抄。
+- **风险提示（写在这里，不是想象的问题）**：谁哪天把 Swift 视图的 `.ignoresSafeArea()` 去掉，
+  根布局会再被 SwiftUI 让一次位，顶栏与底栏一起多缩一截；处置是只保留一层（现在这层在 Compose）。
+- **未验**：CMP 1.7.3 在 iOS 上 `WindowInsets.safeDrawing` 的确切取值（顶 / 底各多少）本机拿不到
+  证据；上面的布局按「真实值」写，真机若出现「顶栏多空一截 / 底栏悬得过高」，先查是不是
+  SwiftUI 又让了一次位。
 
 
 ### 12.15 2026-11-26 下午这批：抽屉瘦身 / 白边 / 付款码提亮 / 快趣补齐
@@ -1908,3 +1905,88 @@ iOS 此前把设置做成列表里的一行「我的 · 设置」，Android 是�
 `Graph.kvcxRide(context)` 单例），iOS 目前只有出行页里 `remember` 的那一份（页面级）。
 再建一份会出现两个状态源（今日页说「骑行中」、出行页说「没单」）。升级条件：把控制器提到
 `IosServices`，出行页与今日页共用同一份，然后按 `TodayHost` 的槽位写法接上。
+**→ 2026-11-26 晚已按这条接上，见 §12.17。**
+
+### 12.17 2026-11-26 晚批（二）：层级 / 悬浮底栏 / 扫码 / 今日快趣行 / 粘贴 / 手势性能
+
+用户一次提了七条，四条并行流 + 主线一起做，合并后跑门禁再推 CI。逐条如下。
+
+#### 12.17.1 侧栏「全部功能」删除 + 设置变成可返回的层级
+
+- 侧栏那行「全部功能」删了（用户口径「多余」）。目录本身保留，入口搬到
+  **设置 → 关于 → 全部功能**（`SettingsScreen(onOpenAllFeatures = …)`，Android 传默认 null，
+  那边本来没有这一页）。
+- 设置从「`inBottomBar = false` 的 Tab」改成**覆盖层**：`meOpen` 为真时，根是设置首页
+  （或全部功能目录），点进去的页面压在根上（`IosOverlayStack`），返回逐层退到根，
+  根的返回键关掉覆盖层、回到原来的 Tab。用户报的「进设置页后没办法返回」就是旧 Tab 形态
+  没有返回语义。`IosTab.Me` 与 `inBottomBar` 字段一并删除（不再有第二套入口）。
+
+#### 12.17.2 底部白边 + 悬浮底栏（液态玻璃近似）
+
+- **白边**根因：主卡整块用 `safeDrawing` 让位，home indicator 那条留给「页面背景」，
+  而底栏是实心 M3 `NavigationBar`，两者之间露出与底栏不同色的横条。现在根只让
+  顶部 / 左右，内容铺到屏幕底，底栏**浮在内容之上**并自己吃底部安全区 → 不再有独立色带。
+- **底栏**：`IosFloatingTabBar`（`shared/src/iosMain/.../IosBottomBar.kt`）——左右 18dp、
+  距底 8dp + 安全区的半透明胶囊，发丝描边 + 顶部高光渐变 + 12dp 阴影，选中项主色淡胶囊。
+  三格与 Android `AppBottomBar` 同序。
+- **为什么不是真 `UIGlassEffect`**：① CI 是 Xcode 16.4，`UIGlassEffect` 要 Xcode 26 SDK；
+  ② CMP 1.7 的 UIKit interop 视图画在 Compose 之上，`UIVisualEffectView` 会盖住图标与文字。
+  真模糊要整条底栏用 UIKit 重写，本机验不了。等 CMP 支持 backdrop blur 再换。
+- 内容让位走 `LocalBottomBarClearance`（80dp）；`TodayScreen` / `WeekScreen` / `SettingsScreen` /
+  `JwHubScreen` 已在读它。
+
+#### 12.17.3 快趣地图：手势帧不再触发重组
+
+`BikeMapCanvas` 里 `viewport` 原来是 `by mutableStateOf`，组合期有 `remember(viewport...)`
+算瓦片清单、`gestureTick` 每帧 +1 重启 effect——拖动 / 捏合每帧都重组。现在：
+
+| 原来 | 现在 |
+|---|---|
+| `by` 委托 + 组合期读 | `State` 对象，组合期不读；手势/绘制/effect 内读 `.value` |
+| `remember(viewport...) { tileKeys }` | `snapshotFlow { visibleKeysFor(...) }.distinctUntilChanged().debounce(120).collectLatest` |
+| `gestureTick` 状态 + `LaunchedEffect(gestureTick)` | `MutableSharedFlow<Unit>` + `debounce(450)` 收集（停手回报） |
+| `LaunchedEffect(canvasSize)` 键是状态 | `snapshotFlow { canvasSize }` |
+
+行为（命中测试、镜头、`onViewportMeasured` / `onCenterSettled` / `onCameraApplied` / `onUserPan`、
+瓦片请求）不变；单测补了「同一视野两次算出的 key 列表相等」（`distinctUntilChanged` 的前提）。
+**重组是否真的消失只能真机看**：拖动时车标应 1:1 跟手、无掉帧。
+
+#### 12.17.4 扫车身码（AVFoundation）
+
+`shared/src/iosMain/.../ui/ebike/IosBikeScan.kt` + `rememberIosBikeScanner()`：
+`AVCaptureSession` + `AVCaptureVideoPreviewLayer` + metadata 输出（QR / Code128 / Code39 /
+EAN13 / EAN8 / ITF14），第一枚码即停；权限三态（未决定请求一次、拒绝弹「去设置」、相机打不开
+另弹一句），取消 / 拒绝回 `null`。`RideScreen.onScanBodyCode` 已接上，
+「车号 / 出码」面板里的扫码行从此渲染。`Info.plist` 加了 `NSCameraUsageDescription`，
+`project.yml` 加 `-framework AVFoundation`。
+
+#### 12.17.5 今日页快趣骑行卡（进程级控制器）
+
+`IosServices.kvcxRideController()` 是进程级单例（与 Android `Graph.kvcxRide` 同口径），
+三条事件流（notices / unlocked / remoteRide）非空——`BikeMapViewModel` 注入控制器时靠流转
+提示与成功信号。出行页改为注入同一份，今日页用 `rememberIosKvcxServiceSlot(...)` 造
+`ActiveServiceSlot`：进页静默查一次（60s TTL）、开锁/锁车直发、还车走
+`kvcxConfirmDialog` 规格的确认弹窗（danger + 逐条编号 + 触感只在确认键）。
+`effects = null`（无闹钟/通知栏倒计时/自动还车，与 iOS 现状一致）。
+
+#### 12.17.6 胖乖 Token 登录：显式粘贴
+
+iOS 上 `OutlinedTextField` 长按菜单不出现（CMP 1.7.3 行为，本仓没有手势拦截；同卡片三个输入框
+都一样）。Token 框补 `trailingIcon` 的「粘贴」按钮：`readPlainText()` → 去首尾空白 → 整段替换；
+剪贴板空时给一句「剪贴板没有可粘贴的内容」。手机号/验证码不加按钮（系统键盘自带粘贴）。
+
+#### 12.17.7 并行与验证
+
+四条并行流各自 worktree + 分支：`feat/ios-map-perf`、`feat/ios-scan`、`feat/ios-today-live`、
+`feat/ios-paste`；主线做层级 / 底栏 / 文档，并负责接线（扫码、今日卡、共享控制器）。
+合并顺序：主线提交 → scan → paste → today-live → map-perf，逐次 merge commit。
+
+本地门禁（合并后）：`:shared:metadataCommonMainClasses`、`:app:testDebugUnitTest`
+（**2501 例 / 0 失败 / 1 跳过**）、`:app:assembleDebug` 全绿；`find_duplicate_kt.ps1` 无新增。
+iOS 编译仍只能靠 CI。
+
+**本批未验（真机 / CI 才能判）**：悬浮底栏的安全区取值与观感、设置覆盖层的返回栈、
+AVFoundation 的 17 处符号（KDoc 有清单，最可能卡在 `UIViewController(null, null)`、
+`@ObjCAction` 选择器链、`AVAuthorizationStatus*` 常量形态）与相机权限弹窗、
+今日页快趣卡的实际显示与还车确认、Token 粘贴按钮（iOS 16+ 首次会弹系统「允许粘贴」）、
+地图手势是否真的不再重组。

@@ -95,6 +95,7 @@ import edu.jxslu.schedule.ui.ebike.KvcxOrdersScreen
 import edu.jxslu.schedule.ui.ebike.KvcxOrdersViewModel
 import edu.jxslu.schedule.ui.ebike.KvcxScreen
 import edu.jxslu.schedule.ui.ebike.KvcxViewModel
+import edu.jxslu.schedule.ui.ebike.rememberIosBikeScanner
 import edu.jxslu.schedule.ui.ebike.RideScreen
 import edu.jxslu.schedule.ui.exam.ExamScreen
 import edu.jxslu.schedule.ui.exam.ExamSettingsScreen
@@ -695,11 +696,12 @@ internal fun IosRouteContent(
         //
         // | 动作 | 为什么给不出 |
         // |---|---|
-        // | `onScanBodyCode` | 没有相机取景页（Android 是 zxing `EbikeScanActivity`） |
         // | `onRequestLocationPermission` / 三个「去设置」 | 定位授权由 `IosBikeLocation` 自己在开流时请求；没有对应的系统设置深链 |
         // | `mapCache` / `showMapSourceChoice` | 瓦片只在内存里（不落盘，没有「地图缓存」可清）；底图只有一种，没有「来源」可选 |
         //
-        // 拉起微信（`onOpenWechatScan` / `onOpenWechatForSettle`）**已接**：`Info.plist` 有
+        // 扫车身码 **已接**（2026-11-26 晚）：`IosBikeScanner` 是 AVFoundation 取景页，
+        // `onScanBodyCode` 非空后「车号 / 出码」面板里的扫码行才会渲染。
+        // 拉起微信（`onOpenWechatScan` / `onOpenWechatForSettle`）也已经接了：`Info.plist` 有
         // `LSApplicationQueriesSchemes`，`iosOpenWechat()` 负责 `UIApplication.openURL`。
         // `EbikeViewModel` 的 `gallery` / `reminders` 也是真实现（存相册、免费时长提醒）；
         // 「自动还车」与「扫完即焚」在 iOS 关闭，对应设置整块不渲染。
@@ -711,8 +713,10 @@ internal fun IosRouteContent(
                     // 会话本体同时是「本机用车编排」与「还车点 / 禁停区图层」两条缝的实现
                     kqcx = services.kqcxSession(),
                     zoneSource = services.kqcxSession(),
-                    // zoneCache / rideController / sideEffects 留默认 null：
-                    // 图层缓存只是「省一个往返」，`rideController` 为 null 时 VM 自建一份。
+                    // 控制器用**进程级单例**（2026-11-26 晚）：今日页的快趣卡片读的是同一份状态，
+                    // 各建一份就等于「今日页说骑行中、出行页说没单」。
+                    rideController = services.kvcxRideController(),
+                    // zoneCache 留默认 null：图层缓存只是「省一个往返」。
                 )
             }
             val ebikeViewModel = remember {
@@ -727,6 +731,9 @@ internal fun IosRouteContent(
                 )
             }
             val bikeMapSlot = remember { iosCanvasBikeMapSlot() }
+            // 扫车身码（2026-11-26 晚）：AVFoundation 取景页，识别到第一枚码就关页；
+            // 取消 / 权限被拒回 null，`RideScreen` 那边按「取消」处理（不弹错误）。
+            val bikeScanner = rememberIosBikeScanner()
             RideScreen(
                 viewModel = mapViewModel,
                 ebikeViewModel = ebikeViewModel,
@@ -735,6 +742,8 @@ internal fun IosRouteContent(
                 // 车标：纯 Compose 画布自绘（Web 墨卡托投影 + 手势），绕开 MapKit 的标注绑定
                 // ——那套在本仓 Kotlin 2.1.21 的绑定里用不了（见 design/ios-port.md §12.13）。
                 bikeMap = bikeMapSlot,
+                // 扫车身码：填进「车号 / 出码」面板的那一行；非空才会渲染
+                onScanBodyCode = bikeScanner,
                 onOpenKvcxAccount = { push(IosRoute(SubpageScreen.KVCX)) },
                 // 拉起微信：`Info.plist` 已补 `LSApplicationQueriesSchemes`（weixin / weixinULAPI）
                 onOpenWechatScan = { iosOpenWechat() },

@@ -85,6 +85,7 @@ import edu.jxslu.schedule.ui.theme.JuwTheme
 import edu.jxslu.schedule.ui.theme.Motion
 import edu.jxslu.schedule.ui.theme.ProvideFixedFontScale
 import edu.jxslu.schedule.ui.today.ActiveServiceCard
+import edu.jxslu.schedule.ui.today.rememberIosKvcxServiceSlot
 import edu.jxslu.schedule.ui.today.TodayScreen
 import edu.jxslu.schedule.ui.today.TodayServiceSlot
 import edu.jxslu.schedule.ui.today.TodayViewModel
@@ -483,12 +484,24 @@ private fun IosRoot(services: IosServices) {
                                                 onOpenSubpage = { screen, focus ->
                                                     pushRoute(IosRoute(screen, focus))
                                                 },
-                                                // 进行中服务卡：只给开水与 U净。
-                                                // `pinned` 恒 false——位置判据是「有在案快趣骑行」，iOS 没有快趣。
+                                                // 进行中服务卡：开水 / U净 / 快趣骑行三行。
+                                                // `pinned` 仍恒 false——位置判据是「有在案快趣骑行」，
+                                                // 那一档 Android 用同步状态算，iOS 这轮只接「行」不接「置顶」。
+                                                //
+                                                // 快趣行（2026-11-26 晚）：控制器是 `IosServices` 的
+                                                // **进程级单例**，与出行页同一份状态（若各建一份，
+                                                // 今日页说「骑行中」、出行页说「没单」）。
+                                                val kvcxSlot = rememberIosKvcxServiceSlot(
+                                                    controller = services.kvcxRideController(),
+                                                    onOpenRide = {
+                                                        stack.add(IosRoute(SubpageScreen.RIDE))
+                                                    },
+                                                )
                                                 serviceCards = TodayServiceSlot(
                                                     pinned = false,
                                                     content = { cardModifier ->
                                                         ActiveServiceCard(
+                                                            kvcx = kvcxSlot,
                                                             waterSession = watering,
                                                             ujingOrder = ujingOrder,
                                                             onOpenWater = {
