@@ -2,11 +2,14 @@ package edu.jxslu.schedule
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import edu.jxslu.schedule.ui.life.DrawerSectionHeader
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,7 +62,7 @@ internal fun IosAllFeaturesScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            contentPadding = PaddingValues(
                 start = 8.dp,
                 end = 8.dp,
                 top = 8.dp,
@@ -67,7 +70,7 @@ internal fun IosAllFeaturesScreen(
             ),
         ) {
             item(key = "title") {
-                androidx.compose.foundation.layout.Row(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),

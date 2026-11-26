@@ -81,7 +81,7 @@ internal val IosDrawerWidth = 300.dp
  * 这里只是把其中已经在上面出现过的那几页滤掉。漏滤的表现是同一页出现两次（看得见），
  * 多滤的表现是点了找不到（一核对就露）——所以这两组名字必须一起改。
  */
-private val IOS_DRAWER_QUICK_SCREENS: Set<SubpageScreen> = setOf(
+internal val IOS_DRAWER_QUICK_SCREENS: Set<SubpageScreen> = setOf(
     SubpageScreen.STUDENT_INFO,
     SubpageScreen.ACCOUNTS,
     SubpageScreen.CAMPUS_STATEMENT,
@@ -383,7 +383,7 @@ private const val CompactRowPressScale = 0.985f
  * 自己的可点元素，避免同一次点击震两下。
  */
 @Composable
-private fun CompactDrawerRow(entry: IosDrawerEntry, onClick: () -> Unit) {
+internal fun CompactDrawerRow(entry: IosDrawerEntry, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val pressScale by animateFloatAsState(
