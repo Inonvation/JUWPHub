@@ -87,6 +87,7 @@ import edu.jxslu.schedule.ui.common.SettingsDivider
 import edu.jxslu.schedule.ui.common.SettingsSection
 import edu.jxslu.schedule.ui.common.WaterUnlockButton
 import edu.jxslu.schedule.ui.common.postNotice
+import edu.jxslu.schedule.ui.common.readPlainText
 import edu.jxslu.schedule.ui.common.RechargeRiskNote
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberRefreshHold
@@ -267,6 +268,24 @@ fun WaterScreen(
         }
     }
 
+    // Token 输入框的粘贴入口（iOS 真机长按不出粘贴菜单，2026-11-26）：Token 是整段一次性粘进来
+    // 的东西，没有别的确定进路，所以给输入框配一颗按钮，走 `readPlainText()` 这条两端已实现的缝。
+    // 读到内容就整段替换（不追加：Token 只有一份，拼错了校验必然不过），并 trim 首尾——
+    // 从聊天窗口复制常带一个换行，单行框里看不见它。空剪贴板不静默：点了按钮没反应，
+    // 用户分不清是没读到还是按钮坏了。
+    val pasteToken: () -> Unit = {
+        val text = readPlainText()?.trim()
+        if (text.isNullOrEmpty()) {
+            scope.launch {
+                snackbar.showNotice(
+                    AppNoticeVisuals("剪贴板没有可粘贴的内容", tone = NoticeTone.Warning),
+                )
+            }
+        } else {
+            viewModel.updateTokenLoginInput(text)
+        }
+    }
+
     // 根因：迁到 SubpageActivity 独立窗口后没有外层 Scaffold 垫状态栏，
     // windowInsets 归零（嵌 NavHost 时期防双倍空白的老规避）会让顶栏顶进状态栏；
     // 现走 M3 默认——TopAppBar 自行消费状态栏，contentWindowInsets 管住手势条。
@@ -302,7 +321,7 @@ fun WaterScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                LoginSection(state = state, viewModel = viewModel)
+                LoginSection(state = state, viewModel = viewModel, onPasteToken = pasteToken)
                 Disclaimer()
             }
         } else {
@@ -485,9 +504,31 @@ private fun SessionExpiredNoticeForWater(loggedIn: Boolean, snackbar: SnackbarHo
  * 登录卡（2026-10-07 卡片化）：验证码 / Token 两种方式收进同一张 SettingsSection，
  * 与趣智 / 快趣 / U净 的登录卡同一形态——本页其余区块都是卡片，表单裸在页面背景上
  * 会显得「没装进容器」。
+ *
+ * ## Token 输入框为什么带一颗「粘贴」按钮（2026-11-26）
+ *
+ * 用户真机（iOS）反馈：长按 Token 输入框出不来粘贴菜单。查到的现状是**本页没有手势拦截**——
+ * 卡里三个输入框都是普通 `OutlinedTextField`，[SettingsSection] 只画 Card，本文件里
+ * `pointerInput` / `combinedClickable` 一个都没有（`clickable` 只挂在订单行、设备行、
+ * 流程详情行和手机号那只眼睛上）。手机号与验证码框同卡片、同控件、同样没有自定义手势，
+ * 所以不是「Token 框被谁拦住了」。缺的是 Compose Multiplatform 1.7.3 在 iOS 上的长按菜单
+ * （文本选区实现，产在 CMP 自身，不在本仓，Windows 上也复现不了）。
+ *
+ * 修不了的东西不当成假设去修：这里补一条**不依赖选区**的进路——`trailingIcon` 里一颗按钮，
+ * 点击读剪贴板并整段替换。它走 [readPlainText]、[copyPlainText] 这对已经在两端实现的缝，
+ * 行为可预期。
+ *
+ * 取舍：按钮只覆盖「粘 Token」这一件事，长按菜单缺了它也不补；反过来菜单哪天恢复了，
+ * 按钮也不碍事（Token 场景下多点一下，总比粘不进来强）。不改成自定义 `BasicTextField`：
+ * 那会把键盘类型、选区、光标和 IME 行为一起改掉，为了一颗按钮不值当。
  */
 @Composable
-private fun LoginSection(state: WaterUiState, viewModel: WaterViewModel) {
+private fun LoginSection(
+    state: WaterUiState,
+    viewModel: WaterViewModel,
+    /** 「粘贴 Token」：读剪贴板写回输入框；读不到时由宿主用页面提示卡说一句。 */
+    onPasteToken: () -> Unit,
+) {
     SettingsSection(
         title = "登录",
         subtitle = "手机号短信登录；只保存登录状态，不保存密码。充值与退款走官方渠道。",
@@ -544,6 +585,12 @@ private fun LoginSection(state: WaterUiState, viewModel: WaterViewModel) {
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    // 长按菜单在 iOS 上出不来的兜底，见 LoginSection 的 KDoc
+                    IconButton(onClick = onPasteToken) {
+                        Icon(AppIcons.ClipboardPaste, contentDescription = "粘贴 Token")
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
