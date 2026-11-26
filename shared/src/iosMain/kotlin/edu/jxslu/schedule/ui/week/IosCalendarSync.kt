@@ -24,10 +24,10 @@ import platform.EventKit.EKAuthorizationStatusDenied
 import platform.EventKit.EKAuthorizationStatusNotDetermined
 import platform.EventKit.EKAuthorizationStatusRestricted
 import platform.EventKit.EKCalendar
-import platform.EventKit.EKEntityTypeEvent
+import platform.EventKit.EKEntityType
 import platform.EventKit.EKEvent
 import platform.EventKit.EKEventStore
-import platform.EventKit.EKSpanThisEvent
+import platform.EventKit.EKSpan
 import platform.Foundation.NSDate
 import platform.Foundation.NSError
 import platform.Foundation.NSProcessInfo
@@ -102,11 +102,11 @@ import kotlin.coroutines.resume
  * | 符号 | 用途 | 核实状态 / 不确定点 |
  * |---|---|---|
  * | `EKEventStore()` | 建事件库 | **未核实**。构造器即 `alloc/init`；本文件 `by lazy` 只建一次 |
- * | `EKEventStore.authorizationStatusForEntityType(EKEntityTypeEvent)` | 读授权状态 | **未核实**。ObjC 类方法 `+authorizationStatusForEntityType:` 在 K/N 上挂 companion；`EKAuthorizationStatus*` 是 NS_ENUM 顶层常量，形态同 `ui/ebike/BikeSensors.ios.kt` 的 `kCLAuthorizationStatus*` |
+ * | `EKEventStore.authorizationStatusForEntityType(EKEntityType.EKEntityTypeEvent)` | 读授权状态 | **已由 CI 钉住形态**：`EKEntityType` / `EKSpan` 是 K/N 的枚举类，条目要写成 `EKEntityType.EKEntityTypeEvent` / `EKSpan.EKSpanThisEvent`（2026-11-26 首次编译报 `Unresolved reference` 后改的）；`EKAuthorizationStatus*` 反而是顶层常量，与 `ui/ebike/BikeSensors.ios.kt` 的 `kCLAuthorizationStatus*` 同一形态 |
  * | `requestFullAccessToEventsWithCompletion` | iOS 17+ 请求权限 | **未核实**。对应 `-requestFullAccessToEventsWithCompletion:`，块参数 `(Boolean, NSError?) -> Unit`；苹果文档写明回调**在任意队列**上执行，所以只能 resume 协程，不能在回调里碰 UI |
- * | `requestAccessToEntityType(EKEntityTypeEvent, completion)` | 15/16 回落请求权限 | **未核实**。iOS 17 SDK 里已标 deprecated，编译期会有警告，不影响构建 |
+ * | `requestAccessToEntityType(EKEntityType.EKEntityTypeEvent, completion)` | 15/16 回落请求权限 | **未核实**。iOS 17 SDK 里已标 deprecated，编译期会有警告，不影响构建 |
  * | `NSProcessInfo.processInfo.operatingSystemVersion` + `useContents` | 判 17 分支 | **未核实**。C 结构体返回 `CValue<NSOperatingSystemVersion>`，字段要 `useContents { majorVersion }` 才读得到；取值形态照 `BikeSensors.ios.kt` 的 `coordinate.useContents` |
- * | `store.defaultCalendarForNewEvents` / `store.calendarsForEntityType(EKEntityTypeEvent)` / `EKCalendar.allowsContentModifications` | 挑可写日历 | **未核实**。返回是 `NSArray<EKCalendar *>`，带不带 `?` 本机判不了，代码用 `.orEmpty()` 兼容两种。**`allowsModifications` 在 EKCalendar 上不存在**（见 [pickWritableCalendar]） |
+ * | `store.defaultCalendarForNewEvents` / `store.calendarsForEntityType(EKEntityType.EKEntityTypeEvent)` / `EKCalendar.allowsContentModifications` | 挑可写日历 | **未核实**。返回是 `NSArray<EKCalendar *>`，带不带 `?` 本机判不了，代码用 `.orEmpty()` 兼容两种。**`allowsModifications` 在 EKCalendar 上不存在**（见 [pickWritableCalendar]） |
  * | `EKEvent.eventWithEventStore(store)` | 建一个待写的事件 | **未核实**。ObjC 类工厂 `+eventWithEventStore:`，形态同 `UIImage.imageWithCGImage` |
  * | `EKEvent.title` / `location` / `notes` / `startDate` / `endDate` / `calendar` | 填内容 | **未核实**。`title` / `location` / `notes` / `calendar` 来自 `EKCalendarItem`，`startDate` / `endDate` 来自 `EKEvent`，都是可写属性。nullability 本机判不了，赋值方向不受影响 |
  * | `EKAlarm.alarmWithRelativeOffset(seconds)` + `EKEvent.addAlarm` | 提前提醒 | **未核实**。类工厂 `+alarmWithRelativeOffset:` 收 `Double` 秒，**负值 = 事件开始之前**；`addAlarm:` 是无返回值的属性式方法 |
@@ -178,7 +178,7 @@ private suspend fun syncToSystemCalendar(
  */
 private suspend fun ensureCalendarAccess(): Boolean = withContext(Dispatchers.Main) {
     val store = eventStore
-    when (EKEventStore.authorizationStatusForEntityType(EKEntityTypeEvent)) {
+    when (EKEventStore.authorizationStatusForEntityType(EKEntityType.EKEntityTypeEvent)) {
         EKAuthorizationStatusNotDetermined -> requestAccess(store)
         EKAuthorizationStatusRestricted, EKAuthorizationStatusDenied -> false
         else -> true
@@ -202,7 +202,7 @@ private suspend fun requestAccess(store: EKEventStore): Boolean =
         if (iosMajorVersion() >= 17) {
             store.requestFullAccessToEventsWithCompletion { granted, error -> finish(granted, error) }
         } else {
-            store.requestAccessToEntityType(EKEntityTypeEvent) { granted, error -> finish(granted, error) }
+            store.requestAccessToEntityType(EKEntityType.EKEntityTypeEvent) { granted, error -> finish(granted, error) }
         }
     }
 
@@ -223,7 +223,7 @@ private fun iosMajorVersion(): Long =
  */
 private fun pickWritableCalendar(store: EKEventStore): EKCalendar? {
     store.defaultCalendarForNewEvents?.let { return it }
-    return store.calendarsForEntityType(EKEntityTypeEvent)
+    return store.calendarsForEntityType(EKEntityType.EKEntityTypeEvent)
         // 元素类型与返回值是否可空本机判不了，收两遍；见文件头的符号清单
         .orEmpty()
         .filterIsInstance<EKCalendar>()
@@ -261,7 +261,7 @@ private fun deleteThenWrite(
         }
         // commit = true：一条一条落库。批量提交还要多用一次 store.commit(…)，那个签名同样没核实过，
         // 而一次同步最多几百条，省下的开销不值得多一个未知符号。
-        if (!store.saveEvent(created, EKSpanThisEvent, true, null)) continue
+        if (!store.saveEvent(created, EKSpan.EKSpanThisEvent, true, null)) continue
         written++
         created.eventIdentifier?.let { freshIds += it }
     }
@@ -283,7 +283,7 @@ private fun deleteOwnedEvents(store: EKEventStore): Set<String> {
     val survivors = mutableSetOf<String>()
     for (id in remembered) {
         val existing = store.eventWithIdentifier(id) ?: continue
-        if (!store.removeEvent(existing, EKSpanThisEvent, true, null)) survivors += id
+        if (!store.removeEvent(existing, EKSpan.EKSpanThisEvent, true, null)) survivors += id
     }
     return survivors
 }

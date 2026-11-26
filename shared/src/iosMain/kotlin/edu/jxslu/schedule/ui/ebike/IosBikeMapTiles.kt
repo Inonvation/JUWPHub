@@ -16,7 +16,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
-import org.jetbrains.skia.Bitmap as SkiaBitmap
 import org.jetbrains.skia.Image as SkiaImage
 
 /**
@@ -46,11 +45,10 @@ import org.jetbrains.skia.Image as SkiaImage
  *
  * `ImageBitmap` 在本仓锁的 Compose Multiplatform 1.7.3 里**造不出来**（`decodeToImageBitmap`
  * 是 1.8+；`ImageBitmap(width, height)` 只能从空白位图画出内容）。iOS 侧唯一的入口是 skia：
- * `SkiaBitmap.makeFromImage(Image.makeFromEncoded(bytes)).toComposeImageBitmap()`。iOS 的 Compose
- * 本来就跑在 skia 上，这些符号不是新增依赖；但在本仓是**第一次**出现 `org.jetbrains.skia.*`，
- * 所以列在这里：三个符号只经 macOS CI 编译验证过（`toComposeImageBitmap` 的接收者是
- * `org.jetbrains.skia.Bitmap`，`design/ios-port.md` §12.14 曾逐个看过 1.7.3 的导出面），
- * 真机行为（解码失败、内存压力）未验。
+ * `Image.makeFromEncoded(bytes).toComposeImageBitmap()`（接收者是 `org.jetbrains.skia.Image`；
+ * 2026-11-26 CI 实测 `skia.Bitmap` 那个重载**不存在**，别改回去）。iOS 的 Compose 本来就跑在
+ * skia 上，这些符号不是新增依赖；但在本仓是**第一次**出现 `org.jetbrains.skia.*`，
+ * 所以列在这里：两个符号只经 macOS CI 编译验证过，真机行为（解码失败、内存压力）未验。
  *
  * ## 线程、缓存与取消
  *
@@ -94,7 +92,7 @@ internal class IosBikeMapTiles : BikeMapTileSource {
         val bytes = fetchTileBytes(key) ?: return
         val bitmap = withContext(Dispatchers.Default) {
             runCatching {
-                SkiaBitmap.makeFromImage(SkiaImage.makeFromEncoded(bytes)).toComposeImageBitmap()
+                SkiaImage.makeFromEncoded(bytes).toComposeImageBitmap()
             }.getOrNull()
         } ?: return
         // 回到主线程：Compose 的快照状态不能从后台线程写

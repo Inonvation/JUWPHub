@@ -1853,9 +1853,10 @@ iOS 根在 2026-11-26 之前是裸的 `JuwTheme { }`，后果是三条**看得�
 | 取图与解码（Ktor + skia → `ImageBitmap`、LRU 64 块、主线程写状态） | `iosMain/ui/ebike/IosBikeMapTiles.kt` | **只能 CI 编译**；真机行为未验 |
 
 三处**只在 CI 上编译过、真机未验**的符号（KDoc 里有完整清单）：`org.jetbrains.skia.Image.makeFromEncoded`
-/ `Bitmap.makeFromImage` / `Bitmap.toComposeImageBitmap()`。选 skia 是因为 CMP 1.7.3 没有
-「从字节造 `ImageBitmap`」的公共入口（`decodeToImageBitmap` 是 1.8+），而 iOS 的 Compose 本来
-就跑在 skia 上；`toComposeImageBitmap` 的接收者已在 §12.14 的导出面核查里确认是 `skia.Bitmap`。
++ `Image.toComposeImageBitmap()`。选 skia 是因为 CMP 1.7.3 没有「从字节造 `ImageBitmap`」的公共入口
+（`decodeToImageBitmap` 是 1.8+），而 iOS 的 Compose 本来就跑在 skia 上。**第一次编译就纠正了一处**：
+`toComposeImageBitmap` 的接收者是 `org.jetbrains.skia.Image`，`skia.Bitmap` 那个重载在本仓的
+CMP 1.7.3 里不存在（CI 报 `receiver type mismatch`，别按 §12.14 的表格写成 `Bitmap`）。
 
 真机第一眼按这个顺序看：① 进快趣出行，1–2 秒内网格被瓦片替换；② 瓦片上的楼名与校区围栏 /
 P 标是否对齐（差半条街就是投影问题，不是瓦片问题）；③ 拖动 / 捏合时瓦片跟着走、松手后视野
@@ -1892,8 +1893,10 @@ iOS 此前把设置做成列表里的一行「我的 · 设置」，Android 是�
 未验（iOS 只能 CI 编译）：EventKit 的六个 K/N 符号名（`requestFullAccessToEventsWithCompletion`、
 `requestAccessToEntityType`、`calendarsForEntityType`、`eventWithEventStore`、`saveEvent`、
 `removeEvent`）、iOS 17 与 15/16 两条授权分支、`Info.plist` 两条日历用途描述是否齐全。
-真机点验：分享弹层出现「一键同步到手机日历」→ 首次点弹出系统授权 → 日历 App 里出现课程
-（带提前提醒）→ 再点一次不产生重复。
+**CI 已钉住两处**：`EKEntityType` / `EKSpan` 是 K/N 的枚举类，条目写成
+`EKEntityType.EKEntityTypeEvent` / `EKSpan.EKSpanThisEvent`（写成顶层常量会 `Unresolved reference`）；
+`EKAuthorizationStatus*` 反而是顶层常量。真机点验：分享弹层出现「一键同步到手机日历」→ 首次点
+弹出系统授权 → 日历 App 里出现课程（带提前提醒）→ 再点一次不产生重复。
 
 #### 12.16.4 今日页快趣骑行行：上移到共享层，iOS 暂未接
 
