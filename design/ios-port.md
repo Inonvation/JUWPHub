@@ -987,6 +987,58 @@ E2 同类放开：`KvcxAction` / `KvcxRideState` / `KvcxNotice` / `KvcxReturnSum
 （`expect fun openExternalUrl(url: String): Boolean`），Android 走 `ACTION_VIEW`，
 iOS 走 `UIApplication.openURL` + scheme 白名单检查。一卡通、胖乖、趣智、电费四处共用。
 
+#### 10.4a 竖好之后长什么样（2026-11-26）
+
+缝落地时**没做成 expect/actual**，改成普通 interface + 平台实现：expect/actual 要求两端各写
+一份构造与全部成员，Native 侧的签名只能在 macOS 上验，而本机（Windows）编不了 K/N
+（先例与理由见 `WebViewController` 的头注）。落地形态：
+
+| 东西 | 位置 | 说明 |
+|---|---|---|
+| `RechargeKind` | `shared/.../ui/life/RechargePlatform.kt` | 从 `:app` 挪进来，两端同一个枚举（`:app` 只删了声明） |
+| `RechargePlatform` | 同上 | 两个方法：`openPaymentPage(url): Boolean`（默认 false = 平台不承载，用共享页）与 `openExternalUrl(url): Boolean` |
+| `RechargeRequests` | 同上 | 一次充值的投递口：`request(kind)` / `openPaymentPage(url, title, merchantReturnHost)` / `closePaymentPage()`。抽屉钱包卡、缴费账单页、校园卡设置页共用一个实例 |
+| `SharedRechargeHost` | `shared/.../ui/life/SharedRechargeHost.kt` | 整条宿主：免责声明 → 充值弹层 → 下单 → 收银台页 → 到账判定。**一行 `android.*` 都没有**（元数据门禁会验） |
+| `BankPayPage` | `shared/.../ui/life/BankPayPage.kt` | 内嵌收银台页（`WebContentView` 的容器）：关闭 / 刷新 / 用浏览器打开 / 回商户域判据 |
+| `IosRechargePlatform` / `iosOpenExternalUrl` / `iosQiekjRecharge` | `shared/iosMain/.../ui/life/RechargePlatform.ios.kt` | `canOpenURL` 只对已声明的 `alipays` / `weixin` 预检（能把「没装支付宝」与「打开失败」分开），其余直接 `openURL` |
+| `alipays` | `iosApp/JUWPHub/Info.plist` → `LSApplicationQueriesSchemes` | 2026-11-26 补（原来只有 `weixin` / `weixinULAPI`） |
+
+**Android 一行没改行为**：`RechargeHost` / `PowerBankPayScreen` / `SideDrawer` 全部保留；
+共享层只多了「可选参数默认 = 现有行为」的三处（`CampusCardViewModel.recharge(preferCashierPage = false)`、
+`CampusCardSettingsScreen(preferCashierPage = false)`、`PowerBillScreen(onRecharge = null)`）。
+
+**一卡通为什么必须换 URL**：直拉那条（`weixin://wap/pay`）在 iOS 上会被微信拒，所以
+`CampusCardViewModel.recharge(preferCashierPage = true)` 改用同一笔单的收银台地址
+（`YktRechargeOrder.WechatPay.cashierUrl`，2026-11-26 新增字段）。选哪条 URL 的唯一实现是
+`YktRechargeOrder.paymentUrl(preferCashierPage)`，`YktRechargePaymentUrlTest` 钉住
+「iOS 那条上不出现 `weixin://`」。
+
+**四类充值在 iOS 上各停在哪**（`—` 表示缺口在别处，不在充值本身）：
+
+| 充值 | iOS 能到哪一步 | 还差什么 |
+|---|---|---|
+| 一卡通 | 下单 → 收银台页（`WKWebView`）→ 页面自己跳微信 → 回 App 后 `CampusCardViewModel` 按余额 + 流水双口径判到账 | 壳层三行接线（见下），以及「从微信返回」没有前台回调（收页那一下会补检，微信在收银台页里跳出去再回来则要等下一轮 5 秒轮询，轮询本来就在跑） |
+| 寝室电费 | 下单 → 聚合收银台页 → 页面里选校园卡 / 电子帐户付款 → 回商户域收页 → 查单；到账靠 `PowerReadingStore` 复读 | **「农行缴电费专用」这一档可能卡在加载中**：收银台在 `respCode=6230` 时调 `window.AndroidFunc.SynObject(jsonStr)`，iOS 侧没有这座桥（本轮明确不做 JS 桥）。校园卡 / 电子帐户两档不经它。兜底是顶栏「用浏览器打开」 |
+| 胖乖生活 | `alipays://` 深链交给支付宝（`iosQiekjRecharge`） | 水页那行接线；从支付宝返回没有前台回调 → 余额要下拉刷新 |
+| 趣智校园 | 深链已在共享层（`QzxyRecharge.deepLink()`），`iosOpenExternalUrl` 也现成 | **页面本身在 iOS 上进不去**（开阀走 CoreBluetooth，传输层未写，§12.1）。等页面能路由时接 `QzxyScreen(onOpenRecharge = …)` |
+
+**还差的三处接线都在壳层文件里**（另一条流独占，本轮不动）：
+
+1. `IosDrawer.kt` 的钱包卡：`onRecharge = { requests.request(RechargeKind.Campus) }`（充值选择
+   弹层 `RechargeChoiceSheet` 里「电费」一项传 `RechargeKind.Power`）；钱包卡的
+   `arrivalWatching` 也就能接真值了（宿主与抽屉共用同一份 `CampusCardViewModel` 之后）。
+2. `PowerBillScreen(viewModel, onRecharge = { requests.request(RechargeKind.Power) })`。
+3. `WaterScreen(onOpenRecharge = { iosQiekjRecharge() })`；校园卡设置页
+   `CampusCardSettingsScreen(onOpenPaymentUrl = { requests.openPaymentPage(it, "校园卡充值"); true },
+   preferCashierPage = true)`。
+4. 宿主本体挂在根组合最后一个子节点：`SharedRechargeHost(requests, IosRechargePlatform, lifeVm, campusVm, roomPickerVm, …)`。
+   `lifeVm` / `campusVm` 必须从 `IosDrawer` 里**抬到壳层**再传两处（Android 靠同一个
+   `viewModel()` key 天然共用，iOS 的 `remember` 各持一份）。
+
+**已知差异（都是平台能力，不是选择）**：iOS 没有 `LocalLifecycleOwner`（`rememberResumeTick()`
+恒 0），所以「回到前台补检到账」只有收银台页收页那一下可靠；收银台页也没有 Android 的
+UA / 三方 Cookie / 页面进度条（`WebContentView` 那条缝不给这些口）。
+
 ### 10.5 胖乖迁完后刻意留在 `:app` 的三份存储
 
 | 文件 | 为什么没搬 |
