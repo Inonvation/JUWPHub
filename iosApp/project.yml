@@ -83,3 +83,9 @@ targets:
           # 不自带 load command，漏了是链接期 Undefined symbols。
           - -framework
           - EventKit
+          # `AVCaptureSession` / `AVCaptureVideoPreviewLayer` / `AVCaptureMetadataOutput`
+          # （快趣「扫车身码」的取景页，shared/.../ui/ebike/IosBikeScan.kt，2026-11-26）在这个框架里。
+          # 同一条纪律：静态 framework 不自带 load command，漏了是链接期 Undefined symbols，
+          # Kotlin 编译期不会报——症状是 CI 一路绿到链接步骤才炸。
+          - -framework
+          - AVFoundation
