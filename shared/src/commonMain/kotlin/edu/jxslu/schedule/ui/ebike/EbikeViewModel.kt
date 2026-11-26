@@ -145,11 +145,22 @@ class EbikeViewModel(
     val hasReminders: Boolean get() = reminders != null
 
     /**
-     * 本平台能不能跑到点执行代码（自动还车）。iOS 为 false：本地通知到点只弹一次、
-     * 不执行代码，`BGTaskScheduler` 又不保证时刻（`design/ios-port.md` §12.13）。
-     * 那一组设置整块不渲染，免得上一个拨了没反应的开关。
+     * 本平台有没有「自动还车」这项能力（那一组设置据此渲染）。
+     *
+     * Android = 闹钟 + 后台任务；**iOS = 到点一条通知 + App 被唤起时补做**（2026-11-26 E3），
+     * 所以这里两端都是 true，差别在 [autoReturnInBackground]：iOS 不承诺「你不在也会还」，
+     * 界面必须把那句话写出来。
      */
     val hasAutoReturn: Boolean get() = reminders?.supportsAutoReturn == true
+
+    /**
+     * 自动还车在 App 不在前台时会不会真的执行（iOS = false，见
+     * [EbikeReminderPort.autoReturnRunsInBackground]）。
+     *
+     * 设置弹层的说明与骑行页倒计时下那行提示据此换口径：iOS 上开着这个开关也只承诺
+     * 「到点提醒 + 下次打开 App 时补还」，不承诺「不管你在不在都会还」。
+     */
+    val autoReturnInBackground: Boolean get() = reminders?.autoReturnRunsInBackground == true
 
     /**
      * 本平台能不能删掉已存进相册的码（扫完即焚）。iOS 为 false：`UIImageWriteToSavedPhotosAlbum`

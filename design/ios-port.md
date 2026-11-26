@@ -1390,8 +1390,8 @@ iOS 侧此前**没有任何通知能力**——`AppServices.ujingReminder()` 在
 | 作业截止 | **能做**（N2）。时刻算法与 Android 同一份（`domain/ReminderPlanner.kt`：截止日前一天/当天 20:00，只算未完成、未逾期、30 天内）；iOS 侧把未来 ≤ 15 个提醒点**提前排上**（`IosHomeworkReminder`），标识符 `homework.<作业id>.<提醒点日期>` 即去重键，重排先按前缀清空整族 | ①**漏掉的点不补**：进 App 时刻已过 20:00 的那一晚不会补发（Android 由闹钟落点 / 15 分钟核对补发）；②免扰时段没有等价物；③**作业页在 iOS 上仍按 §12.4 下线**，所以提醒只能从库里已有的作业排——新建/改截止的入口还没放回来（`onHomeworkChanged` 已接好，入口一放回来自动生效）；④点通知只回到 App，没有深链到那条作业 |
 | 成绩 | **降级能做**（N2，见 12.9.4） | 周期检查不做：Android 是 `WorkManager` 周期核对，iOS 的 `BGTaskScheduler` 不保证周期。现在只有「**打开 App 时查一次 + 有新成绩立刻弹一条**」，标题只写「有 N 门新成绩」（不写课程名/分数，锁屏可见）。没接：后台静默抓取后推送、免扰时段、点通知直达成绩页 |
 | 上课提醒 | **仍待定**（本轮未做） | ①「课表 → 通知」的换算（`Course.startSection/endSection` + 作息表 → 绝对时刻，含单双周 / `date_overrides` 停调课）；②**64 条待发上限的分配策略**（见 12.9.3，作业那 15 条已按它算好）；③重排时机（落库后 / 前台恢复 / 每天首次启动）。Android 那份 `ScheduleAlertReminder` 是 `AlarmManager` + 前台服务 + 免扰队列，**不能搬**，只有换算规则可以复用 |
-| 免费骑行超时 | 不能做 | ①骑行链路本身（`ui/ebike` 是高德 **Android** SDK，§12.1）；②「倒计时常驻/灵动岛」的等价物是 Live Activity（ActivityKit + SwiftUI 扩展 target），本地通知只能给一条到点横幅，不是同一个体验；③到点要触发的自动还车是后台动作，iOS 没有等价物 |
-| 自动还车 | 不能做 | 后台定时（`WorkManager` → `BGAppRefreshTask`，系统不保证时刻）+ 骑行订单来源（同上）。通知只是副产品，前置条件一个都没有 |
+| 免费骑行超时 | **能做**（E3，2026-11-26，已落地，见 §12.18）。排两条本地通知（提前量 + 免费结束，前缀 `freeride.`）；**没有**常驻倒计时 | 倒计时常驻 / 灵动岛的等价物是 Live Activity（ActivityKit + SwiftUI 扩展 target），不是一回事；「到点查一次再发」也不做（iOS 到点不执行代码） |
+| 自动还车 | **降级能做**（E3，2026-11-26，见 §12.18）。到点一条通知（`autoreturn.due`）+ App 被唤起时补做（与 Android 同一个 `runAutoReturn`） | App 不在前台就不会还车（`autoReturnRunsInBackground = false`），界面两处都写明了；`BGAppRefreshTask` 本轮不做（不保证时刻，且要改 `Info.plist`） |
 | 调课提醒 | 一半能做 | 抓取与对比**已经能跑**（`ScheduleSync` 在 iOS 非空，§12.7），缺的仍是**触发时机**：Android 是 `WorkManager` 周期任务。与成绩同一条路可降级成「进 App 补跑」，本轮没做 |
 
 #### 12.9.3 64 条上限：上课提醒的两种候选策略（上课那部分仍不实现，作业的 15 条已按它落地）
@@ -1604,7 +1604,7 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 | **地图车标**（`bikeMap`） | 本仓 Kotlin 2.1.21 的 MapKit 绑定里 `MKAnnotationProtocol.coordinate` 是 final、`MKPointAnnotation.coordinate` 是 `val`、`addOverlay(s)` 全 Unresolved——标注与覆盖物都放不上去 | **已解（2026-11-26 晚）**：不走 MapKit，改由共享层 `BikeMapCanvas` 自绘 + 高德栅格瓦片，见 §12.16 |
 | **扫车身码** | 没有相机取景页（Android 是 zxing `EbikeScanActivity`）。`onScanBodyCode` 为 null | **已解（2026-11-26 晚）**：`IosBikeScan.kt`（AVFoundation）+ `onScanBodyCode` 接上，见 §12.17 |
 | **拉起微信**（扫码取车 / 去微信结清） | `Info.plist` 没有 `LSApplicationQueriesSchemes`，`weixin://` 打不开 | 补 plist + `UIApplication.openURL` |
-| **免费时长提醒 / 自动还车** | `EbikeReminderPort` 没有 iOS 实现。免费时长到点用 `UNTimeIntervalNotificationTrigger` 是够的（`IosLocalNotifications` 已有现成的排 / 撤），**自动还车不行**：它要「到点执行代码」，iOS 只有 `BGTaskScheduler`，系统不保证触发时刻 | 先只做免费时长提醒那一半（排一条到点通知），自动还车留 Android 独占 |
+| **免费时长提醒 / 自动还车** | E3（2026-11-26）已补：免费提醒两条本地通知；自动还车是「到点一条通知 + App 被唤起时补做」，不做后台执行（见 §12.18） | 可靠性升级要 Live Activity / 推送，不是换一个本地通知 API |
 | **存相册 / 扫完即焚** | `EbikeQrGallery` 没有 iOS 实现（要 `UIImageWriteToSavedPhotosAlbum`） | 接 PhotoKit 写入权限 |
 | **瓦片缓存**（`mapCache`） | 没有底图就没有瓦片可缓存 | 随地图一起 |
 
@@ -1623,6 +1623,10 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 | 成绩 | `score.` | `score.latest` | 1 |
 
 合计 **57**，离系统 64 条留 7 条余量。**没有动态砍**：四族各占固定份额，谁都不去抢别人的额度。
+
+> E3（2026-11-26 晚）又接了三个族：`freeride.`（2）、`autoreturn.`（3）、`wenqu.grab.`（1），
+> 合计 **63 / 64**。三者都是覆盖式固定标识符、同时最多各一条，且都只在骑行 / 蹲点那一刻有值，
+> 分配与理由见 §12.18 的「通知族与额度」。
 
 上课提醒排**未来 4 天**内每节一条「提前量那一刻」（Android 还有第二条「上课时刻」通知，iOS 不排）。
 为什么是 4 天不是 7 天：一周满课 77 节必然超 64，而第 5 天以后那批几乎一定在下次进前台时被
@@ -2004,3 +2008,115 @@ AVFoundation 的 17 处符号（KDoc 有清单，最可能卡在 `UIViewControll
 `@ObjCAction` 选择器链、`AVAuthorizationStatus*` 常量形态）与相机权限弹窗、
 今日页快趣卡的实际显示与还车确认、Token 粘贴按钮（iOS 16+ 首次会弹系统「允许粘贴」）、
 地图手势是否真的不再重组。
+
+### 12.18 第三批：三类提醒补到 iOS（2026-11-26 晚，E3）
+
+这一批补的是 §12.9.2 / §12.13 里写着「不能做」的三行：**免费骑行倒计时**、**自动还车**、
+**问渠蹲点**。前两条的结算口径与 Android 共用同一份代码，第三条是 UI 缝（常亮 + 命中提醒）。
+
+#### 免费骑行倒计时：沿用基线那一版，本轮只做核对
+
+`platform/IosEbikeReminder` 在基线（`014ecd03`）里就有实现：按 `EbikeFreeRideNotifications.plan`
+排两条 `UNTimeIntervalNotificationTrigger`（提前量 + 免费结束，标识符 `freeride.lead` /
+`freeride.end`），换起点即覆盖、结束骑行按前缀撤待发 + 已投递。**本轮没有改这一半**，
+只在同一个类里补了自动还车（下面）。仍然没有的两件（都是结构性差异，不是漏做）：
+通知栏常驻倒计时（Android 是前台服务 + Android 16 的 Live Update；iOS 等价物是 ActivityKit
+的 Live Activity，要 SwiftUI 扩展 target）与「到点查一次再决定发不发」（iOS 到点不执行代码）。
+
+#### 自动还车：到点一条通知 + App 被唤起时补做
+
+`EbikeReminderPort` 拆成两个能力位之后才好说清楚：
+
+| 能力位 | 值 | 含义 |
+|---|---|---|
+| `supportsAutoReturn` | **true** | 界面上这组设置照常渲染 |
+| `autoReturnRunsInBackground`（本轮新加，默认 true = Android） | **false** | App 不在前台时**不会**还车 |
+
+时序（`IosEbikeReminder.reconcileAutoReturn`，Android 那四处调用点原样复用）：
+
+| 时刻 | iOS 做什么 |
+|---|---|
+| 计时在案、未到触发点 | 排一条 `autoreturn.due` 通知 + 起一个前台计时器（App 正好开着时那一刻就还） |
+| 过了触发点、仍在「免费结束 + 5 分钟」窗口内 | `runAutoReturn` 当场还车（与 Android 同一个循环、同一份 `performReturnBike`） |
+| 已过窗口 | 只发一条「没来得及执行」（`TITLE_MISSED` / `MISSED_TEXT`），**并落去重键**——iOS 的 reconcile 每次进页都跑，不落键就是每进一次页弹一条 |
+| 窗口外再进页 | 什么都不做（去重键已落） |
+
+**能力边界写在这里，别在别处许更大的愿**：`BGAppRefreshTask` 这一轮不做。它要 `Info.plist` 的
+`BGTaskSchedulerPermittedIdentifiers` + `UIBackgroundModes`（`iosApp/` 不在这一层能改的范围），
+而且系统不保证触发时刻——接一半的后台能力会让用户以为它一定会自己还，比明说「只在 App 打开时」更糟。
+真要提升可靠性，正确的下一步是 **ActivityKit Live Activity**（倒计时一直挂在锁屏上，
+用户看得见剩余时间）+ 后台推送，而不是硬塞一个不保证时刻的 refresh task。
+
+界面必须说实话，两处都改了：`EbikeSettingsSheet` 的「自动还车」区多一行
+「到点只会先发一条通知；真正的还车在下一次打开 App（进「骑行」页）时补做」；
+骑行页倒计时那行触发时刻在 iOS 变成「HH:mm 自动还车（提前 N 秒，需 App 打开）」
+（`RideScreen → RideActionArea → RideActionUpper → RideRidingUpper → RideCountdown` 一路透传，
+默认值 = Android 的现状）。
+
+#### 问渠蹲点：屏幕常亮 + 命中一条本地通知
+
+| 件 | 之前 | 现在 |
+|---|---|---|
+| `KeepScreenOnEffect`（`ui/common/KeepScreenOn.ios.kt`） | 空实现 | `UIApplication.sharedApplication.idleTimerDisabled`，按**持有者计数**增减，归零才放开；复位在 `DisposableEffect` 的 `onDispose` 里 |
+| 命中提醒 | `onHitAlert` 传 null（只有确认框） | `platform/IosWenquGrabAlert.iosWenquGrabHitAlert(activity)`：一条 `wenqu.grab.<活动id>` 通知 |
+
+常亮这条的危险在**漏复位**（进程级全局开关，漏了就是永不灭屏、耗电烧屏）：所以不用布尔、
+用计数；两个页面同时要常亮时，先离开的那一页不会把另一个关掉。`idleTimerDisabled` 只能主线程改，
+两个动作都 `dispatch_async` 到主队列（FIFO，顺序不会乱）。
+
+`onHitAlert` 的签名从 `() -> Unit` 改成 `(WenquActivity) -> Unit`：Android 那一档用不上参数
+（震动 + 提示音不带文案），iOS 要用它写通知标题。**两端共用一个回调**，别各加一个——
+两份回调迟早有一份忘了调。
+
+#### 通知族与额度（接 §12.14 的表）
+
+| 族 | 前缀 | 上限 |
+|---|---|---|
+| 上课提醒 | `class.` | 40 |
+| 作业截止 | `homework.` | 15 |
+| 洗衣完成 | `ujing.` | 1 |
+| 成绩 | `score.` | 1 |
+| **免费骑行** | `freeride.` | 2（lead / end） |
+| **自动还车** | `autoreturn.` | 3（due / result / missed，各覆盖式） |
+| **蹲点命中** | `wenqu.grab.` | 1 |
+| 合计 | | **63**（系统 64） |
+
+新加的三族都是「覆盖式固定标识符」：同时最多一条，且自动还车那三条在免费窗口过后
+（5 分钟内）就撤掉了。**别把它们算成"临时多占几条"就往上课那 40 条里挪额度**——
+真按上限算也还差 1 条，超过就该按 §12.9.3 的顺序砍最远的那些。
+
+#### 壳层还要接的一行（本轮没改壳文件）
+
+`WenquGrabScreen` 的 `onHitAlert` 在 iOS 那边现在还是不传（= 命中只弹确认框）。要接就一行：
+
+```kotlin
+// shared/src/iosMain/.../IosNavigation.kt，SubpageScreen.WENQU_GRAB 里
+WenquGrabScreen(
+    onBack = pop,
+    viewModel = vm,
+    onHitAlert = { activity -> iosWenquGrabHitAlert(activity) },
+)
+```
+
+自动还车**不需要**壳层接任何东西：`IosEbikeReminder` 的 `session` 参数默认从
+`Services.current.kqcxSession()` 取（就是 `IosServices` 里那份进程级会话，不能各建一份——
+token 刷新会互相覆盖）。`IosNavigation` 里现有的 `IosEbikeReminder(services.displayPrefs())`
+一字不用改。
+
+#### 本轮未验 / 风险
+
+- **iOS 侧一行都没编译过**（Windows 无 Kotlin/Native）：`KeepScreenOn.ios.kt`、
+  `IosWenquGrabAlert.kt`、`IosEbikeReminder` 的自动还车那一半都只有 CI 能验。符号姿态说明：
+  `UIApplication.sharedApplication` 与 `dispatch_async(dispatch_get_main_queue())` 是仓里已在用的两处；
+  `idleTimerDisabled` 若在 K/N 里是方法而非属性，改 `IosIdleTimer.apply` 那一行即可。
+- **自动还车的真机行为未验**：前台计时器受进程挂起影响（切后台会一起停，回来接着跑），
+  所以「准点」只在 App 亮着时成立；窗口内的补做才是主路径。
+- **`runAutoReturn` 从 `:app` 搬到 `commonMain`**（`ui/ebike/KvcxAutoReturnRunner.kt`）：
+  `EbikeAutoReturnTest` 的 import 与断言一字未改，`AutoReturnResult` / `runAutoReturn` 由
+  `internal` 放开成 `public`（跨模块 `:app` 的测试要用）。Android 的调度层
+  （`EbikeAutoReturnReminder`）仍在 `:app`，只换了执行器的位置。
+- **失败原因文案降级**：iOS 用异常自带的 `message`（`kvcxErrorText` 的 Java 那份还在 `:app`）。
+  要统一就把它搬进共享层，别在 iOS 再写一份业务码翻译。
+- **通知权限**：四族 + 三族共用一个授权请求；被拒时自动还车照样执行（执行不依赖通知），
+  只是没有横幅可看——`IosNotificationPermission.hint` 是页面上唯一能提醒用户的地方。
+

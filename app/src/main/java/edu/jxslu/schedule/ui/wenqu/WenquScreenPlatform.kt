@@ -44,8 +44,13 @@ class WenquScreenActions(
     val cancelPrereg: suspend () -> Unit,
     /** 盯 / 取消盯之后重排共享周期任务（只重排、不立刻叫醒）。 */
     val pinChanged: suspend () -> Unit,
-    /** 蹲点命中那一刻的提醒：震动 + 提示音（用户可能没盯着屏幕）。 */
-    val hitAlert: () -> Unit,
+    /**
+     * 蹲点命中那一刻的提醒：震动 + 提示音（用户可能没盯着屏幕）。
+     *
+     * 参数是命中的那条活动——Android 这一档用不上（震动与提示音不带文案），但 iOS 要用它写通知
+     * 标题，所以两端共用同一个签名（见 `WenquGrabScreen.onHitAlert`）。
+     */
+    val hitAlert: (WenquActivity) -> Unit,
     /** 去微信报名：活动名已由共享页复制好，这里只递手并给一句回执。 */
     val openWechat: (onNotice: (String) -> Unit) -> Unit,
     /** 进页一次性提示：`loggedIn` 为真清标记，为假消费一次并回文案（null = 不必提示）。 */
@@ -82,6 +87,7 @@ fun rememberWenquScreenActions(): WenquScreenActions {
             },
             cancelPrereg = { WenquPreregReminder.cancel(context) },
             pinChanged = { WenquActivityAlertReminder.onPinChanged(context) },
+            // 震一下 + 响一声：不看屏幕也知道命中了。活动名用不上（这里不出文案）
             hitAlert = {
                 ReminderVibration.vibrate(context)
                 ReminderChime.play(context)

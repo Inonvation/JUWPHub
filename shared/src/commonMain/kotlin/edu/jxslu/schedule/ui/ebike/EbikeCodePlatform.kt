@@ -59,8 +59,25 @@ interface EbikeReminderPort {
      * 不执行任何代码，`BGTaskScheduler` 又不保证触发时刻（见 `design/ios-port.md` §12.13）。
      * false 时页面把「自动还车」那一组设置整块不渲染——给一个拨了没反应的开关比没有更糟。
      * 默认 true 让 Android 侧零改动。
+     *
+     * **iOS 自 2026-11-26（E3）起给 true**：能力本身有，只是不可靠（见
+     * [autoReturnRunsInBackground]）。两端都要在界面上把「什么时候才会真的还车」说清楚。
      */
     val supportsAutoReturn: Boolean get() = true
+
+    /**
+     * 自动还车**在 App 不在前台时**会不会真的执行（2026-11-26 E3 新加，默认 = Android 的现状）。
+     *
+     * | | Android | iOS |
+     * |---|---|---|
+     * | 到点 | `AlarmManager.setAlarmClock` 唤醒 + `WorkManager` 执行 | 只排一条本地通知 |
+     * | 谁还车 | 后台任务，不需要 App 开着 | **只有 App 被唤起时补做**（进骑行页 / 回前台） |
+     * | 可靠吗 | 系统保证（迟到窗口内） | **不保证**：这段时间没打开 App 就不会还车 |
+     *
+     * false 时两处文案要说实话：设置弹层的「自动还车」区补一行「只在 App 打开时执行」，
+     * 骑行页倒计时下那行触发时刻追加一句同样的前提。**别让用户在账单上才发现它没跑**。
+     */
+    val autoReturnRunsInBackground: Boolean get() = true
 
     /**
      * 起免费时长计时并把提醒排上（点「打开微信扫一扫」传 `now + SCAN_DELAY_MS`，
