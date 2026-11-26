@@ -458,6 +458,17 @@ private fun IosRoot(services: IosServices) {
                                                 services.qiekjWateringSessions().watering
                                             }
                                             val watering by wateringFlow.collectAsStateWithLifecycle()
+                                            // 快趣骑行行（2026-11-26 晚）：控制器是 `IosServices` 的
+                                            // **进程级单例**，与出行页同一份状态（各建一份会出现
+                                            // 「今日页说骑行中、出行页说没单」）。槽位必须在
+                                            // `TodayScreen(...)` 的实参之外建：Kotlin 不允许在实参表
+                                            // 里声明局部变量（2026-11-26 CI 报的就是这一条）。
+                                            val kvcxSlot = rememberIosKvcxServiceSlot(
+                                                controller = services.kvcxRideController(),
+                                                onOpenRide = {
+                                                    stack.add(IosRoute(SubpageScreen.RIDE))
+                                                },
+                                            )
                                             TodayScreen(
                                                 viewModel = viewModel,
                                                 // 顶栏汉堡 → 左侧抽屉（Android 同一入口）
@@ -484,19 +495,10 @@ private fun IosRoot(services: IosServices) {
                                                 onOpenSubpage = { screen, focus ->
                                                     pushRoute(IosRoute(screen, focus))
                                                 },
-                                                // 进行中服务卡：开水 / U净 / 快趣骑行三行。
+                                                // 进行中服务卡：开水 / U净 / 快趣骑行三行
+                                                //（快趣槽位在上面的 `kvcxSlot` 里建好，控制器与出行页共用一份）。
                                                 // `pinned` 仍恒 false——位置判据是「有在案快趣骑行」，
                                                 // 那一档 Android 用同步状态算，iOS 这轮只接「行」不接「置顶」。
-                                                //
-                                                // 快趣行（2026-11-26 晚）：控制器是 `IosServices` 的
-                                                // **进程级单例**，与出行页同一份状态（若各建一份，
-                                                // 今日页说「骑行中」、出行页说「没单」）。
-                                                val kvcxSlot = rememberIosKvcxServiceSlot(
-                                                    controller = services.kvcxRideController(),
-                                                    onOpenRide = {
-                                                        stack.add(IosRoute(SubpageScreen.RIDE))
-                                                    },
-                                                )
                                                 serviceCards = TodayServiceSlot(
                                                     pinned = false,
                                                     content = { cardModifier ->
@@ -675,11 +677,10 @@ private fun IosRoot(services: IosServices) {
                     // 只在根层出现（二级页有自己的返回键），**盖在内容之上**而不是把内容挤上去——
                     // 这样 home indicator 那条不再露出一块与底栏不同的底色，内容也能从胶囊边缘透出来。
                     // 内容让位靠 `LocalBottomBarClearance`（上面那层 CompositionLocalProvider）。
-                    // 显隐走淡入淡出（`Motion.state()`）：硬切的话退栈时底栏会先蹦出来。
-                    AnimatedVisibility(
+                    // 显隐壳单独一层：`AnimatedVisibility` 在这里会被解析成 `ColumnScope` 的扩展
+                    // （见 `IosFloatingTabBarHost` 的 KDoc）。
+                    IosFloatingTabBarHost(
                         visible = stack.isEmpty(),
-                        enter = fadeIn(Motion.state()),
-                        exit = fadeOut(Motion.state()),
                         modifier = Modifier.align(Alignment.BottomCenter),
                     ) {
                         IosFloatingTabBar(

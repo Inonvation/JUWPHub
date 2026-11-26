@@ -27,6 +27,8 @@ import platform.AVFoundation.AVMetadataObjectTypeEAN13Code
 import platform.AVFoundation.AVMetadataObjectTypeEAN8Code
 import platform.AVFoundation.AVMetadataObjectTypeITF14Code
 import platform.AVFoundation.AVMetadataObjectTypeQRCode
+import platform.AVFoundation.authorizationStatusForMediaType
+import platform.AVFoundation.requestAccessForMediaType
 import platform.CoreGraphics.CGRectMake
 import platform.Foundation.NSSelectorFromString
 import platform.Foundation.NSURL
@@ -267,13 +269,15 @@ private class IosBikeScanViewController(
         super.viewDidLayoutSubviews()
         // 预览层与取景框的尺寸只能在布局之后才有真实值：viewDidLoad 时 bounds 可能还是全零
         val bounds = view.bounds
-        previewLayer?.let { it.frame = bounds }
+        previewLayer?.let { it.setFrame(bounds) }
         val width = bounds.useContents { size.width }
         val height = bounds.useContents { size.height }
         val side = minOf(width, height) * SCAN_BOX_RATIO
-        scanBox.frame = CGRectMake((width - side) / 2.0, (height - side) / 2.0, side, side)
+        scanBox.setFrame(CGRectMake((width - side) / 2.0, (height - side) / 2.0, side, side))
         val topInset = view.safeAreaInsets.useContents { top }
-        cancelButton.frame = CGRectMake(CANCEL_MARGIN, topInset + CANCEL_MARGIN, CANCEL_BUTTON_WIDTH, CANCEL_BUTTON_HEIGHT)
+        cancelButton.setFrame(
+            CGRectMake(CANCEL_MARGIN, topInset + CANCEL_MARGIN, CANCEL_BUTTON_WIDTH, CANCEL_BUTTON_HEIGHT),
+        )
     }
 
     /**

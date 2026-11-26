@@ -1,5 +1,9 @@
 package edu.jxslu.schedule
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,7 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalIndication
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.ui.theme.Motion
 
 /**
  * iOS 的悬浮底栏（2026-11-26 晚，用户要求「适配苹果的液态玻璃」+「底部白边」）。
@@ -156,8 +160,32 @@ private fun IosBarItemView(
     }
 }
 
-/** 底栏一格的数据：文字 + 图标。枚举（`IosTab`）留在宿主文件里，这里只收展示所需的两样。 */
+/** 底栏一格的显示数据：文字 + 图标。枚举（`IosTab`）留在宿主文件里，这里只收展示所需的两样。 */
 internal class IosBarItem(val label: String, val icon: ImageVector)
+
+/**
+ * 底栏的显隐壳（淡入淡出）。
+ *
+ * **为什么要单独一层**：`AnimatedVisibility` 有 `ColumnScope` / `RowScope` 两个扩展重载，
+ * 直接写在根布局的 `Column` 里、又在 `BoxScope` 内调 `align`，解析会落到
+ * `ColumnScope.AnimatedVisibility` 上并报「不能在隐式接收者上调用」。放进这个没有作用域的
+ * 普通 composable，解析到的是顶层重载。
+ */
+@Composable
+internal fun IosFloatingTabBarHost(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn(Motion.state()),
+        exit = fadeOut(Motion.state()),
+    ) {
+        content()
+    }
+}
 
 /**
  * 悬浮底栏给内容留的净空：胶囊本体约 62dp + 上下外边距 ≈ 76dp，取 [IosBottomBarClearance]。
