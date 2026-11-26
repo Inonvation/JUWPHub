@@ -110,6 +110,14 @@ fun PowerBillScreen(
      * null = 本平台没有打开外部链接的能力，该入口整行不渲染。
      */
     onOpenPlatformUrl: ((String) -> Boolean)? = null,
+    /**
+     * 顶栏「充值」：发起一次电费充值（宿主接到共享充值宿主的 `RechargeRequests.request`）。
+     *
+     * **null = 本平台不给这一页充值入口**，顶栏与改动前一致——Android 走的就是这一档
+     * （它的入口在侧栏钱包卡 → `RechargeHost`）。iOS 没有侧栏那条链以前，这一页是
+     * 唯一「看着电费余额、顺手能充」的落点。
+     */
+    onRecharge: (() -> Unit)? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val haptics = rememberAppHaptics()
@@ -145,6 +153,12 @@ fun PowerBillScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(AppIcons.ArrowLeft01, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    // 充值入口只在宿主给了动作时出现；Android 传 null，顶栏一字未变
+                    if (onRecharge != null) {
+                        TextButton(onClick = onRecharge) { Text("充值") }
                     }
                 },
             )
