@@ -459,8 +459,8 @@ private fun IosRoot(services: IosServices) {
                                                 // 课程长按菜单里的「笔记 / 作业」在精简版下线：两个回调传 null，
                                                 // 弹窗里那两行不渲染（shared 侧 CourseDetailSheet 的可空槽位）
                                                 // 显示设置面板（S17 搬进共享层）：顶栏那只眼睛从此在 iOS 上也有入口。
-                                                // 面板里的「背景」整组不出现——iOS 还没有 UIImage 解码实现，
-                                                // 装配根的 scheduleBackgroundFiles() 返回 null。
+                                                // 「背景」整组现在会渲染：选图（`onPickBackground`）与背景图层
+                                                // （`backgroundLayer`）都已接上，见下面两处。
                                                 displaySettings = { headerMinDp, dismiss ->
                                                     IosDisplaySettingsOverlay(
                                                         viewModel = meViewModel,
@@ -471,15 +471,22 @@ private fun IosRoot(services: IosServices) {
                                                 // 课表分享弹层里的「导出为图片」：挂上之后那一行才渲染
                                                 //（`WeekScreen` 第 4 行入口的可见性由它判，见 shared 侧）。
                                                 onOpenScheduleShare = { shareWeek = it },
+                                                // 背景文件是否还在：偏好里记着文件名、文件被清掉时必须把偏好
+                                                // 一并清掉，否则面板上一直显示「已选」、课表页却一片空白。
+                                                // 装配根给不出文件缝时传 null，`WeekScreen` 整段跳过校验
+                                                //（与「本平台没有背景图功能」同一个含义）。
+                                                backgroundExists = services.scheduleBackgroundFiles()?.let { files ->
+                                                    { candidate: String -> files.exists(candidate) }
+                                                },
                                                 // 课表背景图（2026-11-26 夜间，M4）：`WeekScreen` 的背景层槽位。
                                                 // iOS 上画不出一张 Compose 位图（`ImageBitmap` 在 CMP 1.7.3 只读不写，
                                                 // 见 design/ios-port.md §12.14），所以这一层用 `UIKitView` 垫
                                                 // `UIImageView`，绕开 `ImageBitmap`。
                                                 //
-                                                // 三格参数取自 `WeekUiState`：文件名 / 缩放方式 / 模糊强度。
-                                                // **不透明度与压暗遮罩这两根滑块在 iOS 上不生效**——前者要给 UIImageView 设
-                                                // `alpha`，后者要一层 UIKit 的黑色蒙版，都超出本轮；它们在设置面板里仍在，
-                                                // 拖了没反应，已知不一致。
+                                                // 五格参数全部取自 `WeekUiState`：文件名 / 缩放方式 / 模糊 /
+                                                // 不透明度 / 压暗。**五项都生效**：后两项由 `IosScheduleBackgroundLayer`
+                                                // 在 UIKit 层落（`UIImageView.alpha` + 一层黑色蒙版），
+                                                // 因为背景是原生视图，Compose 的遮罩盖不到它上面。
                                                 backgroundLayer = { layerModifier ->
                                                     val weekState by viewModel.uiState.collectAsStateWithLifecycle()
                                                     val name = weekState.bgImageName
@@ -488,6 +495,8 @@ private fun IosRoot(services: IosServices) {
                                                             fileName = name,
                                                             scale = weekState.bgImageScale,
                                                             blur = weekState.bgImageBlur,
+                                                            opacity = weekState.bgImageOpacity,
+                                                            dim = weekState.bgImageDim,
                                                             modifier = layerModifier,
                                                         )
                                                     }

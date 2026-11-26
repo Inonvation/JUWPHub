@@ -406,10 +406,13 @@ class IosServices : AppServices {
     override fun aiApplyHistoryStore(): AiApplyHistoryStore = aiHistory
 
     /**
-     * 课表页背景图的文件删除（iOS 移植 M4，2026-11-26 补上）。
+     * 课表页背景图的文件缝（iOS 移植 M4，2026-11-26 补上）。
      *
-     * 与 `:app` 的 `GraphServices` 同一个形状：只转接「删旧文件」这一件事，选图与解码压缩仍是
-     * 平台动作（`ui/week/IosScheduleBackgroundFiles.kt` 的类 KDoc 说明了为什么只有这一个方法）。
+     * 与 `:app` 的 `GraphServices` 同一个形状：转接「删旧文件」与「文件还在不在」两件事，
+     * 选图与解码压缩仍是平台动作（`ui/week/IosScheduleBackgroundFiles.kt` 的类 KDoc 说明了边界）。
+     *
+     * `exists` 是 2026-11-26 补的：没有它，`WeekScreen` 没法判断「偏好里记着的背景文件还在不在」，
+     * 文件被清掉之后面板一直显示已选、课表页却一片空白。
      *
      * 返回非 null 之后 `MeViewModel` 才会真的删旧文件；显示设置面板的「背景」整组、
      * 以及课表页的背景图层，仍要靠宿主的接线条（前者看 `onPickBackground`，后者看

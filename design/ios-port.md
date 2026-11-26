@@ -1677,9 +1677,9 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 | 件 | 在哪 |
 |---|---|
 | 页面槽位 `backgroundLayer: (@Composable (Modifier) -> Unit)? = null`（null = 不画，§11.2 ④） | `shared/src/commonMain/.../ui/week/WeekScreen.kt`；调用点在 `Scaffold` 之前、不消费 padding，所以图铺到顶栏 / 状态栏背后 |
-| 画：`IosScheduleBackgroundLayer` / `IosScheduleBackgroundThumb`（`UIKitView` + `UIImageView`） | `shared/src/iosMain/.../ui/week/IosScheduleBackgroundView.kt` |
+| 画：`IosScheduleBackgroundLayer` / `IosScheduleBackgroundThumb`（`UIKitView` + `UIImageView`；文件名 / 缩放 / 模糊 / 不透明度 / 压暗五项都在 UIKit 层生效，2026-11-26 补齐后两项） | `shared/src/iosMain/.../ui/week/IosScheduleBackgroundView.kt` |
 | 选图 + 压缩 + 落盘：`iosImportScheduleBackground(vm)` | `shared/src/iosMain/.../ui/week/IosScheduleBackgroundImport.kt` |
-| 删旧文件：`IosScheduleBackgroundFiles` | `shared/src/iosMain/.../ui/week/IosScheduleBackgroundFiles.kt` |
+| 删旧文件 + 判存在：`IosScheduleBackgroundFiles` | `shared/src/iosMain/.../ui/week/IosScheduleBackgroundFiles.kt` |
 | 目录 | `appDataDir()/schedule_bg/`，与 `:app` 的 `ScheduleBackgroundStore.DIR_NAME` 逐字相同 |
 
 **「模糊」不需要 `UIVisualEffectView`**：与 Android 同一套口径——按 `ScheduleBackground.decodeLongSide(blur)`

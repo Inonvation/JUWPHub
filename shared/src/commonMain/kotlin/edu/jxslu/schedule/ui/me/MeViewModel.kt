@@ -108,7 +108,7 @@ class MeViewModel(private val repo: ScheduleRepository) : ViewModel() {
      * 课表页背景图的文件删除能力；**null = 本平台没接背景图落盘**（iOS 待 UIImage 解码实现）。
      *
      * 用 `runCatching` 兜住「Services 还没装」：本类的 JVM 单测不装装配根。
-     * 只删旧文件——写入与解码压缩都是平台动作（见 [finishBackgroundImport]）。
+     * 删旧文件 + 判断文件还在不在——写入与解码压缩都是平台动作（见 [finishBackgroundImport]）。
      */
     private val backgroundFiles: ScheduleBackgroundFiles? = runCatching {
         Services.current.scheduleBackgroundFiles()
