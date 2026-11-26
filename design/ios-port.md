@@ -1543,6 +1543,26 @@ password / token / cardno / account / username / sno / phone…），崩溃栈�
 **序号不要重排**，新增就往后续——用户截图里的「⑤」和代码里的「⑤」必须是同一件事。
 排查入口：`日志里 grep IosBoot`，最后一句就是死因所在的阶段。
 
+#### 留痕不够用：把「崩」换成「看得见的一句话」（2026-11-26 上午）
+
+第三次「打开还是闪退」之后重新核了一遍事实：包里没有任何异常（`arm64` / `minos 15.0` /
+依赖库齐全 / `Assets.car` 在 / `Info.plist` 十一项全对 / 无嵌套 dylib），所以问题在运行期代码。
+但用户那边三个通道全断——没有 Console、没有 Xcode、`logs/app.log` 在修好 `appDataDir()` 之前
+根本没生成过。**继续靠读代码猜，每猜一次就是一次构建加一次装机。**
+
+于是启动路径换了个形状：
+
+| 改动 | 为什么 |
+|---|---|
+| `IosServices()` / `Services.install` / `warmUp()` 从 `ComposeUIViewController` 之前挪进根组合的 `remember { }` | 组合期同样在主线程，行为不变；唯一区别是失败时能被 `runCatching` 接住、渲染成整屏提示，而不是让进程静默消失 |
+| 根组合里三个碰真磁盘的构造点收成「可空 + 早返回」：偏好库 `displayPrefs()`、外观四条流、`MeViewModel`（Room 开库） | **不能写 `try`**：Compose 编译器对「composable 调用出现在 try/catch 里」直接报 `Try catch is not supported around composable function invocations`（2026-11-26 CI 实测）。所以失败用可空值表达，`IosRoot` 里早返回并渲染 `IosBootCrashScreen` |
+| 外观四项改走 `rememberSafeFlowState` | 首帧正是 DataStore 第一次开文件的那一下；采集期异常在 Kotlin/Native 上等于终止进程。取不到就停在默认值，界面照常画 |
+| `juwDatabase()` 的库路径改走 `appDataDir()` | 原来 `JuwDatabase.ios.kt` 里有一份 `URLForDirectory` + `requireNotNull` 的**第二份拷贝**，而 `appDataDir()` 那份已经证实会回 null 并被改成三级降级——这边没跟着改，于是同一次失败有两条路：日志侧静默失效，开库侧直接抛。而 `juwDatabase()` 在根组合里就被 `MeViewModel` 碰到 |
+
+边界写清楚（`IosBootGuard.kt` 类注释里也有一份）：这一层**兜不住** Kotlin 之前的崩溃
+（dyld / 签名）、Objective-C 异常（WebKit 主线程断言）、以及首帧之后的协程与回调。
+它只负责组合期那一段——而那正是最可疑的一段。
+
 ### 12.13 快趣出行在 iOS 上的真实形态（2026-11-26，P4）
 
 页面层（`RideScreen` / `RidePanels` / `EbikeSettingsSheet` / `EbikeViewModel` / 账号页 / 订单页）

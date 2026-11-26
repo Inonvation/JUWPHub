@@ -299,7 +299,9 @@ private var crashHookInstalled = false
  * 同时把栈打到 `NSLog`，Xcode 里那份控制台输出不因为装了钩子而消失。
  *
  * `setUnhandledExceptionHook` 是 `ExperimentalNativeApi`；若将来这条符号在目标版本上不可用，
- * 删掉 [installCrashHook] 的调用处即可（只有 `IosServices.init` 一处），日志落盘不受影响。
+ * 删掉 [installCrashHook] 的调用处即可（调用点只有 `MainViewController()` 一处，
+ * 2026-11-26 起从 `IosServices.init` 挪到了那里——装配进组合期之后，它是 Swift 进来后的第一件事），
+ * 日志落盘不受影响。
  */
 @OptIn(kotlin.experimental.ExperimentalNativeApi::class)
 internal fun installCrashHook() {

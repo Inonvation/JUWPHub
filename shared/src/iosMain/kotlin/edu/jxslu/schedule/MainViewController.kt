@@ -65,6 +65,7 @@ import edu.jxslu.schedule.domain.ThemePalette
 import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.Services
 import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
+import edu.jxslu.schedule.platform.installCrashHook
 import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.common.drawerCardTransform
 import edu.jxslu.schedule.ui.common.rememberDrawerCardTransform
@@ -105,7 +106,7 @@ import platform.UIKit.UIViewController
 private fun IosRoot(services: IosServices) {
     // ⑥ 组合开始（B2 启动留痕）：这一句只要出现，说明首帧已经在画了，
     // 闪退就不在「构造 / 装配」那几步上。`remember` 保证每次进程只写一条。
-    remember { Logger.i(TAG_BOOT, "⑥ IosRoot 开始组合"); true }
+    remember { IosBootSteps.step("⑥ IosRoot 开始组合"); true }
     // ---- 外观：主题 / 配色 / 动态取色 / 字体缩放（2026-11-26 补） ----
     //
     // 与 Android 的 `JuwRoot`（`MainActivity.kt`）逐条对齐。2026-11-26 之前这里是裸的
@@ -115,14 +116,47 @@ private fun IosRoot(services: IosServices) {
     // 首帧保真：iOS 没有 Android 那种「进程快照 + 阻塞读」的先手（这里在组合期，不能阻塞），
     // 所以极端情况下选了深色的用户会看到一帧浅色。DataStore 的首个值通常在第一帧内到达，
     // 拿这个换「不阻塞首帧」是值得的。
-    val prefsStore = remember { services.displayPrefs() }
-    val themeMode by prefsStore.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.System)
-    val dynamicColor by prefsStore.dynamicColor.collectAsStateWithLifecycle(initialValue = false)
-    val palette by prefsStore.themePalette.collectAsStateWithLifecycle(
-        initialValue = ThemePalette.SkyBlue,
-    )
-    val fontScaleLocked by prefsStore.fontScaleLocked
-        .collectAsStateWithLifecycle(initialValue = true)
+    // 偏好库本身也可能在建 DataStore 的那一下抛（`DisplayPrefsStore` 的属性是即时求值的，
+    // 每个都去碰 `displayDataStore` 的 `lazy`）。**这里不能写 `try`**：Compose 编译器对
+    // 「composable 调用出现在 try/catch 里」直接报错（2026-11-26 CI 实测
+    // `Try catch is not supported around composable function invocations`），
+    // 所以启动期一律用「可空 + 早返回」表达失败。
+    val prefsResult = remember { runCatching { services.displayPrefs() } }
+    val prefsStore = prefsResult.getOrNull()
+    if (prefsStore == null) {
+        IosBootCrashScreen(
+            "偏好库（DisplayPrefsStore）",
+            prefsResult.exceptionOrNull() ?: IllegalStateException("偏好库为空"),
+        )
+        return
+    }
+    // 四处都走 `rememberSafeFlowState`（IosBootGuard.kt）而不是 `collectAsStateWithLifecycle`：
+    // 首帧正是偏好库第一次打开文件的那一下，采集期抛异常在 Kotlin/Native 上等于终止进程。
+    // 采集失败就停在默认值上——外观退回晴空蓝 + 跟随系统，界面照常画。
+    val themeMode = rememberSafeFlowState("themeMode", ThemeMode.System) { prefsStore.themeMode }
+    val dynamicColor = rememberSafeFlowState("dynamicColor", false) { prefsStore.dynamicColor }
+    val palette = rememberSafeFlowState("themePalette", ThemePalette.SkyBlue) {
+        prefsStore.themePalette
+    }
+    val fontScaleLocked = rememberSafeFlowState("fontScaleLocked", true) {
+        prefsStore.fontScaleLocked
+    }
+    // 「我的」与课表显示设置共用同一个 VM（Android 侧是 Activity 作用域，两边等价）。
+    // iOS 没有配置变更重建，`remember` 的生命周期就是这一屏；见 design/ios-port.md §11.2 ①。
+    //
+    // **它构造时会开 Room 库**（`services.scheduleRepository()` → `juwDatabase()`），
+    // 是根组合里除偏好库之外唯一碰真磁盘的构造点，所以同样收成「可空 + 早返回」。
+    // 放这里而不是 `ProvideFixedFontScale` 的 lambda 里：那边是 `@Composable () -> Unit`，
+    // 不是 inline lambda，`return` 在里面不合法。
+    val meVmResult = remember { runCatching { MeViewModel(services.scheduleRepository()) } }
+    val meViewModel = meVmResult.getOrNull()
+    if (meViewModel == null) {
+        IosBootCrashScreen(
+            "我的页 ViewModel（Room 开库）",
+            meVmResult.exceptionOrNull() ?: IllegalStateException("ViewModel 为空"),
+        )
+        return
+    }
     val darkTheme = when (themeMode) {
         ThemeMode.Light -> false
         ThemeMode.Dark -> true
@@ -149,9 +183,7 @@ private fun IosRoot(services: IosServices) {
             // 主卡左缘正好落在侧栏右缘（Android 那条不变量，见该文件的类 KDoc）。
             val drawerWidthPx = with(LocalDensity.current) { IosDrawerWidth.toPx() }
             val cardTransform = rememberDrawerCardTransform(maxSlidePx = drawerWidthPx)
-            // 「我的」与课表显示设置共用同一个 VM（Android 侧是 Activity 作用域，两边等价）。
-            // iOS 没有配置变更重建，`remember` 的生命周期就是这一屏；见 design/ios-port.md §11.2 ①。
-            val meViewModel = remember { MeViewModel(services.scheduleRepository()) }
+            // `meViewModel` 在 `IosRoot` 顶端就建好了（那里才能早返回），这里直接用。
             // 栈的「形状」= 深度 + 栈顶。**深度进键**是为了让 push 与 pop 走不同的转场：
             // `stack` 是 `mutableStateListOf`，直接拿它当 `AnimatedContent` 的键永远判成「没变」
             //（SnapshotStateList 没有结构相等），所以这里取两个快照值拼一个 `Pair`。
@@ -641,44 +673,68 @@ private enum class IosTab(
  *
  * ## 装配
  *
- * [IosServices] 必须在**任何**共享 ViewModel 构造之前安装，所以放在
- * `ComposeUIViewController` 之前——那是 Swift 调用进来的第一行。
- * 与 Android 侧 `JuwApplication.onCreate` 里的 `Services.install(GraphServices(this))` 对称。
+ * [IosServices] 必须在**任何**共享 ViewModel 构造之前安装；与 Android 侧
+ * `JuwApplication.onCreate` 里的 `Services.install(GraphServices(this))` 对称。
+ *
+ * 2026-11-26 起它挪进了根组合的 `remember { }` 里，而不是 `ComposeUIViewController` 之前。
+ * 理由只有一条：**要能被捕获**。装配与首启写库都在主线程上同步跑，放进组合期后行为不变，
+ * 但抛异常时能落到 [IosBootCrashScreen] 而不是让进程静默消失（见 `IosBootGuard.kt`）。
+ * 顺序的不变量仍然成立——它依旧先于根组合里的第一个 ViewModel（`MeViewModel`）。
  */
 fun MainViewController(): UIViewController {
     // ---- 启动阶段留痕（B2，2026-11-26） ----
     //
     // 真机闪退时唯一能拿到的东西是沙箱里 `logs/app.log` 的最后几行（「设置 → 权限与存储 →
-    // 导出诊断日志」）。所以启动路径上每一道关都留一句话：**死在哪一句之后，就是哪一步**。
+    // 导出诊断日志」）或**出错时代替首帧显示的整屏提示**（[IosBootCrashScreen]）。
+    // 所以启动路径上每一道关都留一句话：**死在哪一句之后，就是哪一步**。
     // 序号不要重排，加了新的就往后续，用户截图里的「⑤」和代码里的「⑤」必须是同一件事。
-    Logger.i(TAG_BOOT, "① 进入 MainViewController")
-    val services = IosServices()
-    Logger.i(TAG_BOOT, "② IosServices 构造完成")
-    Services.install(services)
-    Logger.i(TAG_BOOT, "③ Services 已安装")
-    // 首启把作息表与默认学期写进库（Android 在 JuwApplication.ensureDefaults 里做同一件事）。
-    // 这一步只碰本地库与 WebKit 的 cookie 库（后者自己切主队列），**不碰通知中心**。
-    services.warmUp()
-    Logger.i(TAG_BOOT, "④ warmUp 已派发（后台协程）")
-    val controller = ComposeUIViewController {
-        // 分享面板要一个「当前在屏」的 UIViewController，共享层拿不到它。
-        // 这一步在根组合里把 `LocalUIViewController` 装进 `IosShareHost`，之后
-        // `ShareIntents` 的两个 actual（`sharePlainText` / `shareFile`）就能自己弹面板了
-        // —— 不装的话它们恒回 false，页面上表现为「点了没反应」。
-        IosSharePresenter()
-        // 提醒三件（前台横幅代理 / 作业截止重排 / 成绩核对）挪到**首帧之后、主线程**上。
-        // 2026-11-26 之前它们藏在 `IosServices.init` 与 `warmUp` 里，等于在 Swift
-        // `makeUIViewController` 执行期间就去碰 `UNUserNotificationCenter`，而那时 App
-        // 还没进 active——这是真机「一开就闪退」的直接嫌疑。延迟不是为了慢，
-        // 是为了让第一帧真的渲染出来（`LaunchedEffect` 在首次组合之后才跑）。
-        LaunchedEffect(services) {
-            delay(REMINDERS_DELAY_MS)
-            services.warmUpReminders()
+    IosBootSteps.step("① 进入 MainViewController")
+    // 崩溃钩子必须是 Swift 进来之后的**第一件事**：2026-11-26 之前它挂在 `IosServices.init` 里，
+    // 而服务装配一旦挪进组合期（见下），`ComposeUIViewController` 自身的初始化就跑到它前面去了
+    // ——那时再崩，钩子还没装上，日志里连栈都没有。纯 Kotlin 调用，不碰系统框架，符合 §12.12。
+    runCatching { installCrashHook() }
+    return ComposeUIViewController {
+        remember { IosBootSteps.step("⑤ Compose 根开始组合") }
+        // 服务装配与首启写库都挪进组合期，唯一的目的是**让它们可被捕获**：
+        // 2026-11-25/26 那几次闪退里，`IosServices()` 与 `warmUp()` 都在
+        // `ComposeUIViewController` 之前同步跑，一旦抛异常进程直接消失，屏幕上什么也不留。
+        // 组合期同样在主线程上，行为不变，但失败时能落到 [IosBootCrashScreen] 上。
+        val booted = remember {
+            runCatching {
+                IosServices().also { services ->
+                    Services.install(services)
+                    // 首启把作息表与默认学期写进库（Android 在 JuwApplication.ensureDefaults 里
+                    // 做同一件事）。这一步只碰本地库与 WebKit 的 cookie 库（后者自己切主队列），
+                    // **不碰通知中心**。
+                    services.warmUp()
+                }
+            }
         }
-        IosRoot(services)
+        val services = booted.getOrNull()
+        if (services == null) {
+            val error = booted.exceptionOrNull() ?: IllegalStateException("IosServices 构造后为空")
+            IosBootSteps.step("② 服务装配失败：$error")
+            Logger.e(TAG_BOOT, "服务装配失败", error)
+            IosBootCrashScreen("服务装配（IosServices）", error)
+        } else {
+            remember { IosBootSteps.step("② IosServices 构造完成 / ③ Services 已安装 / ④ warmUp 已派发") }
+            // 分享面板要一个「当前在屏」的 UIViewController，共享层拿不到它。
+            // 这一步在根组合里把 `LocalUIViewController` 装进 `IosShareHost`，之后
+            // `ShareIntents` 的两个 actual（`sharePlainText` / `shareFile`）就能自己弹面板了
+            // —— 不装的话它们恒回 false，页面上表现为「点了没反应」。
+            IosSharePresenter()
+            // 提醒三件（前台横幅代理 / 作业截止重排 / 成绩核对）挪到**首帧之后、主线程**上。
+            // 2026-11-26 之前它们藏在 `IosServices.init` 与 `warmUp` 里，等于在 Swift
+            // `makeUIViewController` 执行期间就去碰 `UNUserNotificationCenter`，而那时 App
+            // 还没进 active——这是真机「一开就闪退」的直接嫌疑。延迟不是为了慢，
+            // 是为了让第一帧真的渲染出来（`LaunchedEffect` 在首次组合之后才跑）。
+            LaunchedEffect(services) {
+                delay(REMINDERS_DELAY_MS)
+                runCatching { services.warmUpReminders() }
+            }
+            IosRoot(services)
+        }
     }
-    Logger.i(TAG_BOOT, "⑤ ComposeUIViewController 已创建")
-    return controller
 }
 
 /**

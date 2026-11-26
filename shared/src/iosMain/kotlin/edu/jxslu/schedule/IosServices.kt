@@ -99,7 +99,6 @@ import edu.jxslu.schedule.platform.JwSessionLogout
 import edu.jxslu.schedule.platform.Logger
 import edu.jxslu.schedule.platform.ScheduleBackgroundFiles
 import edu.jxslu.schedule.platform.UjingReminder
-import edu.jxslu.schedule.platform.installCrashHook
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -742,18 +741,20 @@ class IosServices : AppServices {
     private val qzxyFlowLockInstance: Mutex = Mutex()
 
     init {
-        // 未捕获异常落盘（B1，2026-11-25）：下面那个 CoroutineExceptionHandler 只接得住
-        // 协程作用域里的异常；UIKit 回调 / 组合期抛出来的走「进程终止」那条路，
-        // 只能靠 `setUnhandledExceptionHook` 在死前留一份栈到 `logs/app.log`。
-        // **必须第一个装**：后面任何一步出问题，日志里才留得下现场。
-        installCrashHook()
+        // 未捕获异常落盘（B1，2026-11-25）：`CoroutineExceptionHandler` 只接得住协程作用域里的
+        // 异常；UIKit 回调 / 组合期抛出来的走「进程终止」那条路，只能靠
+        // `setUnhandledExceptionHook` 在死前留一份栈到 `logs/app.log`。
+        //
+        // **2026-11-26 起不在这里装**：服务装配挪进了根组合（见 `MainViewController`），本类的
+        // 构造就跑到 `ComposeUIViewController` 之后去了，钩子会比它晚装。调用点现在只有一个
+        // ——`MainViewController()` 的第二行。
         // Cookie 来源与视图生命周期无关（直接读 `WKWebsiteDataStore`），所以装一次就够，
         // 用户关掉导入页之后课表页的「检测」照样能读登录态。纯 Kotlin 赋值，不碰系统框架。
         WebCookies.source = IosWebCookieSource
         // 通知那一套（前台横幅代理 / 排提醒 / 成绩核对）**不在这里装**：
-        // 本类的构造发生在 `MainViewController()` 里，即 Swift `makeUIViewController`
-        // 执行期间，那时 App 还没进 active。2026-11-26 真机「一开就闪退」的嫌疑就是它。
-        // 现在挪到首帧之后的主线程上，见 [warmUpReminders]。
+        // 本类的构造发生在 Swift `makeUIViewController` 执行期间，那时 App 还没进 active。
+        // 2026-11-26 真机「一开就闪退」的嫌疑就是它。现在挪到首帧之后的主线程上，
+        // 见 [warmUpReminders]。
     }
 
     /** 首次打开时把作息表与默认学期写进库（与 Android 的 `ensureDefaults` 同步口径）。 */
