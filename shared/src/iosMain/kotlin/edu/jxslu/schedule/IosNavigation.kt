@@ -60,6 +60,10 @@ import edu.jxslu.schedule.ui.me.hub.AppearanceSettingsScreen
 import edu.jxslu.schedule.ui.me.hub.IosPermissionsStorageScreen
 import edu.jxslu.schedule.ui.me.hub.QuietHoursScreen
 import edu.jxslu.schedule.ui.me.hub.SupportDevScreen
+import edu.jxslu.schedule.ui.common.rememberIosAttachmentImageUi
+import edu.jxslu.schedule.ui.common.rememberIosMarkdownEditorUi
+import edu.jxslu.schedule.ui.common.rememberIosMarkdownImageUi
+import edu.jxslu.schedule.ui.common.rememberIosMarkdownUi
 import edu.jxslu.schedule.ui.common.IosBrandAssets
 import edu.jxslu.schedule.ui.common.GallerySaveOutcome
 import edu.jxslu.schedule.ui.common.decodeBitmap
@@ -368,8 +372,8 @@ internal fun IosRouteContent(
             onOpenNote = { courseName, id, startEditing ->
                 push(IosRoute(SubpageScreen.NOTE_DETAIL, courseName, id, startEditing))
             },
-            // null = 本平台还没有附件图解码（见 IosServices 的说明），缩略图整行不出现
-            images = null,
+            // 附件图（2026-11-29）：缩略图 + 全屏查看器
+            images = rememberIosAttachmentImageUi(),
         )
 
         SubpageScreen.NOTES_COURSE -> NoteCourseScreen(
@@ -378,17 +382,21 @@ internal fun IosRouteContent(
             onOpenNote = { id, startEditing ->
                 push(IosRoute(SubpageScreen.NOTE_DETAIL, route.arg, id, startEditing))
             },
-            images = null,
+            images = rememberIosAttachmentImageUi(),
         )
 
         // 笔记详情（V4 搬进共享层）：正文渲染、附件图、编辑底栏、外链四件平台能力
-        // iOS 都还没有 → 全传 null。表现是：正文按纯文本排版（图片位置给一行说明）、
-        // 编辑态没有附件条与工具条、链接不可点、点图不响应。文字读写是真的能用。
+        // **2026-11-29 全部接上**——附件目录 + skia 解码 + 选图 + 查看器都在
+        // `IosAttachmentStore` / `IosAttachmentUi.kt`，正文链接交给系统浏览器。
         SubpageScreen.NOTE_DETAIL -> NoteDetailScreen(
             courseName = route.arg.orEmpty(),
             noteId = route.itemId,
             startEditing = route.startEditing,
             onBack = pop,
+            markdownImages = rememberIosMarkdownImageUi(),
+            images = rememberIosAttachmentImageUi(),
+            editor = rememberIosMarkdownEditorUi(),
+            onOpenLink = { url -> iosOpenExternalUrl(url) },
         )
 
         SubpageScreen.HOMEWORK -> HomeworkLibraryScreen(
@@ -396,8 +404,8 @@ internal fun IosRouteContent(
             onOpenHomework = { courseName, id, startEditing ->
                 push(IosRoute(SubpageScreen.HOMEWORK_DETAIL, courseName, id, startEditing))
             },
-            images = null,
-            markdown = null,
+            images = rememberIosAttachmentImageUi(),
+            markdown = rememberIosMarkdownUi(),
             // 勾完成 / 删作业后重排截止提醒（2026-11-26 起 iOS 真有排程，见 IosHomeworkReminder）
             onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
@@ -408,8 +416,8 @@ internal fun IosRouteContent(
                 push(IosRoute(SubpageScreen.HOMEWORK_DETAIL, courseName, id, startEditing))
             },
             onOpenLibrary = { push(IosRoute(SubpageScreen.HOMEWORK)) },
-            images = null,
-            markdown = null,
+            images = rememberIosAttachmentImageUi(),
+            markdown = rememberIosMarkdownUi(),
             onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
@@ -419,18 +427,22 @@ internal fun IosRouteContent(
             onOpenHomework = { id, startEditing ->
                 push(IosRoute(SubpageScreen.HOMEWORK_DETAIL, route.arg, id, startEditing))
             },
-            images = null,
-            markdown = null,
+            images = rememberIosAttachmentImageUi(),
+            markdown = rememberIosMarkdownUi(),
             onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
-        // 作业详情（V4 搬进共享层）：与笔记详情同一组 null——平台能力都还没有。
-        // 改截止日 / 勾完成会重排截止提醒（2026-11-26 起）；正文里的图片与公式仍只有 Android 能渲染。
+        // 作业详情（V4 搬进共享层）：与笔记详情同一组槽，2026-11-29 全部接上
+        // （正文附件图 / Markdown 渲染 / 编辑底栏 / 外链）。改截止日、勾完成会重排截止提醒。
         SubpageScreen.HOMEWORK_DETAIL -> HomeworkDetailScreen(
             courseName = route.arg.orEmpty(),
             homeworkId = route.itemId,
             startEditing = route.startEditing,
             onBack = pop,
+            markdownImages = rememberIosMarkdownImageUi(),
+            images = rememberIosAttachmentImageUi(),
+            editor = rememberIosMarkdownEditorUi(),
+            onOpenLink = { url -> iosOpenExternalUrl(url) },
             onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
