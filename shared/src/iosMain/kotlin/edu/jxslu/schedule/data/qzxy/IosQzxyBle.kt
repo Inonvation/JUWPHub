@@ -729,26 +729,30 @@ internal class IosQzxyCentral :
         if (hasProperty(CBCharacteristicPropertyNotify)) add("通知")
         if (hasProperty(CBCharacteristicPropertyIndicate)) add("指示")
     }.joinToString("/").ifBlank { "无" }
-
-    private companion object {
-        const val DEFAULT_MTU = 23
-        const val MIN_CHUNK_BYTES = 20
-        const val MAX_RESPONSE_BYTES = 512
-        const val WRITE_GAP_MILLIS = 30L
-        const val WRITE_TIMEOUT_MILLIS = 1_000L
-        const val WRITE_RETRY_DELAY_MILLIS = 40L
-        const val NOTIFY_TIMEOUT_MILLIS = 2_000L
-        const val LINE_FEED = 0x0A.toByte()
-
-        /** Microchip/ISSC 蓝牙透传服务的三条特征值（与 Android 侧同一组常量）。 */
-        const val WRITE_UUID = "49535343-8841-43f4-a8d4-ecbe34729bb3"
-        const val READ_UUID = "49535343-1e4d-4bd9-ba61-23c647249616"
-        const val FLOW_CONTROL_UUID = "49535343-aca3-481c-91ec-d85e28a60318"
-
-        /** CoreBluetooth 回调队列：串行，避免扫描与连接的现场互相踩。 */
-        val BLE_QUEUE = dispatch_queue_create("edu.jxslu.schedule.qzxy.ble", null)
-    }
 }
+
+// ---------------------------------------------------------------- 常量
+//
+// **不能放 companion object**：`IosQzxyCentral` 继承 `NSObject`，K/N 不允许 ObjC 子类的
+// companion 带字段（CI 首轮报 `Fields are not supported for Companion of subclass of ObjC type`）。
+// 放成文件级私有声明即可，类内引用不用 import（同一文件）。
+
+private const val DEFAULT_MTU = 23
+private const val MIN_CHUNK_BYTES = 20
+private const val MAX_RESPONSE_BYTES = 512
+private const val WRITE_GAP_MILLIS = 30L
+private const val WRITE_TIMEOUT_MILLIS = 1_000L
+private const val WRITE_RETRY_DELAY_MILLIS = 40L
+private const val NOTIFY_TIMEOUT_MILLIS = 2_000L
+private const val LINE_FEED = 0x0A.toByte()
+
+/** Microchip/ISSC 蓝牙透传服务的三条特征值（与 Android 侧同一组常量）。 */
+private const val WRITE_UUID = "49535343-8841-43f4-a8d4-ecbe34729bb3"
+private const val READ_UUID = "49535343-1e4d-4bd9-ba61-23c647249616"
+private const val FLOW_CONTROL_UUID = "49535343-aca3-481c-91ec-d85e28a60318"
+
+/** CoreBluetooth 回调队列：串行，避免扫描与连接的现场互相踩。 */
+private val BLE_QUEUE = dispatch_queue_create("edu.jxslu.schedule.qzxy.ble", null)
 
 /**
  * 一帧字节量的转手工具。
