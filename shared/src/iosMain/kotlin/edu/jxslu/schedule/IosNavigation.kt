@@ -60,6 +60,12 @@ import edu.jxslu.schedule.ui.me.hub.IosPermissionsStorageScreen
 import edu.jxslu.schedule.ui.me.hub.QuietHoursScreen
 import edu.jxslu.schedule.ui.me.hub.SupportDevScreen
 import edu.jxslu.schedule.ui.common.IosBrandAssets
+import edu.jxslu.schedule.ui.common.GallerySaveOutcome
+import edu.jxslu.schedule.ui.common.decodeBitmap
+import edu.jxslu.schedule.ui.common.savePixelBitmapToGallery
+import edu.jxslu.schedule.ui.common.toPngBytes
+import edu.jxslu.schedule.domain.GalleryPaths
+import edu.jxslu.schedule.ui.ebike.rememberIosBikeScanner
 import edu.jxslu.schedule.ui.common.iosPresetBrandPainter
 import edu.jxslu.schedule.ui.me.hub.IosRewardQr
 import edu.jxslu.schedule.ui.qzxy.QzxyBillScreen
@@ -990,9 +996,28 @@ internal fun IosRouteContent(
 
         SubpageScreen.SUPPORT_DEV -> SupportDevScreen(
             onBack = pop,
-            // 赞赏码（2026-11-28）：`BrandAssets/ic_reward_qr.png` 随包分发，
-            // 保存到相册那条平台动作仍是 Android 专有（`AboutPlatform`），这里只负责显示。
+            // 赞赏码（2026-11-28）：`BrandAssets/ic_reward_qr.png` 随包分发。
             rewardQr = { modifier -> IosRewardQr(modifier) },
+            // 落相册（2026-11-28）：素材是 skia `ImageBitmap`，走「PNG 编码 → 解码成
+            // `PixelBitmap` → `savePixelBitmapToGallery`」这条既有链路（与百宝箱存图同一条）。
+            onSaveToGallery = {
+                val bytes = IosBrandAssets.image(IosBrandAssets.REWARD_QR)?.toPngBytes()
+                val pixel = bytes?.let { decodeBitmap(it) }
+                if (pixel == null) {
+                    GallerySaveOutcome.Failed("赞赏码素材缺失，无法保存")
+                } else {
+                    savePixelBitmapToGallery(
+                        bitmap = pixel,
+                        displayName = "JUWPHub-赞赏码.png",
+                        subDir = GalleryPaths.CURRENT_SUBDIR,
+                    )
+                }
+            },
+            // 保存成功后拉微信：iOS 只开放 `weixin://`（落点是微信首页，没有「直达扫一扫」），
+            // 页面下方那行提示本来就写着「若未直达扫一扫，在微信『发现 → 扫一扫 → 相册』里选图」。
+            onOpenWechatScan = { onError ->
+                if (!iosOpenExternalUrl("weixin://")) onError("未安装微信，请手动打开微信扫一扫")
+            },
         )
 
         // ---------------------------------------------------------------- 学工 / 校历 / 实习
@@ -1173,9 +1198,12 @@ internal fun IosRouteContent(
         // 看板（附近洗衣机 + 在用订单状态）与历史账单在 iOS 上都能看：三份本地存储
         // 2026-11-25 全部到位（Keychain 凭证 + 三个 NSUserDefaults 前缀）。
         //
-        // **开洗这一条走不通**：扫码要相机（`onScan` 传 null → 扫码卡整块不渲染），
-        // 支付要支付宝深链（`pay` 不传 → 「支付」入口不渲染）。所以 iOS 上 U净 是
-        // 「能看不能下单」，不是「点了没反应」。
+        // **扫码 2026-11-28 接上了**：`rememberIosBikeScanner`（AVFoundation 取景页）本来就是
+        // 通用码识别，把原文回灌 `UjingViewModel.onQrScanned` 即可——快趣车身码与洗衣机机身码
+        // 共用同一套识别，区分交给 `ujingScanTarget`。今日页「+ → 扫一扫」也走它（见 `MainViewController`）。
+        //
+        // **支付仍走不通**：`UjingPay` 只能在 Activity 上拉起，iOS 侧恒为 null，所以下单在创建
+        // 订单前被拦。这一端是「能扫、能看、不能付款」，不是「点了没反应」。
         SubpageScreen.UJING -> {
             val repo = services.ujingRepository()
             if (repo == null) {
@@ -1195,6 +1223,7 @@ internal fun IosRouteContent(
                         reminder = services.ujingReminder(),
                     )
                 }
+                val qrScanner = rememberIosBikeScanner()
                 UjingScreen(
                     viewModel = vm,
                     onBack = pop,
@@ -1202,6 +1231,13 @@ internal fun IosRouteContent(
                     brandIconRes = IosBrandAssets.UJING,
                     onOpenOrder = { push(IosRoute(SubpageScreen.UJING_ORDER)) },
                     onOpenHistory = { push(IosRoute(SubpageScreen.UJING_HISTORY)) },
+                    // 今日页扫到机身码时带进来的原文（`UjingScanHandoff` 的同一条链，iOS 用路由参数）
+                    scanRaw = route.arg,
+                    onScan = {
+                        qrScanner { raw ->
+                            raw?.takeIf { it.isNotBlank() }?.let(vm::onQrScanned)
+                        }
+                    },
                 )
             }
         }

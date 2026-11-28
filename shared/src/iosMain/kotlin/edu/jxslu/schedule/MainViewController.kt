@@ -80,6 +80,7 @@ import edu.jxslu.schedule.ui.common.iosGuessBrandPainter
 import edu.jxslu.schedule.ui.common.iosServiceBrands
 import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberDrawerCardTransform
+import edu.jxslu.schedule.ui.ebike.rememberIosBikeScanner
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jw.JwHubScreen
 import edu.jxslu.schedule.ui.jwvw.JwWebFit
@@ -609,6 +610,10 @@ private fun IosRoot(services: IosServices) {
                                                     stack.add(IosRoute(SubpageScreen.RIDE))
                                                 },
                                             )
+                                            // 扫码（2026-11-28）：AVFoundation 取景页（`IosBikeScan`）
+                                            // 本来就是一码通吃，机身码 / 车身码由页面自己分流
+                                            // （`quickScanTargetOf`），这里只把原文交回去。
+                                            val iosQrScanner = rememberIosBikeScanner()
                                             TodayScreen(
                                                 viewModel = viewModel,
                                                 // 顶栏汉堡 → 左侧抽屉（Android 同一入口）
@@ -677,9 +682,13 @@ private fun IosRoot(services: IosServices) {
                                                         )
                                                     },
                                                 ),
-                                                // 扫码（onScanCode）在 iOS 侧仍没有实现，留 null；
-                                                // 品牌位图（brandIcon）2026-11-28 已接上——五张图随包分发，
-                                                // 猜你想用卡片有头像位了。
+                                                // 扫码（onScanCode）2026-11-28 接上：U净 弹窗的扫码钮
+                                                // 与今日页快捷扫码都走它。品牌位图同日接上。
+                                                onScanCode = { onResult -> iosQrScanner(onResult) },
+                                                // 扫到洗衣机机身码 → U净页带着原文进去（识别在页面里做）
+                                                onOpenUjingScan = { raw ->
+                                                    stack.add(IosRoute(SubpageScreen.UJING, raw))
+                                                },
                                                 brandIcon = { target -> iosGuessBrandPainter(target) },
                                             )
                                         }
