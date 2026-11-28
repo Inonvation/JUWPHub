@@ -955,12 +955,14 @@ E2 同类放开：`KvcxAction` / `KvcxRideState` / `KvcxNotice` / `KvcxReturnSum
 
 ### 10.3 还差的（按优先级）
 
-1. **iOS 教务会话**：`JwReadSession` 目前只有 OkHttp 实现（`:app` 的 `CasSession`）。要 Ktor 版
-   才能让 iOS 抓课表。WebView 已经能登录并读到 Cookie（`WebViewController.getCookieHeader`），
-   缺的是「Cookie → Ktor 会话 → 解析 → 落库」这条链的最后一节。
-2. **iOS 文件选择 / 另存**：`onPickJsonFile` / `onSaveTextFile` 在 iOS 侧没有实现，
-   JSON 导入导出因此不出现。要 `UIDocumentPickerViewController`。
-3. **iOS 系统日历写入**：`onSyncCalendar` 没有实现，分享弹层里那一行不出现。
+1. **iOS 教务会话**：✅ 已完成（`IosJwReadSession`：Ktor 传输 + Keychain 凭证 + WebKit Cookie 桥，
+   见 §12.7）。2026-11-29 又补了**内置教务浏览窗口**（手机版 / 电脑版切换、自动填表、
+   按模式抓一次：归档课表 / 同步考试），见 §12.7a。
+2. **iOS 文件选择 / 另存**：✅ 已完成（`ui/platform/FilePickers.ios.kt`，
+   `UIDocumentPickerViewController`），JSON / CSV 导入导出可用。
+3. **iOS 系统日历写入**：✅ 已完成（`ui/week/IosCalendarSync.kt`，EventKit）。
+4. **现在的真缺口（2026-11-29）**：成绩单 PDF 的「打开」（要 QuickLook 或自建预览页；
+   分享 / 另存已可用）、桌面小组件（WidgetKit，结构性）、后台周期任务（降级为进前台补算）。
 4. 今日页**已搬完**（V1 页面 + V2 服务卡，2026-11-25）。服务卡在 iOS 上只接
    **开水（胖乖，HTTP）**与 **U净 洗衣**两条链；快趣骑行（高德 SDK）与趣智开水（蓝牙）
    由宿主注入槽位、iOS 传 `null` 整行不渲染；品牌位图与扫码（U净 机身码）2026-11-28 已接上。
@@ -1379,6 +1381,28 @@ Cookie + Ktor 降为兜底（WebView 已销毁时，例如从成绩页触发的�
 2. **没有 WebView 时走 Cookie + Ktor 兜底**（`IosJwReadSession.fetchHtml` 的第二条路）。
    这条路在真机上是否拿得到会话**尚未验证**——`IosWebFetch.available` 为假时（导入页已关）
    就可能落到「还没有登录教务：…」，那句话本身是准确的，不吞。
+
+### 12.7a 内置教务浏览窗口与考试并表（2026-11-29）
+
+Android 的教务网页能力一直压在 `JwImportActivity`（2308 行的 `JwImportScreen`）里；iOS 此前只有一个
+「登录 → 归档课表」的精简窗口，没有电脑版切换、没有自动填表，各业务页的「在教务网页核对」也全部
+不渲染。这一批把它补成一个**共享同一套注入脚本**的窗口：
+
+| 能力 | 实现 | 说明 |
+|---|---|---|
+| 手机版 / 电脑版 | 顶栏按钮 + `JwWebFit.DESKTOP_JS` / `DESKTOP_REVERT_JS` | 与 Android **同一个偏好键** `jwDesktopMode`；切换是当场重注入，不重载页面 |
+| 自动填表 | `JwAutoLogin.fillJs` + Keychain 凭证（`IosServices.jwCredentials()`） | 页面级 + 进程级（5 分钟）双闸门；脚本回 `no-form` 会退回闸门 |
+| 落到学生端后 | 按 `IosJwTask` 分三档：`Browse` / `ImportSchedule` / `SyncExams` | 抓取全在共享层（`ScheduleTermImport` / `ExamSync`），网页只管登录与展示 |
+| 入口 | 教务汇总页、理论 / 实验课表、教材、教学日历、学籍、学业完成、培养方案、实习基地、选课页 | 一律 `onOpenWebPage(title, url)` / `onOpenJwWeb` / `onOpenJwPage`，全部指向同一个窗口 |
+| 考试并表 | 考试页「在教务网页核对」与考试设置「导入考试安排到课表」都开在 `EXAM_QUERY`，登录后直接 `ExamSync.sync(force = true)` | 另外 `warmUpReminders` 每次进 App 补一次 `ExamSync.sync(eager = true)`——Android 靠 WorkManager，iOS 没有后台周期任务，这是等价降级 |
+
+**选课中心**同批补齐：新增共享 `SelectionCenterWebClient`（跑在 `JwReadSession` 上，
+覆盖列表 / 提交 / 退课，协议形状与 `:app` 的 OkHttp 版逐条一致），
+经 `AppServices.selectionCenterClient()` 注入（默认 null，Android 行为不变）。
+写路径目前用 `fetchHtml`（会话失效时可能重登重发一次），升级条件写在类头 `shortcut:` 里。
+
+**仍未对齐的一处**：Android 导入页可手动切「数据学期」重爬单个学期；iOS 走
+`ScheduleTermImport.archive` 一次归档全部学期，没有这个选择项（结果等价，路径更省事）。
 
 ### 12.8 一卡通凭证：录入界面已搬完（2026-11-25 晚，Y1）
 
