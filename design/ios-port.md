@@ -1282,11 +1282,28 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 下线的 16 页：笔记库 / 课程分组 / 笔记详情、作业库 / 待办 / 课程分组 / 作业详情、
 百宝箱 / 菜鸟批量查、问渠 / 问渠设置 / 问渠工时 / 问渠蹲点、AI 调课 / AI 设置 / 调课记录。
 
-**同一次提交里修的教务导入**（详见 `MainViewController.JwLoginScreen` 的 KDoc）：入口从 CAS
-直链改成预热入口 `SSO_WARMUP`（第一次 `sso.jsp?ticket=` 时教务域还没有 `bzb_njw`，这正是
-403 / 白屏的根因；Android 的 `JwImportScreen` 一直这么起跳，iOS 漏了），顶栏补「刷新」，
+**同一次提交里修的教务导入**（详见 `shared/src/iosMain/.../ui/jwvw/IosJwBrowser.kt` 的 KDoc）：
+入口从 CAS 直链改成预热入口 `SSO_WARMUP`（第一次 `sso.jsp?ticket=` 时教务域还没有 `bzb_njw`，
+这正是 403 / 白屏的根因；Android 的 `JwImportScreen` 一直这么起跳，iOS 漏了），顶栏补「刷新」，
 空白页 / 加载失败自动重走认证（上限 2 次），落地判据从「教务域」收紧到「学生端 8080」——
 否则预热页 `sso.jsp` 一加载就被当成「已登录」，必然报「没有可用的教务会话」。
+2026-11-29 起这个窗口又扩成「能切电脑版、能自动填表、能按模式抓一次」的通用教务窗口（§12.7a）。
+
+### 12.20 笔记 / 作业的附件图（2026-11-29）
+
+三张共享页面一直带着四个可空槽（`markdownImages` / `images` / `editor` / `onOpenLink`），
+iOS 全传 null：正文只能按纯文本排、编辑态没有底栏、插图入口整行不出现。这一批补上：
+
+| 件 | 实现 | 与 Android 的对齐点 |
+|---|---|---|
+| 附件目录 | `IosAttachmentStore`：`appDataDir()/notes_img`（okio） | 正文引用同一份 `![](img:文件名)`；删除只删差集 |
+| 压缩 | 选中图 → `UIImage.downscaledToLongSide(1600)` → `UIImageJPEGRepresentation(0.86)` | 与 `ImageImport` 的长边 / 质量同值 |
+| 渲染 | skia 惰性解码 + 24 张常驻缓存 | 满宽图 / 72dp 缩略图 / 全屏查看器（Compose `Dialog`） |
+| 编辑底栏 | 附件条 + `MarkdownToolbar` + 选图（`rememberImagePicker`，最多 9 张） | 选图后按光标位置插引用，失败张数给一次性提示 |
+| 外链 | `onOpenLink` → `iosOpenExternalUrl` | 点正文链接交给系统浏览器 |
+
+**没做**：冷启动扫孤儿文件（`shortcut:` 写在 `IosAttachmentStore` 头注，触发条件是备份体积异常）；
+AI 会话的图片附件（`AiImageAttachments` / `AiImageUi` 仍是 null，AI 调课目前只能纯文本对话）。
 
 ## 13. 装机后请点验什么（2026-11-25 精简版交接口径）
 
