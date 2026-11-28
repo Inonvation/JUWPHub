@@ -3,17 +3,9 @@ package edu.jxslu.schedule.data.local
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.platform.appDataDir
 import edu.jxslu.schedule.platform.platformFileSystem
-import edu.jxslu.schedule.ui.common.decodeBitmap
-import edu.jxslu.schedule.ui.common.toByteArray
 import edu.jxslu.schedule.ui.platform.PickedImage
-import edu.jxslu.schedule.ui.week.downscaledToLongSide
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import okio.Path
 import okio.Path.Companion.toPath
-import platform.Foundation.NSData
-import platform.Foundation.dataWithContentsOfURL
-import platform.UIKit.UIImageJPEGRepresentation
 import kotlin.random.Random
 
 /**
@@ -70,17 +62,15 @@ internal class IosAttachmentStore {
      *
      * 解码走 `NSData` + `UIImage`（选图器给的是文件 URL），与课表背景图同一条链。
      */
-    suspend fun importPicked(picked: PickedImage): String? = withContext(Dispatchers.Default) {
-        runCatching {
-            val data = NSData.dataWithContentsOfURL(picked.url) ?: return@runCatching null
-            val bytes = data.toByteArray() ?: return@runCatching null
-            val image = decodeBitmap(bytes)?.nativeImage ?: return@runCatching null
-            val scaled = image.downscaledToLongSide(MAX_SIDE)
-            val encoded = UIImageJPEGRepresentation(scaled, JPEG_QUALITY)?.toByteArray()
-                ?: return@runCatching null
-            val name = newName()
-            if (write(name, encoded)) name else null
-        }.getOrNull()
+    suspend fun importPicked(picked: PickedImage): String? {
+        val encoded = IosImageCompress.jpegBytes(
+            picked = picked,
+            maxSide = MAX_SIDE,
+            quality = JPEG_QUALITY,
+            maxBytes = MAX_BYTES,
+        ) ?: return null
+        val name = newName()
+        return if (write(name, encoded)) name else null
     }
 
     private fun newName(): String = "img_${AppClock.nowMillis()}_${Random.nextInt(1000, 9999)}.jpg"

@@ -3,6 +3,9 @@ package edu.jxslu.schedule
 import edu.jxslu.schedule.data.ai.AiScheduleClient
 import edu.jxslu.schedule.data.kqcx.KqcxAuthClient
 import edu.jxslu.schedule.data.kqcx.KqcxSessionCore
+import edu.jxslu.schedule.platform.platformFileSystem
+import okio.ByteString.Companion.toByteString
+import okio.Path.Companion.toPath
 import edu.jxslu.schedule.data.local.JuwDatabase
 import edu.jxslu.schedule.data.local.juwDatabase
 import edu.jxslu.schedule.data.power.PowerClient
@@ -430,7 +433,21 @@ class IosServices : AppServices {
     // 纯文本链路照常可用（iOS 的图片压缩还没接，见 `IosPage` 的说明）。
 
     /** 进程单例：客户端持有 Ktor 连接池，每次进页 new 一个等于每次重开池。 */
-    private val aiClient: AiScheduleClient by lazy { AiScheduleClient.create() }
+    private val aiClient: AiScheduleClient by lazy {
+        // 图片编码器（2026-11-29）：`IosAiImageStore.payload` 给的是**绝对路径**，
+        // 这里读字节转 `data:image/jpeg;base64,…`。不注入时 `chatStream(images = …)` 恒空，
+        // 图片附件等于没发（旧版的现状）。
+        AiScheduleClient.create(imageEncoder = ::encodeAiImage)
+    }
+
+    /** 路径 → data URI；读不出来回 null（客户端按「这张跳过」处理，不整批失败）。 */
+    private fun encodeAiImage(source: Any): String? {
+        val path = source as? String ?: return null
+        val bytes = runCatching {
+            platformFileSystem().read(path.toPath()) { readByteArray() }
+        }.getOrNull() ?: return null
+        return "data:image/jpeg;base64," + bytes.toByteString().base64()
+    }
 
     /** 与「调课记录」页共用的那一份（按 id 对账，两个实例会各写一份 JSON）。 */
     private val aiHistory: AiApplyHistoryStore by lazy { AiApplyHistoryStore() }

@@ -34,6 +34,8 @@ import edu.jxslu.schedule.data.repo.RideRecordStore
 import edu.jxslu.schedule.data.xg.XgForm
 import edu.jxslu.schedule.domain.CourseKind
 import edu.jxslu.schedule.ui.ai.AiChatScreen
+import edu.jxslu.schedule.data.local.IosAiImageStore
+import edu.jxslu.schedule.ui.ai.rememberIosAiImageUi
 import edu.jxslu.schedule.ui.ai.AiChatViewModel
 import edu.jxslu.schedule.ui.ai.AiHistoryScreen
 import edu.jxslu.schedule.ui.ai.AiHistoryViewModel
@@ -928,24 +930,27 @@ internal fun IosRouteContent(
         // ---------------------------------------------------------------- AI 调课
         //
         // 三页在 iOS 上都能跑：客户端与调课历史仓都是 `appDataDir()` 落盘（两端同一份），
-        // API Key 走 Keychain。图片那套（截图 / 相册）iOS 没有，`imageUi = null`
-        // 让输入区的图片入口整行不渲染。
+        // API Key 走 Keychain。**图片附件 2026-11-29 接上**：`IosAiImageStore`（长边 1600 /
+        // 质量 0.8 / ≤400KB / 最多 4 张）+ 选图与查看器；`AiScheduleClient` 的编码器在
+        // `IosServices` 里注入（路径 → data URI）。
         SubpageScreen.AI_SCHEDULE -> {
-            val vm = remember {
+            val imageStore = remember { IosAiImageStore() }
+            val vm = remember(imageStore) {
                 AiChatViewModel(
                     repo = services.scheduleRepository(),
                     client = services.aiScheduleClient(),
                     historyStore = services.aiApplyHistoryStore(),
-                    imageStore = null,
+                    imageStore = imageStore,
                     apiKeys = services.aiKeys,
                 )
             }
+            val imageUi = rememberIosAiImageUi(store = imageStore, onAddImage = vm::addImage)
             AiChatScreen(
                 viewModel = vm,
                 onBack = pop,
                 onOpenSettings = { push(IosRoute(SubpageScreen.AI_SETTINGS)) },
                 onOpenHistory = { push(IosRoute(SubpageScreen.AI_HISTORY)) },
-                imageUi = null,
+                imageUi = imageUi,
             )
         }
 
