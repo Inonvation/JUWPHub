@@ -59,13 +59,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.ComposeUIViewController
-import edu.jxslu.schedule.data.jw.JwImportDiagnosis
+import edu.jxslu.schedule.data.jw.JwAutoLogin
 import edu.jxslu.schedule.data.jw.JwUrls
-import edu.jxslu.schedule.data.repo.ScheduleTermImport
 import edu.jxslu.schedule.data.session.IosJwSessionFlag
 import edu.jxslu.schedule.data.ujing.UjingOrderSnapshot
-import edu.jxslu.schedule.domain.AppClock
-import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.domain.ThemeMode
 import edu.jxslu.schedule.domain.ThemePalette
 import edu.jxslu.schedule.platform.Logger
@@ -83,7 +80,8 @@ import edu.jxslu.schedule.ui.common.rememberDrawerCardTransform
 import edu.jxslu.schedule.ui.ebike.rememberIosBikeScanner
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jw.JwHubScreen
-import edu.jxslu.schedule.ui.jwvw.JwWebFit
+import edu.jxslu.schedule.ui.jwvw.IosJwBrowser
+import edu.jxslu.schedule.ui.jwvw.IosJwTask
 import edu.jxslu.schedule.ui.jwvw.TeachingEvalScreen
 import edu.jxslu.schedule.ui.life.IosRechargePlatform
 import edu.jxslu.schedule.ui.life.LifeViewModel
@@ -104,8 +102,6 @@ import edu.jxslu.schedule.ui.today.rememberIosKvcxServiceSlot
 import edu.jxslu.schedule.ui.today.TodayScreen
 import edu.jxslu.schedule.ui.today.TodayServiceSlot
 import edu.jxslu.schedule.ui.today.TodayViewModel
-import edu.jxslu.schedule.ui.web.WebContentView
-import edu.jxslu.schedule.ui.web.WebViewController
 import edu.jxslu.schedule.ui.common.IosSharePresenter
 import edu.jxslu.schedule.ui.week.iosSaveScheduleImageToGallery
 import edu.jxslu.schedule.ui.week.iosShareScheduleImage
@@ -202,7 +198,12 @@ private fun IosRoot(services: IosServices) {
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background),
             )
+            // 教务网页窗口（2026-11-29）：从「登录导入课表」扩成一个能浏览、能切电脑版、
+            // 能按模式抓一次（课表 / 考试）的窗口。三个状态分别是起始页、任务与标题。
             var jwOpen by remember { mutableStateOf(false) }
+            var jwStartUrl by remember { mutableStateOf(JwUrls.SSO_WARMUP) }
+            var jwTask by remember { mutableStateOf(IosJwTask.ImportSchedule) }
+            var jwTitle by remember { mutableStateOf("教务") }
             // 「全部功能」页：iOS 独有，入口挂在设置首页（2026-11-26 晚，侧栏不再有那一行）。
             var showAllFeatures by remember { mutableStateOf(false) }
             // 「我的 · 设置」覆盖层（2026-11-26 晚，用户报「进设置页后没办法返回」）：
@@ -300,6 +301,17 @@ private fun IosRoot(services: IosServices) {
             // 具体原因见 `IosQzxyPage` 的 KDoc。惰性创建：不进取智页就不建仓库与蓝牙。
             val qzxyPage = remember { IosQzxyPage() }
 
+            /**
+             * 打开教务网页窗口（2026-11-29）：`url` 为空 = 从 SSO 预热入口起，
+             * 否则直达该页（考试查询 / 教务主页）。`task` 决定落到学生端后抓什么。
+             */
+            val openJwBrowser: (String?, IosJwTask) -> Unit = { url, task ->
+                jwStartUrl = url?.takeIf { it.isNotBlank() } ?: JwUrls.SSO_WARMUP
+                jwTask = task
+                jwTitle = if (task == IosJwTask.SyncExams) "考试安排 · 教务" else "教务"
+                jwOpen = true
+            }
+
             // iOS 没有系统返回手势：二级页栈非空时把「返回」接到这个缝上（Android 是实体返回键）
             AppBackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
 
@@ -307,7 +319,13 @@ private fun IosRoot(services: IosServices) {
             // 若把引导判在前面，那个按钮点了就毫无反应（用户会被卡在第 2 步）。
             // 关掉登录页回来，引导还在（`onboardingSeen` 仍是 false），接着走。
             if (jwOpen) {
-                JwLoginScreen(services = services, onClose = { jwOpen = false })
+                IosJwBrowser(
+                    services = services,
+                    startUrl = jwStartUrl,
+                    title = jwTitle,
+                    task = jwTask,
+                    onClose = { jwOpen = false },
+                )
             } else if (onboardingSeen == false) {
                 // 首启引导：六屏里 iOS 现在给得起三样（`jwLogin` / `onOpenJwLogin` / `onFinish`）。
                 //
@@ -329,7 +347,7 @@ private fun IosRoot(services: IosServices) {
                 OnboardingScreen(
                     onFinish = { onboardingSeen = true },
                     jwLogin = onboardingJwLogin,
-                    onOpenJwLogin = { jwOpen = true },
+                    onOpenJwLogin = { openJwBrowser(null, IosJwTask.ImportSchedule) },
                     // 品牌位图（2026-11-28）：`BrandAssets/*.png` 已随包分发，五张服务图 + 校徽
                     // 走 `IosBrandAssets` 的合成句柄；映射与 `AndroidOnboarding.kt` 逐项对齐。
                     brands = iosOnboardingBrandIcons,
@@ -376,6 +394,8 @@ private fun IosRoot(services: IosServices) {
                         recharge = rechargeRequests,
                         // 与主分支同一个持有者：从设置里进趣智页时也共用同一份 VM
                         qzxyPage = qzxyPage,
+                        // 覆盖层里的考试页 / 考试设置也要能开教务网页窗口
+                        onOpenJwBrowser = openJwBrowser,
                         root = {
                             if (showAllFeatures) {
                                 IosAllFeaturesScreen(
@@ -548,6 +568,8 @@ private fun IosRoot(services: IosServices) {
                                     recharge = rechargeRequests,
                                     // 趣智三页共用一份 ViewModel（见 `IosQzxyPage` 的 KDoc）
                                     qzxyPage = qzxyPage,
+                                    // 教务网页窗口（考试页「在教务网页核对」/ 考试设置「导入」）
+                                    onOpenJwBrowser = openJwBrowser,
                                 )
                             } else {
                                 AnimatedContent(
@@ -832,15 +854,28 @@ private fun IosRoot(services: IosServices) {
                                             onOpenLeaveHub = { pushRoute(IosRoute(SubpageScreen.LEAVE_HUB)) },
                                             onOpenRepair = { pushRoute(IosRoute(SubpageScreen.DORM_REPAIR)) },
                                             onOpenCalendar = { pushRoute(IosRoute(SubpageScreen.CAMPUS_CALENDAR)) },
+                                            // 教务汇总页顶栏「在教务网页核对」（2026-11-29）：
+                                            // 与各业务页同一个内置浏览器窗口（能切电脑版 / 手机版）。
+                                            onOpenWebPage = { _, url ->
+                                                openJwBrowser(url, IosJwTask.Browse)
+                                            },
                                         )
                                         // 评教整页盖在 hub 之上（同一容器内的兄弟节点，全屏不透明）。
-                                        // 两个平台槽位都传 null：
-                                        // - `casFillScript`：iOS 的教务登录在 WKWebView 里由用户自己完成，
-                                        //   没有「注入脚本自动填表」这条通道（`IosJwReadSession` 只管取数）；
-                                        // - `onJwSessionReady`：那是给人看的「登录已就绪」钩子，iOS 没有对应的
-                                        //   toast 位；评教本身不依赖它就能跑（会话在 `JwReadSession` 里）。
+                                        // `casFillScript`（2026-11-29）：iOS 有一份 Keychain 里的教务凭证
+                                        // （首启引导 / 教务账号页写进去的），拿它拼自动填表脚本与 Android
+                                        // 同一条；没有凭证时传 null，页面退回让用户自己登录。
+                                        // `onJwSessionReady`：给人看的「登录已就绪」钩子，iOS 没有对应 toast 位，
+                                        // 评教本身不依赖它（会话在 `JwReadSession` 里）。
                                         if (evalOpen) {
-                                            TeachingEvalScreen(onBack = { evalOpen = false })
+                                            val evalFillScript = remember {
+                                                services.accountCredentials()?.readCas()?.let { cas ->
+                                                    { JwAutoLogin.fillJs(cas.username, cas.password) }
+                                                }
+                                            }
+                                            TeachingEvalScreen(
+                                                onBack = { evalOpen = false },
+                                                casFillScript = evalFillScript,
+                                            )
                                         }
                                         }
                                     }
@@ -905,6 +940,8 @@ private fun IosOverlayStack(
     recharge: RechargeRequests? = null,
     /** 趣智页的 ViewModel 持有者：与主分支共用一份，见 `IosQzxyPage` 的 KDoc。 */
     qzxyPage: IosQzxyPage? = null,
+    /** 教务网页窗口：覆盖层里的考试页也要能开（与主分支同一个入口）。 */
+    onOpenJwBrowser: ((String?, IosJwTask) -> Unit)? = null,
     root: @Composable () -> Unit,
 ) {
     val shape = stack.size to stack.lastOrNull()
@@ -943,6 +980,8 @@ private fun IosOverlayStack(
                 recharge = recharge,
                 // 覆盖层与主分支共用的同一份趣智 VM 持有者（见 `IosQzxyPage`）。
                 qzxyPage = qzxyPage,
+                // 教务网页窗口：覆盖层里的考试页同样要能开
+                onOpenJwBrowser = onOpenJwBrowser,
             )
         } else {
             root()
@@ -1159,248 +1198,6 @@ private fun IosDisplaySettingsOverlay(
     }
 }
 
-/**
- * 教务导入页（M2，2026-11-25；2026-11-25 晚修：入口与重试，见下）。
- *
- * ## 流程
- *
- * 1. `WKWebView` 从**预热入口** [JwUrls.SSO_WARMUP] 起跳（不是 CAS 直链 [JwUrls.ENTRY]），
- *    用户自己填账号密码 —— iOS 没有凭证保险箱（`EncryptedSharedPreferences` 是 Android 专有），
- *    **不做自动填表**，也不存密码。
- * 2. 页面落在**学生端**（[isStudentSide]）就说明 CAS 回跳完成、Cookie 已经进
- *    `WKWebsiteDataStore`：这时跑一次 `ScheduleTermImport.archive(manual = true)`，
- *    它用 `IosJwReadSession` 读 Cookie 发 HTTP，走的是**与 Android 同一条共享抓取链**。
- * 3. 结果写成顶栏一行字；返回课表页即可看到，课表是 Room 的流，不需要手动刷新。
- *
- * ## 为什么从 SSO_WARMUP 起、而不是 CAS 直链（2026-11-25 用户报障的根因）
- *
- * 用户报「登录后要么 403 要么白屏，还没办法刷新」。上一版开的是 `ENTRY`（CAS 直链），
- * 于是第一次 `sso.jsp?ticket=` 校验时教务域**一个 cookie 都没有**——票据校验依赖预热写下的
- * `bzb_njw`，缺了就 500 / 403 或一张空页。这条根因在 [JwUrls.SSO_WARMUP] 的 KDoc 里写了半年，
- * Android 的 `JwImportScreen` 一直是按它起的（`startUrl`），只有 iOS 这一版漏了。
- *
- * 同一次报障还暴露两件事，一起补：
- *
- * - **没有刷新按钮**：Android 顶栏有，iOS 只有「返回课表」。403 那一屏本来刷一下就过去了，
- *   没按钮等于死路。现在顶栏有「刷新」（`WebViewController.reload()`）。
- * - **落地判据太宽**：上一版用 `JwUrls.isJwHost(url)` 触发导入，而 `sso.jsp` 本身就在教务域
- *   → 预热页一加载就开抓，必然「没有可用的教务会话」。现在只认学生端（端口 8080）。
- *
- * ## 自动重试
- *
- * 空白页 / 主文档加载失败 → 自动重走一次 [JwImportDiagnosis.retryUrl]（认证链上的失败回
- * `SSO_WARMUP`，因为 CAS ticket 是一次性票据，重放必然失败）。只重试 [MAX_AUTO_RETRY] 次，
- * 之后把话说明白交给用户点「刷新」——真故障时不能打转。
- *
- * ## 为什么只抓一次
- *
- * `archive` 自己会遍历教务下拉里的全部学期，重复触发只是白撞教务（强智是单会话，
- * 撞多了会被顶掉）。所以用 `importing` 闸门；失败后闸门放开，下一次页面加载会自然重试。
- *
- * ## 这一版还没有的
- *
- * 没有成绩 / 考试 / 教材 / 选课的单页导入——那些在 Android 侧是 `JwImportScreen` 里
- * 的多个入口，要逐页搬。当前只打通「课表导入」这一条主链路。
- */
-@Composable
-private fun JwLoginScreen(services: IosServices, onClose: () -> Unit) {
-    val controller = remember { WebViewController() }
-    val scope = rememberCoroutineScope()
-    val startUrl = JwUrls.SSO_WARMUP
-    var currentUrl by remember { mutableStateOf<String?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var status by remember { mutableStateOf<String?>(null) }
-    var importing by remember { mutableStateOf(false) }
-    /** 已自动重试次数。非空白页落地就清零，所以「走两步又白屏」还能再救一次。 */
-    var retries by remember { mutableStateOf(0) }
-
-    // 回调挂在**控制器**上：控制器比组合活得久（视图销毁后仍在），装一次即可。
-    // 内层读的 `importing` / `status` / `retries` 是 remember 的 State 委托，读到的是当前值。
-    remember(controller) {
-        // 重试或把话说明白：两条路都要给用户一个能动手的下一步
-        fun retryOrReport(reason: String) {
-            if (retries < MAX_AUTO_RETRY) {
-                retries += 1
-                error = null
-                status = "$reason，正在重试（第 $retries 次）…"
-                controller.loadUrl(JwImportDiagnosis.retryUrl(currentUrl) ?: startUrl)
-            } else {
-                status = null
-                error = "$reason。点右上角「刷新」重试"
-            }
-        }
-
-        controller.onPageFinished = { url ->
-            currentUrl = url
-            error = null
-            // 页面适配（与 Android 同一份脚本）：课表页横向可滚、登录页表单收窄。
-            // 拿不到脚本（about:blank 之类）就什么都不注入。
-            JwWebFit.fitScript(url, desktop = true)?.let { script ->
-                controller.evaluateJavascript(script)
-            }
-            if (!importing && isStudentSide(url)) {
-                importing = true
-                // 刚落到学生端 = 教务会话此刻确实可用：立刻记下，账号中心/教务账号页据此显示已登录
-                IosJwSessionFlag.markUsable()
-                status = "已登录，正在从教务导入课表…"
-                scope.launch {
-                    // 归档会遍历教务下拉里的全部学期（每个学期两张页 + 请求间隔），几十秒起步。
-                    // 顶栏跟着报进度：用户才知道「它在干活、别关页面」——WebView 一关，
-                    // 同源取页的桥就没了（见 IosWebFetch）。
-                    val result = services.scheduleTermImport().archive(manual = true) { done, total, term ->
-                        status = "正在导入 $term（$done/$total）…"
-                    }
-                    // 读库只为把数字说清楚；读失败不能把「导入」本身判死，也不能让 importing
-                    // 永远挂在 true（那会把闸门焊死，之后再也不自动重试）
-                    status = runCatching { describeImport(result, services) }
-                        .getOrElse { "导入结束（结果读取失败：${it.message ?: "未知"}）" }
-                    importing = false
-                }
-            } else {
-                // 空白页判据：主文档加载完但正文一个字都没有（403 / 500 的空响应就是这样）
-                controller.evaluateJavascript(BLANK_PROBE_JS) { result ->
-                    if (result == "0") {
-                        retryOrReport("页面是空白的")
-                    } else if (result != null) {
-                        retries = 0
-                    }
-                }
-            }
-        }
-        controller.onError = { message -> retryOrReport("加载失败：$message") }
-        controller
-    }
-
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onClose) { Text("返回课表") }
-            Text(
-                // 有状态就说状态：导入中 / 导入结果比 URL 有用得多
-                text = error ?: status ?: currentUrl ?: startUrl,
-                // 4 行：导入结果要能同时容下「库里几门 / 开学日 / 第几周 / 示例一门课」
-                fontSize = 10.sp,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
-                color = when {
-                    error != null -> MaterialTheme.colorScheme.error
-                    status != null -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 8.dp),
-            )
-            // 403 / 白屏的手动出口：Android 顶栏一直有这一只，iOS 上一版漏了
-            TextButton(onClick = { controller.reload() }) { Text("刷新") }
-        }
-        Box(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.background),
-        ) {
-            WebContentView(
-                controller = controller,
-                url = startUrl,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-    }
-}
-
-/** 自动重试上限：两次之后交给用户点「刷新」，真故障时不能打转。 */
-private const val MAX_AUTO_RETRY = 2
-
-/**
- * 把归档结果说成一句人话（2026-11-25 晚补）。
- *
- * ## 为什么必须写清数字
- *
- * 上一版只判 `is Result.Failed`，于是 `Archived(createdTerms = [], failed = [...])`——
- * 一个学期都没导入成功——也显示「导入完成，返回课表即可看到」。用户看到的就是
- * 「说成功了但课表是空的」，比报错更糟。
- *
- * 现在三种结局分开说，并且**把库里真实条数、开学日、当前周次、第一门课的例子一起打出来**：
- * 这张屏是唯一能同时看到「教务那边有什么」和「库里落了什么」的地方，用户截一张图就能定位
- * 是没导进来、还是周次/星期对不上、还是今天本来没课。
- */
-private suspend fun describeImport(
-    result: ScheduleTermImport.Result,
-    services: IosServices,
-): String = when (result) {
-    is ScheduleTermImport.Result.Failed -> "导入失败：${result.reason}"
-
-    ScheduleTermImport.Result.InProgress -> "上一次导入还在进行，等它跑完再看"
-
-    is ScheduleTermImport.Result.Archived -> {
-        if (result.createdTerms.isEmpty() && result.failed.isNotEmpty()) {
-            // 一个学期都没落地：把教务给的第一条原因说出来，再带上「教务当前学期」与跳过数
-            // ——这两项能区分「学期下拉没解析出来」和「页面结构变了」
-            "导入失败：${result.failed.first().second}" +
-                "（教务当前学期 ${result.currentTerm ?: "未识别"} · 跳过 ${result.skipped}）"
-        } else {
-            val repo = services.scheduleRepository()
-            val courses = repo.courses.first()
-            val semester = repo.semester.first()
-            val week = ScheduleCalculator.todayWeekOf(semester, AppClock.today()) ?: 0
-            val sample = courses.firstOrNull()?.let { c ->
-                "${c.name.take(10)} ${weekdayLabel(c.day)} ${c.startSection}-${c.endSection}节 " +
-                    ScheduleCalculator.formatWeeks(c.weeks)
-            }
-            buildString {
-                if (result.createdTerms.isEmpty()) {
-                    // 全部跳过（每个学期库里都已有）：这不是失败，但「本次什么都没新建」必须说出来，
-                    // 否则用户以为刚导了一遍
-                    append("导入完成：${result.skipped} 个学期库里已有，本次没有新建")
-                } else {
-                    append("导入完成：库里 ${courses.size} 门")
-                    append(" · 新建 ${result.createdTerms.joinToString("、")}")
-                }
-                append(" · 开学 ${semester?.startDate ?: "—"} · 现第 $week 周")
-                append(" · 教务 ${result.currentTerm ?: "未识别"}")
-                if (result.failed.isNotEmpty()) append(" · ${result.failed.size} 个学期失败")
-                if (sample != null) append("\n示例：$sample")
-            }
-        }
-    }
-}
-
-/** 1..7 → 周一..周日（只用于上面那句示例，越界回「—」）。 */
-private fun weekdayLabel(day: Int): String =
-    listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日").getOrNull(day - 1) ?: "—"
-
-/**
- * 空白页探针：返回正文字符数（去掉空白），`"0"` = 空白页。
- *
- * 用 `String(...)` 包一层是因为 iOS 的 `evaluateJavaScript` 把 JS 数字桥成 `NSNumber`，
- * 而 `WebViewController.Impl` 只 `as? String`——不转成字符串就永远拿不到值。
- */
-private const val BLANK_PROBE_JS = """
-(function(){
-  try{
-    var t = (document.body && document.body.innerText) ? document.body.innerText : '';
-    return String(t.replace(/\s/g, '').length);
-  }catch(e){ return 'err'; }
-})()
-"""
-
-/**
- * 是否已经落在**学生端**（CAS 回跳成功之后的页面）。
- *
- * 只认端口 8080 那一套部署（[JwUrls.XSD_BASE]），外加两个只有登录后才出现的学生端路径。
- * **不能用 `JwUrls.isJwHost`**：`sso.jsp` 本身就在教务域，预热页一加载就会被当成「已登录」。
- */
-private fun isStudentSide(url: String?): Boolean {
-    val u = url.orEmpty()
-    if (!JwUrls.isJwHost(u)) return false
-    return ":8080" in u || "xsMain" in u || "xskb" in u
-}
 
 // ---------------------------------------------------------------- iOS 转场口径（2026-11-26 晚）
 

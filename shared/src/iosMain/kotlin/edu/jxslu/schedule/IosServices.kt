@@ -848,6 +848,12 @@ class IosServices : AppServices {
         // 失败（没登录 / 没网）不该拖住上面两件事。
         runCatching { scoreReminderImpl.checkOnLaunch() }
             .onFailure { Logger.w(TAG, "成绩提醒核对失败：$it") }
+        // 考试变动同步（2026-11-29）：Android 靠 WorkManager 周期检查，iOS 没有后台周期任务，
+        // 所以每次进 App 用 `eager` 补算一次——`ExamSync` 自己按「间隔 + 上次检查时刻」判断该不该跑，
+        // 提醒与自动合并都关着时直接 Skipped。检测到变动且「考试变动自动合并」开着时，
+        // 这一趟就把新考试写进当前课表（这就是用户报的「考试安排同步不到课表」的补法）。
+        runCatching { examSyncImpl.sync(eager = true) }
+            .onFailure { Logger.w(TAG, "考试变动同步失败：$it") }
         // 课表变化后自动重排上课提醒（2026-11-26 补，§12.14 记的那条唯一功能缺口的收口）。
         //
         // 没有这一条时：改完课、换课表、加停课/调休之后，`class.` 那批仍按旧课表排着，

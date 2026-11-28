@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.kqcx.KqcxBikeClient
 import edu.jxslu.schedule.data.kqcx.KqcxOrderStore
 import edu.jxslu.schedule.data.repo.RideRecordStore
@@ -127,6 +128,7 @@ import edu.jxslu.schedule.ui.jw.JwScheduleListScreen
 import edu.jxslu.schedule.ui.jw.StudentInfoScreen
 import edu.jxslu.schedule.ui.jw.TeachingCalendarScreen
 import edu.jxslu.schedule.ui.jw.TextbookScreen
+import edu.jxslu.schedule.ui.jwvw.IosJwTask
 import edu.jxslu.schedule.ui.life.PowerBillScreen
 import edu.jxslu.schedule.ui.life.PowerBillViewModel
 import edu.jxslu.schedule.ui.life.PowerRoomPickerViewModel
@@ -352,6 +354,12 @@ internal fun IosRouteContent(
      * 代价是诊断页读不到主页面的设备现场。
      */
     qzxyPage: IosQzxyPage? = null,
+    /**
+     * 打开教务网页窗口（2026-11-29）：考试页的「在教务网页核对」与考试设置的「导入」都走它。
+     *
+     * null = 宿主没给这个入口（不会发生，主分支与覆盖层都传了同一份），对应按钮不渲染。
+     */
+    onOpenJwBrowser: ((String?, IosJwTask) -> Unit)? = null,
 ) {
     when (route.screen) {
         // ---------------------------------------------------------------- 学习
@@ -426,30 +434,70 @@ internal fun IosRouteContent(
             onHomeworkChanged = { services.homeworkReminder().reschedule() },
         )
 
+        // 理论 / 实验课表列表：顶栏「在教务网页查看」与「去导入」2026-11-29 起接上内置浏览器
+        // （Android 一直是 `JwImportActivity`，iOS 此前两个入口都不渲染）。
         SubpageScreen.THEORY_SCHEDULE -> JwScheduleListScreen(
             kind = CourseKind.Theory,
             onBack = pop,
+            onOpenWebPage = onOpenJwBrowser?.let { open ->
+                { _, url -> open(url, IosJwTask.Browse) }
+            },
+            onOpenJwImport = onOpenJwBrowser?.let { open ->
+                { open(null, IosJwTask.ImportSchedule) }
+            },
         )
 
         SubpageScreen.LAB_SCHEDULE -> JwScheduleListScreen(
             kind = CourseKind.Lab,
             onBack = pop,
+            onOpenWebPage = onOpenJwBrowser?.let { open ->
+                { _, url -> open(url, IosJwTask.Browse) }
+            },
+            onOpenJwImport = onOpenJwBrowser?.let { open ->
+                { open(null, IosJwTask.ImportSchedule) }
+            },
         )
 
         // 教材：抓取链由 `IosServices.textbookSync()` 给（与 Android 同一份 `TextbookSync`，
         // 会话是 `IosJwReadSession`），所以这一页在 iOS 上真的能抓到数据：进页空态自动补抓一次，
         // 顶栏「重新导入」是无闸门的强抓。上一版这里传 `syncAvailable = false`、空态说
         // 「本平台还没有教材抓取」，是 2026-11-25 审计的 P0（用户会照着反复导入课表）。
-        SubpageScreen.TEXTBOOKS -> TextbookScreen(onBack = pop)
+        SubpageScreen.TEXTBOOKS -> TextbookScreen(
+            onBack = pop,
+            // 「在教务网页确认教材」与「去导入」2026-11-29 接上内置浏览器
+            onOpenWebPage = onOpenJwBrowser?.let { open ->
+                { _, url -> open(url, IosJwTask.Browse) }
+            },
+            onOpenJwImport = onOpenJwBrowser?.let { open ->
+                { open(null, IosJwTask.ImportSchedule) }
+            },
+        )
 
-        SubpageScreen.TEACHING_CALENDAR -> TeachingCalendarScreen(onBack = pop)
+        SubpageScreen.TEACHING_CALENDAR -> TeachingCalendarScreen(
+            onBack = pop,
+            onOpenWebPage = onOpenJwBrowser?.let { open ->
+                { _, url -> open(url, IosJwTask.Browse) }
+            },
+            onOpenJwImport = onOpenJwBrowser?.let { open ->
+                { open(null, IosJwTask.ImportSchedule) }
+            },
+        )
 
-        // 学业完成情况 / 培养方案（V4 搬进共享层）：顶栏「在教务网页核对」是唯一平台动作，
-        // iOS 没有内置浏览窗口 → 不传（默认 null），那只图标整行不渲染。
-        // 两页的「重新导入」是真的能用：抓取链路走 `JwReadSession`，iOS 是 `IosJwReadSession`。
-        SubpageScreen.SCHOLAR -> ScholarScreen(onBack = pop)
+        // 学业完成情况 / 培养方案：顶栏「在教务网页核对」2026-11-29 接上内置浏览器。
+        // 两页的「重新导入」本来就真的能用：抓取链路走 `JwReadSession`，iOS 是 `IosJwReadSession`。
+        SubpageScreen.SCHOLAR -> ScholarScreen(
+            onBack = pop,
+            onOpenWebPage = onOpenJwBrowser?.let { open ->
+                { _, url -> open(url, IosJwTask.Browse) }
+            },
+        )
 
-        SubpageScreen.CURRICULUM -> CurriculumScreen(onBack = pop)
+        SubpageScreen.CURRICULUM -> CurriculumScreen(
+            onBack = pop,
+            onOpenWebPage = onOpenJwBrowser?.let { open ->
+                { _, url -> open(url, IosJwTask.Browse) }
+            },
+        )
 
         // ---------------------------------------------------------------- 教务
         SubpageScreen.SCORES -> ScoreScreen(
@@ -464,21 +512,47 @@ internal fun IosRouteContent(
 
         SubpageScreen.SCORE_SETTINGS -> ScoreSettingsScreen(onBack = pop)
 
+        // 考试页（S10 搬进共享层）：列表来自 ExamSync 的快照，「更新」当场打教务并按
+        // 「考试变动自动合并」写课表。**2026-11-29 起两个入口都接上**：
+        // - 「在教务网页核对」→ 教务网页窗口开在考试查询页；
+        // - 考试设置里的「导入考试安排到课表」→ 同一个窗口，登录后直接跑一次 ExamSync。
         SubpageScreen.EXAMS -> ExamScreen(
             onBack = pop,
+            onOpenJwPage = onOpenJwBrowser?.let { open ->
+                { open(JwUrls.EXAM_QUERY, IosJwTask.SyncExams) }
+            },
             onOpenSettings = { push(IosRoute(SubpageScreen.EXAM_SETTINGS)) },
         )
 
-        SubpageScreen.EXAM_SETTINGS -> ExamSettingsScreen(onBack = pop)
+        SubpageScreen.EXAM_SETTINGS -> ExamSettingsScreen(
+            onBack = pop,
+            onOpenImport = onOpenJwBrowser?.let { open ->
+                { open(JwUrls.EXAM_QUERY, IosJwTask.SyncExams) }
+            },
+        )
 
         SubpageScreen.SELECTIONS -> SelectionScreen(
             onBack = pop,
-            onOpenCenter = { roundId ->
-                // 选课中心带轮次参数：iOS 侧路由只带字符串参数，轮次 id 落在 arg 里
-                push(IosRoute(SubpageScreen.SELECTION_CENTER, roundId))
+            // 选课中心（2026-11-29）：iOS 还没有 `SelectionCenterClient`（Native 选课面要 write 会话，
+            // 排在下一轮），所以主按钮直接开**内置教务网页**的选课页——用户在那里能真正选 / 退课，
+            // 比进一个「本平台不可用」的空页诚实。Android 仍走原生筛选面。
+            onOpenCenter = { _ ->
+                val open = onOpenJwBrowser
+                if (open != null) {
+                    open(JwUrls.SELECTION_CENTER, IosJwTask.Browse)
+                } else {
+                    push(IosRoute(SubpageScreen.SELECTION_CENTER))
+                }
             },
             onOpenRecords = { push(IosRoute(SubpageScreen.SELECTION_RECORDS)) },
             onOpenWishes = { push(IosRoute(SubpageScreen.SELECTION_WISHES)) },
+            // 顶栏「在教务网页核对」与备用入口行：内置浏览器
+            onOpenJwWeb = onOpenJwBrowser?.let { open ->
+                { open(JwUrls.SELECTION_CENTER, IosJwTask.Browse) }
+            },
+            onOpenJwPage = onOpenJwBrowser?.let { open ->
+                { open(JwUrls.SELECTION_CENTER, IosJwTask.Browse) }
+            },
         )
 
         SubpageScreen.SELECTION_CENTER -> SelectionCenterScreen(
@@ -496,7 +570,13 @@ internal fun IosRouteContent(
             client = null,
         )
 
-        SubpageScreen.STUDENT_INFO -> StudentInfoScreen(onBack = pop)
+        SubpageScreen.STUDENT_INFO -> StudentInfoScreen(
+            onBack = pop,
+            // 「在教务网页查看学籍」2026-11-29 接上内置浏览器
+            onOpenWebPage = onOpenJwBrowser?.let { open ->
+                { _, url -> open(url, IosJwTask.Browse) }
+            },
+        )
 
         // ---------------------------------------------------------------- 盖章成绩单
         //
@@ -1044,7 +1124,12 @@ internal fun IosRouteContent(
 
         SubpageScreen.CAMPUS_CALENDAR -> CampusCalendarScreen(onBack = pop)
 
-        SubpageScreen.INTERNSHIP_BASES -> InternshipBasesScreen(onBack = pop)
+        SubpageScreen.INTERNSHIP_BASES -> InternshipBasesScreen(
+            onBack = pop,
+            onOpenWebPage = onOpenJwBrowser?.let { open ->
+                { _, url -> open(url, IosJwTask.Browse) }
+            },
+        )
 
         // ---------------------------------------------------------------- 江水生活 · 开水房
         //
