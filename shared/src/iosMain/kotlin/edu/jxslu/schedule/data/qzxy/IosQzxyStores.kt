@@ -173,7 +173,9 @@ internal class IosQzxyWateringRegistry : QzxyWateringRegistry {
         prefs.putString(KEY_STARTED_AT, watering.startedAtMillis.toString())
         prefs.putString(KEY_ADDRESS, watering.deviceAddress)
         prefs.putString(KEY_NAME, watering.deviceName)
-        prefs.putString(KEY_PRE_DEDUCT, watering.preDeductMilli)
+        // 预扣金额可空：`putString` 只收非空，空值就删键（读回来同样是 null）
+        val preDeduct = watering.preDeductMilli
+        if (preDeduct == null) prefs.remove(KEY_PRE_DEDUCT) else prefs.putString(KEY_PRE_DEDUCT, preDeduct)
         _watering.value = watering
     }
 

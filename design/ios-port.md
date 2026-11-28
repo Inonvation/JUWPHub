@@ -1009,20 +1009,21 @@ iOS 走 `UIApplication.openURL` + scheme 白名单检查。一卡通、胖乖、
 共享层只多了「可选参数默认 = 现有行为」的三处（`CampusCardViewModel.recharge(preferCashierPage = false)`、
 `CampusCardSettingsScreen(preferCashierPage = false)`、`PowerBillScreen(onRecharge = null)`）。
 
-**一卡通为什么必须换 URL**：直拉那条（`weixin://wap/pay`）在 iOS 上会被微信拒，所以
-`CampusCardViewModel.recharge(preferCashierPage = true)` 改用同一笔单的收银台地址
-（`YktRechargeOrder.WechatPay.cashierUrl`，2026-11-26 新增字段）。选哪条 URL 的唯一实现是
-`YktRechargeOrder.paymentUrl(preferCashierPage)`，`YktRechargePaymentUrlTest` 钉住
-「iOS 那条上不出现 `weixin://`」。
+**一卡通的支付顺序（2026-11-28 改）**：上一版这里是「iOS 必须走收银台页，直拉会被微信拒」——
+那是推测。`docs/ios-paycode-shortcut/` 的 Scriptable 版实测证明 `weixin://wap/pay?prepayid=…`
+在 iOS 上能拉起微信付款页，所以现在改成**先直拉、打不开退收银台**：
+`YktRechargeOrder.paymentAttempts(preferCashierPage)` 给出候选顺序（iOS = 微信深链 → 收银台页，
+Android = 只微信深链），`List.firstOpened` 按序尝试、第一条被系统接住即收手。
+`YktRechargePaymentUrlTest` 钉住两边各自的序列与兜底。
 
 **四类充值在 iOS 上各停在哪**（`—` 表示缺口在别处，不在充值本身）：
 
 | 充值 | iOS 能到哪一步 | 还差什么 |
 |---|---|---|
-| 一卡通 | 下单 → 收银台页（`WKWebView`）→ 页面自己跳微信 → 回 App 后 `CampusCardViewModel` 按余额 + 流水双口径判到账 | 壳层三行接线（见下），以及「从微信返回」没有前台回调（收页那一下会补检，微信在收银台页里跳出去再回来则要等下一轮 5 秒轮询，轮询本来就在跑） |
+| 一卡通 | 下单 → **先直拉微信**（`weixin://wap/pay`）→ 打不开才退收银台页（`WKWebView`）→ 回 App 后 `CampusCardViewModel` 按余额 + 流水双口径判到账 | 微信内部若报「商家参数格式有误」，`openURL` 仍返回 true、App 感知不到（实测这条推测目前不成立）；真出现时删掉 `paymentAttempts` 里 iOS 的第一个候选即可，其它不用动 |
 | 寝室电费 | 下单 → 聚合收银台页 → 页面里选校园卡 / 电子帐户付款 → 回商户域收页 → 查单；到账靠 `PowerReadingStore` 复读 | **「农行缴电费专用」这一档可能卡在加载中**：收银台在 `respCode=6230` 时调 `window.AndroidFunc.SynObject(jsonStr)`，iOS 侧没有这座桥（本轮明确不做 JS 桥）。校园卡 / 电子帐户两档不经它。兜底是顶栏「用浏览器打开」 |
 | 胖乖生活 | `alipays://` 深链交给支付宝（`iosQiekjRecharge`） | 水页那行接线；从支付宝返回没有前台回调 → 余额要下拉刷新 |
-| 趣智校园 | 深链已在共享层（`QzxyRecharge.deepLink()`），`iosOpenExternalUrl` 也现成 | **页面本身在 iOS 上进不去**（开阀走 CoreBluetooth，传输层未写，§12.1）。等页面能路由时接 `QzxyScreen(onOpenRecharge = …)` |
+| 趣智校园 | **全链路已通（2026-11-28）**：登录 / 余额 / 账单 / 充值深链，加上蓝牙开阀、停阀、结算（CoreBluetooth 传输层，见 §12.1） | 真水控设备上的实测：iOS 拿不到 MAC，查设备改用广播名里的 12 位编号（`qzxyDeviceLookupKeys`），服务端认不认这个键只能现场验 |
 
 **还差的三处接线都在壳层文件里**（另一条流独占，本轮不动）：
 
@@ -1200,12 +1201,26 @@ iOS 侧目前没有二级页栈，二级页先用 `hint` 给一句确定的话�
 | 功能 | 代码量 | 为什么做不到 | 要补什么 |
 |---|---|---|---|
 | 共享单车地图（`ui/ebike`） | 30 文件 / 17,879 行 | 底图是**高德 Android SDK**（`com.amap.api:3dmap`，含 32MB `.so`）。iOS 是另一套 SDK（`AMap3DMap`，CocoaPods/SPM），API 形状完全不同，且要单独申请 iOS key（绑 `edu.jxslu.schedule.ios`） | 接 iOS 高德 SDK + 重写 17,879 行里的地图宿主、覆盖物、路径动画；账号/订单/卡券那部分（HTTP）可以先搬 |
-| 趣智校园蓝牙开阀 | `QzxyGattLink` 643 行 + 状态机（已在共享层；iOS 侧只有失败桩，且缺 5 个平台件，所以整页不路由） | `android.bluetooth` 的 GATT API 与 CoreBluetooth 是两套模型：前者回调在主线程、后者要自己建 `CBCentralManager` 串行队列 | 用 CoreBluetooth 重写传输层，**必须有真水控设备**才能验证；协议帧已在共享层，可复用 |
 | 桌面小组件 | `ui/widget` 12 文件 / 3,112 行 | Glance 是 Android 的 Compose-for-appwidget；iOS 对应物 WidgetKit + SwiftUI，是另一套渲染与数据共享模型（要 App Group + Timeline Provider） | 用 SwiftUI 重写，数据通过 App Group 共享（共享层已有 JSON 落盘，可复用） |
 | 快捷设置磁贴 | `ui/widget` 内 | Android 的 `TileService`；iOS 控制中心不支持第三方磁贴 | 无替代。iOS 侧只保留 App 内入口 |
 | 免费骑行倒计时「灵动岛」 | `ui/reminder` 内 | 用的是 Android 16 的标准 Live Updates（`setRequestPromotedOngoing` + chronometer） | iOS 对应物是 Live Activity（ActivityKit），要写 SwiftUI 布局 + 推送更新；**能做，是另一份实现** |
 | 后台定时任务（`WorkManager`） | `ui/reminder` 6 处 | iOS 的 `BGTaskScheduler` 由系统决定何时跑，不保证周期；Android 的 WorkManager 有最小时延语义 | 改成「进前台时补跑 + BGAppRefreshTask 尽力而为」，**行为必然弱于 Android** |
 | 通知（洗好提醒 / 作业截止 / 成绩提醒 / 问渠提醒） | `ui/reminder` 15 文件 | `NotificationManager` + 渠道 + 前台服务 | 用 `UNUserNotificationCenter` 重写，权限模型不同（iOS 要显式请求）。**洗衣完成（N1）、作业截止与成绩（N2）已接**，共用 `platform/IosLocalNotifications`（见 §12.9）；上课提醒 / 问渠提醒 / 免费骑行缺的是**触发时机**（后台周期抓取 / 到点执行代码），不是通知本身 |
+
+**2026-11-28 从本表移出一项：趣智校园蓝牙开阀**。传输层用 CoreBluetooth 重写完了
+（`shared/iosMain/.../data/qzxy/IosQzxyBle.kt`：`CBCentralManager` 串行队列 + `CBPeripheral`
+服务发现 / 通知 / 写回执 + 按单包上限分包；扫描、四份本机存储、诊断读数同批补齐），
+`QzxyViewModel.fromServices()` 不再回 null，路由接在 `SubpageScreen.QZXY`。
+协议帧、状态机、Ktor 仓库本来就在共享层，一行没改。
+
+两处与 Android 的**结构性差异**（不是欠账，别再当 bug 报）：
+
+| 差异 | 原因 | 现在的做法 |
+|---|---|---|
+| 拿不到蓝牙 MAC | Apple 不公开 `CBPeripheral` 的地址，只有系统生成的 `identifier`（UUID） | 设备地址用 UUID；查服务端设备时改用广播名里的 12 位编号（`qzxyDeviceLookupKeys`，Android 仍是 MAC 优先）。服务端认不认这个键要真水控设备实测 |
+| 没有 ATT MTU 协商 | iOS 只提供「单次最多写多少字节」 | 分包按该上限切；诊断页的「MTU」是上限 + 3 的估算值 |
+
+仍未验：真水控设备上的开阀 / 停阀 / 结算全流程（本机是 Windows，编不了 Kotlin/Native）。
 
 ### 12.2 今晚没做完（能搬，时间不够）
 

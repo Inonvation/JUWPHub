@@ -78,6 +78,7 @@ import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.drawerCardTransform
 import edu.jxslu.schedule.ui.common.iosGuessBrandPainter
 import edu.jxslu.schedule.ui.common.iosServiceBrands
+import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.common.rememberDrawerCardTransform
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jw.JwHubScreen
@@ -220,6 +221,14 @@ private fun IosRoot(services: IosServices) {
             val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
             val shellScope = rememberCoroutineScope()
             val openDrawer: () -> Unit = { shellScope.launch { drawerState.open() } }
+            // 侧栏展开的触感（2026-11-28，用户点名的体验项）：iOS 的系统抽屉在展开/收起时
+            // 没有固定触感，但第三方 App 普遍给一下轻击；这里只在**展开**时给，收起跟随手指、
+            // 再补一下反而吵。开关仍归「设置 → 触感」（`HapticsSettings` 关掉时 `tap()` 自己返回）。
+            // 手势拖动与程序打开都会让 `isOpen` 翻转，所以挂在这里而不是 `openDrawer` 里。
+            val shellHaptics = rememberAppHaptics()
+            LaunchedEffect(drawerState.isOpen) {
+                if (drawerState.isOpen) shellHaptics.tap()
+            }
             // 主卡的缩放 / 圆角 / 阴影（2026-11-25 晚）：与 Android 的层叠抽屉**同一份算式与同一组
             // 数值**，都在 `ui/common/DrawerCardTransform.kt`。位移上限就是侧栏宽度——侧栏开到底时
             // 主卡左缘正好落在侧栏右缘（Android 那条不变量，见该文件的类 KDoc）。

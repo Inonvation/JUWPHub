@@ -22,7 +22,9 @@ import kotlinx.coroutines.flow.StateFlow
  * **介质一律沿用 `SharedPreferences`**：这四份里装着老用户已绑定的设备、未结算的用水记账
  * 与试出来的清除命令参数，换成 `appDataDir()` 下的 JSON 等于当场读不出来
  * （与 `QiekjOrderHistoryStore` 同一条口径，见 `design/ios-port.md` §10.5）。
- * 所以共享层只声明接口，实现留在 `:app` 包一层原类，iOS 侧返回 null。
+ * 所以共享层只声明接口，实现留在各端：Android 包一层原类，iOS 是
+ * `IosQzxyStores.kt`（`NSUserDefaults`，键名与 Android 逐字对齐；2026-11-28 补齐，
+ * 五个接口在 iOS 上都不再是 null）。
  *
  * ## 为什么数据类换了名字
  *
@@ -34,9 +36,10 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * ## null 的语义（照 `design/ios-port.md` §11.2 ④）
  *
- * 五个接口都可由装配根给 null：**null = 本平台没有这项能力**，不是「以后补」的占位。
+ * 五个接口在装配根上都可空：**null = 本平台没有这项能力**，不是「以后补」的占位。
  * 页面在 null 时的行为逐条写在各自的 KDoc 里，统一口径是「入口不渲染 / 这一步跳过」，
- * 而不是留一个点了没反应的按钮。
+ * 而不是留一个点了没反应的按钮。（2026-11-28 起 Android 与 iOS 两端都给非空实现，
+ * 这条约定仍成立：将来的平台若少一块，照这个语义退，不要造假实现。）
  */
 
 // ── 设备 ──

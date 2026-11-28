@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.Dp
  * 共享层这条缝的形参是 `Int`，Android 那半边传的是 `R.drawable.ic_brand_*`。iOS 没有 `R`，
  * 所以宿主（`IosNavigation` / `MainViewController` / `IosDrawer`）要传的是
  * [IosBrandAssets] 里那组**合成句柄**（`IosBrandAssets.KQCX` 等，从 `0x1A01` 起），
- * 图在 `iosApp/JUWPHub/BrandAssets/*.png`。两边只是共用同一个形参类型，取值空间不相干。
+ * 图在 `iosApp/JUWPHub/BrandAssets` 目录里（png）。两边只是共用同一个形参类型，取值空间不相干。
  *
  * ## 认不出的 id 渲染为空
  *

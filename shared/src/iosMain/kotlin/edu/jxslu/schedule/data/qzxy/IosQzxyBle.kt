@@ -327,7 +327,8 @@ internal class IosQzxyCentral :
      * 用 UUID 就能取回来，不必重新扫一遍。
      */
     private fun retrievePeripheral(address: String): CBPeripheral? {
-        val uuid = NSUUID(UUIDString = address) ?: return null
+        // K/N 的构造参数名是 `uUIDString`（ObjC 的 `initWithUUIDString:`）：用位置参数避免拼错
+        val uuid = NSUUID(address)
         val found = central.retrievePeripheralsWithIdentifiers(listOf(uuid))
             .filterIsInstance<CBPeripheral>()
             .firstOrNull()
@@ -590,8 +591,20 @@ internal class IosQzxyCentral :
         markDisconnected()
     }
 
-    override fun peripheral(peripheral: CBPeripheral, didDiscoverServices: List<*>?) {
-        val services = didDiscoverServices?.filterIsInstance<CBService>().orEmpty()
+    /**
+     * 服务发现完成。**签名带的是 `NSError?` 而不是服务列表**（ObjC 选择器
+     * `peripheral:didDiscoverServices:` 就是这么声明的，CI 首轮报过这条），
+     * 服务表从 `peripheral.services` 读回来。
+     */
+    override fun peripheral(peripheral: CBPeripheral, didDiscoverServices: NSError?) {
+        if (didDiscoverServices != null) {
+            servicesWaiter?.completeExceptionally(
+                IllegalStateException("服务发现失败：${didDiscoverServices.localizedDescription}"),
+            )
+            servicesWaiter = null
+            return
+        }
+        val services = peripheral.services?.filterIsInstance<CBService>().orEmpty()
         if (services.isEmpty()) {
             servicesWaiter?.completeExceptionally(IllegalStateException("设备没有公开任何服务"))
             servicesWaiter = null

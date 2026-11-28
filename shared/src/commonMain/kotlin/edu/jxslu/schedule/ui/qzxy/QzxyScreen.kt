@@ -107,13 +107,13 @@ import kotlinx.coroutines.launch
  * `design/ios-port.md` §11.2 ④ 收成可空回调——**null = 本平台没有这项能力，
  * 对应入口整行不渲染**：
  *
- * | 参数 | Android | iOS |
+ * | 参数 | Android | iOS（2026-11-28 起） |
  * |---|---|---|
- * | [viewModel] | `viewModel { QzxyPlatform.viewModel(context) }` | 无（本平台挂不出，见 `QzxyViewModel.fromServices`） |
- * | [onRequestScan] | 权限检查 + `startScan` | 无 BLE，扫描入口不渲染 |
- * | [onOpenRecharge] | 支付宝小程序深链 | 没有 `alipays://` 白名单时不给入口 |
- * | [onOpenBills] | 二级页 `QZXY_BILLS` | 无二级页栈 |
- * | [brandIcon] | `R.drawable.ic_brand_qzxy` | null（共享层没有这套位图） |
+ * | [viewModel] | `viewModel { QzxyPlatform.viewModel(context) }` | 宿主 `IosQzxyPage` 建一份，三页共用 |
+ * | [onRequestScan] | 权限检查 + `startScan` | 直接放行（iOS 没有运行时蓝牙授权 API，第一次建 central 时系统自己弹） |
+ * | [onOpenRecharge] | 支付宝小程序深链 | 同一串 `alipays://`，`iosOpenExternalUrl` |
+ * | [onOpenBills] | 二级页 `QZXY_BILLS` | 同一个二级页栈 |
+ * | [brandIcon] | `R.drawable.ic_brand_qzxy` | `IosBrandAssets.QZXY`（图随包分发） |
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

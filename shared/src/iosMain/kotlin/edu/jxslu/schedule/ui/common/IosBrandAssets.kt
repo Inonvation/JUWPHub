@@ -13,7 +13,7 @@ import platform.Foundation.NSData
 import platform.Foundation.dataWithContentsOfFile
 
 /**
- * iOS 侧的品牌位图素材表（2026-11-27）：`iosApp/JUWPHub/BrandAssets/*.png` 的句柄、
+ * iOS 侧的品牌位图素材表（2026-11-27）：`iosApp/JUWPHub/BrandAssets` 下那批 png 的句柄、
  * 解码入口与解码缓存。
  *
  * ## 这张表里的 id 不是 Android 的 `R` 值

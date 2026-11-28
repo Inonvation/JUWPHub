@@ -21,9 +21,10 @@ package edu.jxslu.schedule.ui.qzxy
  *
  * ## 页面在 iOS 上的现状
  *
- * 入口已具备（`QzxyScreen(onOpenRecharge = { iosQzxyRecharge() })`），但**趣智页在 iOS 上
- * 还进不去**：开阀走 `CoreBluetooth`，传输层没写（`design/ios-port.md` §12.1）。所以这笔
- * 充值在 iOS 上停在「深链与页面槽位都就绪，页面本身不可达」。
+ * **2026-11-28 起这一页在 iOS 上进得去了**：蓝牙开阀那一层已用 CoreBluetooth 重写
+ * （`shared/iosMain/.../data/qzxy/IosQzxyBle.kt`），仓库、扫描、本机存储全部非空，
+ * 路由接在 `SubpageScreen.QZXY`，`onOpenRecharge = { iosOpenExternalUrl(deepLink()) }`。
+ * 仍未验的是真水控设备上的开阀 / 结算全流程。
  */
 object QzxyRecharge {
 
