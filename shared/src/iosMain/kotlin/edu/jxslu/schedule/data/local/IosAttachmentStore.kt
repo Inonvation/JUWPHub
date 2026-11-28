@@ -83,5 +83,8 @@ internal class IosAttachmentStore {
 
         /** JPEG 质量（与 Android `JPEG_QUALITY` 同值）。 */
         const val JPEG_QUALITY = 0.86
+
+        /** 单张字节上限：超了降质量重编（与课表背景图同一个 1.5MB 口径）。 */
+        const val MAX_BYTES = 1_500_000L
     }
 }
