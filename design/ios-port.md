@@ -1302,8 +1302,17 @@ iOS 全传 null：正文只能按纯文本排、编辑态没有底栏、插图�
 | 编辑底栏 | 附件条 + `MarkdownToolbar` + 选图（`rememberImagePicker`，最多 9 张） | 选图后按光标位置插引用，失败张数给一次性提示 |
 | 外链 | `onOpenLink` → `iosOpenExternalUrl` | 点正文链接交给系统浏览器 |
 
-**没做**：冷启动扫孤儿文件（`shortcut:` 写在 `IosAttachmentStore` 头注，触发条件是备份体积异常）；
-AI 会话的图片附件（`AiImageAttachments` / `AiImageUi` 仍是 null，AI 调课目前只能纯文本对话）。
+**没做**：冷启动扫孤儿文件（`shortcut:` 写在 `IosAttachmentStore` 头注，触发条件是备份体积异常）。
+
+### 12.21 AI 会话图片与成绩单 PDF 预览（2026-11-29）
+
+| 能力 | 实现 | 说明 |
+|---|---|---|
+| AI 会话图片 | `IosAiImageStore`（`appDataDir()/ai_img`，长边 1600 / 质量 0.8 / ≤400KB / 最多 4 张）+ `IosAiImageUi`（缩略图 / 看大图 / 相册选图） | 与 `:app` 的 `AiImageStore` 同口径；`AiScheduleClient` 的编码器在 `IosServices` 注入（路径 → `data:image/jpeg;base64,…`）。**粘图仍不给**（`UIPasteboard` 读图在 K/N 里没有先例） |
+| 笔记 / AI 共用压缩 | `IosImageCompress.jpegBytes`：`UIImage` 长边钳制 + JPEG 编码，超字节上限降质量重编 | 两处只有参数不同，别各写一份 |
+| 成绩单 PDF「打开」 | `IosPdfPreview`：`UIDocumentInteractionController`（UIKit，不另加框架） | 列表页与「最近导出」两处都接上；分享 / 另存早就有 |
+| 成绩单页自动填表 | `casAutoFillScript` 接 Keychain 凭证 | 与教务网页窗口同一份 `jwCredentials()` |
+| 今日页下拉刷新报修 | `IosServices.refreshDormRepair()`（`DormRepairSync(cas, store, inbox)`） | 此前下拉不拉报修，只能等进页 |
 
 ## 13. 装机后请点验什么（2026-11-25 精简版交接口径）
 

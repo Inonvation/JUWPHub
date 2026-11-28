@@ -37,6 +37,7 @@ import edu.jxslu.schedule.data.repo.CampusCalendarStore
 import edu.jxslu.schedule.data.repo.CurriculumRepository
 import edu.jxslu.schedule.data.repo.CurriculumSync
 import edu.jxslu.schedule.data.repo.DormRepairStore
+import edu.jxslu.schedule.data.repo.DormRepairSync
 import edu.jxslu.schedule.data.repo.ExamSnapshotStore
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.HomeworkRepository
@@ -761,6 +762,22 @@ class IosServices : AppServices {
     private val dormRepair: DormRepairStore by lazy { DormRepairStore() }
 
     override fun dormRepairStore(): DormRepairStore = dormRepair
+
+    /**
+     * 宿舍报修进度同步（2026-11-29）：与 Android 同一份 `DormRepairSync`，
+     * 会话是 `IosJwReadSession`、快照落 `appDataDir()`、有新进度会写收件箱。
+     *
+     * `webSession` 传 null：iOS 没有 office 域的可抄会话，直接走 CAS 分支
+     * （`DormRepairWebSource` 的 KDoc 里那条「null = 本平台没有现成的 office 会话」）。
+     */
+    private val dormRepairSyncImpl: DormRepairSync by lazy {
+        DormRepairSync(cas = session, store = dormRepair, inbox = inbox)
+    }
+
+    /** 今日页下拉刷新时顺带跑一次报修检查（与 Android 的 `onRefreshDormRepair` 同语义）。 */
+    fun refreshDormRepair() {
+        scope.launch { runCatching { dormRepairSyncImpl.refresh() } }
+    }
 
     // ---- 趣智校园（iOS 移植 2026-11-28：蓝牙那一层接上了 CoreBluetooth） ----
     //

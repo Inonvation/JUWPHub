@@ -712,6 +712,9 @@ private fun IosRoot(services: IosServices) {
                                                 onOpenUjingScan = { raw ->
                                                     stack.add(IosRoute(SubpageScreen.UJING, raw))
                                                 },
+                                                // 下拉刷新顺带拉一次报修进度（2026-11-29）：
+                                                // 与 Android 的 `onRefreshDormRepair` 同语义
+                                                onRefreshDormRepair = { services.refreshDormRepair() },
                                                 brandIcon = { target -> iosGuessBrandPainter(target) },
                                             )
                                         }
