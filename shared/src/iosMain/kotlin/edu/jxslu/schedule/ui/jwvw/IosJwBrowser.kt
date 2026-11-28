@@ -129,8 +129,8 @@ internal fun IosJwBrowser(
             // 页面适配：课表页横向可滚、登录页表单收窄。桌面模式由同一个脚本参数决定。
             JwWebFit.fitScript(url, desktop)?.let { script -> controller.evaluateJavascript(script) }
 
-            // 落在 CAS 登录页且手上有凭证：自动填一次（只一次，见类 KDoc）
-            if (!IosJwAutoLoginGate.tried && JwUrls.isCasHost(url) && JwWebFit.isLoginLikeUrl(url)) {
+            // 落在 CAS 登录页且手上有凭证：自动填一次（窗口内只一次，见 IosJwAutoLoginGate）
+            if (JwUrls.isCasHost(url) && JwWebFit.isLoginLikeUrl(url)) {
                 val cas = credentials()
                 if (cas != null && IosJwAutoLoginGate.tryAcquire()) {
                     controller.evaluateJavascript(JwAutoLogin.fillJs(cas.username, cas.password)) { raw ->
@@ -336,20 +336,22 @@ private object IosJwAutoLoginGate {
 
     private var lastAttemptMillis: Long = 0L
 
-    var tried: Boolean = false
-        private set
-
+    /**
+     * 只有「距上次尝试满 5 分钟」才放行。
+     *
+     * **不要加一个常驻的 `tried` 标志**：2026-11-29 那版就是那么写的，结果进程里第一次
+     * 自动登录之后永久锁死——会话过期、用户重开窗口、密码改对之后都再也不填表，
+     * 表现成「自动登录只在第一次管用」。窗口本身就是节流，页面级重复由它挡住。
+     */
     fun tryAcquire(nowMillis: Long = nowMillis()): Boolean {
         if (nowMillis - lastAttemptMillis < WINDOW_MILLIS) return false
         lastAttemptMillis = nowMillis
-        tried = true
         return true
     }
 
     /** 脚本没找到表单（页面还在渲染 / 不是真登录页）：退回闸门，别的窗口仍可试。 */
     fun release() {
         lastAttemptMillis = 0L
-        tried = false
     }
 
     private fun nowMillis(): Long = edu.jxslu.schedule.domain.AppClock.nowMillis()

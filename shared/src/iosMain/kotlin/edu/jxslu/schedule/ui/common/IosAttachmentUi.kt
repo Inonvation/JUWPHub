@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -301,15 +302,23 @@ private fun IosMarkdownEditorBar(
                                     contentScale = ContentScale.Crop,
                                 )
                             }
-                            // 移除：只从正文删引用，文件由页面算差集后交 deleteFiles
-                            Text(
-                                "×",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.error,
+                            // 移除：只从正文删引用，文件由页面算差集后交 deleteFiles。
+                            // 22dp 触控区 + 半透明底：56dp 的图右下角放 20dp 纯文字点不准（HIG 最小 44）。
+                            Box(
                                 modifier = Modifier
-                                    .size(20.dp)
+                                    .padding(2.dp)
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
                                     .clickable { onRemoveImage(name) },
-                            )
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "×",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                     }
                 }

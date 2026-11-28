@@ -43,6 +43,7 @@ import edu.jxslu.schedule.ui.campus.CampusCardViewModel
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.life.AccountRow
 import edu.jxslu.schedule.ui.common.iosDrawerBrandIds
+import edu.jxslu.schedule.ui.common.rememberAppHaptics
 import edu.jxslu.schedule.ui.life.DrawerHeader
 import edu.jxslu.schedule.ui.life.DrawerRow
 import edu.jxslu.schedule.ui.life.DrawerSectionHeader
@@ -422,6 +423,8 @@ private const val CompactRowPressScale = 0.985f
 internal fun CompactDrawerRow(entry: IosDrawerEntry, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    // 行级轻触感（2026-11-29）：与底栏 / 侧栏同一套开关（设置 → 触感）
+    val haptics = rememberAppHaptics()
     val pressScale by animateFloatAsState(
         targetValue = if (pressed) CompactRowPressScale else 1f,
         label = "iosDrawerRowPress",
@@ -439,7 +442,10 @@ internal fun CompactDrawerRow(entry: IosDrawerEntry, onClick: () -> Unit) {
                 interactionSource = interaction,
                 indication = LocalIndication.current,
                 onClickLabel = entry.label,
-                onClick = onClick,
+                onClick = {
+                    haptics.tap()
+                    onClick()
+                },
             )
             .heightIn(min = 50.dp)
             // 纵向 1dp：与 `DrawerRow` 同（它那 1dp 是给右侧 48dp 命中区留位，这里只为

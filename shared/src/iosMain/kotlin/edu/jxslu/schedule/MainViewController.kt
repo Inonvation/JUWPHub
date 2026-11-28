@@ -443,6 +443,8 @@ private fun IosRoot(services: IosServices) {
                             // 与 Android 侧栏同一个 `DisplayPrefsStore`
                             services = services,
                             onPick = { route ->
+                                // 侧栏点行为给一记轻触感（与底栏同一套开关：设置 → 触感）
+                                shellHaptics.tap()
                                 shellScope.launch { drawerState.close() }
                                 pushRoute(route)
                             },
@@ -450,6 +452,7 @@ private fun IosRoot(services: IosServices) {
                             // 2026-11-26 晚起是**覆盖层**而不是 Tab：切完关抽屉，返回键回原 Tab。
                             // 进设置前把「全部功能 / 二级页」状态清干净，覆盖层永远从设置首页开始。
                             onOpenMe = {
+                                shellHaptics.tap()
                                 shellScope.launch { drawerState.close() }
                                 stack.clear()
                                 showAllFeatures = false
