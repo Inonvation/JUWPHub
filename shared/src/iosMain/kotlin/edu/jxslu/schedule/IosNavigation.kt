@@ -596,7 +596,9 @@ internal fun IosRouteContent(
         SubpageScreen.SELECTION_WISHES -> SelectionWishesScreen(
             onBack = pop,
             onOpenCenter = { push(IosRoute(SubpageScreen.SELECTION_CENTER)) },
-            client = null,
+            // 预选清单的「本轮已开」匹配列（2026-11-29）：与选课中心同一个客户端，
+            // 此前传 null 时那一整列不出现
+            client = services.selectionCenterClient(),
         )
 
         SubpageScreen.STUDENT_INFO -> StudentInfoScreen(
