@@ -46,6 +46,8 @@ import edu.jxslu.schedule.data.repo.ScheduleBaselineStore
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.repo.SelectionCenterClient
+import edu.jxslu.schedule.data.repo.SelectionCenterWebClient
 import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionRoundsStore
 import edu.jxslu.schedule.data.repo.SelectionSync
@@ -311,6 +313,18 @@ class IosServices : AppServices {
      * 不必等额外的接入。轮次快照落 `SelectionRoundsStore`（文件在 `appDataDir()`）。
      */
     override fun selectionSync(): SelectionSync = selectionSyncImpl
+
+    /**
+     * 选课中心客户端（2026-11-29）：跑在 [session]（`IosJwReadSession`）上的共享实现。
+     *
+     * 进程内一份：`prepared`（已「进入」过的轮次）是它的会话前提，各自 new 一个会让每次
+     * 查询都重进轮次。列表 / 提交 / 退课的协议细节在 `SelectionCenterWebClient` 里。
+     */
+    override fun selectionCenterClient(): SelectionCenterClient = selectionCenterClientImpl
+
+    private val selectionCenterClientImpl: SelectionCenterClient by lazy {
+        SelectionCenterWebClient(session)
+    }
 
     override fun noteRepository(): NoteRepository = NoteRepository(juwDatabase())
 

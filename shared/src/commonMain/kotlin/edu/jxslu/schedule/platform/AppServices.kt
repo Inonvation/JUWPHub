@@ -35,6 +35,7 @@ import edu.jxslu.schedule.data.repo.ProfileSync
 import edu.jxslu.schedule.data.repo.ScheduleRepository
 import edu.jxslu.schedule.data.repo.ScheduleSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.repo.SelectionCenterClient
 import edu.jxslu.schedule.data.repo.SelectionRepository
 import edu.jxslu.schedule.data.repo.SelectionSync
 import edu.jxslu.schedule.data.repo.ScoreRepository
@@ -142,6 +143,15 @@ interface AppServices {
 
     /** 选课轮次与记录抓取；null 的语义同 [scheduleSync]。 */
     fun selectionSync(): SelectionSync?
+
+    /**
+     * 选课中心客户端（DESIGN §4.36）：列表 / 提交 / 退课（2026-11-29 加）。
+     *
+     * **默认 null = 本平台没有原生选课面**：选课中心页据此显示「不可用」，并引导去教务网页。
+     * Android 仍用 `:app` 里绑 OkHttp 的 `SelectionCenterHttpClient`（默认实现不受影响）；
+     * iOS 用共享层的 [edu.jxslu.schedule.data.repo.SelectionCenterWebClient]（跑在 `JwReadSession` 上）。
+     */
+    fun selectionCenterClient(): SelectionCenterClient? = null
 
     /** 笔记仓库（DESIGN §3.11）。 */
     fun noteRepository(): NoteRepository

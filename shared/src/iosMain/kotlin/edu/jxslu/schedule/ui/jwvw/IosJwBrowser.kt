@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -154,9 +153,12 @@ internal fun IosJwBrowser(
                         busy = true
                         status = "已登录，正在从教务导入课表…"
                         scope.launch {
-                            val result = services.scheduleTermImport().archive(manual = true) { d, t, term ->
+                            // `scheduleTermImport()` 是可空契约（null = 本平台没有导入链）；
+                            // iOS 侧一直非空，这里仍按可空处理，避免以后某次装配改动变成崩溃
+                            val importer = services.scheduleTermImport()
+                            val result = importer?.archive(manual = true) { d, t, term ->
                                 status = "正在导入 $term（$d/$t）…"
-                            }
+                            } ?: ScheduleTermImport.Result.Failed("本平台没有课表导入链")
                             status = runCatching { describeJwImport(result, services) }
                                 .getOrElse { "导入结束（结果读取失败：${it.message ?: "未知"}）" }
                             busy = false

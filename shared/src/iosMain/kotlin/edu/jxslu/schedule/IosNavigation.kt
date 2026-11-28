@@ -533,15 +533,15 @@ internal fun IosRouteContent(
 
         SubpageScreen.SELECTIONS -> SelectionScreen(
             onBack = pop,
-            // 选课中心（2026-11-29）：iOS 还没有 `SelectionCenterClient`（Native 选课面要 write 会话，
-            // 排在下一轮），所以主按钮直接开**内置教务网页**的选课页——用户在那里能真正选 / 退课，
-            // 比进一个「本平台不可用」的空页诚实。Android 仍走原生筛选面。
-            onOpenCenter = { _ ->
-                val open = onOpenJwBrowser
-                if (open != null) {
-                    open(JwUrls.SELECTION_CENTER, IosJwTask.Browse)
+            // 选课中心（2026-11-29）：原生选课面接上了共享层客户端（`SelectionCenterWebClient`，
+            // 跑在 `IosJwReadSession` 上），所以这里回到「进原生筛选面」——与 Android 同一条路。
+            // 客户端为 null 时才退到内置教务网页（宿主没装配的情况，不该发生）。
+            onOpenCenter = { roundId ->
+                if (services.selectionCenterClient() != null) {
+                    push(IosRoute(SubpageScreen.SELECTION_CENTER, roundId))
                 } else {
-                    push(IosRoute(SubpageScreen.SELECTION_CENTER))
+                    onOpenJwBrowser?.invoke(JwUrls.SELECTION_CENTER, IosJwTask.Browse)
+                        ?: push(IosRoute(SubpageScreen.SELECTION_CENTER, roundId))
                 }
             },
             onOpenRecords = { push(IosRoute(SubpageScreen.SELECTION_RECORDS)) },
@@ -558,8 +558,9 @@ internal fun IosRouteContent(
         SubpageScreen.SELECTION_CENTER -> SelectionCenterScreen(
             onBack = pop,
             focusRoundId = route.arg,
-            // null = 本平台还没有选课接口客户端（iOS 的教务直取链只做了只读同步）
-            client = null,
+            // 原生选课客户端（2026-11-29）：共享层 `SelectionCenterWebClient` 跑在 `IosJwReadSession`
+            // 上——列表 / 提交 / 退课都能走。null 只会在宿主没装配时出现（页面显示「不可用」）。
+            client = services.selectionCenterClient(),
         )
 
         SubpageScreen.SELECTION_RECORDS -> SelectionRecordsScreen(onBack = pop)
