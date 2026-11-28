@@ -110,6 +110,7 @@ import edu.jxslu.schedule.ui.tweak.CourseTweakViewModel
 import edu.jxslu.schedule.ui.campus.StatementScreen
 import edu.jxslu.schedule.ui.campus.StatementViewModel
 import edu.jxslu.schedule.ui.curriculum.CurriculumScreen
+import edu.jxslu.schedule.platform.IosLocalNotifications
 import edu.jxslu.schedule.platform.IosKvcxSideEffects
 import edu.jxslu.schedule.platform.iosWenquGrabHitAlert
 import edu.jxslu.schedule.ui.ebike.BikeMapViewModel
@@ -526,7 +527,14 @@ internal fun IosRouteContent(
             onOpenTranscript = { push(IosRoute(SubpageScreen.TRANSCRIPTS)) },
         )
 
-        SubpageScreen.SCORE_SETTINGS -> ScoreSettingsScreen(onBack = pop)
+        // 成绩设置（2026-11-29）：补上「申请通知权限」——此前不申请，开关打开也没有通知；
+        // `onAlertSettingsChanged` 不传：iOS 没有后台周期任务（进 App 时 `checkOnLaunch` 按新设置跑）。
+        SubpageScreen.SCORE_SETTINGS -> ScoreSettingsScreen(
+            onBack = pop,
+            onRequestNotifPermission = { onDenied ->
+                IosLocalNotifications.ensureAuthorized { granted -> if (!granted) onDenied() }
+            },
+        )
 
         // 考试页（S10 搬进共享层）：列表来自 ExamSync 的快照，「更新」当场打教务并按
         // 「考试变动自动合并」写课表。**2026-11-29 起两个入口都接上**：
@@ -542,6 +550,10 @@ internal fun IosRouteContent(
 
         SubpageScreen.EXAM_SETTINGS -> ExamSettingsScreen(
             onBack = pop,
+            // 通知权限（2026-11-29）：与成绩设置同一套；不申请的话改完开关也不会来通知
+            onRequestNotifPermission = { onDenied ->
+                IosLocalNotifications.ensureAuthorized { granted -> if (!granted) onDenied() }
+            },
             onOpenImport = onOpenJwBrowser?.let { open ->
                 { open(JwUrls.EXAM_QUERY, IosJwTask.SyncExams) }
             },
@@ -1062,6 +1074,11 @@ internal fun IosRouteContent(
                 onReschedule = { services.classReminder().reschedule() },
                 // 作业截止提醒：进本页与改开关都会重排一次。
                 onRecheckHomework = { services.homeworkReminder().reschedule() },
+                // 显式申请授权（2026-11-29）：此前只靠 `reschedule` 里顺带请求，
+                // 用户关掉「上课提醒」时那一刻根本不会触发，开关打开却永远收不到通知。
+                onRequestNotifPermission = { onDenied ->
+                    IosLocalNotifications.ensureAuthorized { granted -> if (!granted) onDenied() }
+                },
             )
         }
 
