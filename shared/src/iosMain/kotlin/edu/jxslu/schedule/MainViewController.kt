@@ -48,6 +48,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -75,6 +76,8 @@ import edu.jxslu.schedule.ui.campus.CampusCardViewModel
 import edu.jxslu.schedule.ui.common.AppBackHandler
 import edu.jxslu.schedule.ui.common.LocalBottomBarClearance
 import edu.jxslu.schedule.ui.common.drawerCardTransform
+import edu.jxslu.schedule.ui.common.iosGuessBrandPainter
+import edu.jxslu.schedule.ui.common.iosServiceBrands
 import edu.jxslu.schedule.ui.common.rememberDrawerCardTransform
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.jw.JwHubScreen
@@ -89,6 +92,7 @@ import edu.jxslu.schedule.ui.me.DisplaySettingsContent
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.me.SettingsScreen
 import edu.jxslu.schedule.ui.onboarding.IosOnboardingJwLogin
+import edu.jxslu.schedule.ui.onboarding.iosOnboardingBrandIcons
 import edu.jxslu.schedule.ui.onboarding.OnboardingScreen
 import edu.jxslu.schedule.ui.theme.JuwTheme
 import edu.jxslu.schedule.ui.theme.Motion
@@ -182,6 +186,20 @@ private fun IosRoot(services: IosServices) {
         // 字体缩放锁定（「固定字体大小」，默认开）：与 Android 同一份实现（`ui/theme/FontScale.kt`），
         // 全 App 唯一的字形缩放覆盖点。
         ProvideFixedFontScale(locked = fontScaleLocked) {
+            // 根背景（2026-11-27）：`ComposeUIViewController` 的 UIView 默认是**白底**，
+            // 而 `JuwTheme` 只提供 `LocalContentColor`、不画底（见 `ui/theme/Theme.kt`）。
+            // 于是任何「铺满但让出安全区」的容器、任何转场期间页面向外让出的缝，
+            // 露出来的都是 UIWindow 的白——用户报的「下方白色边框」「左侧白色」都是这一层。
+            //
+            // 做法是把它作为**第一个根子节点**（root measure policy 按组合顺序叠放，后组合的在上，
+            // 与文件末尾 `SharedRechargeHost` 同一个机制）：先画满一屏主题底色，其余分支全压在
+            // 它上面。不用 `Box { … }` 包住整个 if/else，是因为那要多重排 600 行缩进，
+            // 而这里要的只是「底下有一层不透明的东西」。
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background),
+            )
             var jwOpen by remember { mutableStateOf(false) }
             // 「全部功能」页：iOS 独有，入口挂在设置首页（2026-11-26 晚，侧栏不再有那一行）。
             var showAllFeatures by remember { mutableStateOf(false) }
@@ -267,6 +285,11 @@ private fun IosRoot(services: IosServices) {
             // 五个模块全部恢复，见 `IosNavigation.kt` 里那段说明）。
             val pushRoute: (IosRoute) -> Unit = { route -> stack.add(route) }
 
+            // 趣智校园那三页共用的 ViewModel 持有者（2026-11-28）：必须在栈之上建，
+            // 否则「进诊断页 → 主页离开组合 → 链路被断开 → 诊断页读到空现场」。
+            // 具体原因见 `IosQzxyPage` 的 KDoc。惰性创建：不进取智页就不建仓库与蓝牙。
+            val qzxyPage = remember { IosQzxyPage() }
+
             // iOS 没有系统返回手势：二级页栈非空时把「返回」接到这个缝上（Android 是实体返回键）
             AppBackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
 
@@ -297,6 +320,9 @@ private fun IosRoot(services: IosServices) {
                     onFinish = { onboardingSeen = true },
                     jwLogin = onboardingJwLogin,
                     onOpenJwLogin = { jwOpen = true },
+                    // 品牌位图（2026-11-28）：`BrandAssets/*.png` 已随包分发，五张服务图 + 校徽
+                    // 走 `IosBrandAssets` 的合成句柄；映射与 `AndroidOnboarding.kt` 逐项对齐。
+                    brands = iosOnboardingBrandIcons,
                 )
             } else if (meOpen) {
                 // 设置覆盖层（2026-11-26 晚）：根是设置首页（或「全部功能」目录），二级页压在它
@@ -308,7 +334,27 @@ private fun IosRoot(services: IosServices) {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .windowInsetsPadding(bottomInset),
+                        // 背景画在 `windowInsetsPadding` **之前**（2026-11-27，用户报「设置界面
+                        // 下方有白色边框」）：这条 Box 让出底部安全区，让出来的那块没有任何
+                        // 别的绘制者——不自己画底，露出的就是 UIWindow 的白。
+                        // 颜色取 `background`：设置首页 / 二级页的 `Scaffold` 容器色就是它，
+                        // 两者拼起来看不出接缝。
+                        .background(MaterialTheme.colorScheme.background)
+                        // 转场与跟手位移期间，页面会向右让出左侧一段：这一段由上面那层底兜住，
+                        // 并且裁在屏幕内（不裁的话滑动中的页面会画到窗口外）。
+                        .clipToBounds()
+                        .windowInsetsPadding(bottomInset)
+                        // 左缘右滑（2026-11-27 修）：**覆盖层里常开**，逐层退——
+                        // 二级页 → 「全部功能」→ 设置首页 → 关覆盖层回原 Tab。iOS 的通行预期是
+                        // 「右滑退出当前这一层」，此前这里是 `enabled = stack.isNotEmpty()`，
+                        // 用户进设置后第一屏恰好就是栈空的那一屏，于是「系统返回」永远没反应。
+                        .iosEdgeBackSwipe(enabled = true) {
+                            when {
+                                stack.isNotEmpty() -> stack.removeAt(stack.lastIndex)
+                                showAllFeatures -> showAllFeatures = false
+                                else -> meOpen = false
+                            }
+                        },
                 ) {
                     IosOverlayStack(
                         stack = stack,
@@ -318,6 +364,8 @@ private fun IosRoot(services: IosServices) {
                         pop = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) },
                         // 覆盖层里的校园卡设置页也要能开充值收银台页
                         recharge = rechargeRequests,
+                        // 与主分支同一个持有者：从设置里进趣智页时也共用同一份 VM
+                        qzxyPage = qzxyPage,
                         root = {
                             if (showAllFeatures) {
                                 IosAllFeaturesScreen(
@@ -420,7 +468,20 @@ private fun IosRoot(services: IosServices) {
                                 }
                             },
                     ) {
-                    Box(Modifier.fillMaxSize()) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            // 裁在屏幕内：转场位移与左缘跟手位移都会把页面画出边界
+                            .clipToBounds()
+                            // 左缘右滑返回（挂载点 2026-11-27 上提到最外层 Box）：
+                            // 手势节点必须在页面自己的滚动容器 / `pointerInput` **外面**，
+                            // 否则页面内的横向手势先收到事件、把这段吃掉（见 IosEdgeBack.kt）。
+                            // 只在二级页上生效：根层（栈空）的左缘右滑归抽屉，
+                            // 两者互斥靠 `ModalNavigationDrawer.gesturesEnabled`。
+                            .iosEdgeBackSwipe(enabled = stack.isNotEmpty()) {
+                                if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex)
+                            },
+                    ) {
                         // 二级页栈与根层 Tab 合成**一个** AnimatedContent：`null` 就是根层。
                         // 键取「深度 + 栈顶」而不是 `stack` 本身——`mutableStateListOf` 没有结构相等，
                         // 拿它当键永远判成"没变"。
@@ -440,11 +501,13 @@ private fun IosRoot(services: IosServices) {
                             } else {
                                 Modifier.fillMaxSize().windowInsetsPadding(bottomInset)
                             })
-                                // 左缘右滑返回（2026-11-26 晚）：只在二级页上生效，
-                                // 与抽屉手势互斥（见 `ModalNavigationDrawer.gesturesEnabled`）。
-                                .iosEdgeBackSwipe(enabled = stack.isNotEmpty()) {
-                                    if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex)
-                                },
+                                // 不透明底 + 裁切（2026-11-27，用户报「进出二级页闪白 / 左侧白」）：
+                                // 转场里两页都在位移，被滑走的页面让出的那一条没有任何绘制者。
+                                // `background` 画在本节点上 = 两页共用的底，永远压在最下面一层；
+                                // `clipToBounds` 让位移中的页面不画到窗口外。两者都不能省：
+                                // 只裁不画底，露出的仍是 UIWindow 的白。
+                                .clipToBounds()
+                                .background(MaterialTheme.colorScheme.background),
                             transitionSpec = {
                                 // 浅了是 pop、深了是 push。同一深度换页（不经过根层）也算 push。
                                 // 曲线是 iOS 的 push/pop（2026-11-26 晚，见文件末尾的 IosPageIn/Out）：
@@ -474,6 +537,8 @@ private fun IosRoot(services: IosServices) {
                                     pop = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) },
                                     // 电费账单页 / 校园卡设置页的充值入口共用这一个投递口
                                     recharge = rechargeRequests,
+                                    // 趣智三页共用一份 ViewModel（见 `IosQzxyPage` 的 KDoc）
+                                    qzxyPage = qzxyPage,
                                 )
                             } else {
                                 AnimatedContent(
@@ -587,6 +652,9 @@ private fun IosRoot(services: IosServices) {
                                                             kvcx = kvcxSlot,
                                                             waterSession = watering,
                                                             ujingOrder = ujingOrder,
+                                                            // 服务卡头像位（2026-11-28）：五张 `ic_brand_*`
+                                                            // 已随包分发，映射在 `IosBrandSlots.kt`。
+                                                            brands = iosServiceBrands,
                                                             onOpenWater = {
                                                                 stack.add(IosRoute(SubpageScreen.WATER))
                                                             },
@@ -600,9 +668,10 @@ private fun IosRoot(services: IosServices) {
                                                         )
                                                     },
                                                 ),
-                                                // 扫码（onScanCode）与品牌位图（brandIcon）在 iOS 侧还没有实现，
-                                                // 留 null：U净 弹窗的扫码钮点不动、猜你想用卡片没有图标位。
-                                                // 升级条件写在 ui/today/TodaySlots.kt 的 KDoc 里。
+                                                // 扫码（onScanCode）在 iOS 侧仍没有实现，留 null；
+                                                // 品牌位图（brandIcon）2026-11-28 已接上——五张图随包分发，
+                                                // 猜你想用卡片有头像位了。
+                                                brandIcon = { target -> iosGuessBrandPainter(target) },
                                             )
                                         }
 
@@ -817,6 +886,8 @@ private fun IosOverlayStack(
     pop: () -> Unit,
     /** 充值投递口：覆盖层里的校园卡设置页也要能开收银台页（与主分支同一个实例）。 */
     recharge: RechargeRequests? = null,
+    /** 趣智页的 ViewModel 持有者：与主分支共用一份，见 `IosQzxyPage` 的 KDoc。 */
+    qzxyPage: IosQzxyPage? = null,
     root: @Composable () -> Unit,
 ) {
     val shape = stack.size to stack.lastOrNull()
@@ -824,8 +895,14 @@ private fun IosOverlayStack(
         targetState = shape,
         modifier = Modifier
             .fillMaxSize()
-            // 覆盖层里的二级页同样支持左缘右滑返回
-            .iosEdgeBackSwipe(enabled = stack.isNotEmpty(), onBack = pop),
+            // 与主分支同一套：不透明底 + 裁切（2026-11-27，修「进出设置二级页闪白、
+            // 界面左侧产生白色」）。这里是覆盖层内部的转场，底色取 `background`——
+            // 与设置各页 `Scaffold` 的容器色一致，滑动过程中看到的是同一层底，不是白。
+            //
+            // 左缘右滑不在这里挂：挂载点上提到覆盖层根 `Box`（`IosRoot` 的 `meOpen` 分支），
+            // 这样「栈空时右滑关覆盖层」也有同一个手势可用，且手势节点在页面容器外面。
+            .clipToBounds()
+            .background(MaterialTheme.colorScheme.background),
         transitionSpec = {
             if (targetState.first > initialState.first) {
                 (slideInHorizontally(IosPageIn) { it } + fadeIn(IosFadeIn))
@@ -847,6 +924,8 @@ private fun IosOverlayStack(
                 push = push,
                 pop = pop,
                 recharge = recharge,
+                // 覆盖层与主分支共用的同一份趣智 VM 持有者（见 `IosQzxyPage`）。
+                qzxyPage = qzxyPage,
             )
         } else {
             root()

@@ -92,6 +92,13 @@
 	     文案说明用途，否则审核会拒（侧载不影响，但改起来是同一处）。 -->
 	<key>NSCameraUsageDescription</key>
 	<string>用于扫描共享单车的车身码，以及扫码使用洗衣机等需要取景扫码的场景。</string>
+	<!-- 蓝牙用途说明（2026-11-28 补）：趣智校园的开水阀走 CoreBluetooth
+	     （shared/.../data/qzxy/IosQzxyBle.kt，CBCentralManager + CBPeripheral）。
+	     缺这一项时**不是**「扫描返回失败」，而是第一次创建 CBCentralManager 那一刻
+	     进程被系统直接终止——点「扫描设备」App 直接没了，栈顶看不到我们的代码，
+	     与相册、日历、相机那三条是同一类事故。文案说明用途，否则审核会拒。 -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>用于扫描并连接宿舍热水器（趣智校园蓝牙水控），开阀与结算需要与设备直接通信。</string>
 	<!-- 拉起微信（快趣出行「打开微信扫一扫」/「去微信结清」）。iOS 只开放 `weixin://`
 	     一个公有 scheme，落点是微信首页（扫一扫要用户自己点）；`weixinULAPI` 是微信
 	     OpenSDK 回跳用的，先声明着，将来接 SDK 就不用再改 plist。

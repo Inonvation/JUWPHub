@@ -11,7 +11,7 @@ import platform.UIKit.UIApplication
  *
  * | 方法 | iOS 实现 |
  * |---|---|
- * | [RechargePlatform.openPaymentPage] | **不覆盖** —— 接口默认返回 false，宿主 `SharedRechargeHost` 于是用共享层的 `BankPayPage`（`WKWebView`）盖全屏。一卡通**必须**走这条：从原生 App 直拉 `weixin://` 会被微信拒（商户域名与 referer 对不上），得让收银台页面自己跳 |
+ * | [RechargePlatform.openPaymentPage] | **不覆盖** —— 接口默认返回 false，宿主 `SharedRechargeHost` 于是用共享层的 `BankPayPage`（`WKWebView`）盖全屏。一卡通只在**直拉失败**时才落到这一页（2026-11-28 起先试 [RechargePlatform.openExternalUrl] 拉 `weixin://`；此前是只走这一页，依据「从原生 App 直拉会被微信拒」是推测，Scriptable 版实测能拉起） |
  * | [RechargePlatform.openExternalUrl] | [iosOpenExternalUrl]：`canOpenURL` 预检（仅对白名单 scheme）+ `UIApplication.openURL` |
  *
  * 胖乖的入口有现成实现 [iosQiekjRecharge]（`WaterScreen.onOpenRecharge`）。趣智的深链也在
@@ -46,7 +46,11 @@ object IosRechargePlatform : RechargePlatform {
  * 用系统打开一个 URL / 自定义 scheme；返回 false = 没打开（未装对应 App / 链接无效）。
  *
  * [DECLARED_SCHEMES] 里的 scheme 先过 `canOpenURL`：那是 `LSApplicationQueriesSchemes`
- * 声明过的，预检结果可信，「没装支付宝」因此能变成一句确定的提示。
+ * 声明过的，预检结果可信，「没装支付宝 / 微信」因此能变成一句确定的提示——一卡通充值正是
+ * 靠它把「没装微信」判成 false，再退回收银台页（`paymentAttempts` 的兜底那一跳）。
+ *
+ * 返回 true 只说明 `openURL` 回了成功（系统把 URL 交给了某个 App），**不代表微信真的显示
+ * 了付款页、更不代表付款完成**：`weixin://wap/pay` 的参数微信自己还会校验一遍。
  */
 fun iosOpenExternalUrl(url: String): Boolean {
     if (url.isBlank()) return false

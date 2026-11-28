@@ -42,6 +42,7 @@ import edu.jxslu.schedule.platform.collectAsStateWithLifecycle
 import edu.jxslu.schedule.ui.campus.CampusCardViewModel
 import edu.jxslu.schedule.ui.icon.AppIcons
 import edu.jxslu.schedule.ui.life.AccountRow
+import edu.jxslu.schedule.ui.common.iosDrawerBrandIds
 import edu.jxslu.schedule.ui.life.DrawerHeader
 import edu.jxslu.schedule.ui.life.DrawerRow
 import edu.jxslu.schedule.ui.life.DrawerSectionHeader
@@ -262,6 +263,9 @@ internal fun IosDrawer(
     // `SideDrawerContent` 里（`loadUjingFreeText` 等），本轮不搬——行照常可点，只是不带状态。
     val drawerStatus = rememberIosDrawerServiceStatus(services, drawerVisible)
     val serviceRows = lifeServiceRows(
+        // 五个服务头像位（2026-11-28）：图随包分发（`BrandAssets/`），
+        // 句柄映射在 `IosBrandSlots.iosDrawerBrandIds`，与 Android 的 `ic_brand_*` 同一套图。
+        brands = iosDrawerBrandIds,
         onOpenCampusAccount = { onPick(IosRoute(SubpageScreen.CAMPUS_CARD_SETTINGS)) },
         onOpenWater = { onPick(IosRoute(SubpageScreen.WATER)) },
         onOpenUjing = { onPick(IosRoute(SubpageScreen.UJING)) },

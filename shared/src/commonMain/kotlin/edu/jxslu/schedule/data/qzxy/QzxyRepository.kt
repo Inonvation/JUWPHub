@@ -237,6 +237,25 @@ class QzxyRepository(
     }
 
     /**
+     * 按「设备现场信息」查服务端设备：把 [qzxyDeviceLookupKeys] 的候选逐个试一遍。
+     *
+     * 存在的理由只有一个：**iOS 拿不到蓝牙 MAC**。`CBPeripheral` 只暴露系统生成的
+     * `identifier`（UUID），而服务端 `device/info/mac` 要的是登记 MAC。Android 上
+     * `address` 就是 MAC，首选它，行为不变；iOS 上 `address` 是 36 位 UUID，
+     * [qzxyDeviceLookupKeys] 会跳过它、改用广播名里那 12 位编号（`KLCXKJ-Water,G,490067305242`
+     * 的尾巴）。**服务端认不认这个键只能真机实测**——不认的话页面会明确报「查不到设备」，
+     * 而不是拿 UUID 硬查一轮。
+     *
+     * 会话失效照旧上抛：那是账号问题，不该被「换个候选再试」吞掉。
+     */
+    suspend fun deviceInfo(device: QzxyNearbyDevice): QzxyDeviceInfo? {
+        for (candidate in qzxyDeviceLookupKeys(device)) {
+            deviceInfo(candidate)?.let { return it }
+        }
+        return null
+    }
+
+    /**
      * 设备查询的 MAC 候选值，顺序即尝试顺序。
      *
      * **C0 开头要额外试一次前两位置换成 00**：这条来自 quzhi-lite 的实现

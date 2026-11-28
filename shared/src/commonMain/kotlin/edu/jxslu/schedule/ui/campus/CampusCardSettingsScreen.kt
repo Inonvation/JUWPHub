@@ -98,7 +98,8 @@ import kotlinx.coroutines.launch
  *
  * | 槽位 | 谁给 | null 时 iOS 上少什么 |
  * |---|---|---|
- * | [onOpenPaymentUrl] | Android：`openExternal`（`Intent.ACTION_VIEW` + 过渡静止）；iOS：`RechargeRequests.openPaymentPage`（配 [preferCashierPage] = true，不直拉微信） | 余额卡上的「充值」按钮、充值免责声明、充值弹层 → **本平台不做充值** |
+ * | [onOpenPaymentUrl] | Android：`openExternal`（`Intent.ACTION_VIEW` + 过渡静止）；iOS：`RechargeRequests.openPaymentPage`（收银台页） | 余额卡上的「充值」按钮、充值免责声明、充值弹层 → **本平台不做充值** |
+ * | [openExternalUrl] | iPhone：`iosOpenExternalUrl`（`UIApplication.openURL`） | 不出现「直拉微信」那条主路径，只走收银台页 |
  * | [notificationPermission] | Android：`POST_NOTIFICATIONS` launcher | 「余额提醒」整节（阈值 / 间隔 / 两个开关） |
  * | [powerRoomPicker] | 两端都给（电费仓库 + 凭证存储两端都有） | 拿不到仓库时才为 null → 「寝室电费」整节的房间行不渲染 |
  *
@@ -125,12 +126,23 @@ fun CampusCardSettingsScreen(
      */
     onOpenPaymentUrl: ((String) -> Boolean)? = null,
     /**
-     * 交给 [onOpenPaymentUrl] 的只能是**官方收银台地址**（不直拉 `weixin://`）。
+     * 「直接拉起微信」那条平台通道（2026-11-28）：返回 true = 系统接受了这次 openURL。
      *
-     * iOS 必须置 true：从原生 App 直拉微信会被拒（商户域名与 referer 对不上，
-     * `design/ios-port.md` §10.4），正确做法是收银台 URL 进 `WKWebView`；宿主把
-     * [onOpenPaymentUrl] 接到「内嵌收银台页」上即可（`RechargeRequests.openPaymentPage`）。
-     * Android 保持默认 false（直拉微信最快，行为零变化）。
+     * **null = 本平台没有这条通道**（Android 不传：它的 `launchExternal` 本来就是
+     * `ACTION_VIEW`，直拉与外部打开是同一件事）。非空时充值先试 `weixin://`，
+     * 打不开才退给 [onOpenPaymentUrl] 的收银台页——判定只有一处实现
+     * （`YktRechargeOrder.paymentAttempts` / `firstOpened`），本页不重复写。
+     */
+    openExternalUrl: ((String) -> Boolean)? = null,
+    /**
+     * 下单后的支付顺序：**true = 先试 `weixin://`，打不开再退 [onOpenPaymentUrl] 的收银台页**（iOS 口径），
+     * false = 只直拉微信（Android 口径，行为零变化）。
+     *
+     * 2026-11-28 改口径：上一版这里写的是「iOS 必须置 true，因为直拉会被微信拒」。那条是从
+     * `design/ios-port.md` §10.4 的推测来的；`docs/ios-paycode-shortcut/` 里 Scriptable 版的实测
+     * 证明 `weixin://wap/pay?prepayid=…` 在 iOS 上能拉起微信付款页。所以现在改成
+     * 「先试直拉、失败退收银台」——推测万一成立，用户也只是多看到一次收银台页。
+     * 顺序的唯一实现是 `YktRechargeOrder.paymentAttempts`，本页只传开关。
      */
     preferCashierPage: Boolean = false,
     /**
@@ -724,8 +736,9 @@ fun CampusCardSettingsScreen(
             accountFen = balance?.accountFen,
             // 二次确认弹窗里加粗展示的目标卡号：与下单链路同一份选取口径
             cardAccount = balance?.cards?.rechargeTargetCard()?.account,
-            // 支付落在哪一页，说明文案跟着变（iOS 是收银台页，不是直拉微信）
-            opensCashierPage = preferCashierPage,
+            // 支付落在哪一页，说明文案跟着变。2026-11-28 起：宿主给了直拉通道时**主路径是微信**，
+            // 收银台只是兜底，所以文案按「直接拉起微信」写；没有那条通道时才说收银台。
+            opensCashierPage = preferCashierPage && openExternalUrl == null,
             onDismiss = { showRechargeSheet = false },
             onLaunch = { yuan, toElectric ->
                 showRechargeSheet = false
@@ -747,8 +760,9 @@ fun CampusCardSettingsScreen(
                     viewModel.recharge(
                         yuan,
                         targetAccount = target,
-                        // 见形参 KDoc：iOS 只走收银台页（不直拉 weixin://）
+                        // 见形参 KDoc：true = 先试直拉、打不开退收银台（iOS）；false = 只直拉（Android）
                         preferCashierPage = preferCashierPage,
+                        openExternalUrl = openExternalUrl,
                         // 平台动作由宿主注入：Android 那边顺手把本窗口的推入/滑出过渡换成静止，
                         // 防止从外部应用返回时重放右推动画（2026-09-26 修页面跳动）
                         launchExternal = openPayment,

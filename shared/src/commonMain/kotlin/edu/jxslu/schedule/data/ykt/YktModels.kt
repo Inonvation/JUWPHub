@@ -98,17 +98,16 @@ sealed interface YktRechargeOrder {
 
     /**
      * 直拉微信：`weixin://wap/pay?prepay_id=…`（微信 H5 支付，实测免密渠道）。
-     * `ACTION_VIEW` 即可拉起微信支付界面；prepay_id 约 5 分钟有效。
+     * `ACTION_VIEW` / `openURL` 即可拉起微信支付界面；prepay_id 约 5 分钟有效。
      *
-     * [cashierUrl] 是同一笔单的**官方收银台地址**（`yktwx.juwp.edu.cn/payment/?…`），
-     * 2026-11-26 加：iOS 不能直拉 `weixin://`（商户域名与 referer 对不上，微信会拒，
-     * 见 `design/ios-port.md` §10.4），要把这一条交给 `WKWebView`，让页面自己跳微信。
-     * 两条 URL 指向同一笔订单，选哪条看 [paymentUrl]。
+     * [cashierUrl] 是同一笔单的**官方收银台地址**（`yktwx.juwp.edu.cn/payment/?…`）：
+     * 直拉那条打不开时退这一页，由页面自己跳微信。两条 URL 指向同一笔订单，
+     * 谁先谁后由 [paymentAttempts] 唯一决定。
      */
     data class WechatPay(
         override val orderId: String,
         val wechatUrl: String,
-        /** 同一笔单的官方收银台地址（iOS 走它，不直拉微信）。 */
+        /** 同一笔单的官方收银台地址（直拉那条打不开时的退路）。 */
         val cashierUrl: String,
     ) : YktRechargeOrder
 
@@ -120,18 +119,59 @@ sealed interface YktRechargeOrder {
 }
 
 /**
- * 本次充值该交给平台打开哪一个 URL。
+ * 一次「把支付页递给用户」的尝试。两种尝试的**承载方不同**，所以调用方要分两路执行：
  *
- * 单一实现，两个调用点（`CampusCardViewModel.recharge`）与测试共用：
- * - [preferCashierPage] = false（Android）：直拉微信那条最快——`weixin://wap/pay` 由
- *   微信客户端接手，不经过中间页；
- * - [preferCashierPage] = true（iOS）：即使平台给了 `weixin://` 也不直拉，改用收银台地址，
- *   由 `WKWebView` 里的页面自己跳（原因见 [YktRechargeOrder.WechatPay.cashierUrl]）。
- *   `[YktRechargeOrder.Cashier]` 本来就只有收银台地址，两种取值返回同一条。
+ * - [YktPaymentAttempt.WechatDeepLink]：自定义 scheme，必须交给系统（iOS
+ *   `UIApplication.openURL` / Android `ACTION_VIEW`），由微信客户端接手；
+ * - [YktPaymentAttempt.CashierPage]：http(s) 的官方收银台页，交给平台的页面容器
+ *   （iOS `WKWebView` / Android 浏览器）。
  */
-fun YktRechargeOrder.paymentUrl(preferCashierPage: Boolean): String = when (this) {
-    is YktRechargeOrder.WechatPay -> if (preferCashierPage) cashierUrl else wechatUrl
-    is YktRechargeOrder.Cashier -> cashierUrl
+sealed interface YktPaymentAttempt {
+
+    val url: String
+
+    /** 直拉微信（`weixin://wap/pay?…`）。 */
+    data class WechatDeepLink(override val url: String) : YktPaymentAttempt
+
+    /** 官方收银台页（`https://yktwx.juwp.edu.cn/payment/?…`）。 */
+    data class CashierPage(override val url: String) : YktPaymentAttempt
+}
+
+/**
+ * 本次充值该按什么顺序把支付页递出去（**唯一实现**：两个调用点与单测共用，别在页面里再写一份）。
+ *
+ * - [preferCashierPage] = false（Android）：只试直拉微信——`weixin://wap/pay` 由微信客户端
+ *   接手，不经过中间页；打不开就报错，**不跳收银台页**（Android 行为自 2026-09 起如此）；
+ * - [preferCashierPage] = true（iOS）：先试直拉，系统不接受（返回 false）再退**同一笔单**的
+ *   收银台页。2026-11-28 改：此前这里直接返回收银台页，依据是「iOS 从原生 App 拉
+ *   `weixin://` 会被微信拒」——那是推测，Scriptable 版已实测能拉起微信付款页
+ *   （`docs/ios-paycode-shortcut/说明.md` §「关于 iOS 能不能直接拉起微信」）。
+ *   两种可能都兜住：能拉就拉（少两跳），拉不动就退回收银台页让页面自己跳。
+ */
+fun YktRechargeOrder.paymentAttempts(preferCashierPage: Boolean): List<YktPaymentAttempt> =
+    when (this) {
+        is YktRechargeOrder.WechatPay -> if (preferCashierPage) {
+            listOf(
+                YktPaymentAttempt.WechatDeepLink(wechatUrl),
+                YktPaymentAttempt.CashierPage(cashierUrl),
+            )
+        } else {
+            listOf(YktPaymentAttempt.WechatDeepLink(wechatUrl))
+        }
+
+        is YktRechargeOrder.Cashier -> listOf(YktPaymentAttempt.CashierPage(cashierUrl))
+    }
+
+/**
+ * 按 [paymentAttempts] 的顺序逐个尝试，返回**第一个被平台接住**的那条；全都接不住返回 null。
+ *
+ * 「接住」= 系统接受了这次打开（`openURL` / `startActivity` 回了成功），**不是**支付完成、
+ * 也不保证微信真的显示了付款页——那些只有用户在微信里能看到。到账判定与它无关，
+ * 仍只看余额 + 流水双口径（`YktArrival`）。
+ */
+fun List<YktPaymentAttempt>.firstOpened(open: (YktPaymentAttempt) -> Boolean): YktPaymentAttempt? {
+    for (attempt in this) if (open(attempt)) return attempt
+    return null
 }
 
 /**

@@ -44,10 +44,17 @@ interface RechargePlatform {
     fun openPaymentPage(url: String): Boolean = false
 
     /**
-     * 用系统打开一个 URL / 自定义 scheme：`alipays://`（胖乖 / 趣智充值）、`weixin://`、
+     * 用系统打开一个 URL / 自定义 scheme：`alipays://`（胖乖 / 趣智充值）、`weixin://`
+     * （一卡通充值的「直拉微信」那条，2026-11-28 起 iOS 也走这里）、
      * 以及收银台页里的「用浏览器打开」与掌银跳转。
      *
-     * 返回 false = 本机没有能处理它的应用（未装支付宝 / 微信），调用方据此给提示。
+     * 返回 false = 本机没有能处理它的应用（未装支付宝 / 微信），调用方据此给提示或走兜底
+     * （一卡通充值就是「false → 退收银台页」）。
+     *
+     * 返回 true **只代表系统接受了这次打开**——URL 交给了能处理它的 App（`openURL` /
+     * `startActivity` 成功），但那个 App 里到底显示了什么、用户有没有付款，本 App 看不见，
+     * 也不该据此对外宣称「已支付」。一卡通的到账判定只看余额 + 流水（`YktArrival`）。
+     *
      * iOS 侧要 `Info.plist` 的 `LSApplicationQueriesSchemes` 声明 `alipays` / `weixin`，
      * 否则 `canOpenURL` 恒 false（见 `IosRechargePlatform`）。
      */

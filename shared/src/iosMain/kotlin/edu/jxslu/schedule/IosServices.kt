@@ -24,6 +24,11 @@ import edu.jxslu.schedule.data.qzxy.QzxyDeviceScanner
 import edu.jxslu.schedule.data.qzxy.QzxyDeviceRegistry
 import edu.jxslu.schedule.data.qzxy.QzxyBluetoothLink
 import edu.jxslu.schedule.data.qzxy.IosQzxyBluetoothLink
+import edu.jxslu.schedule.data.qzxy.IosQzxyDeviceRegistry
+import edu.jxslu.schedule.data.qzxy.IosQzxyDiagnostics
+import edu.jxslu.schedule.data.qzxy.IosQzxyPrefs
+import edu.jxslu.schedule.data.qzxy.IosQzxyScanner
+import edu.jxslu.schedule.data.qzxy.IosQzxyWateringRegistry
 import edu.jxslu.schedule.data.repo.AiApplyHistoryStore
 import edu.jxslu.schedule.data.repo.CampusCalendarStore
 import edu.jxslu.schedule.data.repo.CurriculumRepository
@@ -59,6 +64,7 @@ import edu.jxslu.schedule.data.session.IosJwSessionFlag
 import edu.jxslu.schedule.data.session.IosAiApiKeyStore
 import edu.jxslu.schedule.data.session.IosKqcxCredentialStore
 import edu.jxslu.schedule.data.session.IosQiekjCredentialStore
+import edu.jxslu.schedule.data.session.IosQzxySessionStore
 import edu.jxslu.schedule.data.session.IosSessionExpirySink
 import edu.jxslu.schedule.data.session.IosUjingSessionStore
 import edu.jxslu.schedule.data.session.IosWebCookieBridge
@@ -582,8 +588,26 @@ class IosServices : AppServices {
         clear = { aiKeychain.clear() },
     )
 
-    /** 趣智：**iOS 侧返回 null**——会话里含 token，等 `QzxyRepository` 的构造口。 */
-    override fun qzxyRepository(): QzxyRepository? = null
+    /**
+     * 趣智校园仓库：**iOS 侧已能建起来**（2026-11-28）。
+     *
+     * 上一版这里是 `null`，理由写的是「会话里含 token，要一份加密存储；iOS 还没接 Keychain」——
+     * 那条理由在 `IosQzxySessionStore`（`data/session/IosSessionStores.kt`）写完 Keychain 存储之后
+     * 就已经过期了。缺的是把它接进构造：仓库只要「一份 [QzxySessionStore] + 两个过期留痕回调」，
+     * HTTP 那一半本来就是共享层的 Ktor 实现。
+     *
+     * 「登录状态已过期」走与胖乖 / 问渠同一条 [sessionExpiry]（`NSUserDefaults` 一张表），
+     * 账号中心的「已失效」与趣智页进页提示读的是同一份留痕。
+     */
+    override fun qzxyRepository(): QzxyRepository? = qzxyRepo
+
+    private val qzxyRepo: QzxyRepository by lazy {
+        QzxyRepository(
+            sessionStore = IosQzxySessionStore(),
+            onSessionExpired = { sessionExpiry.mark(SessionService.Qzxy.id) },
+            onSessionCleared = { sessionExpiry.clear(SessionService.Qzxy.id) },
+        )
+    }
 
     /**
      * U净 仓库：**iOS 侧已能建起来**（2026-11-25）。
@@ -697,53 +721,60 @@ class IosServices : AppServices {
 
     override fun dormRepairStore(): DormRepairStore = dormRepair
 
-    // ---- 趣智校园页面层（iOS 移植 V3，2026-11-25） ----
+    // ---- 趣智校园（iOS 移植 2026-11-28：蓝牙那一层接上了 CoreBluetooth） ----
     //
-    // 页面层（`ui/qzxy`）已在 commonMain，但**这一端暂时挂不出来**：
-    // `qzxyRepository()` 仍是 null（会话里含 token，要一份加密存储；iOS 还没接 Keychain），
-    // 所以 `QzxyViewModel.fromServices()` 直接回 null，宿主不给路由。下面五个返回 null
-    // 是同一件事的另外几面，不是「先占位」——每一项缺了都对应页面上一块真实的空缺。
+    // 页面层（`ui/qzxy`）本来就在 commonMain，上一版缺的是下面这一整组平台件：
+    // 仓库（会话/过期留痕）、蓝牙链路、扫描、已绑定设备、本机偏好、用水记账、诊断读数。
+    // 现在七项都成立，`QzxyViewModel.fromServices()` 不再回 null，宿主可以给路由。
 
     /**
-     * 蓝牙链路：**给出失败桩而不是 null**。
+     * 蓝牙链路：CoreBluetooth 实现（[IosQzxyBluetoothLink]），**非空**。
      *
-     * [IosQzxyBluetoothLink] 的四个成员全部立刻回 `Result.failure`，状态恒为 Disconnected。
-     * 这与「本平台不支持蓝牙」是同一句话，而且比 null 更早暴露问题：接上 CoreBluetooth 之前，
-     * 任何一条走蓝牙的链路都会拿到明确的错误文案，而不是空指针。
+     * 引擎是 [IosQzxyBle.central] 这条进程单例——扫描与连接必须共用同一个
+     * `CBCentralManager`，否则 `didConnect` 会落到另一个实例上。
      */
     override fun qzxyBluetoothLink(): QzxyBluetoothLink = iosQzxyLink
 
     /**
-     * 链路诊断读数：**null**。
+     * 链路诊断读数：**非空**（[IosQzxyDiagnostics]）。
      *
-     * 服务表与 MTU 是 GATT 服务发现的产物，iOS 侧要等 CoreBluetooth 接上才有，
-     * 而那时也未必按同一形状暴露（`CBService` / `CBCharacteristic` 的属性是另一套位）。
-     * 诊断页的「设备服务表」整块据此不渲染。
+     * 服务表来自 `CBService` / `CBCharacteristic`，属性位是 CoreBluetooth 那一套，
+     * 由引擎翻成与 Android 同形状的中文标注（`QzxyServiceEntry.propertyText`）。
+     * 「MTU」在这端是「单次可写字节上限 + 3」的估算，见该类的 KDoc。
      */
-    override fun qzxyLinkDiagnostics(): QzxyLinkDiagnostics? = null
+    override fun qzxyLinkDiagnostics(): QzxyLinkDiagnostics = iosQzxyDiagnostics
 
-    /** BLE 扫描：**null**（iOS 侧没有 `CBCentralManager` 扫描实现）。设备弹层里「扫描」整行不渲染。 */
-    override fun qzxyScanner(): QzxyDeviceScanner? = null
+    /** BLE 扫描：CoreBluetooth 实现（[IosQzxyScanner]），**非空**。 */
+    override fun qzxyScanner(): QzxyDeviceScanner = iosQzxyScanner
 
     /**
-     * 已绑定设备：**null**。
+     * 已绑定设备：**非空**（[IosQzxyDeviceRegistry]，`NSUserDefaults`）。
      *
-     * Android 侧是 `SharedPreferences`（`qzxy_devices`），里面装着老用户已绑定的设备；
-     * iOS 没有这份介质，换成 `NSUserDefaults` 是新开一份，与老数据无关——所以这里是 null，
-     * 页面按「一台都没绑」处理，而不是给一份能写但留不住的假存储。
+     * 地址在这端是 `CBPeripheral.identifier` 的 UUID，不是 MAC；同一台手机重装 App 后旧绑定
+     * 可能连不上，届时页面会明确报「找不到这台设备，请先扫描一次再连接」，不是静默失败。
      */
-    override fun qzxyDeviceRegistry(): QzxyDeviceRegistry? = null
+    override fun qzxyDeviceRegistry(): QzxyDeviceRegistry = iosQzxyDevices
 
-    /** 调试开关 / 记住的手机号 / 清除命令候选：**null**（页面用安全默认值，见 `QzxyPrefs` 的 KDoc）。 */
-    override fun qzxyPrefs(): QzxyPrefs? = null
+    /** 调试开关 / 记住的手机号 / 清除命令候选：**非空**（`NSUserDefaults` 两份，键名照 Android）。 */
+    override fun qzxyPrefs(): QzxyPrefs = iosQzxyPrefs
 
-    /** 进行中的用水记账：**null**（没有介质，页面不会出现「待核对」态）。 */
-    override fun qzxyWateringRegistry(): QzxyWateringRegistry? = null
+    /** 进行中的用水记账：**非空**，今日页卡片与趣智页读同一条流。 */
+    override fun qzxyWateringRegistry(): QzxyWateringRegistry = iosQzxyWatering
 
     /** 趣智的进程级流程锁：纯内存，两端都建得起来；本端一份即可。 */
     override fun qzxyFlowLock(): Mutex = qzxyFlowLockInstance
 
     private val iosQzxyLink: QzxyBluetoothLink by lazy { IosQzxyBluetoothLink() }
+
+    private val iosQzxyScanner: QzxyDeviceScanner by lazy { IosQzxyScanner() }
+
+    private val iosQzxyDiagnostics: QzxyLinkDiagnostics by lazy { IosQzxyDiagnostics() }
+
+    private val iosQzxyDevices: QzxyDeviceRegistry by lazy { IosQzxyDeviceRegistry() }
+
+    private val iosQzxyPrefs: QzxyPrefs by lazy { IosQzxyPrefs() }
+
+    private val iosQzxyWatering: QzxyWateringRegistry by lazy { IosQzxyWateringRegistry() }
 
     private val qzxyFlowLockInstance: Mutex = Mutex()
 

@@ -847,7 +847,7 @@ class QzxyViewModel(
         if (!firstQuery) return
         viewModelScope.launch {
             infoMutex.withLock {
-                val info = runCatching { repo.deviceInfo(device.address) }
+                val info = runCatching { repo.deviceInfo(device) }
                     .onFailure { error ->
                         if (error is QzxySessionExpiredException) handleFailure(error, "登录已失效")
                     }
@@ -886,7 +886,7 @@ class QzxyViewModel(
             ?.deviceName
             ?.takeIf { it.isNotBlank() }
         val name = known
-            ?: runCatching { repo.deviceInfo(device.address) }
+            ?: runCatching { repo.deviceInfo(device) }
                 .getOrNull()
                 ?.deviceName
                 ?.takeIf { it.isNotBlank() }
@@ -937,7 +937,7 @@ class QzxyViewModel(
         rememberLastUsed(QzxyDeviceRef(device.address, device.name))
         if (cached != null) return
         viewModelScope.launch {
-            runCatching { repo.deviceInfo(device.address) }
+            runCatching { repo.deviceInfo(device) }
                 .onSuccess { info ->
                     _uiState.update { state ->
                         state.copy(
@@ -2791,7 +2791,7 @@ class QzxyViewModel(
         _uiState.value.serverDevice
             ?.takeIf { !it.macAddress.isNullOrBlank() }
             ?.let { return it }
-        val info = runCatching { repo.deviceInfo(device.address) }.getOrNull() ?: return null
+        val info = runCatching { repo.deviceInfo(device) }.getOrNull() ?: return null
         if (info.macAddress.isNullOrBlank()) return null
         _uiState.update {
             it.copy(

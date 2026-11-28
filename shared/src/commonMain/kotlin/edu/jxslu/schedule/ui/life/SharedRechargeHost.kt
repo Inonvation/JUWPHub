@@ -47,7 +47,7 @@ import kotlinx.coroutines.launch
  *
  * | 充值 | 本宿主怎么走 | 成功判据 |
  * |---|---|---|
- * | 一卡通 | 弹层下单 → [CampusCardViewModel.recharge]（`preferCashierPage = true`）→ 收银台 URL 进 [BankPayPage]（`WKWebView`）→ 页面自己跳微信 | [CampusCardViewModel] 的到账轮询（余额 + 流水双口径），**不靠页面回调**；收页时再补一次 [CampusCardViewModel.onHostResume] |
+ * | 一卡通 | 弹层下单 → [CampusCardViewModel.recharge]（`preferCashierPage = true`）：先直拉 `weixin://`（[RechargePlatform.openExternalUrl]），系统不接受再把同一笔单的收银台 URL 交给 [BankPayPage]（`WKWebView`），页面自己跳微信 | [CampusCardViewModel] 的到账轮询（余额 + 流水双口径），**不靠页面回调**；收页时再补一次 [CampusCardViewModel.onHostResume] |
  * | 寝室电费 | [LifeViewModel.placePowerOrder] → [LifeEvent.OpenBankCashier] → 收银台页 → 回到商户域即收页 | [LifeViewModel.checkBankPaid]（`order.status=1`）+ `PowerReadingStore` 复读 |
  * | 胖乖 / 趣智 | **不在本宿主里**：[RechargePlatform.openExternalUrl] 打开 `alipays://` 深链，入口在各自页面（`WaterScreen.onOpenRecharge` / `QzxyScreen.onOpenRecharge`） | 回到本页后余额重拉（iOS 没有前台回调，只能下拉刷新） |
  *
@@ -162,10 +162,12 @@ fun SharedRechargeHost(
     }
 
     /**
-     * 把支付 URL 交给平台；平台不承载收银台页时用共享层的 [BankPayPage]。
+     * 把**收银台页** URL 交给平台；平台不承载这一页时用共享层的 [BankPayPage]。
      *
-     * 一卡通在 iOS 上必须走这一条（`preferCashierPage = true` 拿到的就是收银台地址）：
-     * 从原生 App 直拉 `weixin://` 会被微信拒，页面自己跳才行（§10.4）。
+     * 一卡通直拉微信那条**不走这里**：`weixin://` 由 [CampusCardViewModel.recharge] 里的
+     * [RechargePlatform.openExternalUrl] 直接交给系统，只有系统不接受时才退到这一页
+     * （2026-11-28 改，此前 iOS 只有这一页）。收银台页里点「立即支付」也会自己跳微信，
+     * 所以它是兜底而不是废路。
      */
     fun openPayment(url: String, title: String, merchantReturnHost: String?): Boolean {
         if (platform.openPaymentPage(url)) return true
@@ -276,8 +278,9 @@ fun SharedRechargeHost(
             // 二次确认弹窗里加粗展示的目标卡号：与下单链路同一份选取口径
             //（`rechargeTargetCard` = 第一张非挂失卡）
             cardAccount = balance?.cards?.rechargeTargetCard()?.account,
-            // 本平台的钱是在官方收银台页里付的，说明文案跟着改（见 RechargeSheet 的形参 KDoc）
-            opensCashierPage = true,
+            // 主路径是直拉微信（拉起失败才退收银台页），说明文案用 Android 那一套
+            //（`opensCashierPage` 的默认值）：说「打开收银台里选支付方式」现在不成立
+            //（2026-11-28）。兜底真发生的那一次，收银台页自己会说明。
             onDismiss = { showCampusSheet = false },
             onLaunch = { yuan, toElectric ->
                 showCampusSheet = false
@@ -286,8 +289,10 @@ fun SharedRechargeHost(
                     campusViewModel.recharge(
                         yuan = yuan,
                         targetAccount = target,
-                        // iOS 不直拉 weixin://：收银台 URL 进 WKWebView，由页面自己跳微信
+                        // iOS：先直拉 weixin://，系统不接受再退收银台 URL 进 WKWebView
+                        //（顺序唯一实现在 `paymentAttempts`，这里只提供两条平台通道）
                         preferCashierPage = true,
+                        openExternalUrl = { url -> platform.openExternalUrl(url) },
                         launchExternal = { url -> openPayment(url, "校园卡充值", null) },
                     ) { notice -> scope.postNotice(snackbar, notice.text, notice.tone) }
                 }

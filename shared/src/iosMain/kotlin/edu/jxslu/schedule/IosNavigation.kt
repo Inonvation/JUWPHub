@@ -59,6 +59,15 @@ import edu.jxslu.schedule.ui.me.hub.AppearanceSettingsScreen
 import edu.jxslu.schedule.ui.me.hub.IosPermissionsStorageScreen
 import edu.jxslu.schedule.ui.me.hub.QuietHoursScreen
 import edu.jxslu.schedule.ui.me.hub.SupportDevScreen
+import edu.jxslu.schedule.ui.common.IosBrandAssets
+import edu.jxslu.schedule.ui.common.iosPresetBrandPainter
+import edu.jxslu.schedule.ui.me.hub.IosRewardQr
+import edu.jxslu.schedule.ui.qzxy.QzxyBillScreen
+import edu.jxslu.schedule.ui.qzxy.QzxyBillViewModel
+import edu.jxslu.schedule.ui.qzxy.QzxyDebugScreen
+import edu.jxslu.schedule.ui.qzxy.QzxyRecharge
+import edu.jxslu.schedule.ui.qzxy.QzxyScreen
+import edu.jxslu.schedule.ui.qzxy.QzxyViewModel
 import edu.jxslu.schedule.ui.me.hub.TermsDeclarationsScreen
 import edu.jxslu.schedule.ui.me.hub.TimetableHubScreen
 import edu.jxslu.schedule.ui.timetable.ScheduleChangesScreen
@@ -118,6 +127,7 @@ import edu.jxslu.schedule.ui.life.PowerRoomPickerViewModel
 import edu.jxslu.schedule.ui.life.RechargeKind
 import edu.jxslu.schedule.ui.life.RechargeRequests
 import edu.jxslu.schedule.ui.life.iosQiekjRecharge
+import edu.jxslu.schedule.ui.life.iosOpenExternalUrl
 import edu.jxslu.schedule.ui.me.DataSettingsScreen
 import edu.jxslu.schedule.ui.me.MeViewModel
 import edu.jxslu.schedule.ui.notes.NoteCourseScreen
@@ -273,6 +283,36 @@ internal fun iosDrawerEntries(): List<IosDrawerEntry> = listOf(
 // 由宿主传真回调，见 `MainViewController.kt`。
 
 /**
+ * 趣智校园三页（主页 / 诊断 / 消费记录）里前两页共用的 ViewModel 持有者（2026-11-28）。
+ *
+ * ## 为什么不能建在路由里
+ *
+ * 二级页栈是 `AnimatedContent`，一次只组合栈顶。主页开阀连着蓝牙，点「诊断」之后主页离开
+ * 组合，路由内部 `remember` 出来的 ViewModel 会被丢掉（`onCleared` 顺手 `link.disconnect()`）——
+ * 诊断页拿到的就是一份没有设备现场的空 VM。Android 用 `viewModel()` 挂在 Activity 上天然共用，
+ * iOS 没有 ViewModelStore，只能显式抬到宿主。
+ *
+ * 生命周期：与 App 进程同寿（`IosRoot` 的 `remember`）。比理想值长一点，但这份 VM 里只有
+ * 一个 Ktor 客户端、一条蓝牙链路和几个 StateFlow，与「界面没了还挂着连接」相比，
+ * 「诊断页读不到现场」才是会被用户看见的问题；链路本身还有 60 秒空闲断开兜底。
+ */
+internal class IosQzxyPage {
+
+    private var cached: QzxyViewModel? = null
+
+    /**
+     * 取（必要时创建）趣智页的 ViewModel。
+     *
+     * 只在组合里调用。平台件缺失（`fromServices()` 回 null）时给出 null，
+     * 页面据此退到 [IosNotPortedScreen]，而不是进页看一屏空白。
+     */
+    @Composable
+    fun remembered(): QzxyViewModel? = remember {
+        cached ?: QzxyViewModel.fromServices()?.also { cached = it }
+    }
+}
+
+/**
  * 渲染一个二级页。
  *
  * `push` / `pop` 由宿主（[IosRoot]）提供：页面自己的返回键走 `pop`，页面里的二级入口走 `push`。
@@ -294,6 +334,18 @@ internal fun IosRouteContent(
      * null = 本机没有加密凭证存储（宿主不渲染），两处充值入口因此整颗不渲染。
      */
     recharge: RechargeRequests? = null,
+    /**
+     * 趣智校园那三页（主页面 / 诊断 / 消费记录）共用的 ViewModel 持有者（2026-11-28）。
+     *
+     * 为什么要有这个东西：iOS 的二级页栈是 `AnimatedContent`，一次只组合栈顶那一页。
+     * 趣智页开阀连着蓝牙，进诊断页时主页面会离开组合——如果 VM 建在路由内部，
+     * `onCleared` 会把链路断掉，诊断页看到的是一片空白。所以 VM 必须活在路由之上：
+     * 由宿主（`IosRoot`）建一份，沿栈传下来。
+     *
+     * 默认 null 时退化成「这一页自己建一份」：只在宿主忘了传时发生，主页面照常能用，
+     * 代价是诊断页读不到主页面的设备现场。
+     */
+    qzxyPage: IosQzxyPage? = null,
 ) {
     when (route.screen) {
         // ---------------------------------------------------------------- 学习
@@ -558,11 +610,13 @@ internal fun IosRouteContent(
                     onOpenPaymentUrl = recharge?.let { requests ->
                         { url -> requests.openPaymentPage(url, "校园卡充值"); true }
                     },
+                    // 直拉微信（2026-11-28）：先 `weixin://` 交给系统，打不开再退上面的收银台页。
+                    // 与钱包卡那条主路径同一份判定（`YktRechargeOrder.paymentAttempts`）。
+                    openExternalUrl = { url -> iosOpenExternalUrl(url) },
                     notificationPermission = null,
                     powerRoomPicker = roomPicker,
-                    // iOS 上**必须**走收银台页而不是 `weixin://` 直拉：微信 H5 支付那条
-                    // 深链要求商户域与 referer 匹配，从原生 App 直接 openURL 会被拒
-                    //（`design/ios-port.md` §10.4）。
+                    // true = 「先试直拉、失败退收银台」（iOS 口径）。2026-11-28 起不再等于
+                    // 「只走收银台」：微信那条能开就直接进微信，开不了才用 `onOpenPaymentUrl`。
                     preferCashierPage = true,
                 )
             }
@@ -662,7 +716,7 @@ internal fun IosRouteContent(
         // - `onReconcileAutoReturn`（2026-11-26 晚接上）：iOS 没有精确闹钟，靠
         //   `IosEbikeReminder.reconcileAutoReturn` 做「到点通知 + 唤起时补做」，账号页进页
         //   也跑这一轮兜底对账。
-        // - `brandIcon = null`：`R.drawable.ic_brand_kqcx` 只有 Android 有，头像位整块不占位。
+        // - `brandIcon`：2026-11-28 起传 `IosBrandAssets.KQCX`（图随包分发），头像位不再空着；
         //
         // 订单页的入口这次给**真回调**（iOS 有二级页栈），所以账号页的「骑行记录」整块会渲染。
         SubpageScreen.KVCX -> {
@@ -684,7 +738,7 @@ internal fun IosRouteContent(
                 viewModel = viewModel,
                 onBack = pop,
                 onOpenOrders = { push(IosRoute(SubpageScreen.KVCX_ORDERS)) },
-                brandIcon = null,
+                brandIcon = IosBrandAssets.KQCX,
             )
         }
 
@@ -911,7 +965,7 @@ internal fun IosRouteContent(
                 onBack = pop,
                 viewModel = vm,
                 // iOS 没有 Android 那套品牌 webp，全部退回矢量图标
-                brandIcon = { null },
+                brandIcon = { item -> iosPresetBrandPainter(item) },
                 focusItemId = route.arg,
             )
         }
@@ -934,7 +988,12 @@ internal fun IosRouteContent(
             },
         )
 
-        SubpageScreen.SUPPORT_DEV -> SupportDevScreen(onBack = pop)
+        SubpageScreen.SUPPORT_DEV -> SupportDevScreen(
+            onBack = pop,
+            // 赞赏码（2026-11-28）：`BrandAssets/ic_reward_qr.png` 随包分发，
+            // 保存到相册那条平台动作仍是 Android 专有（`AboutPlatform`），这里只负责显示。
+            rewardQr = { modifier -> IosRewardQr(modifier) },
+        )
 
         // ---------------------------------------------------------------- 学工 / 校历 / 实习
         //
@@ -968,7 +1027,7 @@ internal fun IosRouteContent(
         // 2026-11-25 全部到位（Keychain 凭证 + 订单快照 JSON + 过期留痕），
         // 所以 `qiekjRepository()` 不再是 null。
         //
-        // 品牌位图仍传 null（Android 的 `ic_brand_pangguai` 只有 Android 有）；
+        // 品牌位图（2026-11-28 起不再传 null）：`BrandAssets/ic_brand_pangguai.png` 随包分发；
         // 「充值」按钮 2026-11-26 晚接上了：`alipays://` 深链交给系统，
         // `LSApplicationQueriesSchemes` 已声明 `alipays`（见 `RechargePlatform.ios.kt`）。
         SubpageScreen.WATER -> {
@@ -986,10 +1045,63 @@ internal fun IosRouteContent(
                     viewModel = vm,
                     prefsViewModel = meViewModel,
                     onBack = pop,
+                    // 品牌位图（2026-11-28）：与 Android 的 `ic_brand_pangguai` 同一张图。
+                    brandIcon = IosBrandAssets.PANG_GUAI,
                     // 充值（2026-11-26 晚）：`alipays://` 深链交给系统。
                     // 返回 false = 没装支付宝，页面据此提示而不是静默无反应。
                     onOpenRecharge = { iosQiekjRecharge() },
                 )
+            }
+        }
+
+        // ---------------------------------------------------------------- 江水生活 · 趣智校园
+        //
+        // 2026-11-28：蓝牙那一层接上 CoreBluetooth 之后这一页才真的能用——
+        // 仓库（Keychain 会话）、扫描、连接、服务表、本机存储全部非空，`fromServices()` 不再回 null。
+        //
+        // 三处平台动作的口径：
+        // - `onRequestScan` 直接放行：iOS 没有「请求蓝牙权限」这个 API，第一次建 `CBCentralManager`
+        //   时系统自己弹框；被拒绝时扫描器会报一句能照做的中文（见 `IosQzxyScanner`）。
+        // - `onOpenRecharge` 走支付宝小程序深链（`alipays` 已在 `LSApplicationQueriesSchemes`）。
+        // - `onOpenBills` / `onOpenDiagnostics` 进二级页栈，两页与主页共用同一个 VM（见 `qzxyPage`）。
+        SubpageScreen.QZXY -> {
+            val page = qzxyPage ?: remember { IosQzxyPage() }
+            val vm = page.remembered()
+            if (vm == null) {
+                IosNotPortedScreen(screen = route.screen, onBack = pop)
+            } else {
+                QzxyScreen(
+                    viewModel = vm,
+                    onBack = pop,
+                    onOpenDiagnostics = { address ->
+                        push(IosRoute(SubpageScreen.QZXY_DEBUG, address.orEmpty()))
+                    },
+                    onRequestScan = { onResult -> onResult(true) },
+                    onOpenRecharge = { iosOpenExternalUrl(QzxyRecharge.deepLink()) },
+                    onOpenBills = { push(IosRoute(SubpageScreen.QZXY_BILLS)) },
+                    brandIcon = IosBrandAssets.QZXY,
+                )
+            }
+        }
+
+        // 诊断页：设备现场 / 服务表 / 试签名 / 日志。必须与主页面共用 VM，否则读到的是空现场。
+        SubpageScreen.QZXY_DEBUG -> {
+            val page = qzxyPage ?: remember { IosQzxyPage() }
+            val vm = page.remembered()
+            if (vm == null) {
+                IosNotPortedScreen(screen = route.screen, onBack = pop)
+            } else {
+                QzxyDebugScreen(viewModel = vm, focusAddress = route.arg, onBack = pop)
+            }
+        }
+
+        SubpageScreen.QZXY_BILLS -> {
+            val repo = services.qzxyRepository()
+            if (repo == null) {
+                IosNotPortedScreen(screen = route.screen, onBack = pop)
+            } else {
+                val vm = remember { QzxyBillViewModel(repo) }
+                QzxyBillScreen(onBack = pop, viewModel = vm)
             }
         }
 
@@ -1086,6 +1198,8 @@ internal fun IosRouteContent(
                 UjingScreen(
                     viewModel = vm,
                     onBack = pop,
+                    // 身份卡头像位（2026-11-28）：与 Android 的 `ic_brand_ujing` 同一张图。
+                    brandIconRes = IosBrandAssets.UJING,
                     onOpenOrder = { push(IosRoute(SubpageScreen.UJING_ORDER)) },
                     onOpenHistory = { push(IosRoute(SubpageScreen.UJING_HISTORY)) },
                 )

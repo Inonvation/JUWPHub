@@ -89,3 +89,9 @@ targets:
           # Kotlin 编译期不会报——症状是 CI 一路绿到链接步骤才炸。
           - -framework
           - AVFoundation
+          # `CBCentralManager` / `CBPeripheral` / `CBService`（趣智校园的蓝牙水控，
+          # shared/.../data/qzxy/IosQzxyBle.kt，2026-11-28）在这个框架里。
+          # 同一条纪律：静态 framework 不自带 load command，漏了是链接期 Undefined symbols，
+          # Kotlin 编译期不会报——症状是 CI 一路绿到链接步骤才炸。
+          - -framework
+          - CoreBluetooth

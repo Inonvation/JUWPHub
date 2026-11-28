@@ -289,9 +289,10 @@ class YktRepository(
      * 参数对齐官方收银台（chunk 6affa2d0）：CAMPUSCARD 渠道只发
      * `paytypeid/paytype/paystep/orderid/redirect_url`，**不带 yktcard / accountno**。
      *
-     * [cashierUrl] 是**同一笔单**的官方收银台地址，随结果一起交给上层：iOS 不能直拉
-     * `weixin://`（微信硬校验商户域名与 referer，原生 App 直接 open 会被拒），它走的是这一条。
-     * 取服务端 302 下发的那个（`rechargeCreate` 的 Location）；平台改版走 JSON 分支时用
+     * [cashierUrl] 是**同一笔单**的官方收银台地址，随结果一起交给上层：直拉那条打不开时退它
+     *（iOS 2026-11-28 起先试直拉——`design/ios-port.md` §10.4 原先「iOS 不能直拉」的结论是推测，
+     * 已被 Scriptable 实测推翻）。取服务端 302 下发的那个（`rechargeCreate` 的 Location）；
+     * 平台改版走 JSON 分支时用
      * [buildCashierUrl] 现拼，两者形状相同（`/payment/?synjones-auth=…&orderid=…`）。
      */
     private suspend fun payDirect(
@@ -349,8 +350,8 @@ class YktRepository(
         // [3] 中间页抓 weixin:// 拉起链接（HTML 实体未转义，原文即 weixin://wap/pay?prepayid%3D…）
         val wechatUrl = Regex("weixin://wap/pay\\?[^\"'\\s]+").find(mid.text)?.value
             ?: return null
-        // 同一笔单的收银台地址随直拉结果一起带出去：iOS 不能直拉 weixin://，
-        // 它要的是这一条（见 YktRechargeOrder.WechatPay.cashierUrl）
+        // 同一笔单的收银台地址随直拉结果一起带出去：直拉那条打不开时退这一条
+        //（见 YktRechargeOrder.WechatPay.cashierUrl 与 paymentAttempts）
         return YktRechargeOrder.WechatPay(
             orderId = orderId,
             wechatUrl = wechatUrl,

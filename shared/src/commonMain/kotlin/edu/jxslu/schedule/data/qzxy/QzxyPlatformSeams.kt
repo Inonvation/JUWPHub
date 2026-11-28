@@ -132,6 +132,41 @@ fun qzxyDeviceKey(name: String, address: String): String {
     return address.replace(":", "").uppercase()
 }
 
+/**
+ * 查服务端设备（`device/info/mac`）时要试的键，顺序即尝试顺序。
+ *
+ * ## 为什么需要多个候选
+ *
+ * 服务端要的是**登记 MAC**，而两端能拿到的「地址」不是一回事：
+ * Android 的 `address` 就是 MAC；iOS 只有 `CBPeripheral.identifier`（36 位 UUID），
+ * Apple 不公开蓝牙地址。广播名里的那 12 位编号（[qzxyDeviceKey] 取出来的尾巴）是
+ * iOS 上**唯一**可能被服务端认下的键。
+ *
+ * ## 顺序为什么是「像 MAC 的 address → deviceKey」
+ *
+ * Android 保持原样：`address` 是 MAC，第一个就是它，命中即停，不多打请求。
+ * iOS 的 `address` 不是 12 位十六进制，直接被跳过，于是只剩 `deviceKey`。
+ * 两个都不像 MAC 时（真拿不到编号的设备）退回 `address` 原样试一次——宁可让服务端
+ * 明确回「查不到」，也不要在这里静默当成「这台设备不存在」。
+ *
+ * 纯函数，单测钉在 `QzxyDeviceLookupTest`。
+ */
+fun qzxyDeviceLookupKeys(device: QzxyNearbyDevice): List<String> = buildList {
+    if (looksLikeMac(device.address)) add(device.address)
+    if (looksLikeMac(device.deviceKey) &&
+        !device.deviceKey.replace(":", "").equals(device.address.replace(":", ""), ignoreCase = true)
+    ) {
+        add(device.deviceKey)
+    }
+    if (isEmpty()) add(device.address)
+}
+
+/** 12 位十六进制（可带冒号 / 短横线）= 一个像 MAC 的键。 */
+private fun looksLikeMac(raw: String): Boolean {
+    val hex = raw.replace(":", "").replace("-", "")
+    return hex.length == 12 && hex.all { it.digitToIntOrNull(16) != null }
+}
+
 // ── 本机偏好 ──
 
 /**

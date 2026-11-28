@@ -11,8 +11,10 @@ import edu.jxslu.schedule.data.ykt.YktCredentialStore
 import edu.jxslu.schedule.data.ykt.YktException
 import edu.jxslu.schedule.data.ykt.YktRechargeOrder
 import edu.jxslu.schedule.data.ykt.YktRepository
+import edu.jxslu.schedule.data.ykt.YktPaymentAttempt
 import edu.jxslu.schedule.data.ykt.YktTurnoverSyncer
-import edu.jxslu.schedule.data.ykt.paymentUrl
+import edu.jxslu.schedule.data.ykt.firstOpened
+import edu.jxslu.schedule.data.ykt.paymentAttempts
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.BalanceAlertSource
 import edu.jxslu.schedule.domain.InboxKind
@@ -549,7 +551,7 @@ class CampusCardViewModel(
     }
 
     /**
-     * 充值：下单 → 拉起微信/收银台 → 回流轮询到账（DESIGN §4.19「充值」）。
+     * 充值：下单 → 递支付页 → 回流轮询到账（DESIGN §4.19「充值」）。
      *
      * [launchExternal] 由 UI 层注入：**吃 URL 的回调，不是 `Intent`**——`Intent` 是 Android
      * 专有类型，搬进共享层后只能由宿主拼（Android 侧顺手把二级页窗口的推入/滑出过渡换成
@@ -557,18 +559,33 @@ class CampusCardViewModel(
      * 本页的右推入过渡会被重放，2026-09-26 修「充值回来页面跳动」）。
      * 返回 false = 无法打开（未装微信等），调用方给文案。
      *
-     * [preferCashierPage] = true 时**不直拉 `weixin://`**，改把同一笔单的官方收银台地址交给
-     * [launchExternal]：iOS 从原生 App 直拉微信会被拒（商户域名与 referer 对不上，
-     * `design/ios-port.md` §10.4），正确做法是收银台 URL 进 `WKWebView`、让页面自己跳微信。
-     * 选哪条 URL 的唯一实现是 [edu.jxslu.schedule.data.ykt.paymentUrl]；Android 保持
-     * 默认 false（直拉微信最快，行为零变化）。
+     * [openExternalUrl] 也只给 UI 层注入，**只管直拉微信那条**（`weixin://` 得由系统转给
+     * 微信客户端；[launchExternal] 在 iOS 上承载的是内嵌收银台页，两者不是一回事）。
+     * null = 本页没有这条通道：Android 不传（它的 [launchExternal] 本来就是 `ACTION_VIEW`，
+     * 直拉那条照旧走它）；iOS 形态（[preferCashierPage] = true）下则视为「直拉不可用」，
+     * 直接退收银台页——**绝不把 `weixin://` 塞进页面容器**（那只会白屏）。
+     *
+     * 递出去几条、按什么顺序，唯一实现是 [edu.jxslu.schedule.data.ykt.paymentAttempts]：
+     * iOS（[preferCashierPage] = true）先试直拉，系统不接受再退同一笔单的收银台页；Android
+     * 只直拉，打不开就报错（2026-11-28 改 iOS：此前直接走收银台页，依据「iOS 拉 `weixin://`
+     * 会被微信拒」是推测，Scriptable 版实测能拉起，见 `docs/ios-paycode-shortcut/说明.md`）。
+     *
+     * **返回值语义**：两个回调返回 true 只说明「系统接受了这次打开」（把 URL 交给了能处理它
+     * 的 App / 页面容器），**不代表支付完成，也不代表微信真的显示了付款页**——那只有用户在
+     * 微信里看得到。到账判定与它无关，仍旧只看余额 + 流水双口径轮询（本函数末尾照旧启动），
+     * 别在这个返回值上写「已支付 / 已付款」之类的文案。
      */
     fun recharge(
         yuan: String,
         /** 电子账户 type（`<account>-000`）；null = 充正式卡。见 [electricAccountType]。 */
         targetAccount: String? = null,
-        /** 见 KDoc：true = 只走官方收银台页（iOS），false = 允许直拉微信（Android）。 */
+        /** 见 KDoc：true = 先试直拉、失败退收银台页（iOS）；false = 只直拉（Android）。 */
         preferCashierPage: Boolean = false,
+        /**
+         * 直拉微信那条交给系统；null = 本页没有这条通道（Android 不传，它的 [launchExternal]
+         * 本来就是 `ACTION_VIEW`；iOS 不传时直拉直接算失败、退收银台页）。
+         */
+        openExternalUrl: ((String) -> Boolean)? = null,
         launchExternal: (String) -> Boolean,
         onResult: (NoticeFeedback) -> Unit,
     ) {
@@ -630,39 +647,56 @@ class CampusCardViewModel(
                 targetAccount = placed.targetAccount,
                 walletBalanceBeforeFen = placed.walletBalanceBeforeFen,
             )
-            when (order) {
-                is YktRechargeOrder.WechatPay -> {
-                    // 直拉微信（Android：跳过浏览器与收银台页，weixin://wap/pay 由微信客户端接手）
-                    // 或官方收银台页（iOS：不能直拉，让页面自己跳）。选哪条只有一处实现。
-                    val target = order.paymentUrl(preferCashierPage)
-                    if (launchExternal(target)) {
-                        onResult(
-                            NoticeFeedback(
-                                if (preferCashierPage) {
-                                    "已打开官方收银台，支付完成后回到本页等待到账"
+            // 递支付页：先直拉微信、失败退收银台页（iOS）或只直拉（Android）——顺序由
+            // `paymentAttempts` 唯一决定，这里只负责「按顺序执行，第一条被接住就收手」
+            val opened = order.paymentAttempts(preferCashierPage).firstOpened { attempt ->
+                when (attempt) {
+                    // 直拉微信：`weixin://` 只能交给系统。有 [openExternalUrl] 就走它；
+                    // 没有时按平台形态分（`preferCashierPage` 就是形态）——Android 的
+                    // [launchExternal] 本身就是 `ACTION_VIEW`，能接；iOS 的 [launchExternal]
+                    // 是**内嵌收银台页**，把 `weixin://` 塞进去只会白屏，所以这一条直接算失败、
+                    // 落到下一条收银台页（iOS 设置页那条接线还没传 opener，靠这条兜住）
+                    is YktPaymentAttempt.WechatDeepLink -> when {
+                        openExternalUrl != null -> openExternalUrl(attempt.url)
+                        preferCashierPage -> false
+                        else -> launchExternal(attempt.url)
+                    }
+
+                    // 收银台页：交给平台的页面容器（Android 浏览器 / iOS 内嵌 `WKWebView`）
+                    is YktPaymentAttempt.CashierPage -> launchExternal(attempt.url)
+                }
+            }
+            if (opened == null) {
+                // 一条都没接住。文案按「本该落到哪一页」分，Android 那两句逐字未变
+                if (order is YktRechargeOrder.Cashier) {
+                    onResult(NoticeFeedback("无法打开浏览器，请检查设备后重试", NoticeTone.Error))
+                    // 与加直拉之前一致：一页都没打开就不进到账轮询
+                    return@launch
+                }
+                onResult(
+                    NoticeFeedback(
+                        if (preferCashierPage) "无法打开支付页，请检查设备后重试" else "未找到微信，请确认已安装微信后重试",
+                        NoticeTone.Error,
+                    ),
+                )
+            } else {
+                // 只报「递出去了」，不说「已支付」：系统收下 URL ≠ 微信里点了付款（见 KDoc）
+                onResult(
+                    NoticeFeedback(
+                        when (opened) {
+                            is YktPaymentAttempt.WechatDeepLink ->
+                                "已拉起微信支付，支付完成后回到本页等待到账"
+
+                            is YktPaymentAttempt.CashierPage ->
+                                if (order is YktRechargeOrder.Cashier) {
+                                    "已跳转官方收银台，支付完成后回到本页等待到账"
                                 } else {
-                                    "已拉起微信支付，支付完成后回到本页等待到账"
-                                },
-                                NoticeTone.Info,
-                            ),
-                        )
-                    } else {
-                        onResult(
-                            NoticeFeedback(
-                                if (preferCashierPage) "无法打开支付页，请检查设备后重试" else "未找到微信，请确认已安装微信后重试",
-                                NoticeTone.Error,
-                            ),
-                        )
-                    }
-                }
-                is YktRechargeOrder.Cashier -> {
-                    // 兜底：打开官方收银台（服务端 302 下发的完整 URL）
-                    if (!launchExternal(order.paymentUrl(preferCashierPage))) {
-                        onResult(NoticeFeedback("无法打开浏览器，请检查设备后重试", NoticeTone.Error))
-                        return@launch
-                    }
-                    onResult(NoticeFeedback("已跳转官方收银台，支付完成后回到本页等待到账", NoticeTone.Info))
-                }
+                                    "已打开官方收银台，支付完成后回到本页等待到账"
+                                }
+                        },
+                        NoticeTone.Info,
+                    ),
+                )
             }
             watchRechargeArrivalLaunch(
                 username = saved.username,

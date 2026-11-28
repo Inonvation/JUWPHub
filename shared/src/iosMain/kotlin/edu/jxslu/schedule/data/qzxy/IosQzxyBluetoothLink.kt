@@ -1,43 +1,41 @@
 package edu.jxslu.schedule.data.qzxy
 
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * iOS 侧的蓝牙传输「未实现」桩（iOS 移植 S12，2026-11-24）。
+ * iOS 侧的蓝牙链路（iOS 移植，2026-11-28）：把 [QzxyBluetoothLink] 四个动作转给 CoreBluetooth 引擎。
  *
- * 共享层的水控协议、帧编解码与用水状态机（`QzxyWaterFlow`，`:app`）已经可用，缺的只是射频那一层：
- * iOS 上要接 CoreBluetooth（`CBCentralManager` 扫描、`CBPeripheral.discoverServices`、
- * `writeValue` 与通知回调）。本轮不做，这里给出**立刻回失败**的实现，让装配根
- * （`IosServices` 接这条链路时）拿到的是明确的「不支持」而不是崩溃。
+ * 上一版（S12，2026-11-24）是「立刻回失败」的桩，原因写在当时的 KDoc 里：协议与状态机已在
+ * 共享层，缺的只是射频那一层。现在那一层由 [IosQzxyCentral] 实现，本类回到「只做转接」的位置——
+ * 超时、复用、分包、写回执的语义全在引擎里，`QzxyWaterFlow` 与 `QzxyViewModel` 一行没改。
  *
- * 升级条件：接 CoreBluetooth 后换掉本类——分包口径照 Android 侧按协商 MTU 切
- * （默认 23 → 每包 20 字节），回包按换行切，超时与重连语义照
- * `:app` 的 `QzxyGattLink`（连上就复用、写回执超时不重发）。
+ * ## 地址口径（与 Android 不同，且改不了）
  *
- * 编译状态：**未在本机验证**（Windows 没有 Kotlin/Native），靠 CI 的 macOS 构建。
- * 本文件不含任何 ObjC 调用——只有共享层类型与协程原语，符号风险与
- * [edu.jxslu.schedule.data.session.IosJwReadSession] 同量级。
+ * [ensureConnected] 的参数在 Android 是 MAC（`AA:BB:…`），在这端是
+ * `CBPeripheral.identifier` 的 UUID 字符串。`IosQzxyScanner` 产出的 `address` 就是它，
+ * 已绑定设备存的也是它——所以「用一次扫出来的地址去连」这条链在两端都自洽。
+ * Apple 不公开蓝牙地址，别试图在这里把 UUID 换回 MAC。
  */
-class IosQzxyBluetoothLink : QzxyBluetoothLink {
+internal class IosQzxyBluetoothLink : QzxyBluetoothLink {
 
-    private val _connectionState = MutableStateFlow(QzxyLinkState.Disconnected)
+    /** 进程内唯一引擎：扫描与连接必须共用同一个 `CBCentralManager`，见 [IosQzxyBle]。 */
+    private val central: IosQzxyCentral
+        get() = IosQzxyBle.central
 
-    override val connectionState: StateFlow<QzxyLinkState> = _connectionState.asStateFlow()
+    override val connectionState: StateFlow<QzxyLinkState>
+        get() = central.linkState
 
     override suspend fun ensureConnected(address: String): Result<Unit> =
-        Result.failure(UnsupportedOperationException(NOT_IMPLEMENTED))
+        central.connect(address, CONNECT_TIMEOUT_MILLIS).map { }
 
     override suspend fun exchange(frame: ByteArray, timeoutMillis: Int): Result<ByteArray?> =
-        Result.failure(UnsupportedOperationException(NOT_IMPLEMENTED))
+        central.exchange(frame, timeoutMillis)
 
-    /** 断开对没连过的链路是空操作：状态本来就是「未连接」。 */
-    override fun disconnect() {
-        _connectionState.value = QzxyLinkState.Disconnected
-    }
+    /** 断开对没连过的链路是空操作（引擎内部自己判），与 Android 同口径。 */
+    override fun disconnect() = central.disconnect()
 
     private companion object {
-        const val NOT_IMPLEMENTED = "iOS 侧还没接 CoreBluetooth：蓝牙水控暂不可用"
+        /** 与 Android 的 `QzxyGattLink.CONNECT_TIMEOUT_MILLIS` 同值：建链 + 服务发现都在这段预算里。 */
+        const val CONNECT_TIMEOUT_MILLIS = 15_000L
     }
 }
