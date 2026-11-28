@@ -325,6 +325,8 @@ private fun IosRoot(services: IosServices) {
                     title = jwTitle,
                     task = jwTask,
                     onClose = { jwOpen = false },
+                    // 自动填表用（Keychain 里的学号密码）：没存过就退回让用户手登
+                    credentials = services::jwCredentials,
                 )
             } else if (onboardingSeen == false) {
                 // 首启引导：六屏里 iOS 现在给得起三样（`jwLogin` / `onOpenJwLogin` / `onFinish`）。
@@ -868,7 +870,7 @@ private fun IosRoot(services: IosServices) {
                                         // 评教本身不依赖它（会话在 `JwReadSession` 里）。
                                         if (evalOpen) {
                                             val evalFillScript = remember {
-                                                services.accountCredentials()?.readCas()?.let { cas ->
+                                                services.jwCredentials()?.let { cas ->
                                                     { JwAutoLogin.fillJs(cas.username, cas.password) }
                                                 }
                                             }

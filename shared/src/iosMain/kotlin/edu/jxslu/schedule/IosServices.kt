@@ -59,6 +59,7 @@ import edu.jxslu.schedule.data.session.CasEnsureResult
 import edu.jxslu.schedule.data.session.CasSession
 import edu.jxslu.schedule.data.session.IosCasTransport
 import edu.jxslu.schedule.data.session.IosCredentialVault
+import edu.jxslu.schedule.data.session.SessionCredentials
 import edu.jxslu.schedule.data.session.IosJwReadSession
 import edu.jxslu.schedule.data.session.IosJwSessionFlag
 import edu.jxslu.schedule.data.session.IosAiApiKeyStore
@@ -187,6 +188,15 @@ class IosServices : AppServices {
      * [CasSession] 这条链两端逐条一致：可信期、失败闸门、凭证错才计数。
      */
     private val jwVault: IosCredentialVault by lazy { IosCredentialVault() }
+
+    /**
+     * 教务凭证的原始读口（2026-11-29）：只给 iosMain 内部用——自动填表（教务网页窗口 / 评教）
+     * 需要学号+密码去拼 JwAutoLogin.fillJs。
+     *
+     * 为什么不进 AppServices：「把密码暴露给页面」不是一个跨端契约，Android 的
+     * JwImportScreen 也是直接读 CredentialVault。这里只做一层转发，不缓存。
+     */
+    internal fun jwCredentials(): SessionCredentials? = jwVault.readCas()
 
     /**
      * 教务 CAS 会话（共享层 `CasSession`），iOS 的三件平台物都换成这边的实现：

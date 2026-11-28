@@ -23,12 +23,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import edu.jxslu.schedule.IosJwSessionFlag
+import edu.jxslu.schedule.data.session.IosJwSessionFlag
 import edu.jxslu.schedule.data.jw.JwAutoLogin
 import edu.jxslu.schedule.data.jw.JwImportDiagnosis
 import edu.jxslu.schedule.data.jw.JwUrls
 import edu.jxslu.schedule.data.repo.ExamSync
 import edu.jxslu.schedule.data.repo.ScheduleTermImport
+import edu.jxslu.schedule.data.session.SessionCredentials
 import edu.jxslu.schedule.domain.AppClock
 import edu.jxslu.schedule.domain.ScheduleCalculator
 import edu.jxslu.schedule.platform.AppServices
@@ -83,11 +84,12 @@ internal fun IosJwBrowser(
     title: String,
     task: IosJwTask,
     onClose: () -> Unit,
+    /** 教务凭证（Keychain）：自动填表用；null = 本机没存过密码，退回让用户手登。 */
+    credentials: () -> SessionCredentials? = { null },
 ) {
     val controller = remember { WebViewController() }
     val scope = rememberCoroutineScope()
     val prefs = remember { services.displayPrefs() }
-    val credentials = remember { services.accountCredentials() }
 
     var desktop by remember { mutableStateOf(true) }
     var currentUrl by remember { mutableStateOf<String?>(null) }
@@ -130,7 +132,7 @@ internal fun IosJwBrowser(
 
             // 落在 CAS 登录页且手上有凭证：自动填一次（只一次，见类 KDoc）
             if (!IosJwAutoLoginGate.tried && JwUrls.isCasHost(url) && JwWebFit.isLoginLikeUrl(url)) {
-                val cas = credentials?.readCas()
+                val cas = credentials()
                 if (cas != null && IosJwAutoLoginGate.tryAcquire()) {
                     controller.evaluateJavascript(JwAutoLogin.fillJs(cas.username, cas.password)) { raw ->
                         // 只记结果，不记凭证
