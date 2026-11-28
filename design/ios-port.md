@@ -1313,6 +1313,8 @@ iOS 全传 null：正文只能按纯文本排、编辑态没有底栏、插图�
 | 成绩单 PDF「打开」 | `IosPdfPreview`：`UIDocumentInteractionController`（UIKit，不另加框架） | 列表页与「最近导出」两处都接上；分享 / 另存早就有 |
 | 成绩单页自动填表 | `casAutoFillScript` 接 Keychain 凭证 | 与教务网页窗口同一份 `jwCredentials()` |
 | 今日页下拉刷新报修 | `IosServices.refreshDormRepair()`（`DormRepairSync(cas, store, inbox)`） | 此前下拉不拉报修，只能等进页 |
+| 提醒授权 | 成绩设置 / 考试设置 / 上课提醒三页补上 `onRequestNotifPermission`（`IosLocalNotifications.ensureAuthorized`） | 此前不弹授权，开关打开也收不到通知 |
+| 成绩单「最近导出」的网页核对 | `onOpenWebPage` → 内置教务窗口 | 与其它教务页同一个浏览入口 |
 
 ## 13. 装机后请点验什么（2026-11-25 精简版交接口径）
 

@@ -630,6 +630,10 @@ internal fun IosRouteContent(
                     // 打开：与列表页同一份系统预览；分享同一份 `iosShareTranscriptPdf`
                     onOpenPdf = rememberIosPdfPreview(),
                     onSharePdf = ::iosShareTranscriptPdf,
+                    // 「在教务网页核对」：交给内置教务窗口（2026-11-29，与其它教务页同一个入口）
+                    onOpenWebPage = onOpenJwBrowser?.let { open ->
+                        { _, url -> open(url, IosJwTask.Browse) }
+                    },
                 )
             } else {
                 TranscriptScreen(
