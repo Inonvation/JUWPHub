@@ -520,18 +520,17 @@ private fun IosRoot(services: IosServices) {
                                 .background(MaterialTheme.colorScheme.background),
                             transitionSpec = {
                                 // 浅了是 pop、深了是 push。同一深度换页（不经过根层）也算 push。
-                                // 曲线是 iOS 的 push/pop（2026-11-26 晚，见文件末尾的 IosPageIn/Out）：
-                                // 进场 340ms 起步快收尾极缓，退场 300ms 反向走。原来的 `Motion.page()`
-                                // 是 M3 emphasized（两头都缓），推入读起来偏"肉"。
+                                // **2026-11-28 改成 iOS 的「双层位移」**：新页从右侧整屏滑入，
+                                // 旧页只左移 1/3 留在原处，两端**全程不透明**——不再有淡入淡出，
+                                // 于是转场期间没有任何一帧能露出底下的窗口白（用户报的「闪白 /
+                                // 左侧白」从根上消失，而不是靠底色盖住）。
                                 if (targetState.first > initialState.first) {
-                                    (slideInHorizontally(IosPageIn) { it } +
-                                        fadeIn(IosFadeIn))
-                                        .togetherWith(fadeOut(Motion.exit()))
+                                    slideInHorizontally(IosPageIn) { it }
+                                        .togetherWith(slideOutHorizontally(IosPageOut) { -it / 3 })
                                 } else {
-                                    fadeIn(Motion.exit()).togetherWith(
-                                        slideOutHorizontally(IosPageOut) { it } +
-                                            fadeOut(Motion.exit()),
-                                    )
+                                    // 退出是推入的镜像：上一页从左侧 1/3 处滑回原位，当前页滑出右侧。
+                                    slideInHorizontally(IosPageOut) { -it / 3 }
+                                        .togetherWith(slideOutHorizontally(IosPageOut) { it })
                                 }
                             },
                             label = "IosStack",
@@ -922,13 +921,13 @@ private fun IosOverlayStack(
             .clipToBounds()
             .background(MaterialTheme.colorScheme.background),
         transitionSpec = {
+            // 与主分支同一套「双层位移、全程不透明」：旧页让出 1/3，新页整屏滑入/滑出。
             if (targetState.first > initialState.first) {
-                (slideInHorizontally(IosPageIn) { it } + fadeIn(IosFadeIn))
-                    .togetherWith(fadeOut(Motion.exit()))
+                slideInHorizontally(IosPageIn) { it }
+                    .togetherWith(slideOutHorizontally(IosPageOut) { -it / 3 })
             } else {
-                fadeIn(Motion.exit()).togetherWith(
-                    slideOutHorizontally(IosPageOut) { it } + fadeOut(Motion.exit()),
-                )
+                slideInHorizontally(IosPageOut) { -it / 3 }
+                    .togetherWith(slideOutHorizontally(IosPageOut) { it })
             }
         },
         label = "IosOverlayStack",
@@ -1411,8 +1410,8 @@ private fun isStudentSide(url: String?): Boolean {
  * 为什么不复用 `Motion.page()`：那是 M3 emphasized（两头都缓），用在「从右侧整屏推入」上
  * 读起来偏肉。iOS 的 `UINavigationController` 推入是同一种加速形状，用户对它的手感更敏感。
  *
- * 位移与淡入共用同一条曲线，但**各要各的 spec**（位移是 `IntOffset`、淡入是 `Float`）：
- * 拿位移的 `TweenSpec<IntOffset>` 去喂 `fadeIn` 是类型错，而曲线不一致会读成「先亮再停」。
+ * 位移与 Tab 的淡入共用同一条曲线，但**各要各的 spec**（位移是 `IntOffset`、淡入是 `Float`）。
+ * 二级页的推入 / 退出不再叠淡入淡出：两端都保持不透明，见两处 `transitionSpec` 的说明。
  */
 private val IosEaseOutQuint = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
 
@@ -1422,13 +1421,9 @@ private val IosPageIn = tween<IntOffset>(IOS_PAGE_MS, easing = IosEaseOutQuint)
 /** 二级页退出的位移曲线：同一条曲线的反向（起步缓、收尾快），时长略短。 */
 private val IosPageOut = tween<IntOffset>(IOS_POP_MS, easing = CubicBezierEasing(0.4f, 0f, 1f, 1f))
 
-/** 推入时叠的淡入。位移负责方位，淡入只负责别让新页在边缘「硬切」进来。 */
-private val IosFadeIn = tween<Float>(IOS_PAGE_FADE_MS, easing = IosEaseOutQuint)
-
 /** Tab 切换的淡入：比位移短，让人先看到内容再看到位置。 */
 private val IosTabFadeIn = tween<Float>(IOS_TAB_FADE_MS, easing = IosEaseOutQuint)
 
 private const val IOS_PAGE_MS = 340
 private const val IOS_POP_MS = 300
-private const val IOS_PAGE_FADE_MS = 180
 private const val IOS_TAB_FADE_MS = 160
